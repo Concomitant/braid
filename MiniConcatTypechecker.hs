@@ -275,6 +275,44 @@ data Term
   | Seq Term Term         -- t >> u
   deriving (Show)
 
+--------------------------------------------------------------------------------
+-- 6.1 Surface syntax helpers (stages, >>>, and ... desugaring)
+--------------------------------------------------------------------------------
+
+data Stage = Stage
+  { stageAtoms :: [Term]
+  , stageHasPass :: Bool
+  } deriving (Show)
+
+data StageOp
+  = StageSeq      -- >>
+  | StageSeqPass  -- >>>
+  deriving (Show)
+
+data Stmt = Stmt Stage [(StageOp, Stage)]
+  deriving (Show)
+
+appendPassTerm :: Term -> Term
+appendPassTerm t = Tensor t (Prim "pass")
+
+tensorChain :: [Term] -> Term
+tensorChain [] = Prim "pass"
+tensorChain (t:ts) = foldl Tensor t ts
+
+desugarStage :: Stage -> Term
+desugarStage (Stage atoms hasPass) =
+  let base = tensorChain atoms
+  in if hasPass then appendPassTerm base else base
+
+desugarStmt :: Stmt -> Term
+desugarStmt (Stmt firstStage rest) =
+  foldl step (desugarStage firstStage) rest
+  where
+    step acc (StageSeq, stage) =
+      Seq acc (desugarStage stage)
+    step acc (StageSeqPass, stage) =
+      Seq (appendPassTerm acc) (desugarStage stage)
+
 -- Stack append: Σ1 · Σ2 (right-associative)
 appendStack :: SType -> SType -> SType
 appendStack SNil s2          = s2
@@ -341,11 +379,21 @@ primEnv =
       fTy     = Forall [] [rho]
         (Arrow (sCons rhoTy TInt) (sCons rhoTy TInt))
       gTy     = fTy
+<<<<<<< ours
       plusTy  = Forall [] [rho]
         (Arrow (sCons (sCons rhoTy TInt) TInt)
                (sCons rhoTy TInt))
       printTy = Forall [] [rho]
         (Arrow (sCons rhoTy TInt) rhoTy)
+=======
+      plusTy  = Forall [] []
+        (Arrow (sCons (sCons sNil TInt) TInt)
+               (sCons sNil TInt))
+      printTy = Forall [] []
+        (Arrow (sCons sNil TInt) sNil)
+      passTy  = Forall [] [SV "ρ"]
+        (Arrow (SVarTy (SV "ρ")) (SVarTy (SV "ρ")))
+>>>>>>> theirs
   in M.fromList
        [ ("1",     oneTy)
        , ("2",     twoTy)
@@ -353,6 +401,7 @@ primEnv =
        , ("g",     gTy)
        , ("+",     plusTy)
        , ("print", printTy)
+       , ("pass",  passTy)
        ]
 
 --------------------------------------------------------------------------------
