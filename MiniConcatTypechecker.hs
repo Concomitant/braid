@@ -332,18 +332,20 @@ sCons = SCons
 --  print  : • · Int ⇒ •
 primEnv :: Env
 primEnv =
-  let oneTy   = Forall [] []
-        (Arrow sNil (sCons sNil TInt))
-      twoTy   = Forall [] []
-        (Arrow sNil (sCons sNil TInt))
-      fTy     = Forall [] []
-        (Arrow (sCons sNil TInt) (sCons sNil TInt))
+  let rho     = SV "ρ"
+      rhoTy   = SVarTy rho
+      oneTy   = Forall [] [rho]
+        (Arrow rhoTy (sCons rhoTy TInt))
+      twoTy   = Forall [] [rho]
+        (Arrow rhoTy (sCons rhoTy TInt))
+      fTy     = Forall [] [rho]
+        (Arrow (sCons rhoTy TInt) (sCons rhoTy TInt))
       gTy     = fTy
-      plusTy  = Forall [] []
-        (Arrow (sCons (sCons sNil TInt) TInt)
-               (sCons sNil TInt))
-      printTy = Forall [] []
-        (Arrow (sCons sNil TInt) sNil)
+      plusTy  = Forall [] [rho]
+        (Arrow (sCons (sCons rhoTy TInt) TInt)
+               (sCons rhoTy TInt))
+      printTy = Forall [] [rho]
+        (Arrow (sCons rhoTy TInt) rhoTy)
   in M.fromList
        [ ("1",     oneTy)
        , ("2",     twoTy)
