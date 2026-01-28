@@ -7,6 +7,7 @@ import Data.Map (Map)
 import Data.Maybe (fromMaybe)
 import Control.Monad.State
 import Control.Monad (foldM)
+import Data.Char (isDigit, isSpace)
 
 --------------------------------------------------------------------------------
 -- 1. Element types, stack types, and arrow types
@@ -276,6 +277,72 @@ data Term
   deriving (Show)
 
 --------------------------------------------------------------------------------
+-- 6.0 Parser (juxtaposition binds tighter than >>, left-associative)
+--------------------------------------------------------------------------------
+
+data Token
+  = TokIdent String
+  | TokInt Int
+  | TokSeq
+  deriving (Eq, Show)
+
+tokenize :: String -> Either String [Token]
+tokenize = go
+  where
+    go [] = Right []
+    go (c:cs)
+      | isSpace c = go cs
+      | c == '>' =
+          case cs of
+            ('>':rest) -> (TokSeq :) <$> go rest
+            _ -> Left "Unexpected '>' without matching '>>'"
+      | isDigit c =
+          let (digits, rest) = span isDigit (c:cs)
+          in (TokInt (read digits) :) <$> go rest
+      | otherwise =
+          let (ident, rest) = span isIdentChar (c:cs)
+          in (TokIdent ident :) <$> go rest
+
+    isIdentChar ch = not (isSpace ch) && ch /= '>'
+
+parseProgram :: String -> Either String Term
+parseProgram input = do
+  toks <- tokenize input
+  (term, rest) <- parseSeq toks
+  case rest of
+    [] -> Right term
+    _ -> Left $ "Unexpected tokens at end: " ++ show rest
+
+parseSeq :: [Token] -> Either String (Term, [Token])
+parseSeq toks = do
+  (t1, rest) <- parseTensor toks
+  parseSeqRest t1 rest
+  where
+    parseSeqRest acc (TokSeq:rest) = do
+      (t2, rest') <- parseTensor rest
+      parseSeqRest (Seq acc t2) rest'
+    parseSeqRest acc rest = Right (acc, rest)
+
+parseTensor :: [Token] -> Either String (Term, [Token])
+parseTensor toks = do
+  (t1, rest) <- parseAtom toks
+  parseTensorRest t1 rest
+  where
+    parseTensorRest acc rest@(TokIdent _ : _) = do
+      (t2, rest') <- parseAtom rest
+      parseTensorRest (Tensor acc t2) rest'
+    parseTensorRest acc rest@(TokInt _ : _) = do
+      (t2, rest') <- parseAtom rest
+      parseTensorRest (Tensor acc t2) rest'
+    parseTensorRest acc rest = Right (acc, rest)
+
+parseAtom :: [Token] -> Either String (Term, [Token])
+parseAtom [] = Left "Unexpected end of input"
+parseAtom (TokIdent name:rest) = Right (Prim name, rest)
+parseAtom (TokInt n:rest) = Right (Prim (show n), rest)
+parseAtom (TokSeq:_) = Left "Unexpected '>>'"
+
+--------------------------------------------------------------------------------
 -- 6.1 Surface syntax helpers (stages, >>>, and ... desugaring)
 --------------------------------------------------------------------------------
 
@@ -379,21 +446,13 @@ primEnv =
       fTy     = Forall [] [rho]
         (Arrow (sCons rhoTy TInt) (sCons rhoTy TInt))
       gTy     = fTy
-<<<<<<< ours
       plusTy  = Forall [] [rho]
         (Arrow (sCons (sCons rhoTy TInt) TInt)
                (sCons rhoTy TInt))
       printTy = Forall [] [rho]
         (Arrow (sCons rhoTy TInt) rhoTy)
-=======
-      plusTy  = Forall [] []
-        (Arrow (sCons (sCons sNil TInt) TInt)
-               (sCons sNil TInt))
-      printTy = Forall [] []
-        (Arrow (sCons sNil TInt) sNil)
-      passTy  = Forall [] [SV "ρ"]
-        (Arrow (SVarTy (SV "ρ")) (SVarTy (SV "ρ")))
->>>>>>> theirs
+      passTy  = Forall [] [rho]
+        (Arrow rhoTy rhoTy)
   in M.fromList
        [ ("1",     oneTy)
        , ("2",     twoTy)
@@ -411,13 +470,9 @@ primEnv =
 -- AST for: 1 2 >> f g >> + >> print
 exampleTerm :: Term
 exampleTerm =
-  Seq
-    (Seq
-      (Seq
-        (Tensor (Prim "1") (Prim "2"))
-        (Tensor (Prim "f") (Prim "g")))
-      (Prim "+"))
-    (Prim "print")
+  case parseProgram "1 2 >> f g >> + >> print" of
+    Right term -> term
+    Left err -> error $ "Failed to parse example program: " ++ err
 
 -- Run inference + unification
 inferExample :: Either String Arrow
