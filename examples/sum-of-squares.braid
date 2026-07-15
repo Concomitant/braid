@@ -1,0 +1,6 @@
+def square = dup >> *
+[square] list(1, 2, 3, 4, 5)
+map
+[+] 0 id
+fold
+print

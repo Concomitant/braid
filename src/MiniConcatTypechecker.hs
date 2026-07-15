@@ -793,9 +793,14 @@ splitDefs src = do
         _ -> Left $ "Malformed definition (missing '='): " ++ l
 
 checkModule :: String -> Either String Module
-checkModule src = do
+checkModule = checkModuleWith primEnv
+
+-- Check a module starting from a given environment (REPL sessions grow
+-- the environment incrementally).
+checkModuleWith :: Env -> String -> Either String Module
+checkModuleWith env0 src = do
   (defSrcs, mainSrc) <- splitDefs src
-  (env', defsRev) <- foldM addDef (primEnv, []) defSrcs
+  (env', defsRev) <- foldM addDef (env0, []) defSrcs
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
