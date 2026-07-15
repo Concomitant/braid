@@ -1,0 +1,40 @@
+cabal-version:      2.4
+name:               braid
+version:            0.1.0.0
+synopsis:           Cartesian concatenative string-diagram language prototype
+description:
+  A small strongly typed concatenative language where programs are typed
+  stack transformers (Γ ⇒ Δ) — textual syntax for cartesian string
+  diagrams.  See expanded-spec.md for the language specification.
+build-type:         Simple
+extra-doc-files:    README.md
+                    expanded-spec.md
+
+common warnings
+    ghc-options: -Wall -Wno-name-shadowing
+
+library
+    import:           warnings
+    exposed-modules:  MiniConcatTypechecker
+    build-depends:    base >=4.16 && <5
+                    , containers
+                    , mtl
+    hs-source-dirs:   src
+    default-language: GHC2021
+
+executable braid
+    import:           warnings
+    main-is:          Main.hs
+    build-depends:    base
+                    , braid
+    hs-source-dirs:   app
+    default-language: GHC2021
+
+test-suite braid-tests
+    import:           warnings
+    type:             exitcode-stdio-1.0
+    main-is:          Tests.hs
+    build-depends:    base
+                    , braid
+    hs-source-dirs:   test
+    default-language: GHC2021
