@@ -1,0 +1,14 @@
+#!/bin/sh
+# Run the Braid REPL (or a .braid file) via Docker — no local GHC needed.
+#
+#   ./repl                          start the REPL
+#   ./repl examples/sum-of-squares.braid   run a file
+#
+# Uses the same image as the test workflow (see notes/haskell-tooling-install.md).
+set -e
+cd "$(dirname "$0")"
+if [ -t 0 ]; then TTY_FLAGS="-it"; else TTY_FLAGS="-i"; fi
+exec docker run --rm $TTY_FLAGS \
+  -v "$PWD":/w -w /w \
+  haskell:9.4-slim \
+  cabal run -v0 braid -- "$@"
