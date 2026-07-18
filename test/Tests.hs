@@ -67,6 +67,19 @@ passTests =
   , ("f (1 ... >> +)",   "Int Int ⇒ Int Int")  -- compound open finally
   , ("(pass >> drop) f", "a0 Int ⇒ Int")       -- linked tails close soundly
 
+    -- named open abstractions (spec examples, exact types)
+  , ("(x -> x)",              "a0 ⇒ a0")
+  , ("(x y -> x)",            "a0 a1 ⇒ a0")        -- projection ≡ id drop
+  , ("(x y -> y x)",          "a0 a1 ⇒ a1 a0")     -- ≡ swap
+  , ("(x -> x x >> *)",       "Int ⇒ Int")          -- named square ≡ dup >> *
+  , ("(x -> x 1 >> +)",       "Int ⇒ Int")          -- named increment
+  , ("(x y -> x y >> +)",     "Int Int ⇒ Int")
+  , ("(x y -> x x >> * >> y ... >> +)", "Int Int ⇒ Int")  -- reuse + reorder
+  , ("(f -> f)",              "a0 ⇒ a0")            -- parameters shadow globals
+  , ("[x -> x 1 >> +]",       "• ⇒ Fn⟨Int ⇒ Int⟩")
+  , ("[x y -> x]",            "• ⇒ Fn⟨a0 a1 ⇒ a0⟩")
+  , ("(x -> [x])",            "a0 ⇒ Fn⟨• ⇒ a0⟩")   -- closure over a parameter
+
     -- branch and lists
   , ("branch",        "Bool Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
   , ("negative?",     "Int ⇒ Bool")
@@ -102,6 +115,11 @@ failTests =
   , ("1 >",           "Unexpected '>'")
   , ("nonsense42x",   "Unknown primitive")
   , ("",              "Expected a tensor stage")
+    -- scope rules: unresolved names are errors, never inferred parameters
+  , ("(x -> y)",      "Unknown primitive: y")
+  , ("[x 1 >> +]",    "Unknown primitive: x")   -- no inferred-parameter quotation
+  , ("(x -> +)",      "Cannot unify stacks")    -- body must be input-closed
+  , ("(x x -> x)",    "Duplicate parameter")
   ]
 
 -- (module source, expected alpha-normalized type of main)
@@ -142,6 +160,15 @@ evalTests =
     -- grouping
   , ("7 >> (dup >> *) >> print",           ["49"], "")
   , ("5 8 >> (1 ... >> +) f >> + >> print", ["15"], "")
+
+    -- named abstractions
+  , ("7 >> (x -> x x >> *) >> print",      ["49"], "")
+  , ("7 >> (x -> x 1 >> +) >> print",      ["8"],  "")   -- spec: produces 8
+  , ("3 4 >> (x y -> y x >> +) >> print",  ["7"],  "")
+  , ("1 2 >> (x y -> x) >> print",         ["1"],  "")   -- unused y deleted
+  , ("def sq = (x -> x x >> *)\n5 >> sq >> print", ["25"], "")
+    -- closure: the quotation captures x at reification
+  , ("7 >> (x -> [x 1 >> +]) >> apply >> print",   ["8"], "")
 
     -- lists: the spec's sum-of-squares program
   , ("list(1, 2, 3)",                      [],     "list(1, 2, 3)")

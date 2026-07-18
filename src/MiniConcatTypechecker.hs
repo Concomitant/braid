@@ -307,6 +307,9 @@ data Term
   | Quote Term            -- [p]: push the reified program p
   | ListLit [Term]        -- list(e1, …, en): push a list; each element
                           -- must be a pure push (• ⇒ A)
+  | OpenAbs [String] Term -- (x y -> body): open program with named input
+                          -- wires; the body is input-closed (all input
+                          -- arrives through the parameters)
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
@@ -325,9 +328,10 @@ data Token
   | TokNewline    -- line break (strict >>)
   | TokLBrack     -- [ (open quotation)
   | TokRBrack     -- ] (close quotation)
-  | TokLParen     -- ( (list literal)
+  | TokLParen     -- ( (grouping / list literal)
   | TokRParen     -- )
   | TokComma      -- ,
+  | TokArrow      -- -> (parameter list separator)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -347,6 +351,8 @@ tokenize = go
     go ('(':cs)         = (TokLParen :) <$> go cs
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
+    go ('-':'>':cs)     = (TokArrow :) <$> go cs
+    go ('-':_)          = Left "Unexpected '-' (did you mean '->'?)"
     go (c:cs)
       | isSpace c = go cs
       | isDigit c =
@@ -357,7 +363,7 @@ tokenize = go
           in (TokIdent ident :) <$> go rest
 
     isIdentChar ch =
-      not (isSpace ch) && ch `notElem` (">.[](),\8230" :: String)
+      not (isSpace ch) && ch `notElem` (">.[](),-\8230" :: String)
 
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
 -- newlines adjacent to an explicit >> / >>> (the operator wins).
@@ -427,17 +433,18 @@ parseStage = go []
       go (ListLit elems : acc) rest'
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
+    -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
     go acc (TokLBrack : rest)     = do
-      (stmt, rest') <- parseStmt rest
+      (t, rest') <- parseDelimited rest
       case rest' of
-        (TokRBrack : rest'') -> go (Quote (desugarStmt stmt) : acc) rest''
+        (TokRBrack : rest'') -> go (Quote t : acc) rest''
         _ -> Left "Unclosed quotation (expected ']')"
     -- (p): grouping only — the enclosed program is an ordinary atom,
-    -- not reified.  See spec-update-exponentials.md.
+    -- not reified.  (x y -> p): named open abstraction.
     go acc (TokLParen : rest)     = do
-      (stmt, rest') <- parseStmt rest
+      (t, rest') <- parseDelimited rest
       case rest' of
-        (TokRParen : rest'') -> go (desugarStmt stmt : acc) rest''
+        (TokRParen : rest'') -> go (t : acc) rest''
         _ -> Left "Unclosed group (expected ')')"
     go acc (TokEllipsis : rest)   =
       case rest of
@@ -458,6 +465,27 @@ parseStage = go []
     context []      = " (unexpected end of input)"
     context (t : _) = ", got: " ++ show t
 
+-- The contents of a ( ) or [ ]: an optional `x y ->` parameter prefix
+-- (the arrow is required for parameter introduction — bare idents are a
+-- tensor stage), then a full program.
+parseDelimited :: [Token] -> Either String (Term, [Token])
+parseDelimited toks =
+  case paramsPrefix [] toks of
+    Just (ps, rest) -> do
+      case [ p | (p, n) <- zip ps [0 :: Int ..]
+               , p `elem` take n ps ] of
+        (p : _) -> Left $ "Duplicate parameter: " ++ p
+        []      -> Right ()
+      (stmt, rest') <- parseStmt rest
+      pure (OpenAbs ps (desugarStmt stmt), rest')
+    Nothing -> do
+      (stmt, rest') <- parseStmt toks
+      pure (desugarStmt stmt, rest')
+  where
+    paramsPrefix acc (TokIdent n : rest) = paramsPrefix (n : acc) rest
+    paramsPrefix acc (TokArrow : rest)   = Just (reverse acc, rest)
+    paramsPrefix _   _                   = Nothing
+
 -- Elements of list(…): atoms only, comma-separated.
 parseListElems :: [Token] -> Either String ([Term], [Token])
 parseListElems (TokRParen : rest) = Right ([], rest)
@@ -473,9 +501,9 @@ parseListElems toks = do
     elemAtom (TokIdent name : rest) = Right (Prim name, rest)
     elemAtom (TokInt n : rest)      = Right (Prim (show n), rest)
     elemAtom (TokLBrack : rest)     = do
-      (stmt, rest') <- parseStmt rest
+      (t, rest') <- parseDelimited rest
       case rest' of
-        (TokRBrack : rest'') -> Right (Quote (desugarStmt stmt), rest'')
+        (TokRBrack : rest'') -> Right (Quote t, rest'')
         _ -> Left "Unclosed quotation (expected ']')"
     elemAtom ts =
       Left $ "Expected a list element" ++
@@ -531,9 +559,10 @@ appendStack (STail v) _ =
 
 -- Inference: given an Env and a Term, produce an Arrow and constraints
 infer :: Env -> Term -> Infer (Arrow, [Constraint])
-infer env p@(Prim _)    = inferOperand env True p
-infer env q@(Quote _)   = inferOperand env True q
-infer env l@(ListLit _) = inferOperand env True l
+infer env p@(Prim _)     = inferOperand env True p
+infer env q@(Quote _)    = inferOperand env True q
+infer env l@(ListLit _)  = inferOperand env True l
+infer env o@(OpenAbs {}) = inferOperand env True o
 
 infer env (Tensor ts) = do
   let n = length ts
@@ -584,6 +613,20 @@ inferOperand env _ (Quote p) = do
   -- Fn⟨…⟩, solved (monomorphically) at the use site.
   (arrP, cs) <- infer env p
   pure (Arrow SEnd (SCons (TFn arrP) SEnd), cs)
+inferOperand env _ (OpenAbs ps body) = do
+  -- Named open abstraction (x₁ … xₙ -> body).  Each parameter enters
+  -- scope as a monomorphic terminal-source producer xᵢ : • ⇒ Aᵢ — the
+  -- free metavariable is shared across occurrences, so repeated use is
+  -- forced to one consistent type (λ-binding, HM-style).  The body must
+  -- be input-closed: all input arrives through the parameters.  The
+  -- abstraction is exact in every position: A₁ … Aₙ ⇒ Δ.
+  ptys <- mapM (const freshTyVarName) ps
+  let paramScheme av = Forall [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
+      env' = foldr (\(p, av) -> M.insert p (paramScheme av))
+                   env (zip ps ptys)
+  (Arrow bi bo, cs) <- infer env' body
+  let inS = foldr (SCons . TVarTy) SEnd ptys
+  pure (Arrow inS bo, CEqStack bi SEnd : cs)
 inferOperand env final t
   | final     = infer env t
   | otherwise = do
@@ -702,11 +745,12 @@ primEnv =
 --------------------------------------------------------------------------------
 
 primsIn :: Term -> [String]
-primsIn (Prim n)      = [n]
-primsIn (Tensor ts)   = concatMap primsIn ts
-primsIn (Seq t u)     = primsIn t ++ primsIn u
-primsIn (Quote t)     = primsIn t
-primsIn (ListLit es)  = concatMap primsIn es
+primsIn (Prim n)        = [n]
+primsIn (Tensor ts)     = concatMap primsIn ts
+primsIn (Seq t u)       = primsIn t ++ primsIn u
+primsIn (Quote t)       = primsIn t
+primsIn (ListLit es)    = concatMap primsIn es
+primsIn (OpenAbs ps t)  = [ n | n <- primsIn t, n `notElem` ps ]
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
@@ -853,14 +897,19 @@ checkModuleWith env0 src = do
 -- Γ1 … Γn ρ ⇒ Δ1 … Δn ρ.
 --------------------------------------------------------------------------------
 
-data Value = VInt Int | VBool Bool | VFn Term | VList [Value]
+-- Runtime variable environment: named-abstraction parameters in scope.
+type VarEnv = Map String Value
+
+-- A function value captures the variable environment at reification, so
+-- quotations inside abstraction bodies are closures over the parameters.
+data Value = VInt Int | VBool Bool | VFn VarEnv Term | VList [Value]
   deriving (Eq)
 
 instance Show Value where
   show (VInt n)      = show n
   show (VBool True)  = "true"
   show (VBool False) = "false"
-  show (VFn _)     = "[fn]"
+  show (VFn _ _)     = "[fn]"
   show (VList vs)    = "list(" ++ intercalate ", " (map show vs) ++ ")"
 
 -- Number of concrete wires in a stack type (its closed prefix).
@@ -878,18 +927,21 @@ moduleRunDefs m =
     arityOf (Forall _ _ (Arrow i _)) = closedArity i
 
 -- Evaluate a term: returns the final stack and the print log.  The Env
--- is needed to compute closed arities of grouped compound operands.
-evalTerm :: Env -> RunDefs -> Term -> [Value] -> Either String ([Value], [String])
-evalTerm env defs term st =
+-- is needed to compute closed arities of grouped compound operands; the
+-- VarEnv holds named-abstraction parameters in scope.
+evalTerm :: Env -> RunDefs -> VarEnv -> Term -> [Value]
+         -> Either String ([Value], [String])
+evalTerm env defs vars term st =
   case term of
     Seq t u -> do
-      (st1, l1) <- evalTerm env defs t st
-      (st2, l2) <- evalTerm env defs u st1
+      (st1, l1) <- evalTerm env defs vars t st
+      (st2, l2) <- evalTerm env defs vars u st1
       pure (st2, l1 ++ l2)
-    Tensor ts     -> goAtoms ts st
-    p@(Prim _)    -> goAtoms [p] st
-    q@(Quote _)   -> goAtoms [q] st
-    l@(ListLit _) -> goAtoms [l] st
+    Tensor ts      -> goAtoms ts st
+    p@(Prim _)     -> goAtoms [p] st
+    q@(Quote _)    -> goAtoms [q] st
+    l@(ListLit _)  -> goAtoms [l] st
+    o@(OpenAbs {}) -> goAtoms [o] st
   where
     goAtoms [] stk = Right (stk, [])   -- leftover remainder flows through last
     goAtoms (a : more) stk = do
@@ -899,60 +951,81 @@ evalTerm env defs term st =
 
     -- apply is special: its Γ is the stack segment after the code value.
     -- As the final atom that segment is the whole remaining stack; as a
-    -- non-final atom it was closed to • by the typechecker.
-    applyAtom isFinal (Prim "apply") stk = do
-      (args, stk') <- takeWires "apply" 1 stk
-      case args of
-        [VFn body] -> do
-          let seg = if isFinal then stk' else []
-          (out, logs) <- evalTerm env defs body seg
-          pure (out, if isFinal then [] else stk', logs)
-        _ ->
-          Left "Runtime type error in apply: expected a quotation"
+    -- non-final atom it was closed to • by the typechecker.  (Parameters
+    -- shadow the special forms, hence the vars guards.)
+    applyAtom isFinal (Prim "apply") stk
+      | not (M.member "apply" vars) = do
+          (args, stk') <- takeWires "apply" 1 stk
+          case args of
+            [VFn cvars body] -> do
+              let seg = if isFinal then stk' else []
+              (out, logs) <- evalTerm env defs cvars body seg
+              pure (out, if isFinal then [] else stk', logs)
+            _ ->
+              Left "Runtime type error in apply: expected a quotation"
     -- branch has the same segment semantics as apply: Γ is the stack
     -- after the three control wires.
-    applyAtom isFinal (Prim "branch") stk = do
-      (args, stk') <- takeWires "branch" 3 stk
-      case args of
-        [VBool c, VFn tThen, VFn tElse] -> do
-          let seg = if isFinal then stk' else []
-          (out, logs) <- evalTerm env defs (if c then tThen else tElse) seg
-          pure (out, if isFinal then [] else stk', logs)
-        _ ->
-          Left "Runtime type error in branch: expected Bool and two quotations"
+    applyAtom isFinal (Prim "branch") stk
+      | not (M.member "branch" vars) = do
+          (args, stk') <- takeWires "branch" 3 stk
+          case args of
+            [VBool c, VFn cT tThen, VFn cE tElse] -> do
+              let seg = if isFinal then stk' else []
+              (out, logs) <-
+                if c then evalTerm env defs cT tThen seg
+                     else evalTerm env defs cE tElse seg
+              pure (out, if isFinal then [] else stk', logs)
+            _ ->
+              Left "Runtime type error in branch: expected Bool and two quotations"
     applyAtom _ (Prim name) stk
+      | Just v <- M.lookup name vars = Right ([v], stk, [])
       | isIntLiteral name = Right ([VInt (read name)], stk, [])
       | Just (k, body) <- M.lookup name defs = do
           (args, stk') <- takeWires name k stk
-          (out, logs) <- evalTerm env defs body args
+          (out, logs) <- evalTerm env defs M.empty body args
           pure (out, stk', logs)
       | otherwise = do
           k <- builtinArity name
           (args, stk') <- takeWires name k stk
           (out, logs) <- runBuiltin env defs name args
           pure (out, stk', logs)
-    applyAtom _ (Quote body) stk = Right ([VFn body], stk, [])
+    applyAtom _ (Quote body) stk = Right ([VFn vars body], stk, [])
     applyAtom _ (ListLit es) stk = do
       vs <- mapM elemValue es
       pure ([VList vs], stk, [])
       where
         elemValue e = do
-          (out, _) <- evalTerm env defs e []
+          (out, _) <- evalTerm env defs vars e []
           case out of
             [v] -> Right v
             _   -> Left "list element must push exactly one value"
+    -- Named abstraction: bind the parameter wires (left to right), run
+    -- the body on the empty stack in the extended scope.
+    applyAtom _ (OpenAbs ps body) stk = do
+      (args, stk') <- takeWires "abstraction" (length ps) stk
+      let vars' = M.fromList (zip ps args) `M.union` vars
+      (out, logs) <- evalTerm env defs vars' body []
+      pure (out, stk', logs)
     -- Grouped compound operand (Seq/Tensor as an atom).  Final: evaluate
     -- on the whole remaining stack (its open tail carries the remainder).
     -- Non-final: it was typed closed, so take exactly its inferred arity.
     applyAtom isFinal t' stk
       | isFinal = do
-          (out, logs) <- evalTerm env defs t' stk
+          (out, logs) <- evalTerm env defs vars t' stk
           pure (out, [], logs)
       | otherwise = do
-          Arrow i _ <- inferTermIn env t'
+          -- Arity inference must see the in-scope parameters; their
+          -- element types don't affect wire counts, so polymorphic
+          -- dummies suffice.
+          let dummy = TV "_param"
+              dummyScheme =
+                Forall [dummy] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+              arityEnv = foldr (\n -> M.insert n dummyScheme)
+                               env (M.keys vars)
+          Arrow i _ <- inferTermIn arityEnv t'
           let k = closedArity i
           (args, stk') <- takeWires "grouped program" k stk
-          (out, logs) <- evalTerm env defs t' args
+          (out, logs) <- evalTerm env defs vars t' args
           pure (out, stk', logs)
 
     takeWires name k stk
@@ -982,21 +1055,21 @@ runBuiltin _ _ "print" [v]              = Right ([], [show v])
 runBuiltin _ _ "true"  []               = Right ([VBool True], [])
 runBuiltin _ _ "false" []               = Right ([VBool False], [])
 runBuiltin _ _ "negative?" [VInt n]     = Right ([VBool (n < 0)], [])
-runBuiltin env defs "map" [VFn t, VList vs] = do
+runBuiltin env defs "map" [VFn cv t, VList vs] = do
   rs <- mapM step vs
   pure ([VList (map fst rs)], concatMap snd rs)
   where
     step v = do
-      (out, logs) <- evalTerm env defs t [v]
+      (out, logs) <- evalTerm env defs cv t [v]
       case out of
         [r] -> Right (r, logs)
         _   -> Left "map: code must return exactly one value"
-runBuiltin env defs "fold" [VFn t, b0, VList vs] = do
+runBuiltin env defs "fold" [VFn cv t, b0, VList vs] = do
   (b, logs) <- foldM step (b0, []) vs
   pure ([b], logs)
   where
     step (b, logs) v = do
-      (out, logs') <- evalTerm env defs t [b, v]
+      (out, logs') <- evalTerm env defs cv t [b, v]
       case out of
         [b'] -> Right (b', logs ++ logs')
         _    -> Left "fold: code must return exactly one value"
@@ -1013,4 +1086,4 @@ runModule src = do
     Just (term, arr@(Arrow i _))
       | closedArity i > 0 ->
           Left $ "main requires a nonempty input stack: " ++ show arr
-      | otherwise -> evalTerm (modEnv m) (moduleRunDefs m) term []
+      | otherwise -> evalTerm (modEnv m) (moduleRunDefs m) M.empty term []

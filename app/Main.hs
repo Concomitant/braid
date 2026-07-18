@@ -166,7 +166,7 @@ handleLine st line =
 
     evalLine = do
       term <- parseProgram line
-      evalTerm (rsEnv st) (rsRun st) term (rsStack st)
+      evalTerm (rsEnv st) (rsRun st) M.empty term (rsStack st)
 
 -- Rename the stack type's free variables into a namespace the inference
 -- fresh-name generator (a0…, ρ0…) can never produce, so vars surviving
