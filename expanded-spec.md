@@ -70,13 +70,13 @@ A program is therefore a sequence of tensor stages.
 Cartesian structural basis:
 
 ```text
-id   : ∀ρ A. A ρ ⇒ A ρ
-swap : ∀ρ A B. A B ρ ⇒ B A ρ
-dup  : ∀ρ A. A ρ ⇒ A A ρ
-drop : ∀ρ A. A ρ ⇒ ρ
+id   : ∀A. A ⇒ A
+swap : ∀A B. A B ⇒ B A
+dup  : ∀A. A ⇒ A A
+drop : ∀A. A ⇒ •
 ```
 
-The remainder variable `ρ` is always written last: a primitive acts on the leftmost wires and passes everything to the right of them through. See "Remainder discipline" for why `ρ` may appear only in this position.
+Signatures are exact: an operation consumes and produces precisely the wires written, and constants source from `•`. Nothing carries an implicit remainder — passing wires through is always explicit (`pass` / `...` / `>>>`, or `id` per known wire). When a stack variable does appear in a scheme (`pass`'s ρ, `apply`'s Γ), it is always the rightmost tail; see "Remainder discipline" for why.
 
 Stack identity / remainder passthrough:
 
@@ -173,9 +173,9 @@ t1 … tn : Γ1 … Γn ρ ⇒ Δ1 … Δn ρ
 
 Only the final atom may be open; every earlier atom has its stack variable instantiated to `•`. The result again satisfies the invariant.
 
-A single-atom stage is its own final atom, so a bare `+` keeps its `ρ` and acts on the two leftmost wires.
+Since operations are exact, ρ-retention matters only for `pass` (hence `...`/`>>>`) and for the segment variables of higher-order eliminators (`apply`, `branch`) in final position. A bare `+` requires the stack to be exactly two wires wide; on a deeper stack write `+ ...`.
 
-Operational reading: a stage consumes the leftmost `k` wires, where `k` is the sum of its atoms' closed input arities. If the stage is open (its final atom retains `ρ`, or it ends in `pass` / `...`), all wires to the right flow through untouched. If it is closed, the incoming stack must be exactly `k` wires wide.
+Operational reading: a stage consumes the leftmost `k` wires, where `k` is the sum of its atoms' closed input arities. If the stage is open (it ends in `pass` / `...`, or its final atom is a segment-consuming eliminator), all wires to the right flow through (or into the segment). If it is closed, the incoming stack must be exactly `k` wires wide.
 
 ### Why the variable may only be the tail
 
@@ -193,26 +193,28 @@ is solved by `ρ := •, σ := •`, by `ρ := Int, σ := Int`, by `ρ := Int In
 
 ```text
 def square = dup >> *
--- dup (sole atom) keeps ρ  : A ρ ⇒ A A ρ
--- *   (sole atom) keeps ρ' : Int Int ρ' ⇒ Int ρ'
--- unify: A = Int, ρ = ρ'
--- square : ∀ρ. Int ρ ⇒ Int ρ
+-- dup : A ⇒ A A;  * : Int Int ⇒ Int
+-- unify: A = Int
+-- square : Int ⇒ Int
 
 def first = id drop
--- id   (non-final) closed : A ⇒ A
--- drop (final) keeps ρ    : B ρ ⇒ ρ
--- first : ∀A B ρ. A B ρ ⇒ A ρ
+-- id : A ⇒ A;  drop : B ⇒ •
+-- first : ∀A B. A B ⇒ A
 
 dup >> f g        -- f : A ⇒ B, g : A ⇒ C
--- dup keeps ρ : A ρ ⇒ A A ρ;  f g closed : A A ⇒ B C
--- unify: ρ = •
+-- dup : A ⇒ A A;  f g : A A ⇒ B C
 -- : A ⇒ B C
+
+def increment = (1 ... >> +)
+-- 1 ... : ρ ⇒ Int ρ;  + : Int Int ⇒ Int
+-- unify: ρ = Int
+-- increment : Int ⇒ Int
 ```
 
 ### Consequences for the extension sections
 
-* All library primitives implicitly quantify over a trailing remainder (`+ : ∀ρ. Int Int ρ ⇒ Int ρ`); extension signatures omit `ρ` for brevity.
-* `apply : Code⟨Γ ⇒ Δ⟩ Γ ⇒ Δ` already satisfies the invariant: the quotation sits on the first wire and `Γ` is the tail. Higher-order eliminators must follow this shape — a segment variable can only be a tail, so control values (quotations, booleans) come first and the consumed segment comes last.
+* All signatures are exact as written — no primitive quantifies over an implicit remainder. Stack variables appear only in `pass : ∀ρ. ρ ⇒ ρ` and as the consumed/produced segments of higher-order eliminators.
+* `apply : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ` already satisfies the invariant: the quotation sits on the first wire and `Γ` is the tail. Higher-order eliminators must follow this shape — a segment variable can only be a tail, so control values (quotations, booleans) come first and the consumed segment comes last.
 * `branch` and `trace` are oriented accordingly (see their sections: condition/quotations on the leftmost wires, `Γ` as the tail; `trace` feeds back the first wire, not the last).
 
 ### Implementation notes
@@ -375,13 +377,13 @@ A ⇒ B C
 Add a value type for quoted programs:
 
 ```text
-Code⟨Γ ⇒ Δ⟩
+Fn⟨Γ ⇒ Δ⟩
 ```
 
 Quotation:
 
 ```text
-[p] : • ⇒ Code⟨Γ ⇒ Δ⟩
+[p] : • ⇒ Fn⟨Γ ⇒ Δ⟩
 ```
 
 when:
@@ -393,7 +395,7 @@ p : Γ ⇒ Δ
 Application:
 
 ```text
-apply : Code⟨Γ ⇒ Δ⟩ Γ ⇒ Δ
+apply : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ
 ```
 
 Example:
@@ -407,6 +409,86 @@ print
 Should print `49`.
 
 Initially restrict quotations to closed programs. Add closures later only if needed.
+
+## Exponentials update — integration notes
+
+`spec-update-exponentials.md` extends this document with open abstractions,
+exponential values, named-variable wiring, and refined tensor rules. Adopted
+into this spec:
+
+* **`Fn⟨Γ ⇒ Δ⟩` is the exponential type** (renamed from `Code⟨…⟩` throughout
+  this document; the implementation's `TCode`/`Code⟨…⟩` display is queued for
+  the same rename). `Thunk⟨Δ⟩ ≜ Fn⟨• ⇒ Δ⟩` is display sugar.
+* **Parentheses group, brackets reify.** `(p)` is the open program `p`,
+  unchanged in type; `[p]` is exponential introduction. `list(…)` remains a
+  distinct literal form (the tokenizer already special-cases `list(`).
+* **Named abstractions** `(x y -> body)` / `[x y -> body]` are syntax over
+  `id`/`swap`/`dup`/`drop`: elaborate to structural wiring, then (for
+  brackets) reify. The scope rule is strict — unresolved names are errors,
+  never inferred parameters.
+* **`[f g]` ≠ `[f] [g]`** — matches the existing quotation semantics (each
+  bracket is one reification). `tensorFn`, `curry`, `uncurry` are staged as
+  explicit combinators; exponential boundaries never flatten.
+
+Reconciliation with the remainder discipline:
+
+* **The `apply` ordering question is settled by the invariant.** The
+  argument-first signature `Γ Fn⟨Γ ⇒ Δ⟩ ⇒ Δ` puts a segment variable in
+  leading position — inexpressible under the tail-only invariant and
+  non-principal to unify. So the typing convention is **function-first**:
+  `apply : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ`. Crucially, the argument-first *surface style*
+  still works, because pushed values enter at the front wire:
+
+  ```text
+  7
+  [square] ...
+  apply
+  ```
+
+  After line 2 the stack is `Fn⟨Int ⇒ Int⟩ Int` — the quotation landed on
+  wire 1, exactly where function-first `apply` wants it, with the `...`
+  carrying the `7` beneath it (constants have no implicit remainder). The
+  update's desired visual parallel with `7 / square` holds with no change
+  to the typing convention.
+* **Constants are strictly terminal-source — no implicit remainder.**
+  `7 : • ⇒ Int`, `true : • ⇒ Bool`, `[p] : • ⇒ Fn⟨…⟩`,
+  `list(…) : • ⇒ List A` — exactly as written, in every position. A
+  constant makes exactly its own wires; pushing onto a nonempty stack
+  requires the explicit remainder: `7 ... : ρ ⇒ Int ρ`. Consequently
+  `1 >> +` is ill-typed (`•` cannot supply `+`'s second wire) and the
+  increment is `(1 ... >> +) : Int ⇒ Int`.
+* **Operations are exact too — no implicit remainder anywhere.**
+  `+ : Int Int ⇒ Int` consumes exactly two wires; on a deeper stack write
+  `+ ...`. Every signature in the language means literally what it says,
+  and the spec-update's types hold verbatim (no elided-`ρ` reading
+  convention). The only stack variables in the primitive environment are
+  `pass`'s ρ — the sole source of remainder passing, reached via
+  `...`/`>>>` — and the segment variables of `apply`/`branch`, which are
+  consumed by the eliminator rather than passed. Every line is a total
+  description of its diagram slice: each wire is covered by an atom, an
+  `id`, or the `...`.
+* **Decided — strict tensor everywhere; explicit `>>`.** A consumer never
+  eats the outputs of producers written earlier in the same row. Combined
+  with strictly-closed constants, the increment program is
+  `(1 ... >> +) : Int ρ ⇒ Int ρ` — the `...` passes the incoming wire
+  beneath the pushed literal (`1 >> +` alone is ill-typed: `•` cannot
+  supply `+`'s second wire). Bare `1 +` is still a well-typed tensor —
+  `(• ⇒ Int) ⊗ (Int Int ρ ⇒ Int ρ) = Int Int ρ ⇒ Int Int ρ` — the literal
+  lands on the front wire and the sum of the two incoming wires sits
+  behind it. Named-abstraction bodies need only the `>>`
+  (`(x -> x 1 >> +)` works without `...`, since `x` and `1` are both
+  terminal-source in context: `x 1 : • ⇒ Int Int`). Spec-update examples
+  written in the loose row style are to be read accordingly; see the
+  amendment note in `spec-update-exponentials.md`.
+* **Closures and local bindings are milestones, not day one.**
+  `[x -> x n +] : Γ ⇒ Fn⟨Int ⇒ Int⟩` needs closure values (environment
+  capture at reification), and `7 -> x;` needs the two-zone judgment
+  `Γ ⊢ p : Σ ⇒ Δ`. Both slot in after the named-abstraction elaborator;
+  they supersede "restrict quotations to closed programs" above when they
+  land.
+* **Grouped programs obey the instantiation rule** like any other atom: a
+  non-final `(…)` in a tensor chain is closed (`ρ := •`); only the final
+  atom keeps its remainder.
 
 ## Branching extension
 
@@ -423,8 +505,8 @@ Branch:
 ```text
 branch :
   Bool
-  Code⟨Γ ⇒ Δ⟩
-  Code⟨Γ ⇒ Δ⟩
+  Fn⟨Γ ⇒ Δ⟩
+  Fn⟨Γ ⇒ Δ⟩
   Γ
   ⇒ Δ
 ```
@@ -451,12 +533,12 @@ Higher-order list ops:
 
 ```text
 map :
-  Code⟨A ⇒ B⟩
+  Fn⟨A ⇒ B⟩
   List A
   ⇒ List B
 
 fold :
-  Code⟨B A ⇒ B⟩
+  Fn⟨B A ⇒ B⟩
   B
   List A
   ⇒ B
@@ -480,7 +562,7 @@ Add trace as the diagrammatic primitive:
 
 ```text
 trace :
-  Code⟨X Γ ⇒ X Δ⟩ Γ
+  Fn⟨X Γ ⇒ X Δ⟩ Γ
   ⇒ Δ
 ```
 
@@ -490,7 +572,7 @@ Add conventional fixed point:
 
 ```text
 fix :
-  Code⟨A Γ ⇒ A⟩ Γ
+  Fn⟨A Γ ⇒ A⟩ Γ
   ⇒ A
 ```
 
@@ -519,7 +601,7 @@ pureM : Γ ⇒ M⟨Γ⟩
 
 mapM :
   M⟨Γ⟩
-  Code⟨Γ ⇒ Δ⟩
+  Fn⟨Γ ⇒ Δ⟩
   ⇒ M⟨Δ⟩
 
 joinM :
@@ -528,7 +610,7 @@ joinM :
 
 bindM :
   M⟨Γ⟩
-  Code⟨Γ ⇒ M⟨Δ⟩⟩
+  Fn⟨Γ ⇒ M⟨Δ⟩⟩
   ⇒ M⟨Δ⟩
 ```
 
@@ -555,7 +637,7 @@ Sel R A = (A -> R) -> A
 Stack version:
 
 ```text
-Select R⟨Γ⟩ ≈ Code⟨Γ ⇒ R⟩ -> Γ
+Select R⟨Γ⟩ ≈ Fn⟨Γ ⇒ R⟩ -> Γ
 ```
 
 Eliminator:
@@ -563,7 +645,7 @@ Eliminator:
 ```text
 runSelect :
   Select R⟨Γ⟩
-  Code⟨Γ ⇒ R⟩
+  Fn⟨Γ ⇒ R⟩
   ⇒ Γ
 ```
 
@@ -572,7 +654,7 @@ Bind:
 ```text
 bindSelect :
   Select R⟨Γ⟩
-  Code⟨Γ ⇒ Select R⟨Δ⟩⟩
+  Fn⟨Γ ⇒ Select R⟨Δ⟩⟩
   ⇒ Select R⟨Δ⟩
 ```
 

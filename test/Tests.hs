@@ -8,55 +8,72 @@ import System.Exit (exitFailure, exitSuccess)
 -- (source, expected alpha-normalized type)
 passTests :: [(String, String)]
 passTests =
-  [ -- literals and basic prims
-    ("17",            "ρ0 ⇒ Int ρ0")
-  , ("1 2",           "ρ0 ⇒ Int Int ρ0")
-  , ("1 2 3",         "ρ0 ⇒ Int Int Int ρ0")
-  , ("+",             "Int Int ρ0 ⇒ Int ρ0")
+  [ -- literals are terminal-source constants (• ⇒ Int, no implicit remainder)
+    ("17",            "• ⇒ Int")
+  , ("1 2",           "• ⇒ Int Int")
+  , ("1 2 3",         "• ⇒ Int Int Int")
+  , ("1 ...",         "ρ0 ⇒ Int ρ0")     -- explicit remainder: push onto any stack
+    -- pushing over existing wires: id covers exactly one, ... covers any
+  , ("2 id",          "a0 ⇒ Int a0")
+  , ("1 >> 2 id",     "• ⇒ Int Int")
+  , ("1 >> 2 ...",    "• ⇒ Int Int")
+  , ("1 >> 2 \8230",  "• ⇒ Int Int")   -- U+2026 … aliases ...
+  , ("+",             "Int Int ⇒ Int")
   , ("pass",          "ρ0 ⇒ ρ0")
 
-    -- cartesian basis
-  , ("swap",          "a0 a1 ρ0 ⇒ a1 a0 ρ0")
-  , ("dup",           "a0 ρ0 ⇒ a0 a0 ρ0")
-  , ("drop",          "a0 ρ0 ⇒ ρ0")
-  , ("id",            "a0 ρ0 ⇒ a0 ρ0")
+    -- cartesian basis (exact: no implicit remainder on operations either)
+  , ("swap",          "a0 a1 ⇒ a1 a0")
+  , ("dup",           "a0 ⇒ a0 a0")
+  , ("drop",          "a0 ⇒ •")
+  , ("id",            "a0 ⇒ a0")
 
-    -- sequencing and row polymorphism
-  , ("1 >> +",        "Int ρ0 ⇒ Int ρ0")
-  , ("1 2 >> +",      "ρ0 ⇒ Int ρ0")
-  , ("1 2 >> f g >> + >> print", "ρ0 ⇒ ρ0")
+    -- sequencing; increment needs the explicit remainder (1 >> + is ill-typed)
+  , ("1 ... >> +",    "Int ⇒ Int")
+  , ("1 2 >> +",      "• ⇒ Int")
+    -- strict tensor: `1 +` is (• ⇒ Int) ⊗ (Int Int ⇒ Int), NOT increment
+  , ("1 +",           "Int Int ⇒ Int Int")
+  , ("1 2 >> f g >> + >> print", "• ⇒ •")
 
     -- newline is strict >>
-  , ("1 2\nf g\n+\nprint",       "ρ0 ⇒ ρ0")
-  , ("1 2\n\n+",                 "ρ0 ⇒ Int ρ0")   -- blank lines collapse
-  , ("1 2 >>\n+",                "ρ0 ⇒ Int ρ0")   -- newline after >> absorbed
+  , ("1 2\nf g\n+\nprint",       "• ⇒ •")
+  , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
+  , ("1 2 >>\n+",                "• ⇒ Int")   -- newline after >> absorbed
 
-    -- worked schemes from the spec (remainder discipline section)
-  , ("dup >> *",      "Int ρ0 ⇒ Int ρ0")           -- square
-  , ("id drop",       "a0 a1 ρ0 ⇒ a0 ρ0")          -- first
-  , ("dup >> id drop","a0 ρ0 ⇒ a0 ρ0")             -- counit law
-  , ("dup >> swap",   "a0 ρ0 ⇒ a0 a0 ρ0")          -- commutativity law
-  , ("swap >> swap",  "a0 a1 ρ0 ⇒ a0 a1 ρ0")       -- involution
+    -- worked schemes from the spec (now exact, matching it verbatim)
+  , ("dup >> *",      "Int ⇒ Int")           -- square
+  , ("id drop",       "a0 a1 ⇒ a0")          -- first
+  , ("dup >> id drop","a0 ⇒ a0")             -- counit law
+  , ("dup >> swap",   "a0 ⇒ a0 a0")          -- commutativity law
+  , ("swap >> swap",  "a0 a1 ⇒ a0 a1")       -- involution
 
-    -- trailing remainder: ... and >>>
-  , ("1 2 3 >> f ... >> +",      "ρ0 ⇒ Int Int ρ0")
-  , ("1 2 3 >> f >>> +",         "ρ0 ⇒ Int Int ρ0")   -- >>> ≡ the ... form
-  , ("1 2 3\nf ...\n+",          "ρ0 ⇒ Int Int ρ0")   -- same, via newlines
-  , ("...",                      "ρ0 ⇒ ρ0")           -- bare remainder stage
+    -- trailing remainder: ... and >>> (ops are exact, so deep stacks need it too)
+  , ("1 2 3 >> f ... >> + ...",  "• ⇒ Int Int")
+  , ("1 2 3 >> f >>> + ...",     "• ⇒ Int Int")   -- >>> ≡ the ... form
+  , ("1 2 3\nf ...\n+ ...",      "• ⇒ Int Int")   -- same, via newlines
+  , ("...",                      "ρ0 ⇒ ρ0")       -- bare remainder stage
 
-    -- quotations and apply
-  , ("[dup >> *]",               "ρ0 ⇒ Code⟨Int ρ1 ⇒ Int ρ1⟩ ρ0")
-  , ("[dup >> *] 7 >> apply",    "ρ0 ⇒ Int ρ0")
-  , ("[dup >> *] 7 >> apply >> print", "ρ0 ⇒ ρ0")     -- spec example (49)
-  , ("apply",                    "Code⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
+    -- quotations and apply (quotes are terminal-source constants)
+  , ("[dup >> *]",               "• ⇒ Fn⟨Int ⇒ Int⟩")
+  , ("[dup >> *] 7 >> apply",    "• ⇒ Int")
+  , ("[dup >> *] 7 >> apply >> print", "• ⇒ •")   -- spec example (49)
+  , ("apply",                    "Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
+
+    -- grouping: (p) is the open program p, never reified
+  , ("(dup >> *)",       "Int ⇒ Int")
+  , ("7 >> (dup >> *)",  "• ⇒ Int")
+  , ("(1 4 5)",          "• ⇒ Int Int Int")
+  , ("(1 ... >> +)",     "Int ⇒ Int")          -- the increment
+  , ("(1 ... >> +) f",   "Int Int ⇒ Int Int")  -- compound closed non-finally
+  , ("f (1 ... >> +)",   "Int Int ⇒ Int Int")  -- compound open finally
+  , ("(pass >> drop) f", "a0 Int ⇒ Int")       -- linked tails close soundly
 
     -- branch and lists
-  , ("branch",        "Bool Code⟨ρ0 ⇒ ρ1⟩ Code⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
-  , ("negative?",     "Int ρ0 ⇒ Bool ρ0")
-  , ("list(1, 2, 3)", "ρ0 ⇒ List Int ρ0")
-  , ("list()",        "ρ0 ⇒ List a0 ρ0")
-  , ("map",           "Code⟨a0 ⇒ a1⟩ List a0 ρ0 ⇒ List a1 ρ0")
-  , ("fold",          "Code⟨a0 a1 ⇒ a0⟩ a0 List a1 ρ0 ⇒ a0 ρ0")
+  , ("branch",        "Bool Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
+  , ("negative?",     "Int ⇒ Bool")
+  , ("list(1, 2, 3)", "• ⇒ List Int")
+  , ("list()",        "• ⇒ List a0")
+  , ("map",           "Fn⟨a0 ⇒ a1⟩ List a0 ⇒ List a1")
+  , ("fold",          "Fn⟨a0 a1 ⇒ a0⟩ a0 List a1 ⇒ a0")
   ]
 
 -- (source, substring expected in the error)
@@ -64,13 +81,20 @@ failTests :: [(String, String)]
 failTests =
   [ ("1 true >> +",   "Cannot unify types")
   , ("true >> f",     "Cannot unify types")
-    -- Γ inside Code⟨…⟩: binding Γ := Code⟨Γ⇒Δ⟩ ρ must fail the occurs
+    -- nothing has an implicit remainder: 1 makes exactly one wire,
+    -- + consumes exactly two
+  , ("1 >> +",        "Cannot unify stacks")
+  , ("1 >> 2",        "Cannot unify stacks")   -- the incoming wire is uncovered
+  , ("1 2 3 >> +",    "Cannot unify stacks")   -- deep stack needs `+ ...`
+  , ("7 >> [1]",      "Cannot unify stacks")   -- write `[1] ...` instead
+    -- Γ inside Fn⟨…⟩: binding Γ := Fn⟨Γ⇒Δ⟩ ρ must fail the occurs
     -- check now that it traverses element types.
   , ("dup >> apply",  "Occurs check")
   , ("[dup",          "Unclosed quotation")
   , ("]",             "Expected a tensor stage")
-    -- branches with different stack effects
-  , ("true [1] [drop ...] >> branch", "Occurs check")
+  , ("(1",            "Unclosed group")
+    -- branches with different stack effects ([1] : Fn⟨• ⇒ Int⟩ forces Γ := •)
+  , ("true [1] [drop ...] >> branch", "Cannot unify stacks")
     -- list elements must be pure pushes
   , ("list(drop)",    "Cannot unify stacks")
   , ("list(1 2",      "Expected ',' or ')'")
@@ -83,11 +107,11 @@ failTests =
 -- (module source, expected alpha-normalized type of main)
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
-  [ ("def square = dup >> *\nsquare",           "Int ρ0 ⇒ Int ρ0")
-  , ("def square = dup >> *\nsquare >> square", "Int ρ0 ⇒ Int ρ0")
-  , ("def first = id drop\n1 2 >> first",       "ρ0 ⇒ Int ρ0")
+  [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
+  , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
+  , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
     -- one def used at two different types = let-polymorphism
-  , ("def discard = drop\n1 discard >> true discard", "a0 ρ0 ⇒ Bool ρ0")
+  , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
   ]
 
 -- (module source, expected print log, expected final stack rendering)
@@ -95,16 +119,18 @@ evalTests :: [(String, [String], String)]
 evalTests =
   [ ("1 2 >> f g >> + >> print",           ["6"],  "")      -- f=succ, g=double
   , ("1 2 >> swap",                        [],     "2 1")
-  , ("1 2 3 >> f ... >> +",                [],     "4 3")
-  , ("1 2 3 >> f >>> +",                   [],     "4 3")
+  , ("1 2 3 >> f ... >> + ...",            [],     "4 3")
+  , ("1 2 3 >> f >>> + ...",               [],     "4 3")
   , ("def square = dup >> *\n5 >> square >> print", ["25"], "")
   , ("true false",                         [],     "true false")
-  , ("1 2\nswap\nprint\nprint",            ["2", "1"], "")
+  , ("1 2\nswap\nprint ...\nprint",        ["2", "1"], "")
+  , ("1\n2 id",                            [],     "2 1")
+  , ("1\n2 ...",                           [],     "2 1")
 
     -- quotations and apply
   , ("[dup >> *] 7 >> apply >> print",     ["49"], "")   -- from the spec
   , ("[1 2 >> +] >> apply >> print",       ["3"],  "")
-  , ("[pass]",                             [],     "[code]")
+  , ("[pass]",                             [],     "[fn]")
   , ("def sq = [dup >> *]\nsq 5 >> apply", [],     "25")
 
     -- branch
@@ -112,6 +138,10 @@ evalTests =
   , ("false [1] [2] >> branch >> print",   ["2"],  "")
   , ("true [f ...] [g ...] 10 >> branch >> print", ["11"], "")
   , ("5 >> negative?",                     [],     "false")
+
+    -- grouping
+  , ("7 >> (dup >> *) >> print",           ["49"], "")
+  , ("5 8 >> (1 ... >> +) f >> + >> print", ["15"], "")
 
     -- lists: the spec's sum-of-squares program
   , ("list(1, 2, 3)",                      [],     "list(1, 2, 3)")
@@ -125,7 +155,7 @@ moduleFailTests =
   [ ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
-    -- a def's quote closed non-finally (Code⟨•⇒•⟩) meeting an Int wire:
+    -- a def's quote closed non-finally (Fn⟨•⇒•⟩) meeting an Int wire:
     -- the once-unreachable closed-stack mismatch, now real
   , ("def q = [pass]\nq 1 >> apply",              "Cannot unify stacks")
   ]

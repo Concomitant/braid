@@ -33,14 +33,14 @@ newtype SVar = SV String
 instance Show SVar where
   show (SV s) = s
 
--- Element types.  TCode nests whole arrows inside element types, so
+-- Element types.  TFn nests whole arrows inside element types, so
 -- stack variables can occur inside types — all traversals (occurs
 -- checks, substitution, unification) must recurse through it.
 data Ty
   = TVarTy TVar
   | TInt
   | TBool
-  | TCode Arrow          -- Code⟨Γ ⇒ Δ⟩: a reified program
+  | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
   | TList Ty             -- List A: homogeneous list
   deriving (Eq, Ord)
 
@@ -48,7 +48,7 @@ instance Show Ty where
   show (TVarTy a)  = show a
   show TInt        = "Int"
   show TBool       = "Bool"
-  show (TCode arr) = "Code⟨" ++ show arr ++ "⟩"
+  show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
   show (TList t)   = "List " ++ parens t
     where
       parens u@(TList _) = "(" ++ show u ++ ")"
@@ -120,7 +120,7 @@ instance Substitutable Ty where
       Just t' -> apply s t'   -- chase chains, like the SType instance
   apply _ TInt        = TInt
   apply _ TBool       = TBool
-  apply s (TCode arr) = TCode (apply s arr)
+  apply s (TFn arr) = TFn (apply s arr)
   apply s (TList t)   = TList (apply s t)
 
 instance Substitutable SType where
@@ -155,13 +155,13 @@ data Constraint
   deriving (Eq, Show)
 
 -- All variables (type and stack) in order of first appearance, recursing
--- through Code⟨Γ ⇒ Δ⟩ element types.  The single traversal backing the
+-- through Fn⟨Γ ⇒ Δ⟩ element types.  The single traversal backing the
 -- occurs checks, generalization, and alpha-normalization.
 varsOfTy :: Ty -> ([TVar], [SVar])
 varsOfTy (TVarTy v)  = ([v], [])
 varsOfTy TInt        = ([], [])
 varsOfTy TBool       = ([], [])
-varsOfTy (TCode arr) = varsOfArrow arr
+varsOfTy (TFn arr) = varsOfArrow arr
 varsOfTy (TList t)   = varsOfTy t
 
 varsOfStack :: SType -> ([TVar], [SVar])
@@ -197,7 +197,7 @@ unifyTy s t1 t2 =
     (t, TVarTy a) -> bindTyVar s a t
     (TInt, TInt)  -> Right s
     (TBool, TBool)-> Right s
-    (TCode (Arrow i1 o1), TCode (Arrow i2 o2)) -> do
+    (TFn (Arrow i1 o1), TFn (Arrow i2 o2)) -> do
       s' <- unifyStack s i1 i2
       unifyStack s' o1 o2
     (TList a1, TList a2) -> unifyTy s a1 a2
@@ -272,7 +272,7 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goS (SCons t rest) = SCons (goT t) (goS rest)
 
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
-    goT (TCode arr)  = TCode (substOnce s arr)
+    goT (TFn arr)  = TFn (substOnce s arr)
     goT (TList t)    = TList (goT t)
     goT t            = t
 
@@ -340,6 +340,7 @@ tokenize = go
     go ('>':'>':cs)     = (TokSeq :) <$> go cs
     go ('>':_)          = Left "Unexpected '>' without matching '>>'"
     go ('.':'.':'.':cs) = (TokEllipsis :) <$> go cs
+    go ('…':cs)         = (TokEllipsis :) <$> go cs   -- U+2026, autocorrect's ...
     go ('.':_)          = Left "Unexpected '.' (did you mean '...'?)"
     go ('[':cs)         = (TokLBrack :) <$> go cs
     go (']':cs)         = (TokRBrack :) <$> go cs
@@ -356,7 +357,7 @@ tokenize = go
           in (TokIdent ident :) <$> go rest
 
     isIdentChar ch =
-      not (isSpace ch) && ch `notElem` (">.[]()," :: String)
+      not (isSpace ch) && ch `notElem` (">.[](),\8230" :: String)
 
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
 -- newlines adjacent to an explicit >> / >>> (the operator wins).
@@ -431,6 +432,13 @@ parseStage = go []
       case rest' of
         (TokRBrack : rest'') -> go (Quote (desugarStmt stmt) : acc) rest''
         _ -> Left "Unclosed quotation (expected ']')"
+    -- (p): grouping only — the enclosed program is an ordinary atom,
+    -- not reified.  See spec-update-exponentials.md.
+    go acc (TokLParen : rest)     = do
+      (stmt, rest') <- parseStmt rest
+      case rest' of
+        (TokRParen : rest'') -> go (desugarStmt stmt : acc) rest''
+        _ -> Left "Unclosed group (expected ')')"
     go acc (TokEllipsis : rest)   =
       case rest of
         (t : _) | isStageTok t ->
@@ -444,6 +452,7 @@ parseStage = go []
     isStageTok (TokInt _)   = True
     isStageTok TokEllipsis  = True
     isStageTok TokLBrack    = True
+    isStageTok TokLParen    = True
     isStageTok _            = False
 
     context []      = " (unexpected end of input)"
@@ -558,8 +567,9 @@ inferOperand env final (Prim name)
     pick sc = do
       arr <- if final then instantiate sc else instantiateClosed sc
       pure (arr, [])
-inferOperand env final (ListLit es) = do
-  -- Each element must be a pure push: • ⇒ A, all at the same A.
+inferOperand env _ (ListLit es) = do
+  -- Terminal-source constant: • ⇒ List A.  Each element must be a pure
+  -- push (• ⇒ A), all at the same A.
   elemTy <- TVarTy <$> freshTyVarName
   results <- mapM (inferOperand env False) es
   let cs = concat
@@ -567,106 +577,120 @@ inferOperand env final (ListLit es) = do
             : CEqStack o (SCons elemTy SEnd)
             : csE
         | (Arrow i o, csE) <- results ]
-      listTy = TList elemTy
-  if final
-    then do
-      v <- freshSVarName
-      let r = STail v
-      pure (Arrow r (SCons listTy r), cs)
-    else
-      pure (Arrow SEnd (SCons listTy SEnd), cs)
-inferOperand env final (Quote p) = do
-  -- The quoted program is inferred as a whole; its remainder variables
-  -- stay as metavariables inside Code⟨…⟩, solved (monomorphically) at
-  -- the use site.  The quote itself pushes exactly one value.
+  pure (Arrow SEnd (SCons (TList elemTy) SEnd), cs)
+inferOperand env _ (Quote p) = do
+  -- Terminal-source constant: • ⇒ Fn⟨…⟩.  The quoted program is inferred
+  -- as a whole; its remainder variables stay as metavariables inside
+  -- Fn⟨…⟩, solved (monomorphically) at the use site.
   (arrP, cs) <- infer env p
-  let code = TCode arrP
-  if final
-    then do
-      v <- freshSVarName
-      let r = STail v
-      pure (Arrow r (SCons code r), cs)
-    else
-      pure (Arrow SEnd (SCons code SEnd), cs)
+  pure (Arrow SEnd (SCons (TFn arrP) SEnd), cs)
 inferOperand env final t
   | final     = infer env t
-  | otherwise =
-      -- The parser only produces atoms (Prim/Quote) inside tensor chains.
-      error $ "Non-final tensor operand must be an atom: " ++ show t
+  | otherwise = do
+      -- A grouped compound program in closed (non-final) position.  Its
+      -- closedness is semantic, not syntactic, so: solve its constraints
+      -- locally, then close the OUTER tails of the solved arrow (ρ := •).
+      -- Sound because after solving, those tails are unconstrained free
+      -- variables — e.g. (pass >> drop) solves to A ρ ⇒ ρ and closes to
+      -- A ⇒ •.  Element-internal variables (inside Fn⟨…⟩) stay open,
+      -- matching how closed quote operands behave.
+      (arr, cs) <- infer env t
+      case solve cs of
+        Left _ ->
+          -- Ill-typed subprogram: emit a dummy closed arrow so appendStack
+          -- stays total; the constraints flow up and the global solve
+          -- reports the real error.
+          pure (Arrow SEnd SEnd, cs)
+        Right s ->
+          let arr'@(Arrow i o) = apply s arr
+              tails = nub ([ v | Just v <- [tailVar i] ]
+                        ++ [ v | Just v <- [tailVar o] ])
+              sm = M.fromList [ (v, SEnd) | v <- tails ]
+          in pure (substOnce (Subst M.empty sm) arr', [])
+
+-- The tail variable of a stack, if it is open.
+tailVar :: SType -> Maybe SVar
+tailVar (STail v)    = Just v
+tailVar (SCons _ r)  = tailVar r
+tailVar SEnd         = Nothing
 
 isIntLiteral :: String -> Bool
 isIntLiteral name = not (null name) && all isDigit name
 
--- Integer literals: ∀ρ. ρ ⇒ Int ρ
+-- Integer literals are terminal-source: • ⇒ Int.  Constants have NO
+-- implicit remainder — pushing onto a nonempty stack requires explicit
+-- `...` (e.g. `1 ...` : ρ ⇒ Int ρ).  See spec-update-exponentials.md.
 intLitScheme :: Scheme
-intLitScheme =
-  let rho = SV "ρ"
-      r   = STail rho
-  in Forall [] [rho] (Arrow r (SCons TInt r))
+intLitScheme = Forall [] [] (Arrow SEnd (SCons TInt SEnd))
 
 --------------------------------------------------------------------------------
--- 7. The primitive environment (remainder ρ always trailing)
+-- 7. The primitive environment
+--
+-- Everything is exact: operations consume and produce exactly the wires
+-- written, constants source from •.  There are NO implicit remainders —
+-- the remainder is always explicit (pass / ... / >>>).  A stack variable
+-- appears only in `pass` (identity on an unknown remainder) and as the
+-- consumed/produced segments Γ, Δ of the higher-order eliminators.
 --------------------------------------------------------------------------------
 
---  id    : ∀ρ A. A ρ ⇒ A ρ
---  swap  : ∀ρ A B. A B ρ ⇒ B A ρ
---  dup   : ∀ρ A. A ρ ⇒ A A ρ
---  drop  : ∀ρ A. A ρ ⇒ ρ
+--  id    : ∀A. A ⇒ A
+--  swap  : ∀A B. A B ⇒ B A
+--  dup   : ∀A. A ⇒ A A
+--  drop  : ∀A. A ⇒ •
 --  pass  : ∀ρ. ρ ⇒ ρ
---  f, g  : ∀ρ. Int ρ ⇒ Int ρ
---  +, *  : ∀ρ. Int Int ρ ⇒ Int ρ
---  print : ∀ρ A. A ρ ⇒ ρ
---  true, false : ∀ρ. ρ ⇒ Bool ρ
---  apply : ∀Γ Δ. Code⟨Γ ⇒ Δ⟩ Γ ⇒ Δ   (quotation on the first wire; the
---          consumed segment Γ is the tail, per the remainder discipline)
---  (integer literals are handled by rule: ∀ρ. ρ ⇒ Int ρ)
+--  f, g  : Int ⇒ Int
+--  +, *  : Int Int ⇒ Int
+--  print : ∀A. A ⇒ •
+--  true, false : • ⇒ Bool
+--  negative?   : Int ⇒ Bool
+--  apply : ∀Γ Δ. Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ   (Γ is consumed, not passed)
+--  branch: ∀Γ Δ. Bool Fn⟨Γ⇒Δ⟩ Fn⟨Γ⇒Δ⟩ Γ ⇒ Δ
+--  map   : ∀A B. Fn⟨A ⇒ B⟩ List A ⇒ List B
+--  fold  : ∀A B. Fn⟨B A ⇒ B⟩ B List A ⇒ B
+--  (integer literals are handled by rule: • ⇒ Int)
 primEnv :: Env
 primEnv =
   let rho = SV "ρ"
-      r   = STail rho
       a   = TV "A"
       b   = TV "B"
       ta  = TVarTy a
       tb  = TVarTy b
       gam = SV "Γ"
       del = SV "Δ"
-      codeGD = TCode (Arrow (STail gam) (STail del))
+      one t = SCons t SEnd
+      fnGD = TFn (Arrow (STail gam) (STail del))
       applyTy = Forall [] [gam, del]
-        (Arrow (SCons codeGD (STail gam)) (STail del))
-      -- branch : Bool Code⟨Γ⇒Δ⟩ Code⟨Γ⇒Δ⟩ Γ ⇒ Δ (true-quotation first)
+        (Arrow (SCons fnGD (STail gam)) (STail del))
       branchTy = Forall [] [gam, del]
-        (Arrow (SCons TBool (SCons codeGD (SCons codeGD (STail gam))))
+        (Arrow (SCons TBool (SCons fnGD (SCons fnGD (STail gam))))
                (STail del))
-      -- map : Code⟨A ⇒ B⟩ List A ρ ⇒ List B ρ
-      mapTy = Forall [a, b] [rho]
-        (Arrow (SCons (TCode (Arrow (SCons ta SEnd) (SCons tb SEnd)))
-                 (SCons (TList ta) r))
-               (SCons (TList tb) r))
-      -- fold : Code⟨B A ⇒ B⟩ B List A ρ ⇒ B ρ
-      foldTy = Forall [a, b] [rho]
-        (Arrow (SCons (TCode (Arrow (SCons tb (SCons ta SEnd))
-                                    (SCons tb SEnd)))
-                 (SCons tb (SCons (TList ta) r)))
-               (SCons tb r))
-      unaryTy  = Forall [] [rho] (Arrow (SCons TInt r) (SCons TInt r))
-      binIntTy = Forall [] [rho]
-        (Arrow (SCons TInt (SCons TInt r)) (SCons TInt r))
-      boolLit  = Forall [] [rho] (Arrow r (SCons TBool r))
+      mapTy = Forall [a, b] []
+        (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
+                 (one (TList ta)))
+               (one (TList tb)))
+      foldTy = Forall [a, b] []
+        (Arrow (SCons (TFn (Arrow (SCons tb (one ta)) (one tb)))
+                 (SCons tb (one (TList ta))))
+               (one tb))
+      unaryTy  = Forall [] [] (Arrow (one TInt) (one TInt))
+      binIntTy = Forall [] []
+        (Arrow (SCons TInt (one TInt)) (one TInt))
+      boolLit  = Forall [] [] (Arrow SEnd (one TBool))
   in M.fromList
-       [ ("id",    Forall [a]    [rho] (Arrow (SCons ta r) (SCons ta r)))
-       , ("swap",  Forall [a, b] [rho]
-           (Arrow (SCons ta (SCons tb r)) (SCons tb (SCons ta r))))
-       , ("dup",   Forall [a]    [rho] (Arrow (SCons ta r) (SCons ta (SCons ta r))))
-       , ("drop",  Forall [a]    [rho] (Arrow (SCons ta r) r))
-       , ("pass",  Forall []     [rho] (Arrow r r))
+       [ ("id",    Forall [a]    [] (Arrow (one ta) (one ta)))
+       , ("swap",  Forall [a, b] []
+           (Arrow (SCons ta (one tb)) (SCons tb (one ta))))
+       , ("dup",   Forall [a]    [] (Arrow (one ta) (SCons ta (one ta))))
+       , ("drop",  Forall [a]    [] (Arrow (one ta) SEnd))
+       , ("pass",  Forall []     [rho] (Arrow (STail rho) (STail rho)))
        , ("f",     unaryTy)
        , ("g",     unaryTy)
        , ("+",     binIntTy)
        , ("*",     binIntTy)
-       , ("print", Forall [a]    [rho] (Arrow (SCons ta r) r))
+       , ("print", Forall [a]    [] (Arrow (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
-       , ("negative?", Forall [] [rho] (Arrow (SCons TInt r) (SCons TBool r)))
+       , ("negative?", Forall [] [] (Arrow (one TInt) (one TBool)))
        , ("apply",  applyTy)
        , ("branch", branchTy)
        , ("map",    mapTy)
@@ -829,14 +853,14 @@ checkModuleWith env0 src = do
 -- Γ1 … Γn ρ ⇒ Δ1 … Δn ρ.
 --------------------------------------------------------------------------------
 
-data Value = VInt Int | VBool Bool | VCode Term | VList [Value]
+data Value = VInt Int | VBool Bool | VFn Term | VList [Value]
   deriving (Eq)
 
 instance Show Value where
   show (VInt n)      = show n
   show (VBool True)  = "true"
   show (VBool False) = "false"
-  show (VCode _)     = "[code]"
+  show (VFn _)     = "[fn]"
   show (VList vs)    = "list(" ++ intercalate ", " (map show vs) ++ ")"
 
 -- Number of concrete wires in a stack type (its closed prefix).
@@ -853,13 +877,14 @@ moduleRunDefs m =
   where
     arityOf (Forall _ _ (Arrow i _)) = closedArity i
 
--- Evaluate a term: returns the final stack and the print log.
-evalTerm :: RunDefs -> Term -> [Value] -> Either String ([Value], [String])
-evalTerm defs term st =
+-- Evaluate a term: returns the final stack and the print log.  The Env
+-- is needed to compute closed arities of grouped compound operands.
+evalTerm :: Env -> RunDefs -> Term -> [Value] -> Either String ([Value], [String])
+evalTerm env defs term st =
   case term of
     Seq t u -> do
-      (st1, l1) <- evalTerm defs t st
-      (st2, l2) <- evalTerm defs u st1
+      (st1, l1) <- evalTerm env defs t st
+      (st2, l2) <- evalTerm env defs u st1
       pure (st2, l1 ++ l2)
     Tensor ts     -> goAtoms ts st
     p@(Prim _)    -> goAtoms [p] st
@@ -878,9 +903,9 @@ evalTerm defs term st =
     applyAtom isFinal (Prim "apply") stk = do
       (args, stk') <- takeWires "apply" 1 stk
       case args of
-        [VCode body] -> do
+        [VFn body] -> do
           let seg = if isFinal then stk' else []
-          (out, logs) <- evalTerm defs body seg
+          (out, logs) <- evalTerm env defs body seg
           pure (out, if isFinal then [] else stk', logs)
         _ ->
           Left "Runtime type error in apply: expected a quotation"
@@ -889,9 +914,9 @@ evalTerm defs term st =
     applyAtom isFinal (Prim "branch") stk = do
       (args, stk') <- takeWires "branch" 3 stk
       case args of
-        [VBool c, VCode tThen, VCode tElse] -> do
+        [VBool c, VFn tThen, VFn tElse] -> do
           let seg = if isFinal then stk' else []
-          (out, logs) <- evalTerm defs (if c then tThen else tElse) seg
+          (out, logs) <- evalTerm env defs (if c then tThen else tElse) seg
           pure (out, if isFinal then [] else stk', logs)
         _ ->
           Left "Runtime type error in branch: expected Bool and two quotations"
@@ -899,25 +924,36 @@ evalTerm defs term st =
       | isIntLiteral name = Right ([VInt (read name)], stk, [])
       | Just (k, body) <- M.lookup name defs = do
           (args, stk') <- takeWires name k stk
-          (out, logs) <- evalTerm defs body args
+          (out, logs) <- evalTerm env defs body args
           pure (out, stk', logs)
       | otherwise = do
           k <- builtinArity name
           (args, stk') <- takeWires name k stk
-          (out, logs) <- runBuiltin defs name args
+          (out, logs) <- runBuiltin env defs name args
           pure (out, stk', logs)
-    applyAtom _ (Quote body) stk = Right ([VCode body], stk, [])
+    applyAtom _ (Quote body) stk = Right ([VFn body], stk, [])
     applyAtom _ (ListLit es) stk = do
       vs <- mapM elemValue es
       pure ([VList vs], stk, [])
       where
         elemValue e = do
-          (out, _) <- evalTerm defs e []
+          (out, _) <- evalTerm env defs e []
           case out of
             [v] -> Right v
             _   -> Left "list element must push exactly one value"
-    applyAtom _ t' _ =
-      Left $ "Cannot evaluate non-atomic tensor operand: " ++ show t'
+    -- Grouped compound operand (Seq/Tensor as an atom).  Final: evaluate
+    -- on the whole remaining stack (its open tail carries the remainder).
+    -- Non-final: it was typed closed, so take exactly its inferred arity.
+    applyAtom isFinal t' stk
+      | isFinal = do
+          (out, logs) <- evalTerm env defs t' stk
+          pure (out, [], logs)
+      | otherwise = do
+          Arrow i _ <- inferTermIn env t'
+          let k = closedArity i
+          (args, stk') <- takeWires "grouped program" k stk
+          (out, logs) <- evalTerm env defs t' args
+          pure (out, stk', logs)
 
     takeWires name k stk
       | length stk >= k = Right (take k stk, drop k stk)
@@ -931,39 +967,40 @@ builtinArity name =
     Just (Forall _ _ (Arrow i _)) -> Right (closedArity i)
     Nothing -> Left $ "Unknown primitive at runtime: " ++ name
 
-runBuiltin :: RunDefs -> String -> [Value] -> Either String ([Value], [String])
-runBuiltin _ "id"    [v]              = Right ([v], [])
-runBuiltin _ "swap"  [x, y]           = Right ([y, x], [])
-runBuiltin _ "dup"   [v]              = Right ([v, v], [])
-runBuiltin _ "drop"  [_]              = Right ([], [])
-runBuiltin _ "pass"  []               = Right ([], [])
-runBuiltin _ "f"     [VInt n]         = Right ([VInt (n + 1)], [])   -- sample unary: successor
-runBuiltin _ "g"     [VInt n]         = Right ([VInt (2 * n)], [])   -- sample unary: double
-runBuiltin _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
-runBuiltin _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
-runBuiltin _ "print" [v]              = Right ([], [show v])
-runBuiltin _ "true"  []               = Right ([VBool True], [])
-runBuiltin _ "false" []               = Right ([VBool False], [])
-runBuiltin _ "negative?" [VInt n]     = Right ([VBool (n < 0)], [])
-runBuiltin defs "map" [VCode t, VList vs] = do
+runBuiltin :: Env -> RunDefs -> String -> [Value]
+           -> Either String ([Value], [String])
+runBuiltin _ _ "id"    [v]              = Right ([v], [])
+runBuiltin _ _ "swap"  [x, y]           = Right ([y, x], [])
+runBuiltin _ _ "dup"   [v]              = Right ([v, v], [])
+runBuiltin _ _ "drop"  [_]              = Right ([], [])
+runBuiltin _ _ "pass"  []               = Right ([], [])
+runBuiltin _ _ "f"     [VInt n]         = Right ([VInt (n + 1)], [])   -- sample unary: successor
+runBuiltin _ _ "g"     [VInt n]         = Right ([VInt (2 * n)], [])   -- sample unary: double
+runBuiltin _ _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
+runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
+runBuiltin _ _ "print" [v]              = Right ([], [show v])
+runBuiltin _ _ "true"  []               = Right ([VBool True], [])
+runBuiltin _ _ "false" []               = Right ([VBool False], [])
+runBuiltin _ _ "negative?" [VInt n]     = Right ([VBool (n < 0)], [])
+runBuiltin env defs "map" [VFn t, VList vs] = do
   rs <- mapM step vs
   pure ([VList (map fst rs)], concatMap snd rs)
   where
     step v = do
-      (out, logs) <- evalTerm defs t [v]
+      (out, logs) <- evalTerm env defs t [v]
       case out of
         [r] -> Right (r, logs)
         _   -> Left "map: code must return exactly one value"
-runBuiltin defs "fold" [VCode t, b0, VList vs] = do
+runBuiltin env defs "fold" [VFn t, b0, VList vs] = do
   (b, logs) <- foldM step (b0, []) vs
   pure ([b], logs)
   where
     step (b, logs) v = do
-      (out, logs') <- evalTerm defs t [b, v]
+      (out, logs') <- evalTerm env defs t [b, v]
       case out of
         [b'] -> Right (b', logs ++ logs')
         _    -> Left "fold: code must return exactly one value"
-runBuiltin _ name args =
+runBuiltin _ _ name args =
   Left $ "Runtime type error in " ++ name ++ " applied to "
        ++ show args ++ " (unreachable on typechecked programs)"
 
@@ -976,4 +1013,4 @@ runModule src = do
     Just (term, arr@(Arrow i _))
       | closedArity i > 0 ->
           Left $ "main requires a nonempty input stack: " ++ show arr
-      | otherwise -> evalTerm (moduleRunDefs m) term []
+      | otherwise -> evalTerm (modEnv m) (moduleRunDefs m) term []
