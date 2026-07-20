@@ -90,7 +90,6 @@ passTests =
   , ("here >> there", "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   , ("1 2 >> in1",    "• ⇒ (Int Int | σ0)")
   , ("merge",         "(ρ0 | ρ0) ⇒ ρ0")
-  , ("merge3",        "(ρ0 | ρ0 | ρ0) ⇒ ρ0")
   , ("(dup | drop)",  "(a0 | a1) ⇒ (a0 a0 | •)")
   , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
   , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
@@ -107,7 +106,8 @@ passTests =
   , ("odd?",          "Int ⇒ (• | •)")
     -- case: predicate-driven split, an ordinary combinator (no grammar)
   , ("case",          "Fn⟨ρ0 ⇒ (• | •)⟩ ρ0 ⇒ (ρ0 | ρ0)")
-  , ("case3",         "Fn⟨ρ0 ⇒ (• | •)⟩ Fn⟨ρ0 ⇒ (• | •)⟩ ρ0 ⇒ (ρ0 | ρ0 | ρ0)")
+  , ("clause",        "Fn⟨ρ0 ⇒ (• | •)⟩ Fn⟨ρ0 ⇒ ρ1⟩ (ρ0 | ρ1 | σ0) ⇒ (ρ0 | ρ1 | σ0)")
+  , ("finish",        "Fn⟨ρ0 ⇒ ρ1⟩ (ρ0 | ρ1) ⇒ ρ1")
     -- the polymorphic case step: one scheme, n-arity by iteration
   , ("guard",         "Fn⟨ρ0 ⇒ (• | •)⟩ (ρ0 | σ0) ⇒ (ρ0 | ρ0 | σ0)")
   , ("list(1, 2, 3)", "• ⇒ List Int")
@@ -216,17 +216,15 @@ evalTests =
   , ("4 >> [odd?] ... >> case",            [],     "in2(4)")
   , ("5\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["5"], "")
   , ("4\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["0"], "")
-    -- guards: caseN + a bare handlers row + merge
-  , ("7\n[negative?] [odd?] ... >> case3\ndrop >> 0 | dup >> * | 1 ... >> +\nmerge3\nprint", ["49"], "")
-  , ("8\n[negative?] [odd?] ... >> case3\ndrop >> 0 | dup >> * | 1 ... >> +\nmerge3\nprint", ["9"], "")
+    -- guards via clause/finish: interleaved (pred, handler) per line,
+    -- natural order, constant state shape — no caseN, no mergeN
+  , ("7\nhere\n[odd?] [dup >> *] ... >> clause\n[negative?] [drop >> 0] ... >> clause\n[1 ... >> +] ... >> finish\nprint", ["49"], "")
+  , ("8\nhere\n[odd?] [dup >> *] ... >> clause\n[negative?] [drop >> 0] ... >> clause\n[1 ... >> +] ... >> finish\nprint", ["9"], "")
     -- multi-line rows: newlines adjacent to | are absorbed (both styles)
-  , ("7\n[negative?] [odd?] ... >> case3\n    drop >> 0\n  | dup >> *\n  | 1 ... >> +\nmerge3\nprint", ["49"], "")
-  , ("8\n[negative?] [odd?] ... >> case3\ndrop >> 0 |\ndup >> * |\n1 ... >> +\nmerge3\nprint", ["9"], "")
+  , ("5 >> in1\ndup >> * |\n1 ... >> +\nmerge >> print", ["25"], "")
     -- guard chains: residual-first, matched tracks accumulate in reverse
   , ("7 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in3(7)")
   , ("8 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in1(8)")
-  , ("7\nhere\n[odd?] ... >> guard\n[negative?] ... >> guard\n1 ... >> + | drop >> 0 | dup >> *\nmerge3\nprint", ["49"], "")
-  , ("8\nhere\n[odd?] ... >> guard\n[negative?] ... >> guard\n1 ... >> + | drop >> 0 | dup >> *\nmerge3\nprint", ["9"], "")
     -- bare rows, line-scoped
   , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")

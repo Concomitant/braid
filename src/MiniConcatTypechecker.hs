@@ -713,8 +713,7 @@ inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
-  | Just n <- caseIndex name, not (M.member name env) = pick (caseScheme n)
-  | Just n <- mergeIndex name, not (M.member name env) = pick (mergeScheme n)
+
   | otherwise =
       case M.lookup name env of
         Nothing ->
@@ -812,43 +811,6 @@ injIndex ('i':'n':ds)
   where n = read ds
 injIndex _ = Nothing
 
--- The guard family: caseN (case ≡ case2) takes n-1 predicate values
--- and routes the segment onto one of n flat tracks; the last track is
--- the else.  Guards are tested in wire order, first true wins.
-caseIndex :: String -> Maybe Int
-caseIndex "case" = Just 2
-caseIndex ('c':'a':'s':'e':ds)
-  | not (null ds), all isDigit ds, n >= 2 = Just n
-  where n = read ds
-caseIndex _ = Nothing
-
--- The codiagonal family: mergeN : (Θ | … | Θ)ₙ ⇒ Θ (merge ≡ merge2).
--- A family for the same reason as caseN: collapsing all tracks of an
--- unknown-length row is a counting constraint HM can't express.
-mergeIndex :: String -> Maybe Int
-mergeIndex "merge" = Just 2
-mergeIndex ('m':'e':'r':'g':'e':ds)
-  | not (null ds), all isDigit ds, n >= 2 = Just n
-  where n = read ds
-mergeIndex _ = Nothing
-
-mergeScheme :: Int -> Scheme
-mergeScheme n =
-  let th = SV "Θ"
-      row = foldr RCons RNil (replicate n (STail th))
-  in Forall [] [th] []
-       (Arrow (SCons (TSum row) SEnd) (STail th))
-
--- caseN : Fn⟨Σ⇒(•|•)⟩ ×(n-1) Σ ⇒ (Σ | … | Σ)ₙ
-caseScheme :: Int -> Scheme
-caseScheme n =
-  let sg    = SV "Σ"
-      boolS = TSum (RCons SEnd (RCons SEnd RNil))
-      predT = TFn (Arrow (STail sg) (SCons boolS SEnd))
-      inS   = foldr SCons (STail sg) (replicate (n - 1) predT)
-      outR  = foldr RCons RNil (replicate n (STail sg))
-  in Forall [] [sg] [] (Arrow inS (SCons (TSum outR) SEnd))
-
 -- inN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
 -- segment, tagged at position N; other alternatives are placeholders.
 injScheme :: Int -> Scheme
@@ -915,6 +877,40 @@ primEnv =
         (Arrow (SCons (TFn (Arrow (SCons tb (one ta)) (one tb)))
                  (SCons tb (one (TList ta))))
                (one tb))
+      -- case : Fn⟨Σ ⇒ (•|•)⟩ Σ ⇒ (Σ | Σ) — binary predicate routing
+      caseTy =
+        let sg = SV "Σ"
+            boolS = TSum (RCons SEnd (RCons SEnd RNil))
+        in Forall [] [sg] []
+             (Arrow (SCons (TFn (Arrow (STail sg) (SCons boolS SEnd)))
+                      (STail sg))
+                    (SCons (TSum (RCons (STail sg)
+                             (RCons (STail sg) RNil))) SEnd))
+      -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
+      mergeTy = Forall [] [SV "Θ"] []
+        (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
+                       (RCons (STail (SV "Θ")) RNil))) SEnd)
+               (STail (SV "Θ")))
+      -- clause : Fn⟨Σ⇒(•|•)⟩ Fn⟨Σ⇒Θ⟩ (Σ | Θ | σ) ⇒ (Σ | Θ | σ) — the
+      -- type-preserving guard step: test the residual (track 1); on
+      -- match run the handler NOW, result to the done track (track 2).
+      -- Constant state shape = no counting = no mergeN.
+      clauseTy =
+        let sg = SV "Σ"; th = SV "Θ"; rv = RV "σ"
+            boolS = TSum (RCons SEnd (RCons SEnd RNil))
+            predT = TFn (Arrow (STail sg) (SCons boolS SEnd))
+            handT = TFn (Arrow (STail sg) (STail th))
+            state = TSum (RCons (STail sg) (RCons (STail th) (RTail rv)))
+        in Forall [] [sg, th] [rv]
+             (Arrow (SCons predT (SCons handT (SCons state SEnd)))
+                    (SCons state SEnd))
+      -- finish : Fn⟨Σ⇒Θ⟩ (Σ | Θ) ⇒ Θ — else-handler + unwrap
+      finishTy =
+        let sg = SV "Σ"; th = SV "Θ"
+            handT = TFn (Arrow (STail sg) (STail th))
+            state = TSum (RCons (STail sg) (RCons (STail th) RNil))
+        in Forall [] [sg, th] []
+             (Arrow (SCons handT (SCons state SEnd)) (STail th))
       -- guard : Fn⟨Σ ⇒ (•|•)⟩ (Σ | σ) ⇒ (Σ | Σ | σ) — the polymorphic
       -- case step: track 1 is the untested residual; true moves it to a
       -- fresh track 2, false leaves it; decided tracks shift back.
@@ -959,6 +955,10 @@ primEnv =
        , ("branch", branchTy)
        , ("there",  thereTy)
        , ("guard",  guardTy)
+       , ("case",   caseTy)
+       , ("merge",  mergeTy)
+       , ("clause", clauseTy)
+       , ("finish", finishTy)
        , ("map",    mapTy)
        , ("fold",   foldTy)
        ]
@@ -982,9 +982,7 @@ inferTermIn env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
                , not (M.member n env)
-               , Nothing <- [injIndex n]
-               , Nothing <- [caseIndex n]
-               , Nothing <- [mergeIndex n] ] of
+               , Nothing <- [injIndex n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
@@ -1197,23 +1195,11 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               Left "Runtime type error in apply: expected a quotation"
-    -- mergeN: collapse an n-track sum of equal payloads
-    applyAtom _ (Prim name) stk
-      | Just _ <- mergeIndex name
-      , not (M.member name vars)
-      , not (M.member name defs) = do
-          (args, stk') <- takeWires name 1 stk
-          case args of
-            [VSum _ bundle] -> pure (bundle, stk', [])
-            _ -> Left "Runtime type error in merge: expected a sum value"
-    -- caseN: n-1 predicates on the front wires, segment behind; test
-    -- each on the segment in order, first true wins, last track = else.
-    -- Same positional segment semantics as apply.
-    applyAtom isFinal (Prim name) stk
-      | Just n <- caseIndex name
-      , not (M.member name vars)
-      , not (M.member name defs) = do
-          (args, stk') <- takeWires name (n - 1) stk
+    -- case: one predicate, binary routing (the fixed distributor)
+    applyAtom isFinal (Prim "case") stk
+      | not (M.member "case" vars)
+      , not (M.member "case" defs) = do
+          (args, stk') <- takeWires "case" 1 stk
           let seg = if isFinal then stk' else []
           (tag, logs) <- pickTrack 0 args seg
           pure ([VSum tag seg], if isFinal then [] else stk', logs)
@@ -1348,6 +1334,20 @@ runBuiltin _ _ "negative?" [VInt n]     = Right ([VSum (if n < 0 then 0 else 1) 
 runBuiltin _ _ "even?" [VInt n]         = Right ([VSum (if even n then 0 else 1) []], [])
 runBuiltin _ _ "odd?"  [VInt n]         = Right ([VSum (if odd n then 0 else 1) []], [])
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
+runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
+runBuiltin env defs "clause" [VFn cvP p, VFn cvH h, VSum 0 bundle] = do
+  (verdict, lg) <- evalTerm env defs cvP p bundle
+  case verdict of
+    [VSum 0 []] -> do
+      (out, lg') <- evalTerm env defs cvH h bundle
+      Right ([VSum 1 out], lg ++ lg')          -- matched: handled, done track
+    [VSum _ []] -> Right ([VSum 0 bundle], lg) -- still residual
+    _ -> Left "Runtime type error in clause: predicate must return a decision"
+runBuiltin _ _ "clause" [VFn _ _, VFn _ _, VSum t bundle] =
+  Right ([VSum t bundle], [])                  -- already decided: untouched
+runBuiltin env defs "finish" [VFn cvE e, VSum 0 bundle] =
+  evalTerm env defs cvE e bundle >>= \(out, lg) -> Right (out, lg)
+runBuiltin _ _ "finish" [VFn _ _, VSum _ bundle] = Right (bundle, [])
 runBuiltin env defs "guard" [VFn cv pred', VSum 0 bundle] = do
   (verdict, logs) <- evalTerm env defs cv pred' bundle
   case verdict of

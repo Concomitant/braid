@@ -1,15 +1,13 @@
 7
-[negative?] [odd?] ... >> case3
-    drop >> 0
-  | dup >> *
-  | 1 ... >> +
-merge3
+here
+[odd?]      [dup >> *]  ... >> clause
+[negative?] [drop >> 0] ... >> clause
+[1 ... >> +] ... >> finish
 print
 
 8
-[negative?] [odd?] ... >> case3
-    drop >> 0
-  | dup >> *
-  | 1 ... >> +
-merge3
+here
+[odd?]      [dup >> *]  ... >> clause
+[negative?] [drop >> 0] ... >> clause
+[1 ... >> +] ... >> finish
 print
