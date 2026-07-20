@@ -83,6 +83,11 @@ passTests =
     -- sums: injections, code rows, merge
   , ("in1",           "ρ0 ⇒ (ρ0 | σ0)")
   , ("in2",           "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
+    -- compositional injections: here starts a sum, there widens it;
+    -- here >> there ≡ in2, exactly
+  , ("here",          "ρ0 ⇒ (ρ0 | σ0)")
+  , ("there",         "(σ0) ⇒ (ρ0 | σ0)")
+  , ("here >> there", "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   , ("1 2 >> in1",    "• ⇒ (Int Int | σ0)")
   , ("merge",         "(ρ0 | ρ0) ⇒ ρ0")
   , ("(dup | drop)",  "(a0 | a1) ⇒ (a0 a0 | •)")
@@ -193,6 +198,7 @@ evalTests =
   , ("7 >> in2 >> (dup >> * | 1 ... >> +) >> merge >> print", ["8"], "")
   , ("5 >> in2 >> (drop | ...)",           [],     "in2(5)")
   , ("1 2 >> in1",                         [],     "in1(1, 2)")
+  , ("3 4 >> here >> there",               [],     "in2(3, 4)")
     -- bare rows, line-scoped
   , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")

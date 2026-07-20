@@ -809,6 +809,7 @@ isIntLiteral name = not (null name) && all isDigit name
 -- The lexical injection family: in1, in2, … — position fixed, width
 -- open via the row tail.
 injIndex :: String -> Maybe Int
+injIndex "here" = Just 1          -- here ≡ in1: start a sum at the front
 injIndex ('i':'n':ds)
   | not (null ds), all isDigit ds, n >= 1 = Just n
   where n = read ds
@@ -885,6 +886,11 @@ primEnv =
         (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
+      -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
+      -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
+      thereTy = Forall [] [SV "Δ"] [RV "σ"]
+        (Arrow (SCons (TSum (RTail (RV "σ"))) SEnd)
+               (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
       unaryTy  = Forall [] [] [] (Arrow (one TInt) (one TInt))
       binIntTy = Forall [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
@@ -907,6 +913,7 @@ primEnv =
        , ("apply",  applyTy)
        , ("branch", branchTy)
        , ("merge",  mergeTy)
+       , ("there",  thereTy)
        , ("map",    mapTy)
        , ("fold",   foldTy)
        ]
@@ -1263,6 +1270,7 @@ runBuiltin _ _ "true"  []               = Right ([VBool True], [])
 runBuiltin _ _ "false" []               = Right ([VBool False], [])
 runBuiltin _ _ "negative?" [VInt n]     = Right ([VBool (n < 0)], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
+runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin env defs "map" [VFn cv t, VList vs] = do
   rs <- mapM step vs
   pure ([VList (map fst rs)], concatMap snd rs)
