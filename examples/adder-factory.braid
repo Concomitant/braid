@@ -1,0 +1,7 @@
+def makeAdder = (n -> [n ... >> +])
+
+7
+10 ...
+makeAdder ...
+apply
+print

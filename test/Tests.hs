@@ -80,6 +80,16 @@ passTests =
   , ("[x y -> x]",            "• ⇒ Fn⟨a0 a1 ⇒ a0⟩")
   , ("(x -> [x])",            "a0 ⇒ Fn⟨• ⇒ a0⟩")   -- closure over a parameter
 
+    -- sums: injections, code rows, merge
+  , ("in1",           "ρ0 ⇒ (ρ0 | σ0)")
+  , ("in2",           "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
+  , ("1 2 >> in1",    "• ⇒ (Int Int | σ0)")
+  , ("merge",         "(ρ0 | ρ0) ⇒ ρ0")
+  , ("(dup | drop)",  "(a0 | a1) ⇒ (a0 a0 | •)")
+  , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
+  , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
+  , ("[dup >> * | drop]", "• ⇒ Fn⟨(Int | a0) ⇒ (Int | •)⟩")
+
     -- branch and lists
   , ("branch",        "Bool Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
   , ("negative?",     "Int ⇒ Bool")
@@ -115,6 +125,9 @@ failTests =
   , ("1 >",           "Unexpected '>'")
   , ("nonsense42x",   "Unknown primitive")
   , ("",              "Expected a tensor stage")
+    -- sums
+  , ("5 >> in1 >> (1 | ...)",  "Cannot unify stacks")   -- alt • vs Int
+  , ("1 >> (dup | drop)",      "Cannot unify types")    -- Int vs a sum wire
     -- scope rules: unresolved names are errors, never inferred parameters
   , ("(x -> y)",      "Unknown primitive: y")
   , ("[x 1 >> +]",    "Unknown primitive: x")   -- no inferred-parameter quotation
@@ -169,6 +182,15 @@ evalTests =
   , ("def sq = (x -> x x >> *)\n5 >> sq >> print", ["25"], "")
     -- closure: the quotation captures x at reification
   , ("7 >> (x -> [x 1 >> +]) >> apply >> print",   ["8"], "")
+
+    -- sums: injections, code rows, merge
+  , ("5 >> in1 >> (dup >> * | ...) >> merge >> print",       ["25"], "")
+  , ("7 >> in2 >> (dup >> * | 1 ... >> +) >> merge >> print", ["8"], "")
+  , ("5 >> in2 >> (drop | ...)",           [],     "in2(5)")
+  , ("1 2 >> in1",                         [],     "in1(1, 2)")
+    -- match2 as a DERIVED definition (spec: match = row of applies + merge)
+  , ("def match2 = (f g s -> s >> (f ... >> apply | g ... >> apply) >> merge)\n5 >> in1 >> [dup >> *] [1 ... >> +] ... >> match2 >> print",
+                                           ["25"], "")
 
     -- lists: the spec's sum-of-squares program
   , ("list(1, 2, 3)",                      [],     "list(1, 2, 3)")

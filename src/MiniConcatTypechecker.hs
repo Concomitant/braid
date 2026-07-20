@@ -33,6 +33,14 @@ newtype SVar = SV String
 instance Show SVar where
   show (SV s) = s
 
+-- Alternatives-row variables (σ): the tail of a sum's alternative list.
+-- Same tail-only discipline as stack variables, one level up.
+newtype RVar = RV String
+  deriving (Eq, Ord)
+
+instance Show RVar where
+  show (RV s) = s
+
 -- Element types.  TFn nests whole arrows inside element types, so
 -- stack variables can occur inside types — all traversals (occurs
 -- checks, substitution, unification) must recurse through it.
@@ -41,8 +49,25 @@ data Ty
   | TInt
   | TBool
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
-  | TList Ty             -- List A: homogeneous list
+  | TList Ty           -- List A: homogeneous list
+  | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
   deriving (Eq, Ord)
+
+-- A sum's alternatives: a row of stacks with an optional row-variable
+-- tail.  Rigid (no flattening, no reassociation): nesting is only ever
+-- what was written.
+data SumRow
+  = RNil               -- closed end
+  | RTail RVar         -- open end: alternatives-row variable σ
+  | RCons SType SumRow -- one alternative (a whole stack), then the rest
+  deriving (Eq, Ord)
+
+instance Show SumRow where
+  show row = intercalate " | " (go row)
+    where
+      go RNil           = []
+      go (RTail v)      = [show v]
+      go (RCons st rest) = show st : go rest
 
 instance Show Ty where
   show (TVarTy a)  = show a
@@ -52,7 +77,9 @@ instance Show Ty where
   show (TList t)   = "List " ++ parens t
     where
       parens u@(TList _) = "(" ++ show u ++ ")"
+      parens u@(TSum _)  = show u   -- already parenthesized
       parens u           = show u
+  show (TSum row)  = "(" ++ show row ++ ")"
 
 -- Stack types: front (leftmost) wire first, optional tail variable at the end
 data SType
@@ -81,12 +108,13 @@ instance Show Arrow where
 -- 2. Schemes and environments (only polymorphism over stack vars & type vars)
 --------------------------------------------------------------------------------
 
-data Scheme = Forall [TVar] [SVar] Arrow
+data Scheme = Forall [TVar] [SVar] [RVar] Arrow
   deriving (Eq, Ord)
 
 instance Show Scheme where
-  show (Forall tvars svars arr) =
-    "∀ " ++ unwords (map show tvars ++ map show svars) ++ ". " ++ show arr
+  show (Forall tvars svars rvars arr) =
+    "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars)
+         ++ ". " ++ show arr
 
 type Env = Map String Scheme
 
@@ -95,41 +123,52 @@ type Env = Map String Scheme
 --------------------------------------------------------------------------------
 
 data Subst = Subst
-  { tySub :: Map TVar Ty
-  , stSub :: Map SVar SType
+  { tySub  :: Map TVar Ty
+  , stSub  :: Map SVar SType
+  , rowSub :: Map RVar SumRow
   } deriving (Eq, Show)
 
 emptySubst :: Subst
-emptySubst = Subst M.empty M.empty
+emptySubst = Subst M.empty M.empty M.empty
 
 -- composeSubst s2 s1 = apply s2 after s1
 composeSubst :: Subst -> Subst -> Subst
 composeSubst s2 s1 =
   Subst
-    { tySub = M.map (apply s2) (tySub s1) `M.union` tySub s2
-    , stSub = M.map (apply s2) (stSub s1) `M.union` stSub s2
+    { tySub  = M.map (apply s2) (tySub s1) `M.union` tySub s2
+    , stSub  = M.map (apply s2) (stSub s1) `M.union` stSub s2
+    , rowSub = M.map (apply s2) (rowSub s1) `M.union` rowSub s2
     }
 
 class Substitutable a where
   apply :: Subst -> a -> a
 
 instance Substitutable Ty where
-  apply s@(Subst tSub _) t@(TVarTy v) =
-    case M.lookup v tSub of
+  apply s t@(TVarTy v) =
+    case M.lookup v (tySub s) of
       Nothing -> t
       Just t' -> apply s t'   -- chase chains, like the SType instance
   apply _ TInt        = TInt
   apply _ TBool       = TBool
   apply s (TFn arr) = TFn (apply s arr)
   apply s (TList t)   = TList (apply s t)
+  apply s (TSum row)  = TSum (apply s row)
 
 instance Substitutable SType where
   apply _ SEnd = SEnd
-  apply s@(Subst _ sSub) st@(STail v) =
-    case M.lookup v sSub of
+  apply s st@(STail v) =
+    case M.lookup v (stSub s) of
       Nothing  -> st
       Just st' -> apply s st'
   apply s (SCons ty rest) = SCons (apply s ty) (apply s rest)
+
+instance Substitutable SumRow where
+  apply _ RNil = RNil
+  apply s r@(RTail v) =
+    case M.lookup v (rowSub s) of
+      Nothing -> r
+      Just r' -> apply s r'
+  apply s (RCons st rest) = RCons (apply s st) (apply s rest)
 
 instance Substitutable Arrow where
   apply s (Arrow i o) = Arrow (apply s i) (apply s o)
@@ -137,10 +176,11 @@ instance Substitutable Arrow where
 instance Substitutable Scheme where
   -- Bound variables are removed from the substitution before it touches
   -- the arrow, so quantified names are never captured.
-  apply s (Forall tv sv arr) =
+  apply s (Forall tv sv rv arr) =
     let s' = Subst (foldr M.delete (tySub s) tv)
                    (foldr M.delete (stSub s) sv)
-    in Forall tv sv (apply s' arr)
+                   (foldr M.delete (rowSub s) rv)
+    in Forall tv sv rv (apply s' arr)
 
 instance Substitutable Env where
   apply s = M.map (apply s)
@@ -154,38 +194,47 @@ data Constraint
   | CEqStack SType SType
   deriving (Eq, Show)
 
--- All variables (type and stack) in order of first appearance, recursing
--- through Fn⟨Γ ⇒ Δ⟩ element types.  The single traversal backing the
--- occurs checks, generalization, and alpha-normalization.
-varsOfTy :: Ty -> ([TVar], [SVar])
-varsOfTy (TVarTy v)  = ([v], [])
-varsOfTy TInt        = ([], [])
-varsOfTy TBool       = ([], [])
-varsOfTy (TFn arr) = varsOfArrow arr
+-- All variables (type, stack, row) in order of first appearance,
+-- recursing through Fn⟨Γ ⇒ Δ⟩ and (… | …) element types.  The single
+-- traversal backing occurs checks, generalization, and normalization.
+type Vars = ([TVar], [SVar], [RVar])
+
+varsOfTy :: Ty -> Vars
+varsOfTy (TVarTy v)  = ([v], [], [])
+varsOfTy TInt        = ([], [], [])
+varsOfTy TBool       = ([], [], [])
+varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TList t)   = varsOfTy t
+varsOfTy (TSum row)  = varsOfRow row
 
-varsOfStack :: SType -> ([TVar], [SVar])
-varsOfStack SEnd           = ([], [])
-varsOfStack (STail v)      = ([], [v])
-varsOfStack (SCons t rest) =
-  let (t1, s1) = varsOfTy t
-      (t2, s2) = varsOfStack rest
-  in (t1 ++ t2, s1 ++ s2)
+varsOfStack :: SType -> Vars
+varsOfStack SEnd           = ([], [], [])
+varsOfStack (STail v)      = ([], [v], [])
+varsOfStack (SCons t rest) = varsOfTy t `catVars` varsOfStack rest
 
-varsOfArrow :: Arrow -> ([TVar], [SVar])
+varsOfRow :: SumRow -> Vars
+varsOfRow RNil            = ([], [], [])
+varsOfRow (RTail v)       = ([], [], [v])
+varsOfRow (RCons st rest) = varsOfStack st `catVars` varsOfRow rest
+
+catVars :: Vars -> Vars -> Vars
+catVars (t1, s1, r1) (t2, s2, r2) = (t1 ++ t2, s1 ++ s2, r1 ++ r2)
+
+varsOfArrow :: Arrow -> Vars
 varsOfArrow (Arrow i o) =
-  let (t1, s1) = varsOfStack i
-      (t2, s2) = varsOfStack o
-  in (nub (t1 ++ t2), nub (s1 ++ s2))
+  let (ts, ss, rs) = varsOfStack i `catVars` varsOfStack o
+  in (nub ts, nub ss, nub rs)
 
--- Occurs checks.  Callers (bindTyVar/bindStackVar) only ever check
--- against fully-applied targets, so a pure structural traversal is
--- sufficient — no substitution chasing needed.
+-- Occurs checks.  Callers (bind*Var) only ever check against
+-- fully-applied targets, so a pure structural traversal is sufficient.
 occursTy :: TVar -> Ty -> Bool
-occursTy a t = a `elem` fst (varsOfTy t)
+occursTy a t = let (ts, _, _) = varsOfTy t in a `elem` ts
 
 occursStack :: SVar -> SType -> Bool
-occursStack v st = v `elem` snd (varsOfStack st)
+occursStack v st = let (_, ss, _) = varsOfStack st in v `elem` ss
+
+occursRow :: RVar -> SumRow -> Bool
+occursRow v row = let (_, _, rs) = varsOfRow row in v `elem` rs
 
 -- Unify simple element types
 unifyTy :: Subst -> Ty -> Ty -> Either String Subst
@@ -201,6 +250,7 @@ unifyTy s t1 t2 =
       s' <- unifyStack s i1 i2
       unifyStack s' o1 o2
     (TList a1, TList a2) -> unifyTy s a1 a2
+    (TSum r1, TSum r2)   -> unifyRow s r1 r2
     _             -> Left $ "Cannot unify types: " ++ show t1' ++ " vs " ++ show t2'
 
 bindTyVar :: Subst -> TVar -> Ty -> Either String Subst
@@ -229,6 +279,29 @@ bindStackVar s v st
   | occursStack v st =
       Left $ "Occurs check failed on stack: " ++ show v ++ " in " ++ show st
   | otherwise = Right s { stSub = M.insert v st (stSub s) }
+
+-- Unify sum alternative rows (list unification with an optional row
+-- tail — the stack discipline, one level up).  Arity is rigid.
+unifyRow :: Subst -> SumRow -> SumRow -> Either String Subst
+unifyRow s r1 r2 =
+  let r1' = apply s r1
+      r2' = apply s r2
+  in case (r1', r2') of
+    (RNil, RNil) -> Right s
+    (RTail v, r) -> bindRowVar s v r
+    (r, RTail v) -> bindRowVar s v r
+    (RCons st1 rest1, RCons st2 rest2) -> do
+      s' <- unifyStack s st1 st2
+      unifyRow s' rest1 rest2
+    _ -> Left $ "Cannot unify sum alternatives: (" ++ show r1'
+              ++ ") vs (" ++ show r2' ++ ")"
+
+bindRowVar :: Subst -> RVar -> SumRow -> Either String Subst
+bindRowVar s v row
+  | row == RTail v = Right s
+  | occursRow v row =
+      Left $ "Occurs check failed on sum row: " ++ show v ++ " in " ++ show row
+  | otherwise = Right s { rowSub = M.insert v row (rowSub s) }
 
 -- Solve a list of constraints
 solve :: [Constraint] -> Either String Subst
@@ -259,6 +332,12 @@ freshSVarName = Infer $ do
   put (n + 1)
   pure (SV ("ρ" ++ show n))
 
+freshRVarName :: Infer RVar
+freshRVarName = Infer $ do
+  n <- get
+  put (n + 1)
+  pure (RV ("σ" ++ show n))
+
 -- One-shot simultaneous substitution, NO chasing.  Instantiation is a
 -- rename: a scheme generalized in one inference run may bind names (a0,
 -- ρ1, …) that textually coincide with this run's fresh names, so using
@@ -274,27 +353,37 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
     goT (TFn arr)  = TFn (substOnce s arr)
     goT (TList t)    = TList (goT t)
+    goT (TSum row)   = TSum (goR row)
     goT t            = t
 
--- Instantiate a polymorphic scheme with fresh type & stack variables
--- (used for the final atom of a tensor chain, which may stay open).
+    goR RNil = RNil
+    goR row@(RTail v) = fromMaybe row (M.lookup v (rowSub s))
+    goR (RCons st rest) = RCons (goS st) (goR rest)
+
+-- Instantiate a polymorphic scheme with fresh type, stack, and row
+-- variables (used for the final atom of a tensor chain, which may stay
+-- open).
 instantiate :: Scheme -> Infer Arrow
-instantiate (Forall tvars svars arr) = do
+instantiate (Forall tvars svars rvars arr) = do
   newTVs <- mapM (const freshTyVarName) tvars
   newSVs <- mapM (const freshSVarName) svars
+  newRVs <- mapM (const freshRVarName) rvars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
       sSub = M.fromList (zip svars (map STail newSVs))
-  pure (substOnce (Subst tSub sSub) arr)
+      rSub = M.fromList (zip rvars (map RTail newRVs))
+  pure (substOnce (Subst tSub sSub rSub) arr)
 
 -- Instantiate a scheme *closed*: bound stack variables become the empty
--- stack (ρ := •).  Used for every non-final atom of a tensor chain, per
--- the remainder discipline.
+-- stack (ρ := •) and bound row variables the empty row (σ := ∅).  Used
+-- for every non-final atom of a tensor chain, per the remainder
+-- discipline.
 instantiateClosed :: Scheme -> Infer Arrow
-instantiateClosed (Forall tvars svars arr) = do
+instantiateClosed (Forall tvars svars rvars arr) = do
   newTVs <- mapM (const freshTyVarName) tvars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
       sSub = M.fromList (zip svars (repeat SEnd))
-  pure (substOnce (Subst tSub sSub) arr)
+      rSub = M.fromList (zip rvars (repeat RNil))
+  pure (substOnce (Subst tSub sSub rSub) arr)
 
 --------------------------------------------------------------------------------
 -- 6. Terms
@@ -310,6 +399,10 @@ data Term
   | OpenAbs [String] Term -- (x y -> body): open program with named input
                           -- wires; the body is input-closed (all input
                           -- arrives through the parameters)
+  | Alts [Term] Bool      -- (p₁ | … | pₙ [| ...]): code row — the sum
+                          -- functor action; one component per
+                          -- alternative, residual flag = identity on
+                          -- the remaining alternatives
   deriving (Eq, Show)
 
 --------------------------------------------------------------------------------
@@ -332,6 +425,7 @@ data Token
   | TokRParen     -- )
   | TokComma      -- ,
   | TokArrow      -- -> (parameter list separator)
+  | TokBar        -- | (code-row / sum alternative separator)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -353,6 +447,7 @@ tokenize = go
     go (',':cs)         = (TokComma :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
     go ('-':_)          = Left "Unexpected '-' (did you mean '->'?)"
+    go ('|':cs)         = (TokBar :) <$> go cs
     go (c:cs)
       | isSpace c = go cs
       | isDigit c =
@@ -363,7 +458,7 @@ tokenize = go
           in (TokIdent ident :) <$> go rest
 
     isIdentChar ch =
-      not (isSpace ch) && ch `notElem` (">.[](),-\8230" :: String)
+      not (isSpace ch) && ch `notElem` (">.[](),-|\8230" :: String)
 
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
 -- newlines adjacent to an explicit >> / >>> (the operator wins).
@@ -467,7 +562,9 @@ parseStage = go []
 
 -- The contents of a ( ) or [ ]: an optional `x y ->` parameter prefix
 -- (the arrow is required for parameter introduction — bare idents are a
--- tensor stage), then a full program.
+-- tensor stage), then a full program, possibly a |-separated code row.
+-- A 1-ary row is plain grouping.  A trailing `| ...` marks the residual:
+-- identity on the remaining alternatives (open row).
 parseDelimited :: [Token] -> Either String (Term, [Token])
 parseDelimited toks =
   case paramsPrefix [] toks of
@@ -477,14 +574,30 @@ parseDelimited toks =
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
       (stmt, rest') <- parseStmt rest
-      pure (OpenAbs ps (desugarStmt stmt), rest')
+      case rest' of
+        (TokBar : _) ->
+          Left "Abstraction body cannot be a bare code row (parenthesize it)"
+        _ -> pure (OpenAbs ps (desugarStmt stmt), rest')
     Nothing -> do
       (stmt, rest') <- parseStmt toks
-      pure (desugarStmt stmt, rest')
+      loop [desugarStmt stmt] rest'
   where
     paramsPrefix acc (TokIdent n : rest) = paramsPrefix (n : acc) rest
     paramsPrefix acc (TokArrow : rest)   = Just (reverse acc, rest)
     paramsPrefix _   _                   = Nothing
+
+    loop acc (TokBar : TokEllipsis : rest)
+      | closes rest = Right (Alts (reverse acc) True, rest)
+      | otherwise   = Left "'| ...' must end the code row"
+    loop acc (TokBar : rest) = do
+      (stmt, rest') <- parseStmt rest
+      loop (desugarStmt stmt : acc) rest'
+    loop [t] rest = Right (t, rest)                    -- plain group
+    loop acc rest = Right (Alts (reverse acc) False, rest)
+
+    closes (TokRParen : _) = True
+    closes (TokRBrack : _) = True
+    closes _               = False
 
 -- Elements of list(…): atoms only, comma-separated.
 parseListElems :: [Token] -> Either String ([Term], [Token])
@@ -563,6 +676,7 @@ infer env p@(Prim _)     = inferOperand env True p
 infer env q@(Quote _)    = inferOperand env True q
 infer env l@(ListLit _)  = inferOperand env True l
 infer env o@(OpenAbs {}) = inferOperand env True o
+infer env a@(Alts {})    = inferOperand env True a
 
 infer env (Tensor ts) = do
   let n = length ts
@@ -585,6 +699,7 @@ infer env (Seq t u) = do
 inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
+  | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
   | otherwise =
       case M.lookup name env of
         Nothing ->
@@ -613,6 +728,19 @@ inferOperand env _ (Quote p) = do
   -- Fn⟨…⟩, solved (monomorphically) at the use site.
   (arrP, cs) <- infer env p
   pure (Arrow SEnd (SCons (TFn arrP) SEnd), cs)
+inferOperand env _ (Alts comps residual) = do
+  -- Code row (p₁ | … | pₙ [| ...]): the sum functor action.  A one-wire
+  -- atom (Δ-in-sum ⇒ Δ-out-sum); component i maps alternative i,
+  -- re-tagging into the same position.  The residual `| ...` shares one
+  -- row variable between input and output: identity on the rest.
+  results <- mapM (infer env) comps
+  end <- if residual then RTail <$> freshRVarName else pure RNil
+  let arrows = map fst results
+      cs     = concatMap snd results
+      inRow  = foldr RCons end [ i | Arrow i _ <- arrows ]
+      outRow = foldr RCons end [ o | Arrow _ o <- arrows ]
+  pure ( Arrow (SCons (TSum inRow) SEnd) (SCons (TSum outRow) SEnd)
+       , cs )
 inferOperand env _ (OpenAbs ps body) = do
   -- Named open abstraction (x₁ … xₙ -> body).  Each parameter enters
   -- scope as a monomorphic terminal-source producer xᵢ : • ⇒ Aᵢ — the
@@ -621,7 +749,7 @@ inferOperand env _ (OpenAbs ps body) = do
   -- be input-closed: all input arrives through the parameters.  The
   -- abstraction is exact in every position: A₁ … Aₙ ⇒ Δ.
   ptys <- mapM (const freshTyVarName) ps
-  let paramScheme av = Forall [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
+  let paramScheme av = Forall [] [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
       env' = foldr (\(p, av) -> M.insert p (paramScheme av))
                    env (zip ps ptys)
   (Arrow bi bo, cs) <- infer env' body
@@ -649,7 +777,7 @@ inferOperand env final t
               tails = nub ([ v | Just v <- [tailVar i] ]
                         ++ [ v | Just v <- [tailVar o] ])
               sm = M.fromList [ (v, SEnd) | v <- tails ]
-          in pure (substOnce (Subst M.empty sm) arr', [])
+          in pure (substOnce (Subst M.empty sm M.empty) arr', [])
 
 -- The tail variable of a stack, if it is open.
 tailVar :: SType -> Maybe SVar
@@ -660,11 +788,30 @@ tailVar SEnd         = Nothing
 isIntLiteral :: String -> Bool
 isIntLiteral name = not (null name) && all isDigit name
 
+-- The lexical injection family: in1, in2, … — position fixed, width
+-- open via the row tail.
+injIndex :: String -> Maybe Int
+injIndex ('i':'n':ds)
+  | not (null ds), all isDigit ds, n >= 1 = Just n
+  where n = read ds
+injIndex _ = Nothing
+
+-- inN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
+-- segment, tagged at position N; other alternatives are placeholders.
+injScheme :: Int -> Scheme
+injScheme n =
+  let d   = SV "Δ"
+      ps  = [ SV ("Δ" ++ show i) | i <- [1 .. n - 1] ]
+      rv  = RV "σ"
+      row = foldr (RCons . STail) (RCons (STail d) (RTail rv)) ps
+  in Forall [] (ps ++ [d]) [rv]
+       (Arrow (STail d) (SCons (TSum row) SEnd))
+
 -- Integer literals are terminal-source: • ⇒ Int.  Constants have NO
 -- implicit remainder — pushing onto a nonempty stack requires explicit
 -- `...` (e.g. `1 ...` : ρ ⇒ Int ρ).  See spec-update-exponentials.md.
 intLitScheme :: Scheme
-intLitScheme = Forall [] [] (Arrow SEnd (SCons TInt SEnd))
+intLitScheme = Forall [] [] [] (Arrow SEnd (SCons TInt SEnd))
 
 --------------------------------------------------------------------------------
 -- 7. The primitive environment
@@ -702,40 +849,46 @@ primEnv =
       del = SV "Δ"
       one t = SCons t SEnd
       fnGD = TFn (Arrow (STail gam) (STail del))
-      applyTy = Forall [] [gam, del]
+      applyTy = Forall [] [gam, del] []
         (Arrow (SCons fnGD (STail gam)) (STail del))
-      branchTy = Forall [] [gam, del]
+      branchTy = Forall [] [gam, del] []
         (Arrow (SCons TBool (SCons fnGD (SCons fnGD (STail gam))))
                (STail del))
-      mapTy = Forall [a, b] []
+      mapTy = Forall [a, b] [] []
         (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
                  (one (TList ta)))
                (one (TList tb)))
-      foldTy = Forall [a, b] []
+      foldTy = Forall [a, b] [] []
         (Arrow (SCons (TFn (Arrow (SCons tb (one ta)) (one tb)))
                  (SCons tb (one (TList ta))))
                (one tb))
-      unaryTy  = Forall [] [] (Arrow (one TInt) (one TInt))
-      binIntTy = Forall [] []
+      -- merge : (Θ | Θ) ⇒ Θ — the codiagonal ∇, dual of dup
+      mergeTy = Forall [] [SV "Θ"] []
+        (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
+                       (RCons (STail (SV "Θ")) RNil))) SEnd)
+               (STail (SV "Θ")))
+      unaryTy  = Forall [] [] [] (Arrow (one TInt) (one TInt))
+      binIntTy = Forall [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
-      boolLit  = Forall [] [] (Arrow SEnd (one TBool))
+      boolLit  = Forall [] [] [] (Arrow SEnd (one TBool))
   in M.fromList
-       [ ("id",    Forall [a]    [] (Arrow (one ta) (one ta)))
-       , ("swap",  Forall [a, b] []
+       [ ("id",    Forall [a]    [] [] (Arrow (one ta) (one ta)))
+       , ("swap",  Forall [a, b] [] []
            (Arrow (SCons ta (one tb)) (SCons tb (one ta))))
-       , ("dup",   Forall [a]    [] (Arrow (one ta) (SCons ta (one ta))))
-       , ("drop",  Forall [a]    [] (Arrow (one ta) SEnd))
-       , ("pass",  Forall []     [rho] (Arrow (STail rho) (STail rho)))
+       , ("dup",   Forall [a]    [] [] (Arrow (one ta) (SCons ta (one ta))))
+       , ("drop",  Forall [a]    [] [] (Arrow (one ta) SEnd))
+       , ("pass",  Forall []     [rho] [] (Arrow (STail rho) (STail rho)))
        , ("f",     unaryTy)
        , ("g",     unaryTy)
        , ("+",     binIntTy)
        , ("*",     binIntTy)
-       , ("print", Forall [a]    [] (Arrow (one ta) SEnd))
+       , ("print", Forall [a]    [] [] (Arrow (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
-       , ("negative?", Forall [] [] (Arrow (one TInt) (one TBool)))
+       , ("negative?", Forall [] [] [] (Arrow (one TInt) (one TBool)))
        , ("apply",  applyTy)
        , ("branch", branchTy)
+       , ("merge",  mergeTy)
        , ("map",    mapTy)
        , ("fold",   foldTy)
        ]
@@ -751,13 +904,15 @@ primsIn (Seq t u)       = primsIn t ++ primsIn u
 primsIn (Quote t)       = primsIn t
 primsIn (ListLit es)    = concatMap primsIn es
 primsIn (OpenAbs ps t)  = [ n | n <- primsIn t, n `notElem` ps ]
+primsIn (Alts comps _)  = concatMap primsIn comps
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
 inferTermIn env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
-               , not (M.member n env) ] of
+               , not (M.member n env)
+               , Nothing <- [injIndex n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
@@ -791,12 +946,14 @@ prettyInferExample =
 -- (a simultaneous rename, so substOnce is exactly the right applicator).
 normalizeArrow :: Arrow -> Arrow
 normalizeArrow arr =
-  let (tvs, svs) = varsOfArrow arr
+  let (tvs, svs, rvs) = varsOfArrow arr
       tm = M.fromList
              (zip tvs [ TVarTy (TV ("a" ++ show n)) | n <- [0 :: Int ..] ])
       sm = M.fromList
              (zip svs [ STail (SV ("ρ" ++ show n)) | n <- [0 :: Int ..] ])
-  in substOnce (Subst tm sm) arr
+      rm = M.fromList
+             (zip rvs [ RTail (RV ("σ" ++ show n)) | n <- [0 :: Int ..] ])
+  in substOnce (Subst tm sm rm) arr
 
 -- Infer and alpha-normalize; the workhorse for tests.
 inferNormalized :: String -> Either String Arrow
@@ -807,25 +964,25 @@ inferNormalized = fmap normalizeArrow . inferProgram
 --------------------------------------------------------------------------------
 
 -- Every variable in a bare arrow is free.
-freeVarsArrow :: Arrow -> ([TVar], [SVar])
+freeVarsArrow :: Arrow -> Vars
 freeVarsArrow = varsOfArrow
 
-freeVarsScheme :: Scheme -> ([TVar], [SVar])
-freeVarsScheme (Forall tv sv arr) =
-  let (ft, fs) = freeVarsArrow arr
-  in (ft \\ tv, fs \\ sv)
+freeVarsScheme :: Scheme -> Vars
+freeVarsScheme (Forall tv sv rv arr) =
+  let (ft, fs, fr) = freeVarsArrow arr
+  in (ft \\ tv, fs \\ sv, fr \\ rv)
 
-freeVarsEnv :: Env -> ([TVar], [SVar])
+freeVarsEnv :: Env -> Vars
 freeVarsEnv env =
-  let pairs = map freeVarsScheme (M.elems env)
-  in (nub (concatMap fst pairs), nub (concatMap snd pairs))
+  foldr (catVars . freeVarsScheme) ([], [], []) (M.elems env)
 
--- Generalize all free type & stack variables not fixed by the environment.
+-- Generalize all free type, stack, and row variables not fixed by the
+-- environment.
 generalize :: Env -> Arrow -> Scheme
 generalize env arr =
-  let (ftv, fsv) = freeVarsArrow arr
-      (etv, esv) = freeVarsEnv env
-  in Forall (ftv \\ etv) (fsv \\ esv) arr
+  let (ftv, fsv, frv) = freeVarsArrow arr
+      (etv, esv, erv) = freeVarsEnv env
+  in Forall (ftv \\ etv) (fsv \\ esv) (frv \\ erv) arr
 
 -- A checked module: definitions in order, plus an optional main program.
 data Module = Module
@@ -902,7 +1059,12 @@ type VarEnv = Map String Value
 
 -- A function value captures the variable environment at reification, so
 -- quotations inside abstraction bodies are closures over the parameters.
-data Value = VInt Int | VBool Bool | VFn VarEnv Term | VList [Value]
+data Value
+  = VInt Int
+  | VBool Bool
+  | VFn VarEnv Term
+  | VList [Value]
+  | VSum Int [Value]   -- tag (0-based) + the alternative's wire bundle
   deriving (Eq)
 
 instance Show Value where
@@ -911,6 +1073,8 @@ instance Show Value where
   show (VBool False) = "false"
   show (VFn _ _)     = "[fn]"
   show (VList vs)    = "list(" ++ intercalate ", " (map show vs) ++ ")"
+  show (VSum i vs)   =
+    "in" ++ show (i + 1) ++ "(" ++ intercalate ", " (map show vs) ++ ")"
 
 -- Number of concrete wires in a stack type (its closed prefix).
 closedArity :: SType -> Int
@@ -924,7 +1088,7 @@ moduleRunDefs m =
   M.fromList
     [ (name, (arityOf sc, term)) | (name, sc, term) <- modDefs m ]
   where
-    arityOf (Forall _ _ (Arrow i _)) = closedArity i
+    arityOf (Forall _ _ _ (Arrow i _)) = closedArity i
 
 -- Evaluate a term: returns the final stack and the print log.  The Env
 -- is needed to compute closed arities of grouped compound operands; the
@@ -942,6 +1106,7 @@ evalTerm env defs vars term st =
     q@(Quote _)    -> goAtoms [q] st
     l@(ListLit _)  -> goAtoms [l] st
     o@(OpenAbs {}) -> goAtoms [o] st
+    a@(Alts {})    -> goAtoms [a] st
   where
     goAtoms [] stk = Right (stk, [])   -- leftover remainder flows through last
     goAtoms (a : more) stk = do
@@ -977,6 +1142,15 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               Left "Runtime type error in branch: expected Bool and two quotations"
+    -- inN: like apply, the consumed segment is positional — the whole
+    -- remaining stack in final position, nothing when closed.
+    applyAtom isFinal (Prim name) stk
+      | Just n <- injIndex name
+      , not (M.member name vars)
+      , not (M.member name defs) =
+          if isFinal
+            then Right ([VSum (n - 1) stk], [], [])
+            else Right ([VSum (n - 1) []], stk, [])
     applyAtom _ (Prim name) stk
       | Just v <- M.lookup name vars = Right ([v], stk, [])
       | isIntLiteral name = Right ([VInt (read name)], stk, [])
@@ -999,6 +1173,21 @@ evalTerm env defs vars term st =
           case out of
             [v] -> Right v
             _   -> Left "list element must push exactly one value"
+    -- Code row: consume the sum wire, dispatch on the tag, run the
+    -- matching component on the bundle, re-tag the result.  Tags past
+    -- the components fall to the residual (identity).
+    applyAtom _ (Alts comps residual) stk = do
+      (args, stk') <- takeWires "code row" 1 stk
+      case args of
+        [VSum tag bundle]
+          | tag < length comps -> do
+              (out, logs) <- evalTerm env defs vars (comps !! tag) bundle
+              pure ([VSum tag out], stk', logs)
+          | residual ->
+              pure ([VSum tag bundle], stk', [])
+          | otherwise ->
+              Left "Runtime error in code row: tag out of range"
+        _ -> Left "Runtime type error in code row: expected a sum value"
     -- Named abstraction: bind the parameter wires (left to right), run
     -- the body on the empty stack in the extended scope.
     applyAtom _ (OpenAbs ps body) stk = do
@@ -1019,7 +1208,7 @@ evalTerm env defs vars term st =
           -- dummies suffice.
           let dummy = TV "_param"
               dummyScheme =
-                Forall [dummy] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+                Forall [dummy] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
               arityEnv = foldr (\n -> M.insert n dummyScheme)
                                env (M.keys vars)
           Arrow i _ <- inferTermIn arityEnv t'
@@ -1037,7 +1226,7 @@ evalTerm env defs vars term st =
 builtinArity :: String -> Either String Int
 builtinArity name =
   case M.lookup name primEnv of
-    Just (Forall _ _ (Arrow i _)) -> Right (closedArity i)
+    Just (Forall _ _ _ (Arrow i _)) -> Right (closedArity i)
     Nothing -> Left $ "Unknown primitive at runtime: " ++ name
 
 runBuiltin :: Env -> RunDefs -> String -> [Value]
@@ -1055,6 +1244,7 @@ runBuiltin _ _ "print" [v]              = Right ([], [show v])
 runBuiltin _ _ "true"  []               = Right ([VBool True], [])
 runBuiltin _ _ "false" []               = Right ([VBool False], [])
 runBuiltin _ _ "negative?" [VInt n]     = Right ([VBool (n < 0)], [])
+runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin env defs "map" [VFn cv t, VList vs] = do
   rs <- mapM step vs
   pure ([VList (map fst rs)], concatMap snd rs)

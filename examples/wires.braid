@@ -1,0 +1,6 @@
+1 2 3
+swap id
+(x y z -> z y x)
+print ...
+print ...
+print
