@@ -174,10 +174,12 @@ handleLine st line =
 -- next line's fresh vars.
 freshenStackTy :: SType -> SType
 freshenStackTy sty =
-  let (tvs, svs) = varsOfStack sty
+  let (tvs, svs, rvs) = varsOfStack sty
       tm = M.fromList
              (zip tvs [ TVarTy (TV ("_a" ++ show n)) | n <- [0 :: Int ..] ])
       sm = M.fromList
              (zip svs [ STail (SV ("_r" ++ show n)) | n <- [0 :: Int ..] ])
-      Arrow sty' _ = substOnce (Subst tm sm) (Arrow sty SEnd)
+      rm = M.fromList
+             (zip rvs [ RTail (RV ("_s" ++ show n)) | n <- [0 :: Int ..] ])
+      Arrow sty' _ = substOnce (Subst tm sm rm) (Arrow sty SEnd)
   in sty'

@@ -1,0 +1,13 @@
+def okStep = (1 ... >> + | ...)
+
+10 >> in1
+okStep
+okStep
+merge
+print
+
+10 >> in2
+okStep
+okStep
+merge
+print

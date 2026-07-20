@@ -1,0 +1,9 @@
+def area = (* | dup >> *) >> merge
+
+3 4 >> in1
+area
+print
+
+5 >> in2
+area
+print
