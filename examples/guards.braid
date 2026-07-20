@@ -1,11 +1,15 @@
 7
 [negative?] [odd?] ... >> case3
-drop >> 0 | dup >> * | 1 ... >> +
+    drop >> 0
+  | dup >> *
+  | 1 ... >> +
 merge3
 print
 
 8
 [negative?] [odd?] ... >> case3
-drop >> 0 | dup >> * | 1 ... >> +
+    drop >> 0
+  | dup >> *
+  | 1 ... >> +
 merge3
 print

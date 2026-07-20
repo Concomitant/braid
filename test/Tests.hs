@@ -219,6 +219,9 @@ evalTests =
     -- guards: caseN + a bare handlers row + merge
   , ("7\n[negative?] [odd?] ... >> case3\ndrop >> 0 | dup >> * | 1 ... >> +\nmerge3\nprint", ["49"], "")
   , ("8\n[negative?] [odd?] ... >> case3\ndrop >> 0 | dup >> * | 1 ... >> +\nmerge3\nprint", ["9"], "")
+    -- multi-line rows: newlines adjacent to | are absorbed (both styles)
+  , ("7\n[negative?] [odd?] ... >> case3\n    drop >> 0\n  | dup >> *\n  | 1 ... >> +\nmerge3\nprint", ["49"], "")
+  , ("8\n[negative?] [odd?] ... >> case3\ndrop >> 0 |\ndup >> * |\n1 ... >> +\nmerge3\nprint", ["9"], "")
     -- guard chains: residual-first, matched tracks accumulate in reverse
   , ("7 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in3(7)")
   , ("8 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in1(8)")
