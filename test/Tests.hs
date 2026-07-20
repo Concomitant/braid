@@ -89,6 +89,11 @@ passTests =
   , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
   , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
   , ("[dup >> * | drop]", "• ⇒ Fn⟨(Int | a0) ⇒ (Int | •)⟩")
+    -- bare rows: each LINE is a code row (>> binds tighter than |,
+    -- | tighter than newline)
+  , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
+  , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
+  , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
 
     -- branch and lists
   , ("branch",        "Bool Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
@@ -188,6 +193,10 @@ evalTests =
   , ("7 >> in2 >> (dup >> * | 1 ... >> +) >> merge >> print", ["8"], "")
   , ("5 >> in2 >> (drop | ...)",           [],     "in2(5)")
   , ("1 2 >> in1",                         [],     "in1(1, 2)")
+    -- bare rows, line-scoped
+  , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
+  , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")
+
     -- match2 as a DERIVED definition (spec: match = row of applies + merge)
   , ("def match2 = (f g s -> s >> (f ... >> apply | g ... >> apply) >> merge)\n5 >> in1 >> [dup >> *] [1 ... >> +] ... >> match2 >> print",
                                            ["25"], "")

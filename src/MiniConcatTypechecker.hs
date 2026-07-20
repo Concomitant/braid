@@ -477,7 +477,7 @@ normalizeToks = trim . collapse
     trim = dropWhile (== TokNewline) . dropTrailing
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
-    isSeqOp t = t == TokSeq || t == TokSeqPass
+    isSeqOp t = t == TokSeq || t == TokSeqPass || t == TokBar
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -497,23 +497,59 @@ data StageOp
 data Stmt = Stmt Stage [(StageOp, Stage)]
   deriving (Show)
 
+-- Precedence, loosest to tightest: newline (strict >>), then | (code
+-- row), then >> / >>>, then juxtaposition.  So each LINE is a row, and
+-- `a >> b | c >> d` is (a >> b) | (c >> d) — mirroring the type grammar,
+-- where juxtaposition binds tighter than |.
 parseProgram :: String -> Either String Term
 parseProgram input = do
   toks <- normalizeToks <$> tokenize input
-  (stmt, rest) <- parseStmt toks
+  (term, rest) <- parseProgramToks toks
   case rest of
-    [] -> Right (desugarStmt stmt)
+    [] -> Right term
     _  -> Left $ "Unexpected tokens at end: " ++ show rest
 
-parseStmt :: [Token] -> Either String (Stmt, [Token])
-parseStmt toks = do
+-- program level: rows joined by newline
+parseProgramToks :: [Token] -> Either String (Term, [Token])
+parseProgramToks toks = do
+  (t0, rest) <- parseRow toks
+  loop t0 rest
+  where
+    loop acc (TokNewline : rest) = do
+      (t, rest') <- parseRow rest
+      loop (Seq acc t) rest'
+    loop acc rest = Right (acc, rest)
+
+-- row level: sequences joined by |, optional trailing `| ...` residual
+parseRow :: [Token] -> Either String (Term, [Token])
+parseRow toks = do
+  (s0, rest) <- parseSeqStmt toks
+  loop [desugarStmt s0] rest
+  where
+    loop acc (TokBar : TokEllipsis : rest)
+      | endsRow rest = Right (Alts (reverse acc) True, rest)
+      | otherwise    = Left "'| ...' must end its row"
+    loop acc (TokBar : rest) = do
+      (s, rest') <- parseSeqStmt rest
+      loop (desugarStmt s : acc) rest'
+    loop [t] rest = Right (t, rest)
+    loop acc rest = Right (Alts (reverse acc) False, rest)
+
+    endsRow (TokNewline : _) = True
+    endsRow (TokRParen : _)  = True
+    endsRow (TokRBrack : _)  = True
+    endsRow []               = True
+    endsRow _                = False
+
+-- sequence level: stages joined by >> / >>> only
+parseSeqStmt :: [Token] -> Either String (Stmt, [Token])
+parseSeqStmt toks = do
   (s0, rest) <- parseStage toks
   (ops, rest') <- go [] rest
   Right (Stmt s0 ops, rest')
   where
     go acc (TokSeq : rest')     = next acc StageSeq rest'
     go acc (TokSeqPass : rest') = next acc StageSeqPass rest'
-    go acc (TokNewline : rest') = next acc StageSeq rest'
     go acc rest'                = Right (reverse acc, rest')
 
     next acc op rest' = do
@@ -573,31 +609,13 @@ parseDelimited toks =
                , p `elem` take n ps ] of
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
-      (stmt, rest') <- parseStmt rest
-      case rest' of
-        (TokBar : _) ->
-          Left "Abstraction body cannot be a bare code row (parenthesize it)"
-        _ -> pure (OpenAbs ps (desugarStmt stmt), rest')
-    Nothing -> do
-      (stmt, rest') <- parseStmt toks
-      loop [desugarStmt stmt] rest'
+      (body, rest') <- parseProgramToks rest
+      pure (OpenAbs ps body, rest')
+    Nothing -> parseProgramToks toks
   where
     paramsPrefix acc (TokIdent n : rest) = paramsPrefix (n : acc) rest
     paramsPrefix acc (TokArrow : rest)   = Just (reverse acc, rest)
     paramsPrefix _   _                   = Nothing
-
-    loop acc (TokBar : TokEllipsis : rest)
-      | closes rest = Right (Alts (reverse acc) True, rest)
-      | otherwise   = Left "'| ...' must end the code row"
-    loop acc (TokBar : rest) = do
-      (stmt, rest') <- parseStmt rest
-      loop (desugarStmt stmt : acc) rest'
-    loop [t] rest = Right (t, rest)                    -- plain group
-    loop acc rest = Right (Alts (reverse acc) False, rest)
-
-    closes (TokRParen : _) = True
-    closes (TokRBrack : _) = True
-    closes _               = False
 
 -- Elements of list(…): atoms only, comma-separated.
 parseListElems :: [Token] -> Either String ([Term], [Token])

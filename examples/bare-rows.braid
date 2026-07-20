@@ -1,0 +1,11 @@
+5 >> in1
+dup | +
++ | id
+merge >> (x -> x 1 >> +)
+print
+
+3 4 >> in2
+dup | +
++ | id
+merge >> (x -> x 1 >> +)
+print
