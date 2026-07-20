@@ -713,6 +713,8 @@ inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
+  | Just n <- caseIndex name, not (M.member name env) = pick (caseScheme n)
+  | Just n <- mergeIndex name, not (M.member name env) = pick (mergeScheme n)
   | otherwise =
       case M.lookup name env of
         Nothing ->
@@ -810,6 +812,43 @@ injIndex ('i':'n':ds)
   where n = read ds
 injIndex _ = Nothing
 
+-- The guard family: caseN (case ≡ case2) takes n-1 predicate values
+-- and routes the segment onto one of n flat tracks; the last track is
+-- the else.  Guards are tested in wire order, first true wins.
+caseIndex :: String -> Maybe Int
+caseIndex "case" = Just 2
+caseIndex ('c':'a':'s':'e':ds)
+  | not (null ds), all isDigit ds, n >= 2 = Just n
+  where n = read ds
+caseIndex _ = Nothing
+
+-- The codiagonal family: mergeN : (Θ | … | Θ)ₙ ⇒ Θ (merge ≡ merge2).
+-- A family for the same reason as caseN: collapsing all tracks of an
+-- unknown-length row is a counting constraint HM can't express.
+mergeIndex :: String -> Maybe Int
+mergeIndex "merge" = Just 2
+mergeIndex ('m':'e':'r':'g':'e':ds)
+  | not (null ds), all isDigit ds, n >= 2 = Just n
+  where n = read ds
+mergeIndex _ = Nothing
+
+mergeScheme :: Int -> Scheme
+mergeScheme n =
+  let th = SV "Θ"
+      row = foldr RCons RNil (replicate n (STail th))
+  in Forall [] [th] []
+       (Arrow (SCons (TSum row) SEnd) (STail th))
+
+-- caseN : Fn⟨Σ⇒(•|•)⟩ ×(n-1) Σ ⇒ (Σ | … | Σ)ₙ
+caseScheme :: Int -> Scheme
+caseScheme n =
+  let sg    = SV "Σ"
+      boolS = TSum (RCons SEnd (RCons SEnd RNil))
+      predT = TFn (Arrow (STail sg) (SCons boolS SEnd))
+      inS   = foldr SCons (STail sg) (replicate (n - 1) predT)
+      outR  = foldr RCons RNil (replicate n (STail sg))
+  in Forall [] [sg] [] (Arrow inS (SCons (TSum outR) SEnd))
+
 -- inN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
 -- segment, tagged at position N; other alternatives are placeholders.
 injScheme :: Int -> Scheme
@@ -876,21 +915,18 @@ primEnv =
         (Arrow (SCons (TFn (Arrow (SCons tb (one ta)) (one tb)))
                  (SCons tb (one (TList ta))))
                (one tb))
-      -- merge : (Θ | Θ) ⇒ Θ — the codiagonal ∇, dual of dup
-      mergeTy = Forall [] [SV "Θ"] []
-        (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
-                       (RCons (STail (SV "Θ")) RNil))) SEnd)
-               (STail (SV "Θ")))
-      -- case : Fn⟨Σ ⇒ (•|•)⟩ Σ ⇒ (Σ | Σ) — test a copy of the
-      -- segment with the predicate, route the original by the verdict
-      caseTy =
+      -- guard : Fn⟨Σ ⇒ (•|•)⟩ (Σ | σ) ⇒ (Σ | Σ | σ) — the polymorphic
+      -- case step: track 1 is the untested residual; true moves it to a
+      -- fresh track 2, false leaves it; decided tracks shift back.
+      guardTy =
         let sg = SV "Σ"
+            rv = RV "σ"
             boolS = TSum (RCons SEnd (RCons SEnd RNil))
-        in Forall [] [sg] []
-             (Arrow (SCons (TFn (Arrow (STail sg) (SCons boolS SEnd)))
-                      (STail sg))
-                    (SCons (TSum (RCons (STail sg)
-                             (RCons (STail sg) RNil))) SEnd))
+            predT = TFn (Arrow (STail sg) (SCons boolS SEnd))
+            sumIn  = TSum (RCons (STail sg) (RTail rv))
+            sumOut = TSum (RCons (STail sg) (RCons (STail sg) (RTail rv)))
+        in Forall [] [sg] [rv]
+             (Arrow (SCons predT (SCons sumIn SEnd)) (SCons sumOut SEnd))
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
       -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
       thereTy = Forall [] [SV "Δ"] [RV "σ"]
@@ -921,9 +957,8 @@ primEnv =
        , ("odd?",      Forall [] [] [] (Arrow (one TInt) (one tBool)))
        , ("apply",  applyTy)
        , ("branch", branchTy)
-       , ("merge",  mergeTy)
        , ("there",  thereTy)
-       , ("case",   caseTy)
+       , ("guard",  guardTy)
        , ("map",    mapTy)
        , ("fold",   foldTy)
        ]
@@ -947,7 +982,9 @@ inferTermIn env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
                , not (M.member n env)
-               , Nothing <- [injIndex n] ] of
+               , Nothing <- [injIndex n]
+               , Nothing <- [caseIndex n]
+               , Nothing <- [mergeIndex n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
@@ -1160,20 +1197,26 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               Left "Runtime type error in apply: expected a quotation"
-    -- case: predicate on wire 1, segment behind; test a copy, route
-    -- the original.  Same positional segment semantics as apply.
-    applyAtom isFinal (Prim "case") stk
-      | not (M.member "case" vars) = do
-          (args, stk') <- takeWires "case" 1 stk
+    -- mergeN: collapse an n-track sum of equal payloads
+    applyAtom _ (Prim name) stk
+      | Just _ <- mergeIndex name
+      , not (M.member name vars)
+      , not (M.member name defs) = do
+          (args, stk') <- takeWires name 1 stk
           case args of
-            [VFn cv pred'] -> do
-              let seg = if isFinal then stk' else []
-              (verdict, logs) <- evalTerm env defs cv pred' seg
-              case verdict of
-                [VSum t []] ->
-                  pure ([VSum t seg], if isFinal then [] else stk', logs)
-                _ -> Left "Runtime type error in case: predicate must return a decision"
-            _ -> Left "Runtime type error in case: expected a predicate quotation"
+            [VSum _ bundle] -> pure (bundle, stk', [])
+            _ -> Left "Runtime type error in merge: expected a sum value"
+    -- caseN: n-1 predicates on the front wires, segment behind; test
+    -- each on the segment in order, first true wins, last track = else.
+    -- Same positional segment semantics as apply.
+    applyAtom isFinal (Prim name) stk
+      | Just n <- caseIndex name
+      , not (M.member name vars)
+      , not (M.member name defs) = do
+          (args, stk') <- takeWires name (n - 1) stk
+          let seg = if isFinal then stk' else []
+          (tag, logs) <- pickTrack 0 args seg
+          pure ([VSum tag seg], if isFinal then [] else stk', logs)
     -- branch has the same segment semantics as apply: Γ is the stack
     -- after the three control wires.
     applyAtom isFinal (Prim "branch") stk
@@ -1263,6 +1306,18 @@ evalTerm env defs vars term st =
           (out, logs) <- evalTerm env defs vars t' args
           pure (out, stk', logs)
 
+    pickTrack i [] _ = Right (i, [])   -- all guards false: the else track
+    pickTrack i (VFn cv t : more) seg = do
+      (verdict, lg) <- evalTerm env defs cv t seg
+      case verdict of
+        [VSum 0 []] -> Right (i, lg)
+        [VSum _ []] -> do
+          (j, lg') <- pickTrack (i + 1) more seg
+          Right (j, lg ++ lg')
+        _ -> Left "Runtime type error in case: predicate must return a decision"
+    pickTrack _ _ _ =
+      Left "Runtime type error in case: expected predicate quotations"
+
     takeWires name k stk
       | length stk >= k = Right (take k stk, drop k stk)
       | otherwise =
@@ -1292,8 +1347,15 @@ runBuiltin _ _ "false" []               = Right ([VSum 1 []], [])
 runBuiltin _ _ "negative?" [VInt n]     = Right ([VSum (if n < 0 then 0 else 1) []], [])
 runBuiltin _ _ "even?" [VInt n]         = Right ([VSum (if even n then 0 else 1) []], [])
 runBuiltin _ _ "odd?"  [VInt n]         = Right ([VSum (if odd n then 0 else 1) []], [])
-runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
+runBuiltin env defs "guard" [VFn cv pred', VSum 0 bundle] = do
+  (verdict, logs) <- evalTerm env defs cv pred' bundle
+  case verdict of
+    [VSum 0 []] -> Right ([VSum 1 bundle], logs)   -- matched: fresh track
+    [VSum _ []] -> Right ([VSum 0 bundle], logs)   -- still residual
+    _ -> Left "Runtime type error in guard: predicate must return a decision"
+runBuiltin _ _ "guard" [VFn _ _, VSum t bundle] =
+  Right ([VSum (t + 1) bundle], [])                -- already decided: shift
 runBuiltin env defs "map" [VFn cv t, VList vs] = do
   rs <- mapM step vs
   pure ([VList (map fst rs)], concatMap snd rs)

@@ -90,6 +90,7 @@ passTests =
   , ("here >> there", "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   , ("1 2 >> in1",    "• ⇒ (Int Int | σ0)")
   , ("merge",         "(ρ0 | ρ0) ⇒ ρ0")
+  , ("merge3",        "(ρ0 | ρ0 | ρ0) ⇒ ρ0")
   , ("(dup | drop)",  "(a0 | a1) ⇒ (a0 a0 | •)")
   , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
   , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
@@ -106,6 +107,9 @@ passTests =
   , ("odd?",          "Int ⇒ (• | •)")
     -- case: predicate-driven split, an ordinary combinator (no grammar)
   , ("case",          "Fn⟨ρ0 ⇒ (• | •)⟩ ρ0 ⇒ (ρ0 | ρ0)")
+  , ("case3",         "Fn⟨ρ0 ⇒ (• | •)⟩ Fn⟨ρ0 ⇒ (• | •)⟩ ρ0 ⇒ (ρ0 | ρ0 | ρ0)")
+    -- the polymorphic case step: one scheme, n-arity by iteration
+  , ("guard",         "Fn⟨ρ0 ⇒ (• | •)⟩ (ρ0 | σ0) ⇒ (ρ0 | ρ0 | σ0)")
   , ("list(1, 2, 3)", "• ⇒ List Int")
   , ("list()",        "• ⇒ List a0")
   , ("map",           "Fn⟨a0 ⇒ a1⟩ List a0 ⇒ List a1")
@@ -212,6 +216,14 @@ evalTests =
   , ("4 >> [odd?] ... >> case",            [],     "in2(4)")
   , ("5\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["5"], "")
   , ("4\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["0"], "")
+    -- guards: caseN + a bare handlers row + merge
+  , ("7\n[negative?] [odd?] ... >> case3\ndrop >> 0 | dup >> * | 1 ... >> +\nmerge3\nprint", ["49"], "")
+  , ("8\n[negative?] [odd?] ... >> case3\ndrop >> 0 | dup >> * | 1 ... >> +\nmerge3\nprint", ["9"], "")
+    -- guard chains: residual-first, matched tracks accumulate in reverse
+  , ("7 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in3(7)")
+  , ("8 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in1(8)")
+  , ("7\nhere\n[odd?] ... >> guard\n[negative?] ... >> guard\n1 ... >> + | drop >> 0 | dup >> *\nmerge3\nprint", ["49"], "")
+  , ("8\nhere\n[odd?] ... >> guard\n[negative?] ... >> guard\n1 ... >> + | drop >> 0 | dup >> *\nmerge3\nprint", ["9"], "")
     -- bare rows, line-scoped
   , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")
