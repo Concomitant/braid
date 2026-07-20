@@ -47,7 +47,6 @@ instance Show RVar where
 data Ty
   = TVarTy TVar
   | TInt
-  | TBool
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
   | TList Ty           -- List A: homogeneous list
   | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
@@ -72,7 +71,6 @@ instance Show SumRow where
 instance Show Ty where
   show (TVarTy a)  = show a
   show TInt        = "Int"
-  show TBool       = "Bool"
   show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
   show (TList t)   = "List " ++ parens t
     where
@@ -149,7 +147,6 @@ instance Substitutable Ty where
       Nothing -> t
       Just t' -> apply s t'   -- chase chains, like the SType instance
   apply _ TInt        = TInt
-  apply _ TBool       = TBool
   apply s (TFn arr) = TFn (apply s arr)
   apply s (TList t)   = TList (apply s t)
   apply s (TSum row)  = TSum (apply s row)
@@ -202,7 +199,6 @@ type Vars = ([TVar], [SVar], [RVar])
 varsOfTy :: Ty -> Vars
 varsOfTy (TVarTy v)  = ([v], [], [])
 varsOfTy TInt        = ([], [], [])
-varsOfTy TBool       = ([], [], [])
 varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TList t)   = varsOfTy t
 varsOfTy (TSum row)  = varsOfRow row
@@ -245,7 +241,6 @@ unifyTy s t1 t2 =
     (TVarTy a, t) -> bindTyVar s a t
     (t, TVarTy a) -> bindTyVar s a t
     (TInt, TInt)  -> Right s
-    (TBool, TBool)-> Right s
     (TFn (Arrow i1 o1), TFn (Arrow i2 o2)) -> do
       s' <- unifyStack s i1 i2
       unifyStack s' o1 o2
@@ -871,7 +866,7 @@ primEnv =
       applyTy = Forall [] [gam, del] []
         (Arrow (SCons fnGD (STail gam)) (STail del))
       branchTy = Forall [] [gam, del] []
-        (Arrow (SCons TBool (SCons fnGD (SCons fnGD (STail gam))))
+        (Arrow (SCons tBool (SCons fnGD (SCons fnGD (STail gam))))
                (STail del))
       mapTy = Forall [a, b] [] []
         (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
@@ -886,6 +881,16 @@ primEnv =
         (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
+      -- case : Fn⟨Σ ⇒ (•|•)⟩ Σ ⇒ (Σ | Σ) — test a copy of the
+      -- segment with the predicate, route the original by the verdict
+      caseTy =
+        let sg = SV "Σ"
+            boolS = TSum (RCons SEnd (RCons SEnd RNil))
+        in Forall [] [sg] []
+             (Arrow (SCons (TFn (Arrow (STail sg) (SCons boolS SEnd)))
+                      (STail sg))
+                    (SCons (TSum (RCons (STail sg)
+                             (RCons (STail sg) RNil))) SEnd))
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
       -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
       thereTy = Forall [] [SV "Δ"] [RV "σ"]
@@ -894,7 +899,9 @@ primEnv =
       unaryTy  = Forall [] [] [] (Arrow (one TInt) (one TInt))
       binIntTy = Forall [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
-      boolLit  = Forall [] [] [] (Arrow SEnd (one TBool))
+      -- Bool ≡ (• | •): two payload-free tracks; true = in1, false = in2
+      tBool    = TSum (RCons SEnd (RCons SEnd RNil))
+      boolLit  = Forall [] [] [] (Arrow SEnd (one tBool))
   in M.fromList
        [ ("id",    Forall [a]    [] [] (Arrow (one ta) (one ta)))
        , ("swap",  Forall [a, b] [] []
@@ -909,11 +916,14 @@ primEnv =
        , ("print", Forall [a]    [] [] (Arrow (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
-       , ("negative?", Forall [] [] [] (Arrow (one TInt) (one TBool)))
+       , ("negative?", Forall [] [] [] (Arrow (one TInt) (one tBool)))
+       , ("even?",     Forall [] [] [] (Arrow (one TInt) (one tBool)))
+       , ("odd?",      Forall [] [] [] (Arrow (one TInt) (one tBool)))
        , ("apply",  applyTy)
        , ("branch", branchTy)
        , ("merge",  mergeTy)
        , ("there",  thereTy)
+       , ("case",   caseTy)
        , ("map",    mapTy)
        , ("fold",   foldTy)
        ]
@@ -1086,7 +1096,6 @@ type VarEnv = Map String Value
 -- quotations inside abstraction bodies are closures over the parameters.
 data Value
   = VInt Int
-  | VBool Bool
   | VFn VarEnv Term
   | VList [Value]
   | VSum Int [Value]   -- tag (0-based) + the alternative's wire bundle
@@ -1094,8 +1103,6 @@ data Value
 
 instance Show Value where
   show (VInt n)      = show n
-  show (VBool True)  = "true"
-  show (VBool False) = "false"
   show (VFn _ _)     = "[fn]"
   show (VList vs)    = "list(" ++ intercalate ", " (map show vs) ++ ")"
   show (VSum i vs)   =
@@ -1153,17 +1160,31 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               Left "Runtime type error in apply: expected a quotation"
+    -- case: predicate on wire 1, segment behind; test a copy, route
+    -- the original.  Same positional segment semantics as apply.
+    applyAtom isFinal (Prim "case") stk
+      | not (M.member "case" vars) = do
+          (args, stk') <- takeWires "case" 1 stk
+          case args of
+            [VFn cv pred'] -> do
+              let seg = if isFinal then stk' else []
+              (verdict, logs) <- evalTerm env defs cv pred' seg
+              case verdict of
+                [VSum t []] ->
+                  pure ([VSum t seg], if isFinal then [] else stk', logs)
+                _ -> Left "Runtime type error in case: predicate must return a decision"
+            _ -> Left "Runtime type error in case: expected a predicate quotation"
     -- branch has the same segment semantics as apply: Γ is the stack
     -- after the three control wires.
     applyAtom isFinal (Prim "branch") stk
       | not (M.member "branch" vars) = do
           (args, stk') <- takeWires "branch" 3 stk
           case args of
-            [VBool c, VFn cT tThen, VFn cE tElse] -> do
+            [VSum c [], VFn cT tThen, VFn cE tElse] -> do
               let seg = if isFinal then stk' else []
               (out, logs) <-
-                if c then evalTerm env defs cT tThen seg
-                     else evalTerm env defs cE tElse seg
+                if c == 0 then evalTerm env defs cT tThen seg
+                          else evalTerm env defs cE tElse seg
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               Left "Runtime type error in branch: expected Bool and two quotations"
@@ -1266,9 +1287,11 @@ runBuiltin _ _ "g"     [VInt n]         = Right ([VInt (2 * n)], [])   -- sample
 runBuiltin _ _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
 runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
 runBuiltin _ _ "print" [v]              = Right ([], [show v])
-runBuiltin _ _ "true"  []               = Right ([VBool True], [])
-runBuiltin _ _ "false" []               = Right ([VBool False], [])
-runBuiltin _ _ "negative?" [VInt n]     = Right ([VBool (n < 0)], [])
+runBuiltin _ _ "true"  []               = Right ([VSum 0 []], [])
+runBuiltin _ _ "false" []               = Right ([VSum 1 []], [])
+runBuiltin _ _ "negative?" [VInt n]     = Right ([VSum (if n < 0 then 0 else 1) []], [])
+runBuiltin _ _ "even?" [VInt n]         = Right ([VSum (if even n then 0 else 1) []], [])
+runBuiltin _ _ "odd?"  [VInt n]         = Right ([VSum (if odd n then 0 else 1) []], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin env defs "map" [VFn cv t, VList vs] = do

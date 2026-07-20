@@ -1,0 +1,8 @@
+def describe = [odd?] ... >> case >> (id | drop >> 0) >> merge
+
+def classify = [odd?] ... >> case >> (here | ([negative?] ... >> case >> (here >> there | here >> there >> there) >> merge)) >> merge
+
+5 >> describe >> print
+4 >> describe >> print
+5 >> classify >> print
+2 >> classify >> print

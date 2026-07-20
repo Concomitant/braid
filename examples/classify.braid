@@ -1,0 +1,7 @@
+def classify = (x -> x >> even? >> (x >> here | x >> here >> there) >> merge)
+
+4 >> classify
+print
+
+5 >> classify
+print

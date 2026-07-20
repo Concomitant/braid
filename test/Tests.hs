@@ -101,8 +101,11 @@ passTests =
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
 
     -- branch and lists
-  , ("branch",        "Bool Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
-  , ("negative?",     "Int ⇒ Bool")
+  , ("branch",        "(• | •) Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
+  , ("negative?",     "Int ⇒ (• | •)")
+  , ("odd?",          "Int ⇒ (• | •)")
+    -- case: predicate-driven split, an ordinary combinator (no grammar)
+  , ("case",          "Fn⟨ρ0 ⇒ (• | •)⟩ ρ0 ⇒ (ρ0 | ρ0)")
   , ("list(1, 2, 3)", "• ⇒ List Int")
   , ("list()",        "• ⇒ List a0")
   , ("map",           "Fn⟨a0 ⇒ a1⟩ List a0 ⇒ List a1")
@@ -152,7 +155,7 @@ moduleTypeTests =
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
     -- one def used at two different types = let-polymorphism
-  , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
+  , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ (• | •)")
   ]
 
 -- (module source, expected print log, expected final stack rendering)
@@ -163,7 +166,7 @@ evalTests =
   , ("1 2 3 >> f ... >> + ...",            [],     "4 3")
   , ("1 2 3 >> f >>> + ...",               [],     "4 3")
   , ("def square = dup >> *\n5 >> square >> print", ["25"], "")
-  , ("true false",                         [],     "true false")
+  , ("true false",                         [],     "in1() in2()")
   , ("1 2\nswap\nprint ...\nprint",        ["2", "1"], "")
   , ("1\n2 id",                            [],     "2 1")
   , ("1\n2 ...",                           [],     "2 1")
@@ -178,7 +181,7 @@ evalTests =
   , ("true [1] [2] >> branch >> print",    ["1"],  "")
   , ("false [1] [2] >> branch >> print",   ["2"],  "")
   , ("true [f ...] [g ...] 10 >> branch >> print", ["11"], "")
-  , ("5 >> negative?",                     [],     "false")
+  , ("5 >> negative?",                     [],     "in2()")
 
     -- grouping
   , ("7 >> (dup >> *) >> print",           ["49"], "")
@@ -199,6 +202,16 @@ evalTests =
   , ("5 >> in2 >> (drop | ...)",           [],     "in2(5)")
   , ("1 2 >> in1",                         [],     "in1(1, 2)")
   , ("3 4 >> here >> there",               [],     "in2(3, 4)")
+    -- decide-then-inject: predicate is already the fork (Bool ≡ (• | •))
+  , ("def classify = (x -> x >> even? >> (x >> here | x >> here >> there) >> merge)\n4 >> classify",
+                                           [],     "in1(4)")
+  , ("def classify = (x -> x >> even? >> (x >> here | x >> here >> there) >> merge)\n5 >> classify",
+                                           [],     "in2(5)")
+    -- case: route the segment by a predicate value
+  , ("5 >> [odd?] ... >> case",            [],     "in1(5)")
+  , ("4 >> [odd?] ... >> case",            [],     "in2(4)")
+  , ("5\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["5"], "")
+  , ("4\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["0"], "")
     -- bare rows, line-scoped
   , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")
