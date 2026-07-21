@@ -1,7 +1,9 @@
 def lt100? = _ 100 >> lt? >> (_ drop | _ drop)
 def double = 2 _ >> *
-def while = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
 
-7 >> [lt100?] [double] ... >> while ... >> loop >> print
-100 >> [lt100?] [double] ... >> while ... >> loop >> print
-7 >> [lt100?] [double >> double] ... >> while ... >> loop >> print
+def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
+def while = whileFn ... >> loop
+
+7 >> [lt100?] [double] ... >> while >> print
+100 >> [lt100?] [double] ... >> while >> print
+7 >> [lt100?] [double >> double] ... >> while >> print

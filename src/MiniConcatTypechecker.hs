@@ -1241,14 +1241,22 @@ closedArity :: SType -> Int
 closedArity (SCons _ rest) = 1 + closedArity rest
 closedArity _              = 0
 
-type RunDefs = Map String (Int, Term)   -- name -> (input arity, body)
+-- name -> (closed input arity, input has an open tail, body).  A def
+-- whose input ends in a stack variable is segment-consuming: as the
+-- final atom it takes the whole remaining stack (like apply/loop);
+-- non-final the typechecker closed the tail, so exact arity is right.
+type RunDefs = Map String (Int, Bool, Term)
 
 moduleRunDefs :: Module -> RunDefs
 moduleRunDefs m =
   M.fromList
-    [ (name, (arityOf sc, term)) | (name, sc, term) <- modDefs m ]
+    [ (name, (arityOf sc, openOf sc, term)) | (name, sc, term) <- modDefs m ]
   where
     arityOf (Forall _ _ _ (Arrow i _)) = closedArity i
+    openOf  (Forall _ _ _ (Arrow i _)) = openTailed i
+    openTailed (SCons _ rest) = openTailed rest
+    openTailed (STail _)      = True
+    openTailed SEnd           = False
 
 -- Evaluate a term: returns the final stack and the print log.  The Env
 -- is needed to compute closed arities of grouped compound operands; the
@@ -1324,13 +1332,18 @@ evalTerm env defs vars term st =
           if isFinal
             then Right ([VSum (n - 1) stk], [], [])
             else Right ([VSum (n - 1) []], stk, [])
-    applyAtom _ (Prim name) stk
+    applyAtom isFinal (Prim name) stk
       | Just v <- M.lookup name vars = Right ([v], stk, [])
       | isIntLiteral name = Right ([VInt (read name)], stk, [])
-      | Just (k, body) <- M.lookup name defs = do
-          (args, stk') <- takeWires name k stk
-          (out, logs) <- evalTerm env defs M.empty body args
-          pure (out, stk', logs)
+      | Just (k, open, body) <- M.lookup name defs =
+          if open && isFinal
+            then do
+              (out, logs) <- evalTerm env defs M.empty body stk
+              pure (out, [], logs)
+            else do
+              (args, stk') <- takeWires name k stk
+              (out, logs) <- evalTerm env defs M.empty body args
+              pure (out, stk', logs)
       | otherwise = do
           k <- builtinArity name
           (args, stk') <- takeWires name k stk
