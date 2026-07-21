@@ -1,0 +1,10 @@
+def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
+def while = whileFn ... >> loop
+
+def swapTracks = (in2 | in1) >> merge
+def neq? = eq? >> swapTracks
+
+def shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...
+
+48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print
+1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print
