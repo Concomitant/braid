@@ -1005,6 +1005,22 @@ primsIn (ListLit es)    = concatMap primsIn es
 primsIn (OpenAbs ps t)  = [ n | n <- primsIn t, n `notElem` ps ]
 primsIn (Alts comps _)  = concatMap primsIn comps
 
+-- Replace the def-local keyword `recurse` with the def's own name
+-- (parse-time, shadow-aware) — anonymous self-reference in def bodies.
+substRecurse :: String -> Term -> Term
+substRecurse nm = go
+  where
+    go (Prim "recurse") = Prim nm
+    go t@(Prim _)       = t
+    go (Tensor ts)      = Tensor (map go ts)
+    go (Seq a b)        = Seq (go a) (go b)
+    go (Quote t)        = Quote (go t)
+    go (ListLit es)     = ListLit (map go es)
+    go (Alts cs r)      = Alts (map go cs) r
+    go t@(OpenAbs ps b)
+      | "recurse" `elem` ps = t
+      | otherwise           = OpenAbs ps (go b)
+
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
 inferTermIn env term =
@@ -1129,8 +1145,19 @@ splitDefs src = do
     go (l : rest)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
-          (ds, ps) <- go rest
-          pure ((name, body) : ds, ps)
+          if all isSpace body
+            then do
+              -- block body: the following indented lines (blank ends it)
+              let indented ln = not (all isSpace ln) && isSpace (head ln)
+                  (block, rest') = span indented rest
+              if null block
+                then Left $ "Empty definition body: " ++ name
+                else do
+                  (ds, ps) <- go rest'
+                  pure ((name, intercalate "\n" block) : ds, ps)
+            else do
+              (ds, ps) <- go rest
+              pure ((name, body) : ds, ps)
       | otherwise = do
           (ds, ps) <- go rest
           pure (ds, l : ps)
@@ -1166,7 +1193,8 @@ checkModuleWith env0 src = do
       if M.member name env
         then Left $ "Duplicate definition: " ++ name
         else Right ()
-      term <- parseProgram bodySrc
+      term0 <- parseProgram bodySrc
+      let term = substRecurse name term0
       arr  <- inferDefTermIn name env term
       let sc = generalize env arr
       pure (M.insert name sc env, (name, sc, term) : acc)

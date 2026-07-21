@@ -3,9 +3,17 @@ def lt2? = _ 2 >> lt? >> (_ drop | _ drop)
 def lt100? = _ 100 >> lt? >> (_ drop | _ drop)
 def double = 2 _ >> *
 
-def until100 = lt100? >> (double >> until100 | _) >> merge
-def sumTo = (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)
-def fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge
+def until100 =
+  lt100?
+  double >> recurse | _
+  merge
+
+def sumTo = (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> recurse)) >> merge)
+
+def fib =
+  lt2?
+  _ | (n -> n >> decr >> recurse >> _ (n 2 >> - >> recurse) >> +)
+  merge
 
 7 >> until100 >> print
 0 5 >> sumTo >> print
