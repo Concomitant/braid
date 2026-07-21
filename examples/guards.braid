@@ -1,13 +1,17 @@
-7
-here
-[odd?]      [dup >> *]  ... >> clause
-[negative?] [drop >> 0] ... >> clause
-[1 ... >> +] ... >> finish
+7 >> if
+... | [dup >> *]  odd?
+elif
+... | [drop >> 0] negative?
+elif
+... | [1 ... >> +] otherwise
+endif
 print
 
-8
-here
-[odd?]      [dup >> *]  ... >> clause
-[negative?] [drop >> 0] ... >> clause
-[1 ... >> +] ... >> finish
+8 >> if
+... | [dup >> *]  odd?
+elif
+... | [drop >> 0] negative?
+elif
+... | [1 ... >> +] otherwise
+endif
 print

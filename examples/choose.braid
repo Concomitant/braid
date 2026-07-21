@@ -1,4 +1,4 @@
-def choose = (c t e -> c [t] [e] >> branch)
+def choose = (c t e -> c >> (t | e) >> merge)
 
 true 1 2 >> choose >> print
 false 10 20 >> choose >> print

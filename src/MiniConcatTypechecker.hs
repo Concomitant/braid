@@ -441,7 +441,7 @@ tokenize = go
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
-    go ('-':_)          = Left "Unexpected '-' (did you mean '->'?)"
+    go ('-':cs)         = (TokIdent "-" :) <$> go cs   -- subtraction
     go ('|':cs)         = (TokBar :) <$> go cs
     go (c:cs)
       | isSpace c = go cs
@@ -846,10 +846,12 @@ intLitScheme = Forall [] [] [] (Arrow SEnd (SCons TInt SEnd))
 --  f, g  : Int ⇒ Int
 --  +, *  : Int Int ⇒ Int
 --  print : ∀A. A ⇒ •
---  true, false : • ⇒ Bool
---  negative?   : Int ⇒ Bool
+--  true, false : • ⇒ (• | •)
+--  routers (predicates keep and route; hit = track 1):
+--    negative?, even?, odd?, zero? : Int ⇒ (Int | Int)
+--    lt? : Int Int ⇒ (Int Int | Int Int); eq? : ∀A. A A ⇒ (A A | A A)
 --  apply : ∀Γ Δ. Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ   (Γ is consumed, not passed)
---  branch: ∀Γ Δ. Bool Fn⟨Γ⇒Δ⟩ Fn⟨Γ⇒Δ⟩ Γ ⇒ Δ
+--  guard machine: if / elif / otherwise / endif; loop (Elgot iteration)
 --  map   : ∀A B. Fn⟨A ⇒ B⟩ List A ⇒ List B
 --  fold  : ∀A B. Fn⟨B A ⇒ B⟩ B List A ⇒ B
 --  (integer literals are handled by rule: • ⇒ Int)
@@ -866,9 +868,6 @@ primEnv =
       fnGD = TFn (Arrow (STail gam) (STail del))
       applyTy = Forall [] [gam, del] []
         (Arrow (SCons fnGD (STail gam)) (STail del))
-      branchTy = Forall [] [gam, del] []
-        (Arrow (SCons tBool (SCons fnGD (SCons fnGD (STail gam))))
-               (STail del))
       mapTy = Forall [a, b] [] []
         (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
                  (one (TList ta)))
@@ -877,57 +876,79 @@ primEnv =
         (Arrow (SCons (TFn (Arrow (SCons tb (one ta)) (one tb)))
                  (SCons tb (one (TList ta))))
                (one tb))
-      -- case : Fn⟨Σ ⇒ (•|•)⟩ Σ ⇒ (Σ | Σ) — binary predicate routing
-      caseTy =
-        let sg = SV "Σ"
-            boolS = TSum (RCons SEnd (RCons SEnd RNil))
-        in Forall [] [sg] []
-             (Arrow (SCons (TFn (Arrow (STail sg) (SCons boolS SEnd)))
-                      (STail sg))
-                    (SCons (TSum (RCons (STail sg)
-                             (RCons (STail sg) RNil))) SEnd))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
       mergeTy = Forall [] [SV "Θ"] []
         (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
-      -- clause : Fn⟨Σ⇒(•|•)⟩ Fn⟨Σ⇒Θ⟩ (Σ | Θ | σ) ⇒ (Σ | Θ | σ) — the
-      -- type-preserving guard step: test the residual (track 1); on
-      -- match run the handler NOW, result to the done track (track 2).
-      -- Constant state shape = no counting = no mergeN.
-      clauseTy =
-        let sg = SV "Σ"; th = SV "Θ"; rv = RV "σ"
-            boolS = TSum (RCons SEnd (RCons SEnd RNil))
-            predT = TFn (Arrow (STail sg) (SCons boolS SEnd))
-            handT = TFn (Arrow (STail sg) (STail th))
-            state = TSum (RCons (STail sg) (RCons (STail th) (RTail rv)))
-        in Forall [] [sg, th] [rv]
-             (Arrow (SCons predT (SCons handT (SCons state SEnd)))
-                    (SCons state SEnd))
-      -- finish : Fn⟨Σ⇒Θ⟩ (Σ | Θ) ⇒ Θ — else-handler + unwrap
-      finishTy =
-        let sg = SV "Σ"; th = SV "Θ"
-            handT = TFn (Arrow (STail sg) (STail th))
-            state = TSum (RCons (STail sg) (RCons (STail th) RNil))
-        in Forall [] [sg, th] []
-             (Arrow (SCons handT (SCons state SEnd)) (STail th))
-      -- guard : Fn⟨Σ ⇒ (•|•)⟩ (Σ | σ) ⇒ (Σ | Σ | σ) — the polymorphic
-      -- case step: track 1 is the untested residual; true moves it to a
-      -- fresh track 2, false leaves it; decided tracks shift back.
-      guardTy =
-        let sg = SV "Σ"
-            rv = RV "σ"
-            boolS = TSum (RCons SEnd (RCons SEnd RNil))
-            predT = TFn (Arrow (STail sg) (SCons boolS SEnd))
-            sumIn  = TSum (RCons (STail sg) (RTail rv))
-            sumOut = TSum (RCons (STail sg) (RCons (STail sg) (RTail rv)))
-        in Forall [] [sg] [rv]
-             (Arrow (SCons predT (SCons sumIn SEnd)) (SCons sumOut SEnd))
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
       -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
       thereTy = Forall [] [SV "Δ"] [RV "σ"]
         (Arrow (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
+      -- Guard machine (if/elif/otherwise/endif); state (Θ | Σ).
+      -- if : Σ ⇒ (Θ | Σ) — entry: the value starts on the residual track
+      ifTy =
+        let th = SV "Θ"; sg = SV "Σ"
+        in Forall [] [th, sg] []
+             (Arrow (STail sg)
+                    (one (TSum (RCons (STail th)
+                          (RCons (STail sg) RNil)))))
+      -- elif : (Θ | (Σh|Σm) Fn⟨Σh⇒Θ⟩) ⇒ (Θ | Σm) — fold one clause;
+      -- asymmetric routers welcome (pattern-matching clauses)
+      elifTy =
+        let th = SV "Θ"; sh = SV "Σh"; sm = SV "Σm"
+            dec = TSum (RCons (STail sh) (RCons (STail sm) RNil))
+            act = TFn (Arrow (STail sh) (STail th))
+        in Forall [] [th, sh, sm] []
+             (Arrow (one (TSum (RCons (STail th)
+                          (RCons (SCons act (one dec)) RNil))))
+                    (one (TSum (RCons (STail th)
+                          (RCons (STail sm) RNil)))))
+      -- otherwise : Σ ⇒ (Σ | ()) — the always-hit router: the unit iso
+      -- Σ ≅ Σ+0; its miss track carries the empty sum (uninhabited)
+      voidW = one (TSum RNil)
+      otherwiseTy =
+        let sg = SV "Σ"
+        in Forall [] [sg] []
+             (Arrow (STail sg)
+                    (one (TSum (RCons (STail sg) (RCons voidW RNil)))))
+      -- endif : (Θ | (Σ | ()) Fn⟨Σ⇒Θ⟩) ⇒ Θ — fold-and-close; demands the
+      -- uninhabited miss track: the otherwise-clause is statically
+      -- mandatory.  The dead branch is the absurdity map 0 ⇒ Θ.
+      endifTy =
+        let th = SV "Θ"; sh = SV "Σ"
+            dec = TSum (RCons (STail sh) (RCons voidW RNil))
+            act = TFn (Arrow (STail sh) (STail th))
+        in Forall [] [th, sh] []
+             (Arrow (one (TSum (RCons (STail th)
+                          (RCons (SCons act (one dec)) RNil))))
+                    (STail th))
+      -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ ⇒ Θ — Elgot iteration: the body routes
+      -- to continue (re-enter) or done (exit)
+      loopTy =
+        let sg = SV "Σ"; th = SV "Θ"
+            body = TFn (Arrow (STail sg)
+                     (one (TSum (RCons (STail sg)
+                           (RCons (STail th) RNil)))))
+        in Forall [] [sg, th] []
+             (Arrow (SCons body (STail sg)) (STail th))
+      -- routers: predicates keep and route their input (hit = track 1)
+      intRouter = Forall [] [] []
+        (Arrow (one TInt)
+               (one (TSum (RCons (one TInt) (RCons (one TInt) RNil)))))
+      int2 = SCons TInt (one TInt)
+      int2Router = Forall [] [] []
+        (Arrow int2
+               (one (TSum (RCons int2 (RCons int2 RNil)))))
+      eqTy = Forall [a] [] []
+        (let aa = SCons ta (one ta)
+         in Arrow aa (one (TSum (RCons aa (RCons aa RNil)))))
+      -- uncons : List A ⇒ (• | A List A) — the asymmetric list router
+      unconsTy = Forall [a] [] []
+        (Arrow (one (TList ta))
+               (one (TSum (RCons SEnd
+                     (RCons (SCons ta (one (TList ta))) RNil)))))
       unaryTy  = Forall [] [] [] (Arrow (one TInt) (one TInt))
       binIntTy = Forall [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
@@ -948,19 +969,24 @@ primEnv =
        , ("print", Forall [a]    [] [] (Arrow (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
-       , ("negative?", Forall [] [] [] (Arrow (one TInt) (one tBool)))
-       , ("even?",     Forall [] [] [] (Arrow (one TInt) (one tBool)))
-       , ("odd?",      Forall [] [] [] (Arrow (one TInt) (one tBool)))
-       , ("apply",  applyTy)
-       , ("branch", branchTy)
-       , ("there",  thereTy)
-       , ("guard",  guardTy)
-       , ("case",   caseTy)
-       , ("merge",  mergeTy)
-       , ("clause", clauseTy)
-       , ("finish", finishTy)
-       , ("map",    mapTy)
-       , ("fold",   foldTy)
+       , ("negative?", intRouter)
+       , ("even?",     intRouter)
+       , ("odd?",      intRouter)
+       , ("zero?",     intRouter)
+       , ("eq?",       eqTy)
+       , ("lt?",       int2Router)
+       , ("-",         binIntTy)
+       , ("apply",     applyTy)
+       , ("there",     thereTy)
+       , ("merge",     mergeTy)
+       , ("if",        ifTy)
+       , ("elif",      elifTy)
+       , ("otherwise", otherwiseTy)
+       , ("endif",     endifTy)
+       , ("loop",      loopTy)
+       , ("uncons",    unconsTy)
+       , ("map",       mapTy)
+       , ("fold",      foldTy)
        ]
 
 --------------------------------------------------------------------------------
@@ -1195,30 +1221,35 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               Left "Runtime type error in apply: expected a quotation"
-    -- case: one predicate, binary routing (the fixed distributor)
-    applyAtom isFinal (Prim "case") stk
-      | not (M.member "case" vars)
-      , not (M.member "case" defs) = do
-          (args, stk') <- takeWires "case" 1 stk
-          let seg = if isFinal then stk' else []
-          (tag, logs) <- pickTrack 0 args seg
-          pure ([VSum tag seg], if isFinal then [] else stk', logs)
-    -- branch has the same segment semantics as apply: Γ is the stack
-    -- after the three control wires.
-    applyAtom isFinal (Prim "branch") stk
-      | not (M.member "branch" vars) = do
-          (args, stk') <- takeWires "branch" 3 stk
+    -- if / otherwise: segment-consuming entries into the guard machine
+    -- (positional semantics like apply: whole stack in final position).
+    applyAtom isFinal (Prim "if") stk
+      | not (M.member "if" vars), not (M.member "if" defs) =
+          if isFinal
+            then Right ([VSum 1 stk], [], [])
+            else Right ([VSum 1 []], stk, [])
+    applyAtom isFinal (Prim "otherwise") stk
+      | not (M.member "otherwise" vars), not (M.member "otherwise" defs) =
+          if isFinal
+            then Right ([VSum 0 stk], [], [])
+            else Right ([VSum 0 []], stk, [])
+    -- loop: Elgot iteration — run the body on the segment; the continue
+    -- track re-enters, the done track exits.
+    applyAtom isFinal (Prim "loop") stk
+      | not (M.member "loop" vars), not (M.member "loop" defs) = do
+          (args, stk') <- takeWires "loop" 1 stk
           case args of
-            [VSum c [], VFn cT tThen, VFn cE tElse] -> do
-              let seg = if isFinal then stk' else []
-              (out, logs) <-
-                if c == 0 then evalTerm env defs cT tThen seg
-                          else evalTerm env defs cE tElse seg
-              pure (out, if isFinal then [] else stk', logs)
-            _ ->
-              Left "Runtime type error in branch: expected Bool and two quotations"
-    -- inN: like apply, the consumed segment is positional — the whole
-    -- remaining stack in final position, nothing when closed.
+            [VFn cv body] -> do
+              let seg0 = if isFinal then stk' else []
+                  go seg logs = do
+                    (out, lg) <- evalTerm env defs cv body seg
+                    case out of
+                      [VSum 0 bundle] -> go bundle (logs ++ lg)
+                      [VSum 1 bundle] -> Right (bundle, logs ++ lg)
+                      _ -> Left "Runtime type error in loop: body must return a (continue | done) decision"
+              (result, logs) <- go seg0 []
+              pure (result, if isFinal then [] else stk', logs)
+            _ -> Left "Runtime type error in loop: expected a body quotation"
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
@@ -1292,18 +1323,6 @@ evalTerm env defs vars term st =
           (out, logs) <- evalTerm env defs vars t' args
           pure (out, stk', logs)
 
-    pickTrack i [] _ = Right (i, [])   -- all guards false: the else track
-    pickTrack i (VFn cv t : more) seg = do
-      (verdict, lg) <- evalTerm env defs cv t seg
-      case verdict of
-        [VSum 0 []] -> Right (i, lg)
-        [VSum _ []] -> do
-          (j, lg') <- pickTrack (i + 1) more seg
-          Right (j, lg ++ lg')
-        _ -> Left "Runtime type error in case: predicate must return a decision"
-    pickTrack _ _ _ =
-      Left "Runtime type error in case: expected predicate quotations"
-
     takeWires name k stk
       | length stk >= k = Right (take k stk, drop k stk)
       | otherwise =
@@ -1330,32 +1349,31 @@ runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
 runBuiltin _ _ "print" [v]              = Right ([], [show v])
 runBuiltin _ _ "true"  []               = Right ([VSum 0 []], [])
 runBuiltin _ _ "false" []               = Right ([VSum 1 []], [])
-runBuiltin _ _ "negative?" [VInt n]     = Right ([VSum (if n < 0 then 0 else 1) []], [])
-runBuiltin _ _ "even?" [VInt n]         = Right ([VSum (if even n then 0 else 1) []], [])
-runBuiltin _ _ "odd?"  [VInt n]         = Right ([VSum (if odd n then 0 else 1) []], [])
+runBuiltin _ _ "negative?" [VInt n]     = Right ([VSum (if n < 0 then 0 else 1) [VInt n]], [])
+runBuiltin _ _ "even?" [VInt n]         = Right ([VSum (if even n then 0 else 1) [VInt n]], [])
+runBuiltin _ _ "odd?"  [VInt n]         = Right ([VSum (if odd n then 0 else 1) [VInt n]], [])
+runBuiltin _ _ "zero?" [VInt n]         = Right ([VSum (if n == 0 then 0 else 1) [VInt n]], [])
+runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
+runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) [VInt x, VInt y]], [])
+runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])
+runBuiltin _ _ "uncons" [VList []]      = Right ([VSum 0 []], [])
+runBuiltin _ _ "uncons" [VList (v:vs)]  = Right ([VSum 1 [v, VList vs]], [])
+-- elif: fold one guard clause into the (Θ | Σ) state
+runBuiltin env defs "elif" [VSum 0 done'] = Right ([VSum 0 done'], [])
+runBuiltin env defs "elif" [VSum 1 [VFn cv act, VSum d payload]]
+  | d == 0 = do
+      (out, lg) <- evalTerm env defs cv act payload
+      Right ([VSum 0 out], lg)               -- hit: action ran, done track
+  | otherwise = Right ([VSum 1 payload], []) -- miss: payload to residual
+-- endif: fold the final clause and close; the miss branch is the
+-- absurdity map (its track is uninhabited) — defensive error only
+runBuiltin env defs "endif" [VSum 0 done'] = Right (done', [])
+runBuiltin env defs "endif" [VSum 1 [VFn cv act, VSum 0 payload]] =
+  evalTerm env defs cv act payload
+runBuiltin _ _ "endif" [VSum 1 _] =
+  Left "endif: absurd (unreachable: the otherwise-clause cannot miss)"
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
-runBuiltin env defs "clause" [VFn cvP p, VFn cvH h, VSum 0 bundle] = do
-  (verdict, lg) <- evalTerm env defs cvP p bundle
-  case verdict of
-    [VSum 0 []] -> do
-      (out, lg') <- evalTerm env defs cvH h bundle
-      Right ([VSum 1 out], lg ++ lg')          -- matched: handled, done track
-    [VSum _ []] -> Right ([VSum 0 bundle], lg) -- still residual
-    _ -> Left "Runtime type error in clause: predicate must return a decision"
-runBuiltin _ _ "clause" [VFn _ _, VFn _ _, VSum t bundle] =
-  Right ([VSum t bundle], [])                  -- already decided: untouched
-runBuiltin env defs "finish" [VFn cvE e, VSum 0 bundle] =
-  evalTerm env defs cvE e bundle >>= \(out, lg) -> Right (out, lg)
-runBuiltin _ _ "finish" [VFn _ _, VSum _ bundle] = Right (bundle, [])
-runBuiltin env defs "guard" [VFn cv pred', VSum 0 bundle] = do
-  (verdict, logs) <- evalTerm env defs cv pred' bundle
-  case verdict of
-    [VSum 0 []] -> Right ([VSum 1 bundle], logs)   -- matched: fresh track
-    [VSum _ []] -> Right ([VSum 0 bundle], logs)   -- still residual
-    _ -> Left "Runtime type error in guard: predicate must return a decision"
-runBuiltin _ _ "guard" [VFn _ _, VSum t bundle] =
-  Right ([VSum (t + 1) bundle], [])                -- already decided: shift
 runBuiltin env defs "map" [VFn cv t, VList vs] = do
   rs <- mapM step vs
   pure ([VList (map fst rs)], concatMap snd rs)

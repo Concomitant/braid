@@ -490,6 +490,14 @@ Reconciliation with the remainder discipline:
   non-final `(…)` in a tensor chain is closed (`ρ := •`); only the final
   atom keeps its remainder.
 
+## Sums and control flow (superseding note)
+
+The branching/looping design was consolidated and substantially extended
+in `spec-sums.md` — sums of stacks, code rows, routers, the
+if/elif/otherwise/endif guard machine, and Elgot iteration (`loop`).
+That chapter supersedes the "Branching extension" section below (branch
+was retired: `choose = (c t e -> c >> (t | e) >> merge)`).
+
 ## Branching extension
 
 Booleans:

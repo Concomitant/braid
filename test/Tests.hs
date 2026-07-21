@@ -100,16 +100,22 @@ passTests =
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
 
-    -- branch and lists
-  , ("branch",        "(• | •) Fn⟨ρ0 ⇒ ρ1⟩ Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
-  , ("negative?",     "Int ⇒ (• | •)")
-  , ("odd?",          "Int ⇒ (• | •)")
-    -- case: predicate-driven split, an ordinary combinator (no grammar)
-  , ("case",          "Fn⟨ρ0 ⇒ (• | •)⟩ ρ0 ⇒ (ρ0 | ρ0)")
-  , ("clause",        "Fn⟨ρ0 ⇒ (• | •)⟩ Fn⟨ρ0 ⇒ ρ1⟩ (ρ0 | ρ1 | σ0) ⇒ (ρ0 | ρ1 | σ0)")
-  , ("finish",        "Fn⟨ρ0 ⇒ ρ1⟩ (ρ0 | ρ1) ⇒ ρ1")
-    -- the polymorphic case step: one scheme, n-arity by iteration
-  , ("guard",         "Fn⟨ρ0 ⇒ (• | •)⟩ (ρ0 | σ0) ⇒ (ρ0 | ρ0 | σ0)")
+    -- routers: predicates keep and route their input (hit = track 1)
+  , ("negative?",     "Int ⇒ (Int | Int)")
+  , ("odd?",          "Int ⇒ (Int | Int)")
+  , ("zero?",         "Int ⇒ (Int | Int)")
+  , ("eq?",           "a0 a0 ⇒ (a0 a0 | a0 a0)")
+  , ("lt?",           "Int Int ⇒ (Int Int | Int Int)")
+  , ("-",             "Int Int ⇒ Int")
+  , ("uncons",        "List a0 ⇒ (• | a0 List a0)")
+    -- the guard machine
+  , ("if",            "ρ0 ⇒ (ρ1 | ρ0)")
+  , ("otherwise",     "ρ0 ⇒ (ρ0 | ())")
+  , ("elif",          "(ρ0 | Fn⟨ρ1 ⇒ ρ0⟩ (ρ1 | ρ2)) ⇒ (ρ0 | ρ2)")
+  , ("endif",         "(ρ0 | Fn⟨ρ1 ⇒ ρ0⟩ (ρ1 | ())) ⇒ ρ0")
+  , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 ⇒ ρ1")
+  , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [1 ... >> +] otherwise\nendif", "• ⇒ Int")
+    -- lists
   , ("list(1, 2, 3)", "• ⇒ List Int")
   , ("list()",        "• ⇒ List a0")
   , ("map",           "Fn⟨a0 ⇒ a1⟩ List a0 ⇒ List a1")
@@ -133,8 +139,9 @@ failTests =
   , ("[dup",          "Unclosed quotation")
   , ("]",             "Expected a tensor stage")
   , ("(1",            "Unclosed group")
-    -- branches with different stack effects ([1] : Fn⟨• ⇒ Int⟩ forces Γ := •)
-  , ("true [1] [drop ...] >> branch", "Cannot unify stacks")
+    -- a guard chain without its otherwise-clause: endif demands the
+    -- uninhabited miss track, so the missing else is a TYPE error
+  , ("7 >> if\n... | [dup >> *] odd?\nendif", "Cannot unify types")
     -- list elements must be pure pushes
   , ("list(drop)",    "Cannot unify stacks")
   , ("list(1 2",      "Expected ',' or ')'")
@@ -181,11 +188,7 @@ evalTests =
   , ("[pass]",                             [],     "[fn]")
   , ("def sq = [dup >> *]\nsq 5 >> apply", [],     "25")
 
-    -- branch
-  , ("true [1] [2] >> branch >> print",    ["1"],  "")
-  , ("false [1] [2] >> branch >> print",   ["2"],  "")
-  , ("true [f ...] [g ...] 10 >> branch >> print", ["11"], "")
-  , ("5 >> negative?",                     [],     "in2()")
+  , ("5 >> negative?",                     [],     "in2(5)")
 
     -- grouping
   , ("7 >> (dup >> *) >> print",           ["49"], "")
@@ -207,24 +210,28 @@ evalTests =
   , ("1 2 >> in1",                         [],     "in1(1, 2)")
   , ("3 4 >> here >> there",               [],     "in2(3, 4)")
     -- decide-then-inject: predicate is already the fork (Bool ≡ (• | •))
-  , ("def classify = (x -> x >> even? >> (x >> here | x >> here >> there) >> merge)\n4 >> classify",
+  , ("def classify = even? >> (here | here >> there) >> merge\n4 >> classify",
                                            [],     "in1(4)")
-  , ("def classify = (x -> x >> even? >> (x >> here | x >> here >> there) >> merge)\n5 >> classify",
+  , ("def classify = even? >> (here | here >> there) >> merge\n5 >> classify",
                                            [],     "in2(5)")
-    -- case: route the segment by a predicate value
-  , ("5 >> [odd?] ... >> case",            [],     "in1(5)")
-  , ("4 >> [odd?] ... >> case",            [],     "in2(4)")
-  , ("5\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["5"], "")
-  , ("4\n[odd?] ... >> case\nid | drop >> 0\nmerge\nprint", ["0"], "")
-    -- guards via clause/finish: interleaved (pred, handler) per line,
-    -- natural order, constant state shape — no caseN, no mergeN
-  , ("7\nhere\n[odd?] [dup >> *] ... >> clause\n[negative?] [drop >> 0] ... >> clause\n[1 ... >> +] ... >> finish\nprint", ["49"], "")
-  , ("8\nhere\n[odd?] [dup >> *] ... >> clause\n[negative?] [drop >> 0] ... >> clause\n[1 ... >> +] ... >> finish\nprint", ["9"], "")
+    -- routers in flight: quoted routers dispatch via plain apply
+  , ("5 >> [odd?] ... >> apply",           [],     "in1(5)")
+  , ("4 >> [odd?] ... >> apply",           [],     "in2(4)")
+    -- if-then-else is route >> row >> merge
+  , ("5 >> odd? >> (id | drop >> 0) >> merge >> print", ["5"], "")
+  , ("4 >> odd? >> (id | drop >> 0) >> merge >> print", ["0"], "")
+    -- the if/elif/otherwise/endif idiom
+  , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [drop >> 0] negative?\nelif\n... | [1 ... >> +] otherwise\nendif\nprint", ["49"], "")
+  , ("8 >> if\n... | [dup >> *] odd?\nelif\n... | [drop >> 0] negative?\nelif\n... | [1 ... >> +] otherwise\nendif\nprint", ["9"], "")
+    -- loop: Elgot iteration (sum 1..5)
+  , ("0 5 >> [(a n -> n >> zero? >> ((z -> a >> in2) | (m -> (a m >> +) (m 1 >> -) >> in1)) >> merge)] ... >> loop >> print", ["15"], "")
+  , ("5 3 >> - >> print",                  ["2"],  "")
+  , ("2 2 >> eq?",                         [],     "in1(2, 2)")
+  , ("3 5 >> lt?",                         [],     "in1(3, 5)")
+  , ("list(1, 2) >> uncons",               [],     "in2(1, list(2))")
+  , ("list() >> uncons",                   [],     "in1()")
     -- multi-line rows: newlines adjacent to | are absorbed (both styles)
   , ("5 >> in1\ndup >> * |\n1 ... >> +\nmerge >> print", ["25"], "")
-    -- guard chains: residual-first, matched tracks accumulate in reverse
-  , ("7 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in3(7)")
-  , ("8 >> here >> [odd?] ... >> guard >> [negative?] ... >> guard", [], "in1(8)")
     -- bare rows, line-scoped
   , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")

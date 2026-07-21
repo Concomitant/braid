@@ -1,0 +1,4 @@
+0 5
+[(a n -> n >> zero? >> ((z -> a >> in2) | (m -> (a m >> +) (m 1 >> -) >> in1)) >> merge)] ...
+loop
+print
