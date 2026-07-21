@@ -1,10 +1,12 @@
-def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
-def while = whileFn ... >> loop
+# Euclid's subtractive gcd: while the pair disagrees, subtract the
+# smaller from the larger.
 
-def not = (in2 | in1) >> merge
+# neq? builds on raw eq? (not the cleanup-baked equals) because shrink
+# needs BOTH wires of the payload; negation is the prelude's track swap
 def neq? = eq? >> not
 
+# [a, b] -> [big - small, small]
 def shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...
 
-48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print
-1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print
+48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print      # 6
+1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print   # 21

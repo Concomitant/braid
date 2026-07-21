@@ -238,6 +238,52 @@ general recursion consumes stack. Sections with `_` (the hole, a
 synonym for `id`) make the constant-operand predicates point-free:
 `def lt100? = _ 100 >> lt? >> (_ drop | _ drop)`.
 
+## 6c. The sum monad, officially
+
+Routers are the Kleisli arrows of the sum monad `(· | E)`, and the
+combinator vocabulary of sections 3–5 turns out to be its structure
+maps in costume:
+
+* **return** = `in1` — injection into the hit track.
+* **fmap f** = `(f | ...)` — a code row is the functor action.
+* **join** = `(... | in2) >> merge` — flatten one nested layer.
+* **Kleisli composition** = the `and` idiom: `p >> (q | in2) >> merge`.
+
+The surface operator `>=>` makes the last one first-class syntax:
+
+```text
+p >=> q       ≡       p >> (q | in2) >> merge
+```
+
+It is pure parse-time sugar — the desugaring happens before inference,
+so there are no new typing rules and the monad laws follow from the
+row/merge semantics already specified. Precedence sits between `|`
+and `>>`, so a Kleisli stage is a whole `>>`-chain:
+
+```text
+def process = even? >=> _ 100 >> less >=> double >> in1
+```
+
+reads as three stages — test even, test below 100, double-and-succeed
+— with the failure track threaded invisibly past every stage. The
+final `>> in1` is `return`, lifting the pure stage into the monad.
+Short-circuiting is structural: a stage on the miss track never runs.
+
+**Why there is no do-notation.** Haskell's `do` exists to manage
+names (`x <- p; q x`). Braid has no names to manage — data flows by
+position — so the entire content of do-notation collapses into the
+choice of composition operator. A "do-block" would just be a region
+where sequencing means `>=>`; the operator by itself is the whole
+feature.
+
+**Scope.** The desugaring is binary: the miss track is one
+alternative (`in2`). N-ary error rows compose with explicit rows
+and injections — a parse-time desugar cannot know the row's arity.
+Monad *polymorphism* (code generic over which monad, via constructor
+variables of kind Stack → Stack) is explicitly deferred; the sum
+monad's operations are wiring patterns, and it is not yet clear the
+abstraction pays for its unification machinery.
+
 ## 7. The two-level pattern
 
 A recurring law of this design: each concept has a **flat spelling**

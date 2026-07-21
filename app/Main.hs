@@ -40,21 +40,26 @@ runFile path = do
 --------------------------------------------------------------------------------
 
 data ReplState = ReplState
-  { rsEnv      :: Env        -- prims + user defs
-  , rsRun      :: RunDefs    -- runtime bodies of user defs
+  { rsEnv      :: Env        -- prims + prelude + user defs
+  , rsRun      :: RunDefs    -- runtime bodies of prelude + user defs
+  , rsDocs     :: M.Map String String   -- ## docs, prelude + user
   , rsUserDefs :: [String]   -- user def names, in definition order
   , rsStackTy  :: SType      -- type of the current stack (internal names)
   , rsStack    :: [Value]    -- the current stack, front wire first
   }
 
 initialState :: ReplState
-initialState = ReplState primEnv M.empty [] SEnd []
+initialState =
+  ReplState (modEnv preludeModule)
+            (moduleRunDefs preludeModule)
+            (modDocs preludeModule)
+            [] SEnd []
 
 repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type, :s stack, :defs, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type, :doc <name>, :s stack, :defs, :clear, :q quit"
   loop initialState
 
 loop :: ReplState -> IO ()
@@ -76,12 +81,15 @@ loop st = do
           putStrLn (renderStack st)
           loop st
         ":defs" -> do
-          case rsUserDefs st of
-            [] -> putStrLn "no definitions"
-            ns -> mapM_ (putStrLn . renderDef st) ns
+          let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
+          mapM_ (putStrLn . renderDef st) preludeOnly
+          mapM_ (putStrLn . renderDef st) (rsUserDefs st)
           loop st
         l | ":t " `isPrefixOf` l -> do
               typeOf st (drop 3 l)
+              loop st
+          | ":doc " `isPrefixOf` l -> do
+              docOf st (trim (drop 5 l))
               loop st
           | ":" `isPrefixOf` l -> do
               putStrLn $ "unknown command: " ++ l
@@ -94,8 +102,27 @@ trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
 renderDef :: ReplState -> String -> String
 renderDef st name =
   case M.lookup name (rsEnv st) of
-    Just sc -> "def " ++ name ++ " : " ++ show sc
+    Just sc -> "def " ++ name ++ " : " ++ show sc ++ docSuffix
     Nothing -> "def " ++ name ++ " : ???"
+  where
+    docSuffix =
+      case M.lookup name (rsDocs st) of
+        Just d  -> "\n  ## " ++ d
+        Nothing -> ""
+
+docOf :: ReplState -> String -> IO ()
+docOf st name
+  | M.member name (rsEnv st) =
+      case M.lookup name (rsDocs st) of
+        Just d  -> putStrLn ("## " ++ d) >> putStrLn (renderTypeLine)
+        Nothing -> putStrLn "(no doc)" >> putStrLn (renderTypeLine)
+  | otherwise = putStrLn $ "unknown name: " ++ name
+  where
+    renderTypeLine =
+      case M.lookup name (rsEnv st) of
+        Just sc -> name ++ " : " ++ show sc
+        Nothing -> name
+
 
 renderStack :: ReplState -> String
 renderStack st =
@@ -118,19 +145,20 @@ handleLine :: ReplState -> String -> IO ReplState
 handleLine st line =
   case splitDefs line of
     Left err -> report err
-    Right ([(name, _)], rest)
+    Right ([(name, _, _)], rest)
       | all isSpace rest -> defLine name
     Right ([], _) -> programLine
     Right _       -> report "one definition per line, please"
   where
     report err = putStrLn ("error: " ++ err) >> pure st
 
-    -- def name = program : extend (or replace) a user definition
+    -- def name = program : extend (or replace) a user definition;
+    -- prelude names may always be shadowed
     defLine name = do
       let envBase
             | name `elem` rsUserDefs st = M.delete name (rsEnv st)
             | otherwise                 = rsEnv st
-      case checkModuleWith envBase line of
+      case checkModuleWith envBase preludeNames line of
         Left err -> report err
         Right m  ->
           case modDefs m of
@@ -139,6 +167,7 @@ handleLine st line =
               pure st
                 { rsEnv      = modEnv m
                 , rsRun      = moduleRunDefs m `M.union` rsRun st
+                , rsDocs     = modDocs m `M.union` rsDocs st
                 , rsUserDefs =
                     rsUserDefs st ++ [n | n `notElem` rsUserDefs st]
                 }

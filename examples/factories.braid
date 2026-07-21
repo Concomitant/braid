@@ -1,19 +1,11 @@
-def equals = eq? >> (_ drop | _ drop)
-def less = lt? >> (_ drop | _ drop)
+# Building predicates. Sections over the cleanup-baked routers for
+# literal comparands; factories for computed ones. All prelude.
 
 def five? = _ 5 >> equals
-
-def equalsTo = (k -> [_ k >> equals])
-def lessThan = (k -> [_ k >> less])
-
-def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])
-
-def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
-def while = whileFn ... >> loop
 def double = 2 _ >> *
 
-5 >> five? >> print
-5 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print
-6 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print
-7 >> [_ 100 >> less] [double] ... >> while >> print
-7 >> (100 >> lessThan) [double] ... >> while >> print
+5 >> five? >> print                                           # in1(5)
+5 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print   # in1(5)
+6 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print   # in2(6)
+7 >> [_ 100 >> less] [double] ... >> while >> print           # 112
+7 >> (100 >> lessThan) [double] ... >> while >> print         # 112

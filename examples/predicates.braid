@@ -1,18 +1,13 @@
-def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
-def while = whileFn ... >> loop
+# Value-level predicate combinators from the prelude: negate, both,
+# either compose quoted routers; until is while of the negated
+# predicate.
 
-def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])
-def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])
-def either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])
-
-def until = (p f -> (p >> negate) f) ... >> while
-
-def small? = _ 10 >> lt? >> (_ drop | _ drop)
-def big? = _ 100 >> lt? >> (_ drop | _ drop) >> (in2 | in1) >> merge
+def small? = _ 10 >> less
+def big? = _ 100 >> less >> not
 def double = 2 _ >> *
 
-4 >> ([even?] [small?] >> both) ... >> apply >> print
-40 >> ([even?] [small?] >> both) ... >> apply >> print
-3 >> ([even?] [small?] >> either) ... >> apply >> print
-9 >> ([even?] [small?] >> both >> negate) ... >> apply >> print
-7 >> [big?] [double] ... >> until >> print
+4 >> ([even?] [small?] >> both) ... >> apply >> print             # in1(4)
+40 >> ([even?] [small?] >> both) ... >> apply >> print            # in2(40)
+3 >> ([even?] [small?] >> either) ... >> apply >> print           # in1(3)
+9 >> ([even?] [small?] >> both >> negate) ... >> apply >> print   # NAND: in1(9)
+7 >> [big?] [double] ... >> until >> print                        # 112

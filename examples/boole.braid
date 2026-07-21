@@ -1,13 +1,16 @@
-def not = (in2 | in1) >> merge
-def small? = _ 10 >> lt? >> (_ drop | _ drop)
+# Wire-level boolean algebra on routers: the row IS the truth table.
+#   and: consult q only on hit     or: stay hit, consult q on miss
+#   not: swap the tracks (prelude)
+
+def small? = _ 10 >> less
 def big? = small? >> not
 
 def evenAndSmall? = even? >> (small? | in2) >> merge
 def oddOrZero? = odd? >> (in1 | zero?) >> merge
 
-4 >> evenAndSmall? >> print
-40 >> evenAndSmall? >> print
-7 >> oddOrZero? >> print
-0 >> oddOrZero? >> print
-8 >> oddOrZero? >> print
-12 >> big? >> print
+4 >> evenAndSmall? >> print    # in1(4)
+40 >> evenAndSmall? >> print   # in2(40)
+7 >> oddOrZero? >> print       # in1(7)
+0 >> oddOrZero? >> print       # in1(0)
+8 >> oddOrZero? >> print       # in2(8)
+12 >> big? >> print            # in1(12)

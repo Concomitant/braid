@@ -429,6 +429,7 @@ data Token
   | TokComma      -- ,
   | TokArrow      -- -> (parameter list separator)
   | TokBar        -- | (code-row / sum alternative separator)
+  | TokKleisli    -- >=> (Kleisli composition in the sum monad)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -437,6 +438,8 @@ tokenize = go
     go [] = Right []
     go ('\r':'\n':cs) = (TokNewline :) <$> go cs
     go ('\n':cs)      = (TokNewline :) <$> go cs
+    go ('#':cs)         = go (dropWhile (/= '\n') cs)  -- comment to EOL
+    go ('>':'=':'>':cs) = (TokKleisli :) <$> go cs
     go ('>':'>':'>':cs) = (TokSeqPass :) <$> go cs
     go ('>':'>':cs)     = (TokSeq :) <$> go cs
     go ('>':_)          = Left "Unexpected '>' without matching '>>'"
@@ -461,7 +464,7 @@ tokenize = go
           in (TokIdent ident :) <$> go rest
 
     isIdentChar ch =
-      not (isSpace ch) && ch `notElem` (">.[](),-|\8230" :: String)
+      not (isSpace ch) && ch `notElem` (">.[](),-|#\8230" :: String)
 
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
 -- newlines adjacent to an explicit >> / >>> (the operator wins).
@@ -480,7 +483,8 @@ normalizeToks = trim . collapse
     trim = dropWhile (== TokNewline) . dropTrailing
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
-    isSeqOp t = t == TokSeq || t == TokSeqPass || t == TokBar
+    isSeqOp t =
+      t == TokSeq || t == TokSeqPass || t == TokBar || t == TokKleisli
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -501,9 +505,10 @@ data Stmt = Stmt Stage [(StageOp, Stage)]
   deriving (Show)
 
 -- Precedence, loosest to tightest: newline (strict >>), then | (code
--- row), then >> / >>>, then juxtaposition.  So each LINE is a row, and
--- `a >> b | c >> d` is (a >> b) | (c >> d) — mirroring the type grammar,
--- where juxtaposition binds tighter than |.
+-- row), then >=> (Kleisli), then >> / >>>, then juxtaposition.  So each
+-- LINE is a row, `a >> b | c >> d` is (a >> b) | (c >> d) — mirroring
+-- the type grammar, where juxtaposition binds tighter than | — and
+-- `p >=> a >> b >=> q` Kleisli-composes whole >>-chains.
 parseProgram :: String -> Either String Term
 parseProgram input = do
   toks <- normalizeToks <$> tokenize input
@@ -526,15 +531,15 @@ parseProgramToks toks = do
 -- row level: sequences joined by |, optional trailing `| ...` residual
 parseRow :: [Token] -> Either String (Term, [Token])
 parseRow toks = do
-  (s0, rest) <- parseSeqStmt toks
-  loop [desugarStmt s0] rest
+  (t0, rest) <- parseKleisli toks
+  loop [t0] rest
   where
     loop acc (TokBar : TokEllipsis : rest)
       | endsRow rest = Right (Alts (reverse acc) True, rest)
       | otherwise    = Left "'| ...' must end its row"
     loop acc (TokBar : rest) = do
-      (s, rest') <- parseSeqStmt rest
-      loop (desugarStmt s : acc) rest'
+      (t, rest') <- parseKleisli rest
+      loop (t : acc) rest'
     loop [t] rest = Right (t, rest)
     loop acc rest = Right (Alts (reverse acc) False, rest)
 
@@ -543,6 +548,23 @@ parseRow toks = do
     endsRow (TokRBrack : _)  = True
     endsRow []               = True
     endsRow _                = False
+
+-- kleisli level: >>-sequences joined by >=>.  Pure parse-time sugar for
+-- composition in the sum monad — the desugaring is the `and` idiom:
+--   t1 >=> t2   ≡   t1 >> (t2 | in2) >> merge
+-- (t2 runs on the hit track; the miss track re-injects untouched).
+parseKleisli :: [Token] -> Either String (Term, [Token])
+parseKleisli toks = do
+  (s0, rest) <- parseSeqStmt toks
+  loop (desugarStmt s0) rest
+  where
+    loop acc (TokKleisli : rest) = do
+      (s, rest') <- parseSeqStmt rest
+      loop (kleisli acc (desugarStmt s)) rest'
+    loop acc rest = Right (acc, rest)
+
+    kleisli t1 t2 =
+      Seq t1 (Seq (Alts [t2, Prim "in2"] False) (Prim "merge"))
 
 -- sequence level: stages joined by >> / >>> only
 parseSeqStmt :: [Token] -> Either String (Stmt, [Token])
@@ -1139,18 +1161,24 @@ generalize env arr =
 data Module = Module
   { modEnv  :: Env
   , modDefs :: [(String, Scheme, Term)]
+  , modDocs :: Map String String   -- ## doc comments, by def name
   , modMain :: Maybe (Term, Arrow)
   }
 
 -- Split source into `def name = body` lines and the main program
 -- (all remaining lines, in order, joined by newline-sequencing).
-splitDefs :: String -> Either String ([(String, String)], String)
+-- A `## text` line is a doc comment: it binds to the next def
+-- (consecutive doc lines join); doc text preceding a non-def line is
+-- dropped.
+splitDefs :: String -> Either String ([(String, String, Maybe String)], String)
 splitDefs src = do
-  (defs, progLines) <- go (lines src)
+  (defs, progLines) <- go Nothing (lines src)
   pure (defs, intercalate "\n" progLines)
   where
-    go [] = Right ([], [])
-    go (l : rest)
+    go _ [] = Right ([], [])
+    go doc (l : rest)
+      | Just d <- docLine l =
+          go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
           if all isSpace body
@@ -1161,14 +1189,19 @@ splitDefs src = do
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
-                  (ds, ps) <- go rest'
-                  pure ((name, intercalate "\n" block) : ds, ps)
+                  (ds, ps) <- go Nothing rest'
+                  pure ((name, intercalate "\n" block, doc) : ds, ps)
             else do
-              (ds, ps) <- go rest
-              pure ((name, body) : ds, ps)
+              (ds, ps) <- go Nothing rest
+              pure ((name, body, doc) : ds, ps)
       | otherwise = do
-          (ds, ps) <- go rest
+          (ds, ps) <- go Nothing rest
           pure (ds, l : ps)
+
+    docLine l =
+      case dropWhile isSpace l of
+        '#' : '#' : txt -> Just (dropWhile isSpace txt)
+        _               -> Nothing
 
     parseDefLine l =
       case break (== '=') l of
@@ -1179,15 +1212,23 @@ splitDefs src = do
             _ -> Left $ "Malformed definition: " ++ l
         _ -> Left $ "Malformed definition (missing '='): " ++ l
 
+-- Check a module against the prelude: user defs may shadow prelude
+-- defs (once each); the prelude's defs and docs are folded into the
+-- result so the runtime sees them.
 checkModule :: String -> Either String Module
-checkModule = checkModuleWith primEnv
+checkModule src = do
+  m <- checkModuleWith (modEnv preludeModule) preludeNames src
+  pure m { modDefs = modDefs preludeModule ++ modDefs m
+         , modDocs = modDocs m `M.union` modDocs preludeModule }
 
 -- Check a module starting from a given environment (REPL sessions grow
--- the environment incrementally).
-checkModuleWith :: Env -> String -> Either String Module
-checkModuleWith env0 src = do
+-- the environment incrementally).  Names in `shadowable` may be
+-- redefined once (prelude shadowing); all other redefinition is an
+-- error.
+checkModuleWith :: Env -> [String] -> String -> Either String Module
+checkModuleWith env0 shadow0 src = do
   (defSrcs, mainSrc) <- splitDefs src
-  (env', defsRev) <- foldM addDef (env0, []) defSrcs
+  (env', _, defsRev, docs) <- foldM addDef (env0, shadow0, [], M.empty) defSrcs
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
@@ -1195,17 +1236,64 @@ checkModuleWith env0 src = do
         term <- parseProgram mainSrc
         arr  <- inferTermIn env' term
         pure (Just (term, arr))
-  pure (Module env' (reverse defsRev) mainPart)
+  pure (Module env' (reverse defsRev) docs mainPart)
   where
-    addDef (env, acc) (name, bodySrc) = do
-      if M.member name env
+    addDef (env, shadow, acc, docs) (name, bodySrc, doc) = do
+      if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
         else Right ()
       term0 <- parseProgram bodySrc
       let term = substRecurse name term0
-      arr  <- inferDefTermIn name env term
-      let sc = generalize env arr
-      pure (M.insert name sc env, (name, sc, term) : acc)
+          env1 = M.delete name env   -- a shadowed def must not leak in
+      arr  <- inferDefTermIn name env1 term
+      let sc = generalize env1 arr
+      pure ( M.insert name sc env
+           , filter (/= name) shadow
+           , (name, sc, term) : acc
+           , maybe docs (\d -> M.insert name d docs) doc )
+
+--------------------------------------------------------------------------------
+-- 10.5 Prelude: derived definitions available in every module and REPL
+-- session.  All user code — the primitive set stays minimal.  User defs
+-- shadow prelude defs silently.
+--------------------------------------------------------------------------------
+
+preludeSrc :: String
+preludeSrc = unlines
+  [ "## invert a router: swap the hit and miss tracks"
+  , "def not = (in2 | in1) >> merge"
+  , "## negate a quoted router, as a value"
+  , "def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])"
+  , "## and on quoted routers: hit iff both hit; q runs only on p's hit"
+  , "def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])"
+  , "## or on quoted routers: hit if p hits, otherwise q decides"
+  , "def either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])"
+  , "## compare two wires with eq?, route the first, drop the second"
+  , "def equals = eq? >> (_ drop | _ drop)"
+  , "## compare two wires with lt?, route the first, drop the second"
+  , "def less = lt? >> (_ drop | _ drop)"
+  , "## predicate factory: k >> equalsTo is a quoted equals-k router"
+  , "def equalsTo = (k -> [_ k >> equals])"
+  , "## predicate factory: k >> lessThan is a quoted below-k router"
+  , "def lessThan = (k -> [_ k >> less])"
+  , "## assemble a loop body from a quoted predicate and step"
+  , "def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])"
+  , "## run step while predicate hits; exit with the miss payload"
+  , "def while = whileFn ... >> loop"
+  , "## assemble a loop body that exits on the predicate's hit"
+  , "def untilFn = (p f -> [p ... >> apply >> (done | f ... >> apply >> again) >> merge])"
+  , "## run step until predicate hits; exit with the hit payload"
+  , "def until = untilFn ... >> loop"
+  ]
+
+preludeModule :: Module
+preludeModule =
+  case checkModuleWith primEnv [] preludeSrc of
+    Left err -> error ("prelude failed to check: " ++ err)
+    Right m  -> m
+
+preludeNames :: [String]
+preludeNames = [ n | (n, _, _) <- modDefs preludeModule ]
 
 --------------------------------------------------------------------------------
 -- 11. Interpreter

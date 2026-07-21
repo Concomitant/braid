@@ -1,0 +1,11 @@
+# A validation railway with >=>: each stage routes hit | miss, and
+# Kleisli composition threads the hit track while misses fall through.
+
+def double = 2 _ >> *   # not in the prelude
+
+## even, under 100, then doubled and re-injected as success
+def process = even? >=> _ 100 >> less >=> double >> in1
+
+4 >> process >> print     # in1(8)
+7 >> process >> print     # in2(7)
+120 >> process >> print   # in2(120)

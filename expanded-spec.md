@@ -147,6 +147,25 @@ a >> b >>> c   ≡   a >> (b pass) >> c
 
 Newline is strict `>>`, not implicit `pass`.
 
+## Surface: comments, docs, prelude
+
+* `#` starts a comment running to end of line (lexer trivia).
+* `##` at the start of a line is a **doc comment**: it binds to the
+  next `def` (consecutive `##` lines join) and is stored with the
+  definition. The REPL shows docs in `:defs` and via `:doc <name>`.
+  Doc text preceding a non-def line is dropped. Design intent: when
+  quoted code becomes inspectable data (`Code⟨⟩`), docs migrate from
+  the def table into the code values themselves, composing along
+  `>>` — documentation as a Writer-style annotation on morphisms.
+* A **prelude** of derived definitions is auto-loaded into every
+  module and REPL session: `not`, `negate`, `both`, `either`,
+  `equals`, `less`, `equalsTo`, `lessThan`, `whileFn`, `while`,
+  `untilFn`, `until` (see `preludeSrc` in the implementation; all are
+  user-level code over the primitive set). A user `def` of a prelude
+  name shadows it silently, once; redefining any name twice is still
+  an error. `>=>` (see spec-sums §6c) is Kleisli composition for the
+  sum monad, desugared at parse time.
+
 ## Remainder discipline and principal typing
 
 ### Stack shape invariant

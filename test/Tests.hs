@@ -171,6 +171,8 @@ failTests =
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
+    -- >=> is Kleisli composition in the sum monad
+  , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
     -- one def used at two different types = let-polymorphism
@@ -249,6 +251,23 @@ evalTests =
     -- from closures; while = whileFn ... >> loop fuses in the knot
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double] ... >> while >> print", ["112"], "")
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double >> double] ... >> while >> print", ["112"], "")
+    -- comments: # to end of line, ## docs are inert at runtime
+  , ("# header comment\n5 >> print # trailing", ["5"], "")
+  , ("## doc for sq2\ndef sq2 = dup >> *\n3 >> sq2 >> print", ["9"], "")
+    -- prelude defs available with no local definition
+  , ("5 >> _ 5 >> equals >> print",             ["in1(5)"], "")
+  , ("def double = 2 _ >> *\n7 >> [_ 100 >> less] [double] ... >> while >> print", ["112"], "")
+  , ("7 >> [_ 100 >> less >> not] [dup >> +] ... >> until >> print", ["112"], "")
+    -- user defs shadow prelude defs
+  , ("def while = drop\n1 2 >> while ... >> print", ["2"], "")
+    -- >=>: short-circuiting Kleisli chains; in1 lifts pure stages
+  , ("4 >> (even? >=> zero?) >> print",         ["in2(4)"], "")
+  , ("0 >> (even? >=> zero?) >> print",         ["in1(0)"], "")
+  , ("7 >> (even? >=> zero?) >> print",         ["in2(7)"], "")
+  , ("def double = 2 _ >> *\n4 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in1(8)"], "")
+  , ("def double = 2 _ >> *\n120 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in2(120)"], "")
+  , ("def double = 2 _ >> *\n7 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in2(7)"], "")
+  , ("5 >> (_ 5 >> equals >=> odd?) >> print",  ["in1(5)"], "")
     -- cleanup-baked comparison routers and quoted sections: predicates
     -- built inline, no lambda, no factory
   , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals >> print", ["in1(5)"], "")
@@ -308,6 +327,7 @@ evalTests =
 moduleFailTests :: [(String, String)]
 moduleFailTests =
   [ ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
+  , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
   ]
