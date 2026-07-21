@@ -268,6 +268,9 @@ evalTests =
   , ("def double = 2 _ >> *\n120 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in2(120)"], "")
   , ("def double = 2 _ >> *\n7 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in2(7)"], "")
   , ("5 >> (_ 5 >> equals >=> odd?) >> print",  ["in1(5)"], "")
+    -- ok/miss aliases: return and stay-missed of the sum monad
+  , ("def double2 = 2 _ >> *\ndef process = even? >=> _ 100 >> less >=> double2 >> ok\n4 >> process >> print", ["in1(8)"], "")
+  , ("7 >> odd? >> (ok | zero?) >> merge >> print", ["in1(7)"], "")
     -- cleanup-baked comparison routers and quoted sections: predicates
     -- built inline, no lambda, no factory
   , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals >> print", ["in1(5)"], "")

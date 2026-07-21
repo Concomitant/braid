@@ -836,6 +836,8 @@ isIntLiteral name = not (null name) && all isDigit name
 -- open via the row tail.
 injIndex :: String -> Maybe Int
 injIndex "here"  = Just 1         -- here ≡ in1: start a sum at the front
+injIndex "ok"    = Just 1         -- ok ≡ in1: return of the sum monad
+injIndex "miss"  = Just 2         -- miss ≡ in2: stay on the miss track
 injIndex "again" = Just 1         -- loop protocol: continue with new state
 injIndex "done"  = Just 2         -- loop protocol: exit with this result
 injIndex ('i':'n':ds)
@@ -1261,13 +1263,13 @@ checkModuleWith env0 shadow0 src = do
 preludeSrc :: String
 preludeSrc = unlines
   [ "## invert a router: swap the hit and miss tracks"
-  , "def not = (in2 | in1) >> merge"
+  , "def not = (miss | ok) >> merge"
   , "## negate a quoted router, as a value"
-  , "def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])"
+  , "def negate = (p -> [p ... >> apply >> (miss | ok) >> merge])"
   , "## and on quoted routers: hit iff both hit; q runs only on p's hit"
-  , "def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])"
+  , "def both = (p q -> [p ... >> apply >> (q ... >> apply | miss) >> merge])"
   , "## or on quoted routers: hit if p hits, otherwise q decides"
-  , "def either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])"
+  , "def either = (p q -> [p ... >> apply >> (ok | q ... >> apply) >> merge])"
   , "## compare two wires with eq?, route the first, drop the second"
   , "def equals = eq? >> (_ drop | _ drop)"
   , "## compare two wires with lt?, route the first, drop the second"

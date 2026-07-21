@@ -5,8 +5,8 @@
 def small? = _ 10 >> less
 def big? = small? >> not
 
-def evenAndSmall? = even? >> (small? | in2) >> merge
-def oddOrZero? = odd? >> (in1 | zero?) >> merge
+def evenAndSmall? = even? >> (small? | miss) >> merge
+def oddOrZero? = odd? >> (ok | zero?) >> merge
 
 4 >> evenAndSmall? >> print    # in1(4)
 40 >> evenAndSmall? >> print   # in2(40)

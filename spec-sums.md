@@ -244,7 +244,8 @@ Routers are the Kleisli arrows of the sum monad `(· | E)`, and the
 combinator vocabulary of sections 3–5 turns out to be its structure
 maps in costume:
 
-* **return** = `in1` — injection into the hit track.
+* **return** = `in1`, alias `ok` — injection into the hit track.
+* `in2` has the alias `miss` — stay on the miss track.
 * **fmap f** = `(f | ...)` — a code row is the functor action.
 * **join** = `(... | in2) >> merge` — flatten one nested layer.
 * **Kleisli composition** = the `and` idiom: `p >> (q | in2) >> merge`.
@@ -261,12 +262,12 @@ row/merge semantics already specified. Precedence sits between `|`
 and `>>`, so a Kleisli stage is a whole `>>`-chain:
 
 ```text
-def process = even? >=> _ 100 >> less >=> double >> in1
+def process = even? >=> _ 100 >> less >=> double >> ok
 ```
 
 reads as three stages — test even, test below 100, double-and-succeed
 — with the failure track threaded invisibly past every stage. The
-final `>> in1` is `return`, lifting the pure stage into the monad.
+final `>> ok` is `return`, lifting the pure stage into the monad.
 Short-circuiting is structural: a stage on the miss track never runs.
 
 **Why there is no do-notation.** Haskell's `do` exists to manage
