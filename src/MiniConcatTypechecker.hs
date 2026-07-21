@@ -805,7 +805,9 @@ isIntLiteral name = not (null name) && all isDigit name
 -- The lexical injection family: in1, in2, … — position fixed, width
 -- open via the row tail.
 injIndex :: String -> Maybe Int
-injIndex "here" = Just 1          -- here ≡ in1: start a sum at the front
+injIndex "here"  = Just 1         -- here ≡ in1: start a sum at the front
+injIndex "again" = Just 1         -- loop protocol: continue with new state
+injIndex "done"  = Just 2         -- loop protocol: exit with this result
 injIndex ('i':'n':ds)
   | not (null ds), all isDigit ds, n >= 1 = Just n
   where n = read ds

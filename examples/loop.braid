@@ -1,4 +1,14 @@
-0 5
-[(a n -> n >> zero? >> ((z -> a >> in2) | (m -> (a m >> +) (m 1 >> -) >> in1)) >> merge)] ...
+def decr = (x -> x 1 >> -)
+def sumStep = (a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m >> decr) >> again)) >> merge)
+def sumTo = [sumStep] ... >> loop
+
+0 5 >> sumTo >> print
+
+0 4
+[(a n -> n >> if
+... | [(z -> a >> done)] zero?
+elif
+... | [(m -> (a m >> +) (m >> decr) >> again)] otherwise
+endif)] ...
 loop
 print

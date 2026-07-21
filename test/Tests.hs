@@ -114,6 +114,9 @@ passTests =
   , ("elif",          "(ρ0 | Fn⟨ρ1 ⇒ ρ0⟩ (ρ1 | ρ2)) ⇒ (ρ0 | ρ2)")
   , ("endif",         "(ρ0 | Fn⟨ρ1 ⇒ ρ0⟩ (ρ1 | ())) ⇒ ρ0")
   , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 ⇒ ρ1")
+    -- loop protocol aliases: again ≡ in1 (continue), done ≡ in2 (exit)
+  , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
+  , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [1 ... >> +] otherwise\nendif", "• ⇒ Int")
     -- lists
   , ("list(1, 2, 3)", "• ⇒ List Int")
@@ -224,7 +227,9 @@ evalTests =
   , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [drop >> 0] negative?\nelif\n... | [1 ... >> +] otherwise\nendif\nprint", ["49"], "")
   , ("8 >> if\n... | [dup >> *] odd?\nelif\n... | [drop >> 0] negative?\nelif\n... | [1 ... >> +] otherwise\nendif\nprint", ["9"], "")
     -- loop: Elgot iteration (sum 1..5)
-  , ("0 5 >> [(a n -> n >> zero? >> ((z -> a >> in2) | (m -> (a m >> +) (m 1 >> -) >> in1)) >> merge)] ... >> loop >> print", ["15"], "")
+  , ("def decr = (x -> x 1 >> -)\ndef sumStep = (a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m >> decr) >> again)) >> merge)\n0 5 >> [sumStep] ... >> loop >> print", ["15"], "")
+    -- the guard machine as a loop body
+  , ("0 3 >> [(a n -> n >> if\n... | [(z -> a >> done)] zero?\nelif\n... | [(m -> (a m >> +) (m 1 >> -) >> again)] otherwise\nendif)] ... >> loop >> print", ["6"], "")
   , ("5 3 >> - >> print",                  ["2"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
