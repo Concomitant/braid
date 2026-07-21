@@ -959,6 +959,7 @@ primEnv =
       boolLit  = Forall [] [] [] (Arrow SEnd (one tBool))
   in M.fromList
        [ ("id",    Forall [a]    [] [] (Arrow (one ta) (one ta)))
+       , ("_",     Forall [a]    [] [] (Arrow (one ta) (one ta)))  -- hole: id
        , ("swap",  Forall [a, b] [] []
            (Arrow (SCons ta (one tb)) (SCons tb (one ta))))
        , ("dup",   Forall [a]    [] [] (Arrow (one ta) (SCons ta (one ta))))
@@ -1340,6 +1341,7 @@ builtinArity name =
 runBuiltin :: Env -> RunDefs -> String -> [Value]
            -> Either String ([Value], [String])
 runBuiltin _ _ "id"    [v]              = Right ([v], [])
+runBuiltin _ _ "_"     [v]              = Right ([v], [])
 runBuiltin _ _ "swap"  [x, y]           = Right ([y, x], [])
 runBuiltin _ _ "dup"   [v]              = Right ([v, v], [])
 runBuiltin _ _ "drop"  [_]              = Right ([], [])

@@ -1,5 +1,5 @@
-def lt100? = (x -> x 100 >> lt? >> ((a b -> a) | (a b -> a)))
-def double = 2 ... >> *
+def lt100? = _ 100 >> lt? >> (_ drop | _ drop)
+def double = 2 _ >> *
 def until100 = [lt100? >> (double >> again | done) >> merge] ... >> loop
 
 7 >> until100 >> print

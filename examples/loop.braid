@@ -1,4 +1,4 @@
-def decr = (x -> x 1 >> -)
+def decr = _ 1 >> -
 def sumStep = (a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m >> decr) >> again)) >> merge)
 def sumTo = [sumStep] ... >> loop
 

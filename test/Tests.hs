@@ -26,6 +26,11 @@ passTests =
   , ("dup",           "a0 ⇒ a0 a0")
   , ("drop",          "a0 ⇒ •")
   , ("id",            "a0 ⇒ a0")
+    -- _ is id: the section hole — marks where the incoming wire goes
+  , ("_",             "a0 ⇒ a0")
+  , ("2 _ >> *",      "Int ⇒ Int")
+  , ("_ 2 >> -",      "Int ⇒ Int")
+  , ("_ drop",        "a0 a1 ⇒ a0")
 
     -- sequencing; increment needs the explicit remainder (1 >> + is ill-typed)
   , ("1 ... >> +",    "Int ⇒ Int")
@@ -231,6 +236,8 @@ evalTests =
     -- the guard machine as a loop body
   , ("0 3 >> [(a n -> n >> if\n... | [(z -> a >> done)] zero?\nelif\n... | [(m -> (a m >> +) (m 1 >> -) >> again)] otherwise\nendif)] ... >> loop >> print", ["6"], "")
   , ("5 3 >> - >> print",                  ["2"],  "")
+  , ("7 >> (2 _ >> *) >> print",           ["14"], "")
+  , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
   , ("list(1, 2) >> uncons",               [],     "in2(1, list(2))")
