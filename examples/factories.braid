@@ -1,0 +1,13 @@
+def five? = _ 5 >> eq? >> (_ drop | _ drop)
+
+def equals = (k -> [_ k >> eq? >> (_ drop | _ drop)])
+def lessThan = (k -> [_ k >> lt? >> (_ drop | _ drop)])
+
+def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
+def while = whileFn ... >> loop
+def double = 2 _ >> *
+
+5 >> five? >> print
+7 >> (5 >> equals) ... >> apply >> print
+5 >> (5 >> equals) ... >> apply >> print
+7 >> (100 >> lessThan) [double] ... >> while >> print

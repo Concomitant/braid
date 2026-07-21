@@ -249,6 +249,12 @@ evalTests =
     -- from closures; while = whileFn ... >> loop fuses in the knot
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double] ... >> while >> print", ["112"], "")
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double >> double] ... >> while >> print", ["112"], "")
+    -- user-built predicates: scaffold-test-cleanup, and factories that
+    -- return quoted routers
+  , ("def five? = _ 5 >> eq? >> (_ drop | _ drop)\n5 >> five? >> print", ["in1(5)"], "")
+  , ("def equals = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equals) ... >> apply >> print", ["in2(7)"], "")
+  , ("def equals = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equals) ... >> apply >> print", ["in1(5)"], "")
+  , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef lessThan = (k -> [_ k >> lt? >> (_ drop | _ drop)])\ndef double = 2 _ >> *\n7 >> (100 >> lessThan) [double] ... >> while >> print", ["112"], "")
     -- value-level predicate combinators: negate/both/either on quoted
     -- routers (closures assemble the composed router)
   , ("def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\ndef either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n4 >> ([even?] [small?] >> both) ... >> apply >> print", ["in1(4)"], "")
