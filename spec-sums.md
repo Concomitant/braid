@@ -303,6 +303,28 @@ variables of kind Stack → Stack) is explicitly deferred; the sum
 monad's operations are wiring patterns, and it is not yet clear the
 abstraction pays for its unification machinery.
 
+## 6d. The list monad, derived
+
+With one new primitive (`cons : a List a ⇒ List a` — lists could be
+consumed but never built) the list monad is prelude-level user code:
+
+```text
+def single  = _ list() >> cons                    -- return
+def concat  = [append] list() ... >> fold          -- join
+def flatMap = map >> concat                        -- bind
+def filter  = (p -> [p ... >> apply >>
+                (single | drop >> list()) >> merge]) ... >> flatMap
+```
+
+`filter` is the monad in action: each element maps to a singleton or
+the empty list, and join flattens — order-preserving, no reverse
+tricks. Its type came out more general than asked:
+`filter : Fn⟨a ⇒ (b | c)⟩ List a ⇒ List b` — asymmetric routers
+filter and transform in one pass. `append`/`reverse` are fold/cons
+exercises. Note List is the free monoid: `[append] list() ... >> fold`
+and `[+] 0 ... >> fold` are the same generic reduction applied to two
+Monoid instances — the dictionary is just wires.
+
 ## 7. The two-level pattern
 
 A recurring law of this design: each concept has a **flat spelling**

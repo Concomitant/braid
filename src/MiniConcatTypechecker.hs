@@ -654,6 +654,9 @@ parseListElems toks = do
     (TokRParen : rest') -> Right ([e], rest')
     _ -> Left "Expected ',' or ')' in list literal"
   where
+    elemAtom (TokIdent "list" : TokLParen : rest) = do
+      (elems, rest') <- parseListElems rest
+      Right (ListLit elems, rest')
     elemAtom (TokIdent name : rest) = Right (Prim name, rest)
     elemAtom (TokInt n : rest)      = Right (Prim (show n), rest)
     elemAtom (TokLBrack : rest)     = do
@@ -1022,6 +1025,8 @@ primEnv =
        , ("endif",     endifTy)
        , ("loop",      loopTy)
        , ("uncons",    unconsTy)
+       , ("cons",      Forall [a] [] []
+           (Arrow (SCons ta (one (TList ta))) (one (TList ta))))
        , ("map",       mapTy)
        , ("fold",      foldTy)
        ]
@@ -1280,6 +1285,18 @@ preludeSrc = unlines
   , "def equalsTo = (k -> [_ k >> equals])"
   , "## predicate factory: k >> lessThan is a quoted below-k router"
   , "def lessThan = (k -> [_ k >> less])"
+  , "## reverse a list"
+  , "def reverse = [swap >> cons] list() ... >> fold"
+  , "## append two lists"
+  , "def append = swap >> _ reverse >> [swap >> cons] ... >> fold"
+  , "## flatten one layer: join of the list monad"
+  , "def concat = [append] list() ... >> fold"
+  , "## one-element list: return of the list monad"
+  , "def single = _ list() >> cons"
+  , "## map then flatten: bind of the list monad"
+  , "def flatMap = map >> concat"
+  , "## keep the elements a quoted router hits"
+  , "def filter = (p -> [p ... >> apply >> (single | drop >> list()) >> merge]) ... >> flatMap"
   , "## keep only a router's decision: collapse both payloads to nothing"
   , "def verdict = (forget | forget)"
   , "## assemble a loop body from a quoted predicate and step"
@@ -1537,6 +1554,7 @@ runBuiltin _ _ "zero?" [VInt n]         = Right ([VSum (if n == 0 then 0 else 1)
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
 runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])
+runBuiltin _ _ "cons" [v, VList vs]     = Right ([VList (v : vs)], [])
 runBuiltin _ _ "uncons" [VList []]      = Right ([VSum 0 []], [])
 runBuiltin _ _ "uncons" [VList (v:vs)]  = Right ([VSum 1 [v, VList vs]], [])
 -- elif: fold one guard clause into the (Θ | Σ) state

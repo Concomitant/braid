@@ -160,7 +160,8 @@ Newline is strict `>>`, not implicit `pass`.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,
   `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,
-  `while`, `untilFn`, `until` (see `preludeSrc` in the implementation; all are
+  `while`, `untilFn`, `until`, `reverse`, `append`, `concat`, `single`,
+  `flatMap`, `filter` (see `preludeSrc` in the implementation; all are
   user-level code over the primitive set). A user `def` of a prelude
   name shadows it silently, once; redefining any name twice is still
   an error. `>=>` (see spec-sums §6c) is Kleisli composition for the

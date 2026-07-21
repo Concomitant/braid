@@ -1,0 +1,11 @@
+# The list monad, fully derived in the prelude:
+#   single = return    concat = join    flatMap = bind    filter via bind
+
+list(1, 2, 3, 4) >> [odd?] ... >> filter >> print
+list(1, 2, 3) >> [dup >> _ single >> cons] ... >> flatMap >> print
+list(list(1, 2), list(), list(3)) >> concat >> print
+
+# One generic reduction, two instances of the Monoid theory — the
+# dictionary is just wires: [op] unit.
+list(1, 2, 3, 4) >> [+] 0 ... >> fold >> print
+list(list(1, 2), list(3), list()) >> [append] list() ... >> fold >> print
