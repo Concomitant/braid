@@ -130,6 +130,24 @@ odd? >> (dup >> * | 1 ... >> +) >> merge     -- if odd then square else incremen
 `true`/`false : • ⇒ (• | •)` remain as degenerate routers (decisions
 about nothing). Quoted routers dispatch with plain `apply`.
 
+### Verdicts, when you really want them
+
+Routers keep their payloads because kept data costs one word to drop
+and dropped data is gone. When only the decision matters, `verdict`
+(prelude) collapses any router's payloads generically:
+
+```text
+forget : ∀ρ. ρ ⇒ •                  -- the terminal morphism (primitive)
+def verdict = (forget | forget)      -- (Δ₁ | Δ₂) ⇒ (• | •)
+
+eq? >> verdict : a a ⇒ (• | •)
+```
+
+`forget` is the segment-wide terminal map every cartesian category
+guarantees (`drop` is its single-wire case). Without it, collapsing a
+payload was an arity-indexed family (`drop`, `drop drop`, …) — the
+caseN disease again; with it, one polymorphic def covers all routers.
+
 ## 5. Guards: if / elif / otherwise / endif
 
 Haskell-style guards, with zero new grammar — four primitives named as

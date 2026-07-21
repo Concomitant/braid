@@ -997,6 +997,8 @@ primEnv =
        , ("dup",   Forall [a]    [] [] (Arrow (one ta) (SCons ta (one ta))))
        , ("drop",  Forall [a]    [] [] (Arrow (one ta) SEnd))
        , ("pass",  Forall []     [rho] [] (Arrow (STail rho) (STail rho)))
+         -- the terminal morphism: forget the whole segment
+       , ("forget", Forall []    [rho] [] (Arrow (STail rho) SEnd))
        , ("f",     unaryTy)
        , ("g",     unaryTy)
        , ("+",     binIntTy)
@@ -1278,6 +1280,8 @@ preludeSrc = unlines
   , "def equalsTo = (k -> [_ k >> equals])"
   , "## predicate factory: k >> lessThan is a quoted below-k router"
   , "def lessThan = (k -> [_ k >> less])"
+  , "## keep only a router's decision: collapse both payloads to nothing"
+  , "def verdict = (forget | forget)"
   , "## assemble a loop body from a quoted predicate and step"
   , "def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
@@ -1388,6 +1392,12 @@ evalTerm env defs vars term st =
               Left "Runtime type error in apply: expected a quotation"
     -- if / otherwise: segment-consuming entries into the guard machine
     -- (positional semantics like apply: whole stack in final position).
+    -- forget: the terminal morphism — consume the segment, emit nothing
+    applyAtom isFinal (Prim "forget") stk
+      | not (M.member "forget" vars), not (M.member "forget" defs) =
+          if isFinal
+            then Right ([], [], [])
+            else Right ([], stk, [])
     applyAtom isFinal (Prim "if") stk
       | not (M.member "if" vars), not (M.member "if" defs) =
           if isFinal

@@ -159,8 +159,8 @@ Newline is strict `>>`, not implicit `pass`.
   `>>` — documentation as a Writer-style annotation on morphisms.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,
-  `equals`, `less`, `equalsTo`, `lessThan`, `whileFn`, `while`,
-  `untilFn`, `until` (see `preludeSrc` in the implementation; all are
+  `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,
+  `while`, `untilFn`, `until` (see `preludeSrc` in the implementation; all are
   user-level code over the primitive set). A user `def` of a prelude
   name shadows it silently, once; redefining any name twice is still
   an error. `>=>` (see spec-sums §6c) is Kleisli composition for the

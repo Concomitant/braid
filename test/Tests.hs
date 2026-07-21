@@ -113,6 +113,7 @@ passTests =
   , ("lt?",           "Int Int ⇒ (Int Int | Int Int)")
   , ("-",             "Int Int ⇒ Int")
   , ("uncons",        "List a0 ⇒ (• | a0 List a0)")
+  , ("forget",        "ρ0 ⇒ •")
     -- the guard machine
   , ("if",            "ρ0 ⇒ (ρ1 | ρ0)")
   , ("otherwise",     "ρ0 ⇒ (ρ0 | ())")
@@ -271,6 +272,12 @@ evalTests =
     -- ok/miss aliases: return and stay-missed of the sum monad
   , ("def double2 = 2 _ >> *\ndef process = even? >=> _ 100 >> less >=> double2 >> ok\n4 >> process >> print", ["in1(8)"], "")
   , ("7 >> odd? >> (ok | zero?) >> merge >> print", ["in1(7)"], "")
+    -- forget (terminal morphism) and verdict: routers to pure decisions
+  , ("1 2 3 >> forget", [], "")
+  , ("5 >> odd? >> verdict >> print", ["in1()"], "")
+  , ("4 >> odd? >> verdict >> print", ["in2()"], "")
+  , ("3 4 >> eq? >> verdict >> print", ["in2()"], "")
+  , ("4 4 >> eq? >> verdict >> print", ["in1()"], "")
     -- multi-line kleisli: newline absorption around >=> (either side)
   , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
   , ("0 >> (even? >=>\nzero?) >> print", ["in1(0)"], "")
