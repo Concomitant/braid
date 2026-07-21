@@ -1,0 +1,9 @@
+# A law is a program; a presentation is an enumerator. Here we check
+# the law  succ ; double = double ; succ ; succ  on successor-generated
+# samples: map both sides over the samples, compare wholesale.
+
+def samples = list(0, 1, 2, 3, 4, 5)
+def lhs = [f >> g] ... >> map
+def rhs = [g >> f >> f] ... >> map
+
+samples >> lhs >> _ (samples >> rhs) >> eq? >> verdict >> print   # in1() = law holds

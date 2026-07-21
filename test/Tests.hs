@@ -290,6 +290,9 @@ evalTests =
     -- one generic reduction, two Monoid instances (dictionaries as wires)
   , ("list(1, 2, 3, 4) >> [+] 0 ... >> fold >> print", ["10"], "")
   , ("list(list(1, 2), list(3), list()) >> [append] list() ... >> fold >> print", ["list(1, 2, 3)"], "")
+    -- laws as programs, presentations as enumerators
+  , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f >> f] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
     -- multi-line kleisli: newline absorption around >=> (either side)
   , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
   , ("0 >> (even? >=>\nzero?) >> print", ["in1(0)"], "")
