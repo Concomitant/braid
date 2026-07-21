@@ -175,6 +175,8 @@ moduleTypeTests =
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
     -- one def used at two different types = let-polymorphism
   , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ (• | •)")
+    -- recursive defs (monomorphic self-reference)
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge\nfib", "Int ⇒ Int")
   ]
 
 -- (module source, expected print log, expected final stack rendering)
@@ -237,6 +239,10 @@ evalTests =
   , ("0 3 >> [(a n -> n >> if\n... | [(z -> a >> done)] zero?\nelif\n... | [(m -> (a m >> +) (m 1 >> -) >> again)] otherwise\nendif)] ... >> loop >> print", ["6"], "")
   , ("5 3 >> - >> print",                  ["2"],  "")
   , ("7 >> (2 _ >> *) >> print",           ["14"], "")
+    -- recursion: tail recursion replaces the loop harness; tree recursion is new
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = lt100? >> (double >> until100 | _) >> merge\n7 >> until100 >> print", ["112"], "")
+  , ("def decr = _ 1 >> -\ndef sumTo = (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)\n0 5 >> sumTo >> print", ["15"], "")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")
   , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")

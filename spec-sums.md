@@ -204,6 +204,40 @@ loop        -- ⇒ 15
 that always continues diverges. (It is Elgot iteration; the traced/fix
 story from the earlier spec remains derivable later.)
 
+## 6b. Recursion
+
+Definitions may reference themselves, typed by **monomorphic recursive
+binding** (the name is bound at a fresh monomorphic arrow while its body
+is inferred; the recursive uses share it; two constraints tie the knot;
+generalization happens after — polymorphic recursion is not offered).
+Runtime recursion is guarded by the delay law for free: a self-call
+inside a row component runs only when that track is chosen.
+
+Tail recursion makes the loop harness disappear — the self-call is
+`again`, falling through is `done`:
+
+```text
+def until100 = lt100? >> (double >> until100 | _) >> merge
+```
+
+and tree recursion becomes writable at all:
+
+```text
+def fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge
+```
+
+Placement rule: like segment-consuming primitives, a recursive call's
+enclosing group must sit in **final position** in its stage — its output
+width is unknown until the knot ties, and non-final operands are closed
+at elaboration time.  (`… >> fib >> _ (… >> fib) >> +` — the second
+call's group is final; the first call's result rides the `_`.)
+
+The trade that keeps both forms: `loop` is constant-space by
+construction (Elgot iteration is the tail-call-optimized closed form);
+general recursion consumes stack. Sections with `_` (the hole, a
+synonym for `id`) make the constant-operand predicates point-free:
+`def lt100? = _ 100 >> lt? >> (_ drop | _ drop)`.
+
 ## 7. The two-level pattern
 
 A recurring law of this design: each concept has a **flat spelling**

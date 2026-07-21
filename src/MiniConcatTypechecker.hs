@@ -1018,6 +1018,34 @@ inferTermIn env term =
       s <- solve cs
       pure (apply s arr)
 
+-- Infer a definition body, allowing MONOMORPHIC self-reference: the
+-- name is bound at a fresh monomorphic arrow while inferring, the
+-- recursive uses share its metavariables (like abstraction parameters),
+-- and two constraints tie the knot.  Generalization happens afterwards
+-- in the caller.  (Polymorphic recursion is undecidable — not offered.)
+inferDefTermIn :: String -> Env -> Term -> Either String Arrow
+inferDefTermIn name env term
+  | name `notElem` primsIn term = inferTermIn env term
+  | otherwise =
+      case nub [ n | n <- primsIn term
+                   , n /= name
+                   , not (isIntLiteral n)
+                   , not (M.member n env)
+                   , Nothing <- [injIndex n] ] of
+        (n : _) -> Left $ "Unknown primitive: " ++ n
+        [] -> do
+          let (arr, cs) = runInfer0 $ do
+                fi <- freshSVarName
+                fo <- freshSVarName
+                let mono = Forall [] [] []
+                             (Arrow (STail fi) (STail fo))
+                (a@(Arrow bi bo), cs') <-
+                  infer (M.insert name mono env) term
+                pure (a, cs' ++ [ CEqStack bi (STail fi)
+                                , CEqStack bo (STail fo) ])
+          s <- solve cs
+          pure (apply s arr)
+
 inferProgram :: String -> Either String Arrow
 inferProgram src = do
   term <- parseProgram src
@@ -1139,7 +1167,7 @@ checkModuleWith env0 src = do
         then Left $ "Duplicate definition: " ++ name
         else Right ()
       term <- parseProgram bodySrc
-      arr  <- inferTermIn env term
+      arr  <- inferDefTermIn name env term
       let sc = generalize env arr
       pure (M.insert name sc env, (name, sc, term) : acc)
 
