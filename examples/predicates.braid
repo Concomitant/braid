@@ -1,0 +1,18 @@
+def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])
+def while = whileFn ... >> loop
+
+def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])
+def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])
+def either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])
+
+def until = (p f -> (p >> negate) f) ... >> while
+
+def small? = _ 10 >> lt? >> (_ drop | _ drop)
+def big? = _ 100 >> lt? >> (_ drop | _ drop) >> (in2 | in1) >> merge
+def double = 2 _ >> *
+
+4 >> ([even?] [small?] >> both) ... >> apply >> print
+40 >> ([even?] [small?] >> both) ... >> apply >> print
+3 >> ([even?] [small?] >> either) ... >> apply >> print
+9 >> ([even?] [small?] >> both >> negate) ... >> apply >> print
+7 >> [big?] [double] ... >> until >> print
