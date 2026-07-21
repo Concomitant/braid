@@ -197,6 +197,9 @@ evalTests =
   , ("[1 2 >> +] >> apply >> print",       ["3"],  "")
   , ("[pass]",                             [],     "[fn]")
   , ("def sq = [dup >> *]\nsq 5 >> apply", [],     "25")
+    -- tails-only closing: a non-final def keeps its element-internal
+    -- polymorphism (q's quoted pass applies to whatever follows)
+  , ("def q = [pass]\nq 1 >> apply",        [],     "1")
 
   , ("5 >> negative?",                     [],     "in2(5)")
 
@@ -242,6 +245,9 @@ evalTests =
     -- multi-line def bodies + recurse (anonymous self-reference)
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 =\n  lt100?\n  double >> recurse | _\n  merge\n7 >> until100 >> print", ["112"], "")
   , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib =\n  lt2?\n  _ | (n -> n >> decr >> recurse >> _ (n 2 >> - >> recurse) >> +)\n  merge\n10 >> fib >> print", ["55"], "")
+    -- while, DERIVED in-language: closures assemble the loop body
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef while = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\n7 >> [lt100?] [double] ... >> while ... >> loop >> print", ["112"], "")
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef while = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\n7 >> [lt100?] [double >> double] ... >> while ... >> loop >> print", ["112"], "")
     -- recursion: tail recursion replaces the loop harness; tree recursion is new
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = lt100? >> (double >> until100 | _) >> merge\n7 >> until100 >> print", ["112"], "")
   , ("def decr = _ 1 >> -\ndef sumTo = (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)\n0 5 >> sumTo >> print", ["15"], "")
@@ -273,9 +279,6 @@ moduleFailTests =
   [ ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
-    -- a def's quote closed non-finally (Fn⟨•⇒•⟩) meeting an Int wire:
-    -- the once-unreachable closed-stack mismatch, now real
-  , ("def q = [pass]\nq 1 >> apply",              "Cannot unify stacks")
   ]
 
 runPass :: (String, String) -> Maybe String

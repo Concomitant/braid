@@ -368,16 +368,24 @@ instantiate (Forall tvars svars rvars arr) = do
       rSub = M.fromList (zip rvars (map RTail newRVs))
   pure (substOnce (Subst tSub sSub rSub) arr)
 
--- Instantiate a scheme *closed*: bound stack variables become the empty
--- stack (ρ := •) and bound row variables the empty row (σ := ∅).  Used
--- for every non-final atom of a tensor chain, per the remainder
--- discipline.
+-- Instantiate a scheme *closed* for a non-final tensor atom: only the
+-- OUTER TAILS of the arrow are closed (ρ := •) — that is all appendStack
+-- needs.  Variables living purely inside element types (Fn⟨…⟩, sums)
+-- are freshened like any instantiation: they are the atom's
+-- polymorphism, not a remainder.  (Matches the grouped-compound closing
+-- policy.)
 instantiateClosed :: Scheme -> Infer Arrow
-instantiateClosed (Forall tvars svars rvars arr) = do
+instantiateClosed (Forall tvars svars rvars arr@(Arrow i o)) = do
   newTVs <- mapM (const freshTyVarName) tvars
+  let tailVs = [ v | Just v <- [tailVar i, tailVar o] ]
+  newSVs <- mapM (\v -> if v `elem` tailVs
+                          then pure Nothing
+                          else Just <$> freshSVarName) svars
+  newRVs <- mapM (const freshRVarName) rvars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
-      sSub = M.fromList (zip svars (repeat SEnd))
-      rSub = M.fromList (zip rvars (repeat RNil))
+      sSub = M.fromList [ (v, maybe SEnd STail mn)
+                        | (v, mn) <- zip svars newSVs ]
+      rSub = M.fromList (zip rvars (map RTail newRVs))
   pure (substOnce (Subst tSub sSub rSub) arr)
 
 --------------------------------------------------------------------------------
