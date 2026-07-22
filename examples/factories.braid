@@ -1,11 +1,11 @@
 # Building predicates. Sections over the cleanup-baked routers for
 # literal comparands; factories for computed ones. All prelude.
 
-def five? = _ 5 >> equals
+def five? = _ 5 >> equals?
 def double = 2 _ >> *
 
 5 >> five? >> print                                           # in1(5)
-5 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print   # in1(5)
-6 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print   # in2(6)
-7 >> [_ 100 >> less] [double] ... >> while >> print           # 112
+5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print   # in1(5)
+6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print   # in2(6)
+7 >> [_ 100 >> less?] [double] ... >> while >> print           # 112
 7 >> (100 >> lessThan) [double] ... >> while >> print         # 112

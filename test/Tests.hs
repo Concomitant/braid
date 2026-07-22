@@ -182,6 +182,11 @@ moduleTypeTests =
   , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
   , ("type YN = Bool\ntrue",                    "• ⇒ YN")
+    -- two-tier control flow: p? routes and keeps, bare p forgets to Bool
+  , ("equals",                                  "a0 a0 ⇒ Bool")
+  , ("less",                                    "Int Int ⇒ Bool")
+  , ("odd",                                     "Int ⇒ Bool")
+  , ("equals?",                                 "a0 a0 ⇒ (a0 | a0)")
   , ("list(1, 2, 3)",                           "• ⇒ List(Int)")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
@@ -266,21 +271,21 @@ evalTests =
   , ("## doc for sq2\ndef sq2 = dup >> *\n3 >> sq2 >> print", ["9"], "")
   , ("type MInt = (• | Int)\n5 >> print",        ["5"], "")
     -- prelude defs available with no local definition
-  , ("5 >> _ 5 >> equals >> print",             ["in1(5)"], "")
-  , ("def double = 2 _ >> *\n7 >> [_ 100 >> less] [double] ... >> while >> print", ["112"], "")
-  , ("7 >> [_ 100 >> less >> not] [dup >> +] ... >> until >> print", ["112"], "")
+  , ("5 >> _ 5 >> equals? >> print",             ["in1(5)"], "")
+  , ("def double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
+  , ("7 >> [_ 100 >> less? >> not] [dup >> +] ... >> until >> print", ["112"], "")
     -- user defs shadow prelude defs
   , ("def while = drop\n1 2 >> while ... >> print", ["2"], "")
     -- >=>: short-circuiting Kleisli chains; in1 lifts pure stages
   , ("4 >> (even? >=> zero?) >> print",         ["in2(4)"], "")
   , ("0 >> (even? >=> zero?) >> print",         ["in1(0)"], "")
   , ("7 >> (even? >=> zero?) >> print",         ["in2(7)"], "")
-  , ("def double = 2 _ >> *\n4 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in1(8)"], "")
-  , ("def double = 2 _ >> *\n120 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in2(120)"], "")
-  , ("def double = 2 _ >> *\n7 >> (even? >=> _ 100 >> less >=> double >> in1) >> print", ["in2(7)"], "")
-  , ("5 >> (_ 5 >> equals >=> odd?) >> print",  ["in1(5)"], "")
+  , ("def double = 2 _ >> *\n4 >> (even? >=> _ 100 >> less? >=> double >> in1) >> print", ["in1(8)"], "")
+  , ("def double = 2 _ >> *\n120 >> (even? >=> _ 100 >> less? >=> double >> in1) >> print", ["in2(120)"], "")
+  , ("def double = 2 _ >> *\n7 >> (even? >=> _ 100 >> less? >=> double >> in1) >> print", ["in2(7)"], "")
+  , ("5 >> (_ 5 >> equals? >=> odd?) >> print",  ["in1(5)"], "")
     -- ok/miss aliases: return and stay-missed of the sum monad
-  , ("def double2 = 2 _ >> *\ndef process = even? >=> _ 100 >> less >=> double2 >> ok\n4 >> process >> print", ["in1(8)"], "")
+  , ("def double2 = 2 _ >> *\ndef process = even? >=> _ 100 >> less? >=> double2 >> ok\n4 >> process >> print", ["in1(8)"], "")
   , ("7 >> odd? >> (ok | zero?) >> merge >> print", ["in1(7)"], "")
     -- forget (terminal morphism) and verdict: routers to pure decisions
   , ("1 2 3 >> forget", [], "")
@@ -288,6 +293,13 @@ evalTests =
   , ("4 >> odd? >> verdict >> print", ["in2()"], "")
   , ("3 4 >> eq? >> verdict >> print", ["in2()"], "")
   , ("4 4 >> eq? >> verdict >> print", ["in1()"], "")
+  , ("3 3 >> equals >> print",  ["in1()"], "")
+  , ("5 3 >> less >> print",    ["in2()"], "")
+  , ("3 5 >> less >> print",    ["in1()"], "")
+  , ("7 >> odd >> print",       ["in1()"], "")
+    -- a Bool drives a choice through an ordinary row
+  , ("7 >> odd >> (1 | 0) >> merge >> print", ["1"], "")
+  , ("8 >> odd >> (1 | 0) >> merge >> print", ["0"], "")
     -- the list monad, all derived in the prelude:
     -- single = return, concat = join, flatMap = bind, filter via bind
   , ("list(1, 2, 3) >> reverse >> print", ["list(3, 2, 1)"], "")
@@ -306,19 +318,19 @@ evalTests =
   , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f >> f] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
   , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
     -- multi-line kleisli: newline absorption around >=> (either side)
-  , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
+  , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less?\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
   , ("0 >> (even? >=>\nzero?) >> print", ["in1(0)"], "")
     -- cleanup-baked comparison routers and quoted sections: predicates
     -- built inline, no lambda, no factory
-  , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals >> print", ["in1(5)"], "")
-  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n5 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print", ["in1(5)"], "")
-  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n6 >> ([_ 5 >> equals] [odd?] >> both) ... >> apply >> print", ["in2(6)"], "")
-  , ("def less = lt? >> (_ drop | _ drop)\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef double = 2 _ >> *\n7 >> [_ 100 >> less] [double] ... >> while >> print", ["112"], "")
+  , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals? >> print", ["in1(5)"], "")
+  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in1(5)"], "")
+  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in2(6)"], "")
+  , ("def less = lt? >> (_ drop | _ drop)\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
     -- user-built predicates: scaffold-test-cleanup, and factories that
     -- return quoted routers
   , ("def five? = _ 5 >> eq? >> (_ drop | _ drop)\n5 >> five? >> print", ["in1(5)"], "")
-  , ("def equals = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equals) ... >> apply >> print", ["in2(7)"], "")
-  , ("def equals = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equals) ... >> apply >> print", ["in1(5)"], "")
+  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equalsK) ... >> apply >> print", ["in2(7)"], "")
+  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equalsK) ... >> apply >> print", ["in1(5)"], "")
   , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef lessThan = (k -> [_ k >> lt? >> (_ drop | _ drop)])\ndef double = 2 _ >> *\n7 >> (100 >> lessThan) [double] ... >> while >> print", ["112"], "")
     -- value-level predicate combinators: negate/both/either on quoted
     -- routers (closures assemble the composed router)

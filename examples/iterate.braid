@@ -1,8 +1,8 @@
 # The while combinator, from the prelude: predicate and step arrive as
-# quoted routers; the section [_ 100 >> less] is the predicate inline.
+# quoted routers; the section [_ 100 >> less?] is the predicate inline.
 
 def double = 2 _ >> *
 
-7 >> [_ 100 >> less] [double] ... >> while >> print             # 112
-100 >> [_ 100 >> less] [double] ... >> while >> print           # 100
-7 >> [_ 100 >> less] [double >> double] ... >> while >> print   # 112
+7 >> [_ 100 >> less?] [double] ... >> while >> print             # 112
+100 >> [_ 100 >> less?] [double] ... >> while >> print           # 100
+7 >> [_ 100 >> less?] [double >> double] ... >> while >> print   # 112

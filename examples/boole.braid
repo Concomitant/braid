@@ -2,7 +2,7 @@
 #   and: consult q only on hit     or: stay hit, consult q on miss
 #   not: swap the tracks (prelude)
 
-def small? = _ 10 >> less
+def small? = _ 10 >> less?
 def big? = small? >> not
 
 def evenAndSmall? = even? >> (small? | miss) >> merge

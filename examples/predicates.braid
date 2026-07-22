@@ -2,8 +2,8 @@
 # either compose quoted routers; until is while of the negated
 # predicate.
 
-def small? = _ 10 >> less
-def big? = _ 100 >> less >> not
+def small? = _ 10 >> less?
+def big? = _ 100 >> less? >> not
 def double = 2 _ >> *
 
 4 >> ([even?] [small?] >> both) ... >> apply >> print             # in1(4)

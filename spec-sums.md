@@ -132,6 +132,12 @@ about nothing). Quoted routers dispatch with plain `apply`.
 
 ### Verdicts, when you really want them
 
+The naming convention makes the choice one character: **`p?` routes
+and keeps** (`eq?`, `less?`, `odd?` — data flows on), **bare `p`
+forgets and answers `Bool`** (`equals`, `less`, `odd` — implicitly
+`>> verdict`). A Bool then drives a choice through an ordinary row:
+`odd >> (1 | 0) >> merge`.
+
 Routers keep their payloads because kept data costs one word to drop
 and dropped data is gone. When only the decision matters, `verdict`
 (prelude) collapses any router's payloads generically:

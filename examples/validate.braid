@@ -6,7 +6,7 @@ def double = 2 _ >> *   # not in the prelude
 ## even, under 100, then doubled and declared ok
 def process =
     even?
-    >=> _ 100 >> less
+    >=> _ 100 >> less?
     >=> double >> ok
 
 4 >> process >> print     # in1(8)

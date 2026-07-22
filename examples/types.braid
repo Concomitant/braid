@@ -7,7 +7,7 @@
 ## a score routes as passing or failing
 type Score = (Int | Int)
 
-def passing? = _ 60 >> less >> not
+def passing? = _ 60 >> less? >> not
 
 75 >> passing? >> verdict >> print   # in1()
 40 >> passing? >> verdict >> print   # in2()
