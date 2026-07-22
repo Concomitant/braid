@@ -331,6 +331,16 @@ exercises. Note List is the free monoid: `[append] list() ... >> fold`
 and `[+] 0 ... >> fold` are the same generic reduction applied to two
 Monoid instances — the dictionary is just wires.
 
+## 6e. User data types are initial models
+
+`type Nat = (• | Nat)` and friends close the categorical loop: a
+recursive declaration is the initial algebra of a row functor, the
+`Name`/`Name?` coercions are the algebra isomorphism, and `Name?` is a
+router — data-type elimination IS the control-flow machinery of this
+chapter. Folds need no new primitive: they are `recurse`-style
+definitions through `Name?`, and the guard/row vocabulary applies to
+user data unchanged.
+
 ## 7. The two-level pattern
 
 A recurring law of this design: each concept has a **flat spelling**

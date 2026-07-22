@@ -170,6 +170,20 @@ Newline is strict `>>`, not implicit `pass`.
   folds EVERY matching sum's display. REPL: `:t` folds, `:t!` shows raw
   structure, `:defs` lists aliases. Stage 2 (recursive `type`, μ of a
   row) and stage 3 (theories/instances) build on this syntax.
+* **Recursive type declarations** (stage 2 of named types): a `type`
+  whose RHS mentions its own name is a NOMINAL data type, not a
+  transparent alias — `type Nat = (• | Nat)`,
+  `type Tree(a) = (a | Tree(a) Tree(a))`. Iso-recursive: the declared
+  name in term position rolls (`in2 >> Tree` builds a node) and
+  `Name?` unrolls — a destructuring router in the `uncons` tradition
+  (decision by routing, data intact; the pair is a lossless iso and
+  both directions are runtime no-ops). `Tree(a)` unifies only with
+  `Tree(b)` argwise, never with its unfolding. Later declarations may
+  reference earlier data types; mutual recursion between declarations
+  is not yet supported. Folds are not generated — they are written
+  with ordinary recursion through `Name?` (see examples/nat.braid,
+  examples/tree.braid). Built-in List migration to a declared type is
+  deferred.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,
   `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,

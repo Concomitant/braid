@@ -50,6 +50,7 @@ data Ty
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
   | TList Ty           -- List A: homogeneous list
   | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
+  | TData String [Ty]  -- a declared recursive (nominal) type: Name(args)
   deriving (Eq, Ord)
 
 -- A sum's alternatives: a row of stacks with an optional row-variable
@@ -74,6 +75,9 @@ instance Show Ty where
   show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
   show (TList t)   = "List(" ++ show t ++ ")"
   show (TSum row)  = "(" ++ show row ++ ")"
+  show (TData n []) = n
+  show (TData n as) =
+    n ++ "(" ++ intercalate ", " (map show as) ++ ")"
 
 -- Stack types: front (leftmost) wire first, optional tail variable at the end
 data SType
@@ -145,6 +149,7 @@ instance Substitutable Ty where
   apply _ TInt        = TInt
   apply s (TFn arr) = TFn (apply s arr)
   apply s (TList t)   = TList (apply s t)
+  apply s (TData n as) = TData n (map (apply s) as)
   apply s (TSum row)  = TSum (apply s row)
 
 instance Substitutable SType where
@@ -198,6 +203,7 @@ varsOfTy TInt        = ([], [], [])
 varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TList t)   = varsOfTy t
 varsOfTy (TSum row)  = varsOfRow row
+varsOfTy (TData _ as) = foldr (catVars . varsOfTy) ([], [], []) as
 
 varsOfStack :: SType -> Vars
 varsOfStack SEnd           = ([], [], [])
@@ -242,6 +248,9 @@ unifyTy s t1 t2 =
       unifyStack s' o1 o2
     (TList a1, TList a2) -> unifyTy s a1 a2
     (TSum r1, TSum r2)   -> unifyRow s r1 r2
+    (TData n1 as1, TData n2 as2)
+      | n1 == n2 && length as1 == length as2 ->
+          foldM (\acc (x, y) -> unifyTy acc x y) s (zip as1 as2)
     _             -> Left $ "Cannot unify types: " ++ show t1' ++ " vs " ++ show t2'
 
 bindTyVar :: Subst -> TVar -> Ty -> Either String Subst
@@ -345,6 +354,7 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goT (TFn arr)  = TFn (substOnce s arr)
     goT (TList t)    = TList (goT t)
     goT (TSum row)   = TSum (goR row)
+    goT (TData n as) = TData n (map goT as)
     goT t            = t
 
     goR RNil = RNil
@@ -683,6 +693,46 @@ data Alias = Alias
   , aBody   :: Ty
   } deriving (Eq, Show)
 
+-- A recursive `type` declaration: a NOMINAL data type.  Name(args)
+-- unifies only with itself (argwise), never with its unfolding; the
+-- generated coercions `Name` (roll) and `Name?` (unroll) are the only
+-- doors, and both are runtime no-ops.
+data DataDecl = DataDecl
+  { dName   :: String
+  , dParams :: [TVar]
+  , dBody   :: Ty
+  } deriving (Eq, Show)
+
+dataSig :: DataDecl -> (String, Int)
+dataSig d = (dName d, length (dParams d))
+
+-- The schemes and runtime entries a data declaration contributes:
+--   Name  : ∀params. body ⇒ Name(params)      (roll)
+--   Name? : ∀params. Name(params) ⇒ body      (unroll)
+dataDeclArtifacts :: DataDecl
+                  -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
+dataDeclArtifacts d =
+  ( [ (dName d,         Forall ps [] [] (Arrow bodyStack namedStack))
+    , (dName d ++ "?",  Forall ps [] [] (Arrow namedStack bodyStack)) ]
+  , [ (dName d,        (1, False, Prim "id"))
+    , (dName d ++ "?", (1, False, Prim "id")) ] )
+  where
+    ps         = dParams d
+    bodyStack  = SCons (dBody d) SEnd
+    namedStack = SCons (TData (dName d) (map TVarTy ps)) SEnd
+
+occursData :: String -> Ty -> Bool
+occursData n = goT
+  where
+    goT (TData m as) = m == n || any goT as
+    goT (TList t)    = goT t
+    goT (TSum r)     = goR r
+    goT _            = False
+    goR (RCons st r) = goS st || goR r
+    goR _            = False
+    goS (SCons t st) = goT t || goS st
+    goS _            = False
+
 lookupAlias :: String -> [Alias] -> Maybe Alias
 lookupAlias n = go
   where
@@ -690,18 +740,25 @@ lookupAlias n = go
     go (al : rest) | aName al == n = Just al
                    | otherwise     = go rest
 
--- Parse a whole `type …` declaration line (aliases in scope are needed
--- to expand references in the RHS).
-parseTypeLine :: [Alias] -> String -> Either String Alias
-parseTypeLine aliases line =
+-- Parse a whole `type …` declaration line (aliases and data types in
+-- scope are needed to resolve references in the RHS; the declared name
+-- itself is in scope for self-reference, which makes the declaration a
+-- nominal data type rather than a transparent alias).
+parseTypeLine :: [Alias] -> [(String, Int)] -> String
+              -> Either String (Either Alias DataDecl)
+parseTypeLine aliases dataSigs line =
   case break (== '=') line of
     (lhs, '=' : rhs) -> do
       (name, params) <- parseHead lhs
-      body <- parseTyBody aliases params rhs
+      let sigs = (name, length params) : dataSigs
+      body <- parseTyBody aliases sigs params rhs
       if all (`occursIn` body) params
-        then Right (Alias name params body)
+        then Right ()
         else Left $ "Type alias " ++ name
                  ++ ": every parameter must occur in the body"
+      pure $ if occursData name body
+               then Right (DataDecl name params body)
+               else Left  (Alias name params body)
     _ -> Left $ "Malformed type declaration (missing '='): " ++ line
   where
     parseHead lhs = do
@@ -720,6 +777,7 @@ parseTypeLine aliases line =
     tyParamsIn (TVarTy v) = [v]
     tyParamsIn (TList t)  = tyParamsIn t
     tyParamsIn (TSum r)   = rowParams r
+    tyParamsIn (TData _ as) = concatMap tyParamsIn as
     tyParamsIn _          = []
     rowParams RNil          = []
     rowParams (RTail _)     = []
@@ -729,33 +787,43 @@ parseTypeLine aliases line =
     stackParams (SCons t s) = tyParamsIn t ++ stackParams s
 
 -- Parse a full RHS: one element-type expression, nothing left over.
-parseTyBody :: [Alias] -> [TVar] -> String -> Either String Ty
-parseTyBody aliases params src = do
+parseTyBody :: [Alias] -> [(String, Int)] -> [TVar] -> String
+            -> Either String Ty
+parseTyBody aliases dataSigs params src = do
   toks <- normalizeToks <$> tokenize src
-  (t, rest) <- parseTyElem aliases params toks
+  (t, rest) <- parseTyElem aliases dataSigs params toks
   case rest of
     [] -> Right t
     _  -> Left $ "Unexpected tokens after type expression: " ++ show rest
 
-parseTyElem :: [Alias] -> [TVar] -> [Token]
+parseTyElem :: [Alias] -> [(String, Int)] -> [TVar] -> [Token]
             -> Either String (Ty, [Token])
-parseTyElem aliases params toks = case toks of
+parseTyElem aliases dataSigs params toks = case toks of
   (TokLParen : rest) -> do
     (alts, rest') <- goAlts rest
     pure (TSum (foldr RCons RNil alts), rest')
   (TokIdent "List" : TokLParen : rest) -> do
-    (t, rest') <- parseTyElem aliases params rest
+    (t, rest') <- parseTyElem aliases dataSigs params rest
     case rest' of
       (TokRParen : rest'') -> pure (TList t, rest'')
       _ -> Left "Expected ')' after List argument"
   (TokIdent "Int" : rest) -> pure (TInt, rest)
   (TokIdent name : TokLParen : rest)
+    | Just arity <- lookup name dataSigs -> do
+        (args, rest') <- goArgs rest
+        if length args == arity
+          then pure (TData name args, rest')
+          else Left $ "Type " ++ name ++ " expects "
+                   ++ show arity ++ " argument(s)"
     | Just al <- lookupAlias name aliases -> do
         (args, rest') <- goArgs rest
         body <- applyAlias al args
         pure (body, rest')
   (TokIdent name : rest)
     | TV name `elem` params -> pure (TVarTy (TV name), rest)
+    | Just 0 <- lookup name dataSigs -> pure (TData name [], rest)
+    | Just _ <- lookup name dataSigs ->
+        Left $ "Type " ++ name ++ " expects arguments"
     | Just al <- lookupAlias name aliases ->
         if null (aParams al)
           then pure (aBody al, rest)
@@ -775,7 +843,7 @@ parseTyElem aliases params toks = case toks of
     -- a stack: • or a run of element types
     goStack (TokIdent "•" : rest) = pure (SEnd, rest)
     goStack ts = do
-      (t, rest) <- parseTyElem aliases params ts
+      (t, rest) <- parseTyElem aliases dataSigs params ts
       case rest of
         (TokBar : _)    -> pure (SCons t SEnd, rest)
         (TokRParen : _) -> pure (SCons t SEnd, rest)
@@ -786,7 +854,7 @@ parseTyElem aliases params toks = case toks of
           pure (SCons t s, rest')
     -- alias arguments: elem (, elem)* )
     goArgs ts = do
-      (t, rest) <- parseTyElem aliases params ts
+      (t, rest) <- parseTyElem aliases dataSigs params ts
       case rest of
         (TokComma : rest')  -> do
           (args, rest'') <- goArgs rest'
@@ -810,6 +878,7 @@ substTyVars m = goT
     goT (TFn arr)    = TFn arr
     goT (TList t)    = TList (goT t)
     goT (TSum r)     = TSum (goR r)
+    goT (TData n as) = TData n (map goT as)
     goR RNil         = RNil
     goR t@(RTail _)  = t
     goR (RCons s r)  = RCons (goS s) (goR r)
@@ -833,6 +902,9 @@ matchAlias al t = do
     goT TInt TInt m = Just m
     goT (TList b) (TList x) m = goT b x m
     goT (TSum rb) (TSum rx) m = goR rb rx m
+    goT (TData nb bs) (TData nx xs) m
+      | nb == nx && length bs == length xs =
+          foldM (\acc (b, x) -> goT b x acc) m (zip bs xs)
     goT _ _ _ = Nothing
     goR RNil RNil m = Just m
     goR (RCons sb rb) (RCons sx rx) m = goS sb sx m >>= goR rb rx
@@ -868,6 +940,9 @@ showTyA as t =
       TFn arr   -> "Fn⟨" ++ showArrowA as arr ++ "⟩"
       TList u   -> "List(" ++ showTyA as u ++ ")"
       TSum row  -> "(" ++ showRowA as row ++ ")"
+      TData n [] -> n
+      TData n args ->
+        n ++ "(" ++ intercalate ", " (map (showTyA as) args) ++ ")"
 
 showRowA :: [Alias] -> SumRow -> String
 showRowA as row = intercalate " | " (go row)
@@ -1394,6 +1469,7 @@ data Module = Module
   { modEnv     :: Env
   , modDefs    :: [(String, Scheme, Term)]
   , modAliases :: [Alias]          -- match order: latest first
+  , modDatas   :: [DataDecl]       -- recursive (nominal) declarations
   , modDocs    :: Map String String -- ## doc comments, by def/type name
   , modMain    :: Maybe (Term, Arrow)
   }
@@ -1457,12 +1533,16 @@ splitDefs src = do
 checkModule :: String -> Either String Module
 checkModule src = do
   m <- checkModuleWith (modEnv preludeModule) preludeNames
-                       (modAliases preludeModule) src
-  let shadowed = map aName (modAliases m)
-      keptPrelude =
+                       (modAliases preludeModule)
+                       (modDatas preludeModule) src
+  let shadowed = map aName (modAliases m) ++ map dName (modDatas m)
+      keptPreludeAl =
         [ al | al <- modAliases preludeModule, aName al `notElem` shadowed ]
+      keptPreludeDt =
+        [ d | d <- modDatas preludeModule, dName d `notElem` shadowed ]
   pure m { modDefs    = modDefs preludeModule ++ modDefs m
-         , modAliases = modAliases m ++ keptPrelude
+         , modAliases = modAliases m ++ keptPreludeAl
+         , modDatas   = modDatas m ++ keptPreludeDt
          , modDocs    = modDocs m `M.union` modDocs preludeModule }
 
 -- Check a module starting from a given environment (REPL sessions grow
@@ -1471,12 +1551,13 @@ checkModule src = do
 -- error.  `aliases0` are type aliases in scope for RHS references (and
 -- shadowable by user `type` lines); only the module's OWN aliases are
 -- returned in modAliases (latest first).
-checkModuleWith :: Env -> [String] -> [Alias] -> String
+checkModuleWith :: Env -> [String] -> [Alias] -> [DataDecl] -> String
                 -> Either String Module
-checkModuleWith env0 shadow0 aliases0 src = do
+checkModuleWith env0 shadow0 aliases0 datas0 src = do
   (defSrcs, tyLines, mainSrc) <- splitDefs src
-  (_inScope, ownAliases, docs0) <- foldM addType (aliases0, [], M.empty) tyLines
-  (env', _, defsRev, docs) <- foldM addDef (env0, shadow0, [], docs0) defSrcs
+  (env1, _, _, ownAliases, ownDatas, docs0) <-
+    foldM addType (env0, aliases0, datas0, [], [], M.empty) tyLines
+  (env', _, defsRev, docs) <- foldM addDef (env1, shadow0, [], docs0) defSrcs
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
@@ -1484,23 +1565,38 @@ checkModuleWith env0 shadow0 aliases0 src = do
         term <- parseProgram mainSrc
         arr  <- inferTermIn env' term
         pure (Just (term, arr))
-  -- ownAliases is built latest-first, which is exactly the match order
-  pure (Module env' (reverse defsRev) ownAliases docs mainPart)
+  -- own lists are built latest-first, which is exactly the match order
+  pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart)
   where
-    preludeAliasNames = map aName aliases0
+    preludeTypeNames = map aName aliases0 ++ map dName datas0
 
-    addType (inScope, own, docs) (line, doc) = do
-      al <- parseTypeLine inScope line
-      let n = aName al
-      if any ((== n) . aName) own
-        then Left $ "Duplicate type alias: " ++ n
+    addType (env, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
+      decl <- parseTypeLine aliasesIn (map dataSig datasIn) line
+      let n = either aName dName decl
+      if any ((== n) . aName) ownAl || any ((== n) . dName) ownDt
+        then Left $ "Duplicate type declaration: " ++ n
         else Right ()
-      if n `elem` preludeAliasNames || not (any ((== n) . aName) inScope)
+      if n `elem` preludeTypeNames
+           || not (any ((== n) . aName) aliasesIn
+                   || any ((== n) . dName) datasIn)
         then Right ()
-        else Left $ "Duplicate type alias: " ++ n
-      let inScope' = al : filter ((/= n) . aName) inScope
-          docs'    = maybe docs (\d -> M.insert n d docs) doc
-      pure (inScope', al : own, docs')
+        else Left $ "Duplicate type declaration: " ++ n
+      let docs' = maybe docs (\d -> M.insert n d docs) doc
+      case decl of
+        Left al ->
+          pure ( env
+               , al : filter ((/= n) . aName) aliasesIn
+               , datasIn, al : ownAl, ownDt, docs' )
+        Right dd -> do
+          if M.member n env || M.member (n ++ "?") env
+            then Left $ "Type " ++ n
+                     ++ ": constructor name collides with an existing definition"
+            else Right ()
+          let (scs, _) = dataDeclArtifacts dd
+          pure ( foldr (uncurry M.insert) env scs
+               , filter ((/= n) . aName) aliasesIn
+               , dd : filter ((/= n) . dName) datasIn
+               , ownAl, dd : ownDt, docs' )
     addDef (env, shadow, acc, docs) (name, bodySrc, doc) = do
       if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
@@ -1577,7 +1673,7 @@ preludeSrc = unlines
 
 preludeModule :: Module
 preludeModule =
-  case checkModuleWith primEnv [] [] preludeSrc of
+  case checkModuleWith primEnv [] [] [] preludeSrc of
     Left err -> error ("prelude failed to check: " ++ err)
     Right m  -> m
 
@@ -1627,7 +1723,9 @@ type RunDefs = Map String (Int, Bool, Term)
 moduleRunDefs :: Module -> RunDefs
 moduleRunDefs m =
   M.fromList
-    [ (name, (arityOf sc, openOf sc, term)) | (name, sc, term) <- modDefs m ]
+    (  concat [ snd (dataDeclArtifacts d) | d <- modDatas m ]
+    ++ [ (name, (arityOf sc, openOf sc, term))
+       | (name, sc, term) <- modDefs m ] )
   where
     arityOf (Forall _ _ _ (Arrow i _)) = closedArity i
     openOf  (Forall _ _ _ (Arrow i _)) = openTailed i

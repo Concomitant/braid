@@ -43,6 +43,7 @@ data ReplState = ReplState
   { rsEnv      :: Env        -- prims + prelude + user defs
   , rsRun      :: RunDefs    -- runtime bodies of prelude + user defs
   , rsAliases  :: [Alias]    -- type aliases, match order (user first)
+  , rsDatas    :: [DataDecl] -- recursive (nominal) type declarations
   , rsDocs     :: M.Map String String   -- ## docs, prelude + user
   , rsUserDefs :: [String]   -- user def names, in definition order
   , rsStackTy  :: SType      -- type of the current stack (internal names)
@@ -54,6 +55,7 @@ initialState =
   ReplState (modEnv preludeModule)
             (moduleRunDefs preludeModule)
             (modAliases preludeModule)
+            (modDatas preludeModule)
             (modDocs preludeModule)
             [] SEnd []
 
@@ -83,6 +85,7 @@ loop st = do
           putStrLn (renderStack st)
           loop st
         ":defs" -> do
+          mapM_ (putStrLn . renderData st) (reverse (rsDatas st))
           mapM_ (putStrLn . renderAlias st) (reverse (rsAliases st))
           let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
           mapM_ (putStrLn . renderDef st) preludeOnly
@@ -104,6 +107,19 @@ loop st = do
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
+
+renderData :: ReplState -> DataDecl -> String
+renderData st d =
+  "type " ++ dName d ++ params ++ " = " ++ showTyA [] (dBody d) ++ docSuffix
+  where
+    params
+      | null (dParams d) = ""
+      | otherwise =
+          "(" ++ intercalate ", " (map show (dParams d)) ++ ")"
+    docSuffix =
+      case M.lookup (dName d) (rsDocs st) of
+        Just doc -> "\n  ## " ++ doc
+        Nothing  -> ""
 
 renderAlias :: ReplState -> Alias -> String
 renderAlias st al =
@@ -139,13 +155,17 @@ docOf st name
   | otherwise = putStrLn $ "unknown name: " ++ name
   where
     isAlias = any ((== name) . aName) (rsAliases st)
+              || any ((== name) . dName) (rsDatas st)
     renderTypeLine =
-      case M.lookup name (rsEnv st) of
-        Just sc -> name ++ " : " ++ showSchemeA (rsAliases st) sc
-        Nothing ->
-          case [ al | al <- rsAliases st, aName al == name ] of
-            (al : _) -> renderAlias st { rsDocs = M.empty } al
-            []       -> name
+      case [ d | d <- rsDatas st, dName d == name ] of
+        (d : _) -> renderData st { rsDocs = M.empty } d
+        [] ->
+          case M.lookup name (rsEnv st) of
+            Just sc -> name ++ " : " ++ showSchemeA (rsAliases st) sc
+            Nothing ->
+              case [ al | al <- rsAliases st, aName al == name ] of
+                (al : _) -> renderAlias st { rsDocs = M.empty } al
+                []       -> name
 
 
 renderStack :: ReplState -> String
@@ -178,14 +198,34 @@ handleLine st line =
   where
     report err = putStrLn ("error: " ++ err) >> pure st
 
-    -- type Name(...) = rhs : declare (or replace) a type alias
+    -- type Name(...) = rhs : declare (or replace) a type alias or a
+    -- recursive (nominal) data type
     typeLine src =
-      case parseTypeLine (rsAliases st) src of
+      case parseTypeLine (rsAliases st) (map dataSig (rsDatas st)) src of
         Left err -> report err
-        Right al -> do
+        Right (Left al) -> do
           putStrLn $ "type " ++ aName al
           pure st { rsAliases =
-                      al : filter ((/= aName al) . aName) (rsAliases st) }
+                      al : filter ((/= aName al) . aName) (rsAliases st)
+                  , rsDatas =
+                      filter ((/= aName al) . dName) (rsDatas st) }
+        Right (Right dd) -> do
+          let n = dName dd
+              redecl = any ((== n) . dName) (rsDatas st)
+              envClean
+                | redecl    = M.delete n (M.delete (n ++ "?") (rsEnv st))
+                | otherwise = rsEnv st
+          if M.member n envClean || M.member (n ++ "?") envClean
+            then report $ "Type " ++ n
+                   ++ ": constructor name collides with an existing definition"
+            else do
+              let (scs, runs) = dataDeclArtifacts dd
+              putStrLn $ "type " ++ n ++ "   (" ++ n ++ " rolls, "
+                       ++ n ++ "? unrolls)"
+              pure st { rsEnv     = foldr (uncurry M.insert) envClean scs
+                      , rsRun     = M.fromList runs `M.union` rsRun st
+                      , rsDatas   = dd : filter ((/= n) . dName) (rsDatas st)
+                      , rsAliases = filter ((/= n) . aName) (rsAliases st) }
 
     -- def name = program : extend (or replace) a user definition;
     -- prelude names may always be shadowed
@@ -193,7 +233,7 @@ handleLine st line =
       let envBase
             | name `elem` rsUserDefs st = M.delete name (rsEnv st)
             | otherwise                 = rsEnv st
-      case checkModuleWith envBase preludeNames (rsAliases st) line of
+      case checkModuleWith envBase preludeNames (rsAliases st) (rsDatas st) line of
         Left err -> report err
         Right m  ->
           case modDefs m of

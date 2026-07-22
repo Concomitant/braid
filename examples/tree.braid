@@ -1,0 +1,16 @@
+# User-declared binary trees. Tree? is a router — elimination IS
+# control flow — and folds are ordinary recursion.
+
+type Tree(a) = (a | Tree(a) Tree(a))
+
+def leaf = in1 >> Tree
+def node = in2 >> Tree
+
+## sum of the leaves
+def total = Tree? >> (_ | _ total >> swap >> _ total >> +) >> merge
+
+## number of leaves
+def size = Tree? >> (drop >> 1 | _ size >> swap >> _ size >> +) >> merge
+
+1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print   # 7
+1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> size >> print    # 3

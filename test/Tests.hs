@@ -187,6 +187,12 @@ moduleTypeTests =
   , ("less",                                    "Int Int ⇒ Bool")
   , ("odd",                                     "Int ⇒ Bool")
   , ("equals?",                                 "a0 a0 ⇒ (a0 | a0)")
+    -- recursive type declarations: nominal, Name rolls / Name? unrolls
+    -- the printer folds Nat's unfolding to Maybe(Nat) — which is the
+    -- theorem: Nat ≅ Maybe(Nat) is the successor algebra
+  , ("type Nat = (• | Nat)\nNat?",              "Nat ⇒ Maybe(Nat)")
+  , ("type Nat = (• | Nat)\nNat",               "Maybe(Nat) ⇒ Nat")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\nTree?", "Tree(a0) ⇒ (a0 | Tree(a0) Tree(a0))")
   , ("list(1, 2, 3)",                           "• ⇒ List(Int)")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
@@ -270,6 +276,10 @@ evalTests =
   , ("# header comment\n5 >> print # trailing", ["5"], "")
   , ("## doc for sq2\ndef sq2 = dup >> *\n3 >> sq2 >> print", ["9"], "")
   , ("type MInt = (• | Int)\n5 >> print",        ["5"], "")
+    -- Peano round-trip: folds by ordinary recursion through Nat?
+  , ("type Nat = (• | Nat)\ndef fromInt = zero? >> (drop >> in1 >> Nat | _ 1 >> - >> fromInt >> in2 >> Nat) >> merge\ndef toInt = Nat? >> (0 | toInt >> 1 ... >> +) >> merge\n3 >> fromInt >> toInt >> print", ["3"], "")
+    -- trees: build with rolled injections, fold with recursion
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\ndef total = Tree? >> (_ | _ total >> swap >> _ total >> +) >> merge\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
     -- prelude defs available with no local definition
   , ("5 >> _ 5 >> equals? >> print",             ["in1(5)"], "")
   , ("def double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
@@ -380,10 +390,13 @@ moduleFailTests :: [(String, String)]
 moduleFailTests =
   [ ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
-  , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type alias")
+  , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
   , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
+    -- nominal rigidity: a data type is NOT its unfolding
+  , ("type Nat = (• | Nat)\nin1 >> Nat >> Nat? >> Nat?", "Cannot unify types")
+  , ("type dup = (• | dup)\n1",                  "collides")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
   ]

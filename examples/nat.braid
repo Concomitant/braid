@@ -1,0 +1,16 @@
+# Peano arithmetic as user code. Nat is the initial algebra of the row
+# functor (• | X): Nat rolls, Nat? unrolls, both runtime no-ops.
+
+type Nat = (• | Nat)
+
+def z = in1 >> Nat
+def s = in2 >> Nat
+
+def fromInt = zero? >> (drop >> z | _ 1 >> - >> fromInt >> s) >> merge
+def toInt = Nat? >> (0 | toInt >> 1 ... >> +) >> merge
+
+## addition by structural recursion on the second argument
+def add = (m n -> n >> Nat? >> (m | m ... >> add >> s) >> merge)
+
+3 >> fromInt >> toInt >> print                             # 3
+2 >> fromInt >> _ (3 >> fromInt) >> add >> toInt >> print  # 5
