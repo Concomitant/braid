@@ -1,0 +1,16 @@
+# The parallel-reduce theorem, runnable: because + is associative with
+# unit 0, folding chunks independently and combining the partials
+# equals folding the whole. Associativity IS the parallelization
+# license — the law is what lets a scheduler split the fold.
+
+def whole = list(1, 2, 3, 4, 5, 6, 7, 8) >> [+] 0 ... >> fold
+def left  = list(1, 2, 3, 4) >> [+] 0 ... >> fold
+def right = list(5, 6, 7, 8) >> [+] 0 ... >> fold
+
+whole >> print
+left >> _ right >> + >> print
+whole >> _ (left >> _ right >> +) >> eq? >> verdict >> print   # in1()
+
+# Same theorem, list monoid: concat of chunk-concats = concat.
+def parts = list(list(1, 2), list(3), list(), list(4, 5))
+parts >> concat >> print

@@ -290,6 +290,9 @@ evalTests =
     -- one generic reduction, two Monoid instances (dictionaries as wires)
   , ("list(1, 2, 3, 4) >> [+] 0 ... >> fold >> print", ["10"], "")
   , ("list(list(1, 2), list(3), list()) >> [append] list() ... >> fold >> print", ["list(1, 2, 3)"], "")
+    -- chunked fold + combine = whole fold (associativity licenses
+    -- parallel reduce)
+  , ("def w = list(1, 2, 3, 4, 5, 6) >> [*] 1 ... >> fold\ndef l = list(1, 2, 3) >> [*] 1 ... >> fold\ndef r = list(4, 5, 6) >> [*] 1 ... >> fold\nw >> _ (l >> _ r >> *) >> eq? >> verdict >> print", ["in1()"], "")
     -- laws as programs, presentations as enumerators
   , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f >> f] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
   , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
