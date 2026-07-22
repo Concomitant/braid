@@ -157,6 +157,19 @@ Newline is strict `>>`, not implicit `pass`.
   quoted code becomes inspectable data (`Code⟨⟩`), docs migrate from
   the def table into the code values themselves, composing along
   `>>` — documentation as a Writer-style annotation on morphisms.
+* **Type aliases** (stage 1 of named types): `type Bool = (• | •)`,
+  `type Maybe(a) = (• | a)` — parens+commas application syntax, matching
+  `list(1, 2, 3)`; `List` displays as `List(Int)`. Aliases are
+  transparent and display-only: expanded away at declaration time,
+  folded back by the type printer (fewest-params-bound wins, ties to
+  the latest declaration, user aliases before prelude). Bodies are
+  closed structures over element-type parameters; `Fn⟨…⟩` is not yet
+  expressible in type syntax. The prelude ships `Bool` and `Maybe`
+  (both •-anchored, so router types don't fold); fully-general aliases
+  like `type Result(a, e) = (a | e)` are user opt-in — declaring one
+  folds EVERY matching sum's display. REPL: `:t` folds, `:t!` shows raw
+  structure, `:defs` lists aliases. Stage 2 (recursive `type`, μ of a
+  row) and stage 3 (theories/instances) build on this syntax.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,
   `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,

@@ -3,7 +3,7 @@ module Main (main) where
 import MiniConcatTypechecker
 import qualified Data.Map as M
 import Data.Char (isSpace)
-import Data.List (isPrefixOf)
+import Data.List (isPrefixOf, intercalate)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO
@@ -42,6 +42,7 @@ runFile path = do
 data ReplState = ReplState
   { rsEnv      :: Env        -- prims + prelude + user defs
   , rsRun      :: RunDefs    -- runtime bodies of prelude + user defs
+  , rsAliases  :: [Alias]    -- type aliases, match order (user first)
   , rsDocs     :: M.Map String String   -- ## docs, prelude + user
   , rsUserDefs :: [String]   -- user def names, in definition order
   , rsStackTy  :: SType      -- type of the current stack (internal names)
@@ -52,6 +53,7 @@ initialState :: ReplState
 initialState =
   ReplState (modEnv preludeModule)
             (moduleRunDefs preludeModule)
+            (modAliases preludeModule)
             (modDocs preludeModule)
             [] SEnd []
 
@@ -59,7 +61,7 @@ repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type, :doc <name>, :s stack, :defs, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :s stack, :defs, :clear, :q quit"
   loop initialState
 
 loop :: ReplState -> IO ()
@@ -81,12 +83,16 @@ loop st = do
           putStrLn (renderStack st)
           loop st
         ":defs" -> do
+          mapM_ (putStrLn . renderAlias st) (reverse (rsAliases st))
           let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
           mapM_ (putStrLn . renderDef st) preludeOnly
           mapM_ (putStrLn . renderDef st) (rsUserDefs st)
           loop st
-        l | ":t " `isPrefixOf` l -> do
-              typeOf st (drop 3 l)
+        l | ":t! " `isPrefixOf` l -> do
+              typeOfWith show st (drop 4 l)
+              loop st
+          | ":t " `isPrefixOf` l -> do
+              typeOfWith (showArrowA (rsAliases st)) st (drop 3 l)
               loop st
           | ":doc " `isPrefixOf` l -> do
               docOf st (trim (drop 5 l))
@@ -99,10 +105,24 @@ loop st = do
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
 
+renderAlias :: ReplState -> Alias -> String
+renderAlias st al =
+  "type " ++ aName al ++ params ++ " = " ++ showTyA [] (aBody al) ++ docSuffix
+  where
+    params
+      | null (aParams al) = ""
+      | otherwise =
+          "(" ++ intercalate ", " (map show (aParams al)) ++ ")"
+    docSuffix =
+      case M.lookup (aName al) (rsDocs st) of
+        Just d  -> "\n  ## " ++ d
+        Nothing -> ""
+
 renderDef :: ReplState -> String -> String
 renderDef st name =
   case M.lookup name (rsEnv st) of
-    Just sc -> "def " ++ name ++ " : " ++ show sc ++ docSuffix
+    Just sc -> "def " ++ name ++ " : " ++ showSchemeA (rsAliases st) sc
+                 ++ docSuffix
     Nothing -> "def " ++ name ++ " : ???"
   where
     docSuffix =
@@ -112,16 +132,20 @@ renderDef st name =
 
 docOf :: ReplState -> String -> IO ()
 docOf st name
-  | M.member name (rsEnv st) =
+  | M.member name (rsEnv st) || isAlias =
       case M.lookup name (rsDocs st) of
-        Just d  -> putStrLn ("## " ++ d) >> putStrLn (renderTypeLine)
-        Nothing -> putStrLn "(no doc)" >> putStrLn (renderTypeLine)
+        Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine
+        Nothing -> putStrLn "(no doc)" >> putStrLn renderTypeLine
   | otherwise = putStrLn $ "unknown name: " ++ name
   where
+    isAlias = any ((== name) . aName) (rsAliases st)
     renderTypeLine =
       case M.lookup name (rsEnv st) of
-        Just sc -> name ++ " : " ++ show sc
-        Nothing -> name
+        Just sc -> name ++ " : " ++ showSchemeA (rsAliases st) sc
+        Nothing ->
+          case [ al | al <- rsAliases st, aName al == name ] of
+            (al : _) -> renderAlias st { rsDocs = M.empty } al
+            []       -> name
 
 
 renderStack :: ReplState -> String
@@ -133,24 +157,35 @@ renderStack st =
     -- pretty display names (a0/ρ0) without touching internal state
     displayTy =
       let Arrow _ o = normalizeArrow (Arrow SEnd (rsStackTy st))
-      in show o
+      in showStackA (rsAliases st) o
 
-typeOf :: ReplState -> String -> IO ()
-typeOf st src =
+typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
+typeOfWith render st src =
   case parseProgram src >>= inferTermIn (rsEnv st) of
     Left err  -> putStrLn $ "error: " ++ err
-    Right arr -> putStrLn $ trim src ++ " : " ++ show (normalizeArrow arr)
+    Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
 
 handleLine :: ReplState -> String -> IO ReplState
 handleLine st line =
   case splitDefs line of
     Left err -> report err
-    Right ([(name, _, _)], rest)
+    Right ([(name, _, _)], [], rest)
       | all isSpace rest -> defLine name
-    Right ([], _) -> programLine
-    Right _       -> report "one definition per line, please"
+    Right ([], [(tyLine, _)], rest)
+      | all isSpace rest -> typeLine tyLine
+    Right ([], [], _) -> programLine
+    Right _           -> report "one definition per line, please"
   where
     report err = putStrLn ("error: " ++ err) >> pure st
+
+    -- type Name(...) = rhs : declare (or replace) a type alias
+    typeLine src =
+      case parseTypeLine (rsAliases st) src of
+        Left err -> report err
+        Right al -> do
+          putStrLn $ "type " ++ aName al
+          pure st { rsAliases =
+                      al : filter ((/= aName al) . aName) (rsAliases st) }
 
     -- def name = program : extend (or replace) a user definition;
     -- prelude names may always be shadowed
@@ -158,12 +193,12 @@ handleLine st line =
       let envBase
             | name `elem` rsUserDefs st = M.delete name (rsEnv st)
             | otherwise                 = rsEnv st
-      case checkModuleWith envBase preludeNames line of
+      case checkModuleWith envBase preludeNames (rsAliases st) line of
         Left err -> report err
         Right m  ->
           case modDefs m of
             [(n, sc, _)] -> do
-              putStrLn $ "def " ++ n ++ " : " ++ show sc
+              putStrLn $ "def " ++ n ++ " : " ++ showSchemeA (rsAliases st) sc
               pure st
                 { rsEnv      = modEnv m
                 , rsRun      = moduleRunDefs m `M.union` rsRun st

@@ -112,9 +112,9 @@ passTests =
   , ("eq?",           "a0 a0 ⇒ (a0 a0 | a0 a0)")
   , ("lt?",           "Int Int ⇒ (Int Int | Int Int)")
   , ("-",             "Int Int ⇒ Int")
-  , ("uncons",        "List a0 ⇒ (• | a0 List a0)")
+  , ("uncons",        "List(a0) ⇒ (• | a0 List(a0))")
   , ("forget",        "ρ0 ⇒ •")
-  , ("cons",          "a0 List a0 ⇒ List a0")
+  , ("cons",          "a0 List(a0) ⇒ List(a0)")
     -- the guard machine
   , ("if",            "ρ0 ⇒ (ρ1 | ρ0)")
   , ("otherwise",     "ρ0 ⇒ (ρ0 | ())")
@@ -126,10 +126,10 @@ passTests =
   , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [1 ... >> +] otherwise\nendif", "• ⇒ Int")
     -- lists
-  , ("list(1, 2, 3)", "• ⇒ List Int")
-  , ("list()",        "• ⇒ List a0")
-  , ("map",           "Fn⟨a0 ⇒ a1⟩ List a0 ⇒ List a1")
-  , ("fold",          "Fn⟨a0 a1 ⇒ a0⟩ a0 List a1 ⇒ a0")
+  , ("list(1, 2, 3)", "• ⇒ List(Int)")
+  , ("list()",        "• ⇒ List(a0)")
+  , ("map",           "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
+  , ("fold",          "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   ]
 
 -- (source, substring expected in the error)
@@ -175,10 +175,18 @@ moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
+    -- type aliases: display folding (Bool/Maybe from the prelude;
+    -- user aliases beat prelude; fewest-params-bound wins ties)
+  , ("5 >> odd? >> verdict",                    "• ⇒ Bool")
+  , ("7 >> zero? >> (forget | ...)",            "• ⇒ Maybe(Int)")
+  , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
+  , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
+  , ("type YN = Bool\ntrue",                    "• ⇒ YN")
+  , ("list(1, 2, 3)",                           "• ⇒ List(Int)")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
     -- one def used at two different types = let-polymorphism
-  , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ (• | •)")
+  , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
     -- recursive defs (monomorphic self-reference)
   , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge\nfib", "Int ⇒ Int")
   ]
@@ -256,6 +264,7 @@ evalTests =
     -- comments: # to end of line, ## docs are inert at runtime
   , ("# header comment\n5 >> print # trailing", ["5"], "")
   , ("## doc for sq2\ndef sq2 = dup >> *\n3 >> sq2 >> print", ["9"], "")
+  , ("type MInt = (• | Int)\n5 >> print",        ["5"], "")
     -- prelude defs available with no local definition
   , ("5 >> _ 5 >> equals >> print",             ["in1(5)"], "")
   , ("def double = 2 _ >> *\n7 >> [_ 100 >> less] [double] ... >> while >> print", ["112"], "")
@@ -359,6 +368,10 @@ moduleFailTests :: [(String, String)]
 moduleFailTests =
   [ ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
+  , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type alias")
+  , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
+  , ("type = (• | •)\n1",                        "Malformed type declaration")
+  , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
   ]
@@ -392,10 +405,11 @@ runModuleType (src, expected) =
       case modMain m of
         Nothing -> Just $ show src ++ ": module has no main program"
         Just (_, arr)
-          | show (normalizeArrow arr) == expected -> Nothing
+          | rendered == expected -> Nothing
           | otherwise ->
               Just $ show src ++ ": expected " ++ expected
-                   ++ ", got " ++ show (normalizeArrow arr)
+                   ++ ", got " ++ rendered
+          where rendered = showArrowA (modAliases m) (normalizeArrow arr)
 
 runEval :: (String, [String], String) -> Maybe String
 runEval (src, wantLog, wantStack) =

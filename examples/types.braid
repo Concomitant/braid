@@ -1,0 +1,13 @@
+# Named types: transparent aliases, folded back into type display.
+# In the REPL:
+#   :t true                ->  • ⇒ Bool
+#   :t! true               ->  • ⇒ (• | •)      (raw escape)
+#   :t 7 >> zero? >> (forget | ...)   ->  • ⇒ Maybe(Int)
+
+## a score routes as passing or failing
+type Score = (Int | Int)
+
+def passing? = _ 60 >> less >> not
+
+75 >> passing? >> verdict >> print   # in1()
+40 >> passing? >> verdict >> print   # in2()

@@ -72,11 +72,7 @@ instance Show Ty where
   show (TVarTy a)  = show a
   show TInt        = "Int"
   show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
-  show (TList t)   = "List " ++ parens t
-    where
-      parens u@(TList _) = "(" ++ show u ++ ")"
-      parens u@(TSum _)  = show u   -- already parenthesized
-      parens u           = show u
+  show (TList t)   = "List(" ++ show t ++ ")"
   show (TSum row)  = "(" ++ show row ++ ")"
 
 -- Stack types: front (leftmost) wire first, optional tail variable at the end
@@ -671,6 +667,233 @@ parseListElems toks = do
           (t : _) -> ", got: " ++ show t
 
 --------------------------------------------------------------------------------
+-- 6.5 Type aliases (stage 1: transparent, display-only)
+--
+-- `type Name = rhs` / `type Name(p, q) = rhs` declares a name for an
+-- element-type structure (typically a sum). Aliases never touch
+-- inference or unification: they are expanded away at declaration time
+-- (alias references in a RHS) and folded back at display time.  Bodies
+-- are closed (no stack/row tails); parameters range over single
+-- element types; Fn⟨…⟩ is not expressible in stage-1 type syntax.
+--------------------------------------------------------------------------------
+
+data Alias = Alias
+  { aName   :: String
+  , aParams :: [TVar]
+  , aBody   :: Ty
+  } deriving (Eq, Show)
+
+lookupAlias :: String -> [Alias] -> Maybe Alias
+lookupAlias n = go
+  where
+    go [] = Nothing
+    go (al : rest) | aName al == n = Just al
+                   | otherwise     = go rest
+
+-- Parse a whole `type …` declaration line (aliases in scope are needed
+-- to expand references in the RHS).
+parseTypeLine :: [Alias] -> String -> Either String Alias
+parseTypeLine aliases line =
+  case break (== '=') line of
+    (lhs, '=' : rhs) -> do
+      (name, params) <- parseHead lhs
+      body <- parseTyBody aliases params rhs
+      if all (`occursIn` body) params
+        then Right (Alias name params body)
+        else Left $ "Type alias " ++ name
+                 ++ ": every parameter must occur in the body"
+    _ -> Left $ "Malformed type declaration (missing '='): " ++ line
+  where
+    parseHead lhs = do
+      toks <- normalizeToks <$> tokenize lhs
+      case toks of
+        [TokIdent "type", TokIdent name]
+          | validName name -> Right (name, [])
+        (TokIdent "type" : TokIdent name : TokLParen : rest)
+          | validName name -> (,) name <$> paramList rest
+        _ -> Left $ "Malformed type declaration: " ++ line
+    paramList (TokIdent p : TokComma : rest) = (TV p :) <$> paramList rest
+    paramList [TokIdent p, TokRParen]        = Right [TV p]
+    paramList _ = Left "Malformed type parameter list"
+    validName n = n `notElem` ["Int", "List", "type", "•"]
+    occursIn p t = p `elem` tyParamsIn t
+    tyParamsIn (TVarTy v) = [v]
+    tyParamsIn (TList t)  = tyParamsIn t
+    tyParamsIn (TSum r)   = rowParams r
+    tyParamsIn _          = []
+    rowParams RNil          = []
+    rowParams (RTail _)     = []
+    rowParams (RCons st r)  = stackParams st ++ rowParams r
+    stackParams SEnd        = []
+    stackParams (STail _)   = []
+    stackParams (SCons t s) = tyParamsIn t ++ stackParams s
+
+-- Parse a full RHS: one element-type expression, nothing left over.
+parseTyBody :: [Alias] -> [TVar] -> String -> Either String Ty
+parseTyBody aliases params src = do
+  toks <- normalizeToks <$> tokenize src
+  (t, rest) <- parseTyElem aliases params toks
+  case rest of
+    [] -> Right t
+    _  -> Left $ "Unexpected tokens after type expression: " ++ show rest
+
+parseTyElem :: [Alias] -> [TVar] -> [Token]
+            -> Either String (Ty, [Token])
+parseTyElem aliases params toks = case toks of
+  (TokLParen : rest) -> do
+    (alts, rest') <- goAlts rest
+    pure (TSum (foldr RCons RNil alts), rest')
+  (TokIdent "List" : TokLParen : rest) -> do
+    (t, rest') <- parseTyElem aliases params rest
+    case rest' of
+      (TokRParen : rest'') -> pure (TList t, rest'')
+      _ -> Left "Expected ')' after List argument"
+  (TokIdent "Int" : rest) -> pure (TInt, rest)
+  (TokIdent name : TokLParen : rest)
+    | Just al <- lookupAlias name aliases -> do
+        (args, rest') <- goArgs rest
+        body <- applyAlias al args
+        pure (body, rest')
+  (TokIdent name : rest)
+    | TV name `elem` params -> pure (TVarTy (TV name), rest)
+    | Just al <- lookupAlias name aliases ->
+        if null (aParams al)
+          then pure (aBody al, rest)
+          else Left $ "Type alias " ++ name ++ " expects arguments"
+    | otherwise -> Left $ "Unknown type name: " ++ name
+  _ -> Left "Expected a type expression"
+  where
+    -- sum alternatives: stack (| stack)* )
+    goAlts ts = do
+      (st, rest) <- goStack ts
+      case rest of
+        (TokBar : rest')    -> do
+          (alts, rest'') <- goAlts rest'
+          pure (st : alts, rest'')
+        (TokRParen : rest') -> pure ([st], rest')
+        _ -> Left "Expected '|' or ')' in sum type"
+    -- a stack: • or a run of element types
+    goStack (TokIdent "•" : rest) = pure (SEnd, rest)
+    goStack ts = do
+      (t, rest) <- parseTyElem aliases params ts
+      case rest of
+        (TokBar : _)    -> pure (SCons t SEnd, rest)
+        (TokRParen : _) -> pure (SCons t SEnd, rest)
+        (TokComma : _)  -> pure (SCons t SEnd, rest)
+        [] -> pure (SCons t SEnd, [])
+        _  -> do
+          (s, rest') <- goStack rest
+          pure (SCons t s, rest')
+    -- alias arguments: elem (, elem)* )
+    goArgs ts = do
+      (t, rest) <- parseTyElem aliases params ts
+      case rest of
+        (TokComma : rest')  -> do
+          (args, rest'') <- goArgs rest'
+          pure (t : args, rest'')
+        (TokRParen : rest') -> pure ([t], rest')
+        _ -> Left "Expected ',' or ')' in type arguments"
+
+applyAlias :: Alias -> [Ty] -> Either String Ty
+applyAlias al args
+  | length args /= length (aParams al) =
+      Left $ "Type alias " ++ aName al ++ " expects "
+           ++ show (length (aParams al)) ++ " argument(s)"
+  | otherwise = Right (substTyVars (M.fromList (zip (aParams al) args))
+                                   (aBody al))
+
+substTyVars :: Map TVar Ty -> Ty -> Ty
+substTyVars m = goT
+  where
+    goT t@(TVarTy v) = M.findWithDefault t v m
+    goT TInt         = TInt
+    goT (TFn arr)    = TFn arr
+    goT (TList t)    = TList (goT t)
+    goT (TSum r)     = TSum (goR r)
+    goR RNil         = RNil
+    goR t@(RTail _)  = t
+    goR (RCons s r)  = RCons (goS s) (goR r)
+    goS SEnd         = SEnd
+    goS t@(STail _)  = t
+    goS (SCons t s)  = SCons (goT t) (goS s)
+
+-- One-way match of an alias body against a concrete element type.
+-- Parameters bind single element types (nonlinear occurrences must
+-- agree); closed rows/stacks only match same-shape closed structure.
+matchAlias :: Alias -> Ty -> Maybe [Ty]
+matchAlias al t = do
+  binds <- goT (aBody al) t M.empty
+  mapM (`M.lookup` binds) (aParams al)
+  where
+    goT (TVarTy p) x m
+      | p `elem` aParams al =
+          case M.lookup p m of
+            Nothing -> Just (M.insert p x m)
+            Just y  -> if x == y then Just m else Nothing
+    goT TInt TInt m = Just m
+    goT (TList b) (TList x) m = goT b x m
+    goT (TSum rb) (TSum rx) m = goR rb rx m
+    goT _ _ _ = Nothing
+    goR RNil RNil m = Just m
+    goR (RCons sb rb) (RCons sx rx) m = goS sb sx m >>= goR rb rx
+    goR _ _ _ = Nothing
+    goS SEnd SEnd m = Just m
+    goS (SCons tb sb) (SCons tx sx) m = goT tb tx m >>= goS sb sx
+    goS _ _ _ = Nothing
+
+-- Folded display: try to rewrite structure back into declared names.
+-- Fewest parameters wins; ties go to the earliest alias in the list
+-- (callers order user-latest-first, then prelude).
+bestAlias :: [Alias] -> Ty -> Maybe (Alias, [Ty])
+bestAlias aliases t =
+  case [ (al, args) | al <- aliases, Just args <- [matchAlias al t] ] of
+    [] -> Nothing
+    cs -> Just (minimumOn (length . aParams . fst) cs)
+  where
+    minimumOn f (x : xs) = go x xs
+      where go best []       = best
+            go best (y : ys) = go (if f y < f best then y else best) ys
+    minimumOn _ [] = error "bestAlias: impossible"
+
+showTyA :: [Alias] -> Ty -> String
+showTyA as t =
+  case bestAlias as t of
+    Just (al, args)
+      | null args -> aName al
+      | otherwise ->
+          aName al ++ "(" ++ intercalate ", " (map (showTyA as) args) ++ ")"
+    Nothing -> case t of
+      TVarTy a  -> show a
+      TInt      -> "Int"
+      TFn arr   -> "Fn⟨" ++ showArrowA as arr ++ "⟩"
+      TList u   -> "List(" ++ showTyA as u ++ ")"
+      TSum row  -> "(" ++ showRowA as row ++ ")"
+
+showRowA :: [Alias] -> SumRow -> String
+showRowA as row = intercalate " | " (go row)
+  where
+    go RNil            = []
+    go (RTail v)       = [show v]
+    go (RCons st rest) = showStackA as st : go rest
+
+showStackA :: [Alias] -> SType -> String
+showStackA _  SEnd        = "•"
+showStackA _  (STail v)   = show v
+showStackA as st          = unwords (go st)
+  where
+    go SEnd           = []
+    go (STail v)      = [show v]
+    go (SCons t rest) = showTyA as t : go rest
+
+showArrowA :: [Alias] -> Arrow -> String
+showArrowA as (Arrow s1 s2) = showStackA as s1 ++ " ⇒ " ++ showStackA as s2
+
+showSchemeA :: [Alias] -> Scheme -> String
+showSchemeA as (Forall tvars svars rvars arr) =
+  "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars)
+       ++ ". " ++ showArrowA as arr
+
+--------------------------------------------------------------------------------
 -- 6.2 Desugaring (stages → Term)
 --------------------------------------------------------------------------------
 
@@ -1168,26 +1391,33 @@ generalize env arr =
 
 -- A checked module: definitions in order, plus an optional main program.
 data Module = Module
-  { modEnv  :: Env
-  , modDefs :: [(String, Scheme, Term)]
-  , modDocs :: Map String String   -- ## doc comments, by def name
-  , modMain :: Maybe (Term, Arrow)
+  { modEnv     :: Env
+  , modDefs    :: [(String, Scheme, Term)]
+  , modAliases :: [Alias]          -- match order: latest first
+  , modDocs    :: Map String String -- ## doc comments, by def/type name
+  , modMain    :: Maybe (Term, Arrow)
   }
 
--- Split source into `def name = body` lines and the main program
--- (all remaining lines, in order, joined by newline-sequencing).
--- A `## text` line is a doc comment: it binds to the next def
--- (consecutive doc lines join); doc text preceding a non-def line is
--- dropped.
-splitDefs :: String -> Either String ([(String, String, Maybe String)], String)
+-- Split source into `def name = body` lines, `type …` declaration
+-- lines, and the main program (all remaining lines, in order, joined
+-- by newline-sequencing).  A `## text` line is a doc comment: it binds
+-- to the next def or type line (consecutive doc lines join); doc text
+-- preceding a plain program line is dropped.
+splitDefs :: String
+          -> Either String ( [(String, String, Maybe String)]
+                           , [(String, Maybe String)]
+                           , String )
 splitDefs src = do
-  (defs, progLines) <- go Nothing (lines src)
-  pure (defs, intercalate "\n" progLines)
+  (defs, tys, progLines) <- go Nothing (lines src)
+  pure (defs, tys, intercalate "\n" progLines)
   where
-    go _ [] = Right ([], [])
+    go _ [] = Right ([], [], [])
     go doc (l : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
+      | ("type" : _) <- words l = do
+          (ds, ts, ps) <- go Nothing rest
+          pure (ds, (l, doc) : ts, ps)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
           if all isSpace body
@@ -1198,14 +1428,14 @@ splitDefs src = do
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
-                  (ds, ps) <- go Nothing rest'
-                  pure ((name, intercalate "\n" block, doc) : ds, ps)
+                  (ds, ts, ps) <- go Nothing rest'
+                  pure ((name, intercalate "\n" block, doc) : ds, ts, ps)
             else do
-              (ds, ps) <- go Nothing rest
-              pure ((name, body, doc) : ds, ps)
+              (ds, ts, ps) <- go Nothing rest
+              pure ((name, body, doc) : ds, ts, ps)
       | otherwise = do
-          (ds, ps) <- go Nothing rest
-          pure (ds, l : ps)
+          (ds, ts, ps) <- go Nothing rest
+          pure (ds, ts, l : ps)
 
     docLine l =
       case dropWhile isSpace l of
@@ -1221,23 +1451,32 @@ splitDefs src = do
             _ -> Left $ "Malformed definition: " ++ l
         _ -> Left $ "Malformed definition (missing '='): " ++ l
 
--- Check a module against the prelude: user defs may shadow prelude
--- defs (once each); the prelude's defs and docs are folded into the
--- result so the runtime sees them.
+-- Check a module against the prelude: user defs and type aliases may
+-- shadow prelude ones (once each); the prelude's defs, aliases, and
+-- docs are folded into the result so the runtime and printer see them.
 checkModule :: String -> Either String Module
 checkModule src = do
-  m <- checkModuleWith (modEnv preludeModule) preludeNames src
-  pure m { modDefs = modDefs preludeModule ++ modDefs m
-         , modDocs = modDocs m `M.union` modDocs preludeModule }
+  m <- checkModuleWith (modEnv preludeModule) preludeNames
+                       (modAliases preludeModule) src
+  let shadowed = map aName (modAliases m)
+      keptPrelude =
+        [ al | al <- modAliases preludeModule, aName al `notElem` shadowed ]
+  pure m { modDefs    = modDefs preludeModule ++ modDefs m
+         , modAliases = modAliases m ++ keptPrelude
+         , modDocs    = modDocs m `M.union` modDocs preludeModule }
 
 -- Check a module starting from a given environment (REPL sessions grow
 -- the environment incrementally).  Names in `shadowable` may be
 -- redefined once (prelude shadowing); all other redefinition is an
--- error.
-checkModuleWith :: Env -> [String] -> String -> Either String Module
-checkModuleWith env0 shadow0 src = do
-  (defSrcs, mainSrc) <- splitDefs src
-  (env', _, defsRev, docs) <- foldM addDef (env0, shadow0, [], M.empty) defSrcs
+-- error.  `aliases0` are type aliases in scope for RHS references (and
+-- shadowable by user `type` lines); only the module's OWN aliases are
+-- returned in modAliases (latest first).
+checkModuleWith :: Env -> [String] -> [Alias] -> String
+                -> Either String Module
+checkModuleWith env0 shadow0 aliases0 src = do
+  (defSrcs, tyLines, mainSrc) <- splitDefs src
+  (_inScope, ownAliases, docs0) <- foldM addType (aliases0, [], M.empty) tyLines
+  (env', _, defsRev, docs) <- foldM addDef (env0, shadow0, [], docs0) defSrcs
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
@@ -1245,8 +1484,23 @@ checkModuleWith env0 shadow0 src = do
         term <- parseProgram mainSrc
         arr  <- inferTermIn env' term
         pure (Just (term, arr))
-  pure (Module env' (reverse defsRev) docs mainPart)
+  -- ownAliases is built latest-first, which is exactly the match order
+  pure (Module env' (reverse defsRev) ownAliases docs mainPart)
   where
+    preludeAliasNames = map aName aliases0
+
+    addType (inScope, own, docs) (line, doc) = do
+      al <- parseTypeLine inScope line
+      let n = aName al
+      if any ((== n) . aName) own
+        then Left $ "Duplicate type alias: " ++ n
+        else Right ()
+      if n `elem` preludeAliasNames || not (any ((== n) . aName) inScope)
+        then Right ()
+        else Left $ "Duplicate type alias: " ++ n
+      let inScope' = al : filter ((/= n) . aName) inScope
+          docs'    = maybe docs (\d -> M.insert n d docs) doc
+      pure (inScope', al : own, docs')
     addDef (env, shadow, acc, docs) (name, bodySrc, doc) = do
       if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
@@ -1269,7 +1523,11 @@ checkModuleWith env0 shadow0 src = do
 
 preludeSrc :: String
 preludeSrc = unlines
-  [ "## invert a router: swap the hit and miss tracks"
+  [ "## the boolean object: a bare two-way decision"
+  , "type Bool = (• | •)"
+  , "## an optional value: empty or one element"
+  , "type Maybe(a) = (• | a)"
+  , "## invert a router: swap the hit and miss tracks"
   , "def not = (miss | ok) >> merge"
   , "## negate a quoted router, as a value"
   , "def negate = (p -> [p ... >> apply >> (miss | ok) >> merge])"
@@ -1311,7 +1569,7 @@ preludeSrc = unlines
 
 preludeModule :: Module
 preludeModule =
-  case checkModuleWith primEnv [] preludeSrc of
+  case checkModuleWith primEnv [] [] preludeSrc of
     Left err -> error ("prelude failed to check: " ++ err)
     Right m  -> m
 
