@@ -1,0 +1,22 @@
+# Graphical linear algebra: a matrix IS a wiring diagram over the
+# linear generators (dup, drop, +, 0, scaling), and composition IS
+# matrix multiplication (Bonchi-Sobocinski-Zanasi).
+
+## [[1,2],[3,4]] : outputs x+2y and 3x+4y
+def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))
+
+1 0 >> m >> print _ >> print          # column 1: 1, 3
+0 1 >> m >> print _ >> print          # column 2: 2, 4
+
+## composition = matmul: m·m = [[7,10],[15,22]]
+1 0 >> m >> m >> print _ >> print     # 7, 15
+0 1 >> m >> m >> print _ >> print     # 10, 22
+
+## a permutation matrix is just swap
+1 0 >> swap >> m >> print _ >> print  # (m after swap) col 1 = m col 2: 2, 4
+
+## the bialgebra law relating copy and add, checked on a sample
+def pack2 = (a b -> a >> toStr >> _ (b >> toStr) >> cat)
+def lhsB = + >> dup
+def rhsB = (x y -> x y >> + >> _ (x y >> +))
+3 4 >> lhsB >> pack2 >> _ (3 4 >> rhsB >> pack2) >> eq? >> verdict >> print   # in1()
