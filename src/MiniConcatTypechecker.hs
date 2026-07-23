@@ -48,7 +48,6 @@ data Ty
   = TVarTy TVar
   | TInt
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
-  | TList Ty           -- List A: homogeneous list
   | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
   | TData String [Ty]  -- a declared recursive (nominal) type: Name(args)
   deriving (Eq, Ord)
@@ -73,7 +72,6 @@ instance Show Ty where
   show (TVarTy a)  = show a
   show TInt        = "Int"
   show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
-  show (TList t)   = "List(" ++ show t ++ ")"
   show (TSum row)  = "(" ++ show row ++ ")"
   show (TData n []) = n
   show (TData n as) =
@@ -148,7 +146,6 @@ instance Substitutable Ty where
       Just t' -> apply s t'   -- chase chains, like the SType instance
   apply _ TInt        = TInt
   apply s (TFn arr) = TFn (apply s arr)
-  apply s (TList t)   = TList (apply s t)
   apply s (TData n as) = TData n (map (apply s) as)
   apply s (TSum row)  = TSum (apply s row)
 
@@ -201,7 +198,6 @@ varsOfTy :: Ty -> Vars
 varsOfTy (TVarTy v)  = ([v], [], [])
 varsOfTy TInt        = ([], [], [])
 varsOfTy (TFn arr)   = varsOfArrow arr
-varsOfTy (TList t)   = varsOfTy t
 varsOfTy (TSum row)  = varsOfRow row
 varsOfTy (TData _ as) = foldr (catVars . varsOfTy) ([], [], []) as
 
@@ -246,7 +242,6 @@ unifyTy s t1 t2 =
     (TFn (Arrow i1 o1), TFn (Arrow i2 o2)) -> do
       s' <- unifyStack s i1 i2
       unifyStack s' o1 o2
-    (TList a1, TList a2) -> unifyTy s a1 a2
     (TSum r1, TSum r2)   -> unifyRow s r1 r2
     (TData n1 as1, TData n2 as2)
       | n1 == n2 && length as1 == length as2 ->
@@ -352,7 +347,6 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
 
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
     goT (TFn arr)  = TFn (substOnce s arr)
-    goT (TList t)    = TList (goT t)
     goT (TSum row)   = TSum (goR row)
     goT (TData n as) = TData n (map goT as)
     goT t            = t
@@ -403,7 +397,6 @@ data Term
   | Tensor [Term]         -- n-ary tensor chain, atoms aligned with wires left to right
   | Seq Term Term         -- t >> u
   | Quote Term            -- [p]: push the reified program p
-  | ListLit [Term]        -- list(e1, …, en): push a list; each element
                           -- must be a pure push (• ⇒ A)
   | OpenAbs [String] Term -- (x y -> body): open program with named input
                           -- wires; the body is input-closed (all input
@@ -592,7 +585,7 @@ parseStage = go []
   where
     go acc (TokIdent "list" : TokLParen : rest) = do
       (elems, rest') <- parseListElems rest
-      go (ListLit elems : acc) rest'
+      go (desugarList elems : acc) rest'
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
@@ -649,6 +642,14 @@ parseDelimited toks =
     paramsPrefix _   _                   = Nothing
 
 -- Elements of list(…): atoms only, comma-separated.
+-- list(e1, …, en) is sugar: build with nil/cons from the prelude.
+-- The result is a compound atom (a group), composing like any
+-- parenthesized program.
+desugarList :: [Term] -> Term
+desugarList es = foldl step (Prim "nil") (reverse es)
+  where
+    step acc e = Seq acc (Seq (Tensor [e, Prim "pass"]) (Prim "cons"))
+
 parseListElems :: [Token] -> Either String ([Term], [Token])
 parseListElems (TokRParen : rest) = Right ([], rest)
 parseListElems toks = do
@@ -662,7 +663,7 @@ parseListElems toks = do
   where
     elemAtom (TokIdent "list" : TokLParen : rest) = do
       (elems, rest') <- parseListElems rest
-      Right (ListLit elems, rest')
+      Right (desugarList elems, rest')
     elemAtom (TokIdent name : rest) = Right (Prim name, rest)
     elemAtom (TokInt n : rest)      = Right (Prim (show n), rest)
     elemAtom (TokLBrack : rest)     = do
@@ -773,7 +774,6 @@ occursData :: String -> Ty -> Bool
 occursData n = goT
   where
     goT (TData m as) = m == n || any goT as
-    goT (TList t)    = goT t
     goT (TSum r)     = goR r
     goT _            = False
     goR (RCons st r) = goS st || goR r
@@ -820,10 +820,9 @@ parseTypeLine aliases dataSigs line =
     paramList (TokIdent p : TokComma : rest) = (TV p :) <$> paramList rest
     paramList [TokIdent p, TokRParen]        = Right [TV p]
     paramList _ = Left "Malformed type parameter list"
-    validName n = n `notElem` ["Int", "List", "type", "•"]
+    validName n = n `notElem` ["Int", "type", "•"]
     occursIn p t = p `elem` tyParamsIn t
     tyParamsIn (TVarTy v) = [v]
-    tyParamsIn (TList t)  = tyParamsIn t
     tyParamsIn (TSum r)   = rowParams r
     tyParamsIn (TData _ as) = concatMap tyParamsIn as
     tyParamsIn _          = []
@@ -850,11 +849,6 @@ parseTyElem aliases dataSigs params toks = case toks of
   (TokLParen : rest) -> do
     (alts, rest') <- goAlts rest
     pure (TSum (foldr RCons RNil alts), rest')
-  (TokIdent "List" : TokLParen : rest) -> do
-    (t, rest') <- parseTyElem aliases dataSigs params rest
-    case rest' of
-      (TokRParen : rest'') -> pure (TList t, rest'')
-      _ -> Left "Expected ')' after List argument"
   (TokIdent "Int" : rest) -> pure (TInt, rest)
   (TokIdent name : TokLParen : rest)
     | Just arity <- lookup name dataSigs -> do
@@ -924,7 +918,6 @@ substTyVars m = goT
     goT t@(TVarTy v) = M.findWithDefault t v m
     goT TInt         = TInt
     goT (TFn arr)    = TFn arr
-    goT (TList t)    = TList (goT t)
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goT as)
     goR RNil         = RNil
@@ -948,7 +941,6 @@ matchAlias al t = do
             Nothing -> Just (M.insert p x m)
             Just y  -> if x == y then Just m else Nothing
     goT TInt TInt m = Just m
-    goT (TList b) (TList x) m = goT b x m
     goT (TSum rb) (TSum rx) m = goR rb rx m
     goT (TData nb bs) (TData nx xs) m
       | nb == nx && length bs == length xs =
@@ -986,7 +978,6 @@ showTyA as t =
       TVarTy a  -> show a
       TInt      -> "Int"
       TFn arr   -> "Fn⟨" ++ showArrowA as arr ++ "⟩"
-      TList u   -> "List(" ++ showTyA as u ++ ")"
       TSum row  -> "(" ++ showRowA as row ++ ")"
       TData n [] -> n
       TData n args ->
@@ -1066,7 +1057,6 @@ appendStack (STail v) _ =
 infer :: Env -> Term -> Infer (Arrow, [Constraint])
 infer env p@(Prim _)     = inferOperand env True p
 infer env q@(Quote _)    = inferOperand env True q
-infer env l@(ListLit _)  = inferOperand env True l
 infer env o@(OpenAbs {}) = inferOperand env True o
 infer env a@(Alts {})    = inferOperand env True a
 
@@ -1104,17 +1094,6 @@ inferOperand env final (Prim name)
     pick sc = do
       arr <- if final then instantiate sc else instantiateClosed sc
       pure (arr, [])
-inferOperand env _ (ListLit es) = do
-  -- Terminal-source constant: • ⇒ List A.  Each element must be a pure
-  -- push (• ⇒ A), all at the same A.
-  elemTy <- TVarTy <$> freshTyVarName
-  results <- mapM (inferOperand env False) es
-  let cs = concat
-        [ CEqStack i SEnd
-            : CEqStack o (SCons elemTy SEnd)
-            : csE
-        | (Arrow i o, csE) <- results ]
-  pure (Arrow SEnd (SCons (TList elemTy) SEnd), cs)
 inferOperand env _ (Quote p) = do
   -- Terminal-source constant: • ⇒ Fn⟨…⟩.  The quoted program is inferred
   -- as a whole; its remainder variables stay as metavariables inside
@@ -1251,14 +1230,6 @@ primEnv =
       fnGD = TFn (Arrow (STail gam) (STail del))
       applyTy = Forall [] [gam, del] []
         (Arrow (SCons fnGD (STail gam)) (STail del))
-      mapTy = Forall [a, b] [] []
-        (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
-                 (one (TList ta)))
-               (one (TList tb)))
-      foldTy = Forall [a, b] [] []
-        (Arrow (SCons (TFn (Arrow (SCons tb (one ta)) (one tb)))
-                 (SCons tb (one (TList ta))))
-               (one tb))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
       mergeTy = Forall [] [SV "Θ"] []
         (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
@@ -1327,11 +1298,6 @@ primEnv =
       eqTy = Forall [a] [] []
         (let aa = SCons ta (one ta)
          in Arrow aa (one (TSum (RCons aa (RCons aa RNil)))))
-      -- uncons : List A ⇒ (• | A List A) — the asymmetric list router
-      unconsTy = Forall [a] [] []
-        (Arrow (one (TList ta))
-               (one (TSum (RCons SEnd
-                     (RCons (SCons ta (one (TList ta))) RNil)))))
       unaryTy  = Forall [] [] [] (Arrow (one TInt) (one TInt))
       binIntTy = Forall [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
@@ -1370,11 +1336,6 @@ primEnv =
        , ("otherwise", otherwiseTy)
        , ("endif",     endifTy)
        , ("loop",      loopTy)
-       , ("uncons",    unconsTy)
-       , ("cons",      Forall [a] [] []
-           (Arrow (SCons ta (one (TList ta))) (one (TList ta))))
-       , ("map",       mapTy)
-       , ("fold",      foldTy)
        ]
 
 --------------------------------------------------------------------------------
@@ -1386,7 +1347,6 @@ primsIn (Prim n)        = [n]
 primsIn (Tensor ts)     = concatMap primsIn ts
 primsIn (Seq t u)       = primsIn t ++ primsIn u
 primsIn (Quote t)       = primsIn t
-primsIn (ListLit es)    = concatMap primsIn es
 primsIn (OpenAbs ps t)  = [ n | n <- primsIn t, n `notElem` ps ]
 primsIn (Alts comps _)  = concatMap primsIn comps
 
@@ -1400,7 +1360,6 @@ substRecurse nm = go
     go (Tensor ts)      = Tensor (map go ts)
     go (Seq a b)        = Seq (go a) (go b)
     go (Quote t)        = Quote (go t)
-    go (ListLit es)     = ListLit (map go es)
     go (Alts cs r)      = Alts (map go cs) r
     go t@(OpenAbs ps b)
       | "recurse" `elem` ps = t
@@ -1677,6 +1636,18 @@ preludeSrc = unlines
   , "type Bool = (• | •)"
   , "## an optional value: empty or one element"
   , "type Maybe(a) = (• | a)"
+  , "## the list: initial algebra of (• | a X); foldList is generated"
+  , "type List(a) = (• | a List(a))"
+  , "## the empty list"
+  , "def nil = in1 >> List"
+  , "## prepend an element"
+  , "def cons = in2 >> List"
+  , "## open one layer: the asymmetric list router"
+  , "def uncons = unList"
+  , "## left fold: step sees [acc, elem], list consumed left to right"
+  , "def fold = (f b l -> l >> unList >> (b | (x r -> f b x >> apply >> f _ r >> fold)) >> merge)"
+  , "## apply a quoted function to every element"
+  , "def map = (f l -> l >> [nil] [(x r -> f x >> apply >> _ r >> cons)] ... >> foldList)"
   , "## invert a router: swap the hit and miss tracks"
   , "def not = (miss | ok) >> merge"
   , "## negate a quoted router, as a value"
@@ -1752,14 +1723,25 @@ type VarEnv = Map String Value
 data Value
   = VInt Int
   | VFn VarEnv Term
-  | VList [Value]
   | VSum Int [Value]   -- tag (0-based) + the alternative's wire bundle
   deriving (Eq)
 
+-- Cons-shaped sum spines (in2(x, in2(y, … in1()))) display as
+-- list(x, y, …); a bare in1() stays in1().
+listView :: Value -> Maybe [Value]
+listView (VSum 1 [x, rest]) = (x :) <$> end rest
+  where
+    end (VSum 0 [])          = Just []
+    end (VSum 1 [y, more])   = (y :) <$> end more
+    end _                    = Nothing
+listView _ = Nothing
+
 instance Show Value where
+  show v@(VSum _ _)
+    | Just vs <- listView v =
+        "list(" ++ intercalate ", " (map show vs) ++ ")"
   show (VInt n)      = show n
   show (VFn _ _)     = "[fn]"
-  show (VList vs)    = "list(" ++ intercalate ", " (map show vs) ++ ")"
   show (VSum i vs)   =
     "in" ++ show (i + 1) ++ "(" ++ intercalate ", " (map show vs) ++ ")"
 
@@ -1801,7 +1783,6 @@ evalTerm env defs vars term st =
     Tensor ts      -> goAtoms ts st
     p@(Prim _)     -> goAtoms [p] st
     q@(Quote _)    -> goAtoms [q] st
-    l@(ListLit _)  -> goAtoms [l] st
     o@(OpenAbs {}) -> goAtoms [o] st
     a@(Alts {})    -> goAtoms [a] st
   where
@@ -1885,15 +1866,6 @@ evalTerm env defs vars term st =
           (out, logs) <- runBuiltin env defs name args
           pure (out, stk', logs)
     applyAtom _ (Quote body) stk = Right ([VFn vars body], stk, [])
-    applyAtom _ (ListLit es) stk = do
-      vs <- mapM elemValue es
-      pure ([VList vs], stk, [])
-      where
-        elemValue e = do
-          (out, _) <- evalTerm env defs vars e []
-          case out of
-            [v] -> Right v
-            _   -> Left "list element must push exactly one value"
     -- Code row: consume the sum wire, dispatch on the tag, run the
     -- matching component on the bundle, re-tag the result.  Tags past
     -- the components fall to the residual (identity).
@@ -1972,9 +1944,6 @@ runBuiltin _ _ "zero?" [VInt n]         = Right ([VSum (if n == 0 then 0 else 1)
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
 runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])
-runBuiltin _ _ "cons" [v, VList vs]     = Right ([VList (v : vs)], [])
-runBuiltin _ _ "uncons" [VList []]      = Right ([VSum 0 []], [])
-runBuiltin _ _ "uncons" [VList (v:vs)]  = Right ([VSum 1 [v, VList vs]], [])
 -- elif: fold one guard clause into the (Θ | Σ) state
 runBuiltin env defs "elif" [VSum 0 done'] = Right ([VSum 0 done'], [])
 runBuiltin env defs "elif" [VSum 1 [VFn cv act, VSum d payload]]
@@ -1991,24 +1960,6 @@ runBuiltin _ _ "endif" [VSum 1 _] =
   Left "endif: absurd (unreachable: the otherwise-clause cannot miss)"
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
-runBuiltin env defs "map" [VFn cv t, VList vs] = do
-  rs <- mapM step vs
-  pure ([VList (map fst rs)], concatMap snd rs)
-  where
-    step v = do
-      (out, logs) <- evalTerm env defs cv t [v]
-      case out of
-        [r] -> Right (r, logs)
-        _   -> Left "map: code must return exactly one value"
-runBuiltin env defs "fold" [VFn cv t, b0, VList vs] = do
-  (b, logs) <- foldM step (b0, []) vs
-  pure ([b], logs)
-  where
-    step (b, logs) v = do
-      (out, logs') <- evalTerm env defs cv t [b, v]
-      case out of
-        [b'] -> Right (b', logs ++ logs')
-        _    -> Left "fold: code must return exactly one value"
 runBuiltin _ _ name args =
   Left $ "Runtime type error in " ++ name ++ " applied to "
        ++ show args ++ " (unreachable on typechecked programs)"

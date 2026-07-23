@@ -112,9 +112,7 @@ passTests =
   , ("eq?",           "a0 a0 ⇒ (a0 a0 | a0 a0)")
   , ("lt?",           "Int Int ⇒ (Int Int | Int Int)")
   , ("-",             "Int Int ⇒ Int")
-  , ("uncons",        "List(a0) ⇒ (• | a0 List(a0))")
   , ("forget",        "ρ0 ⇒ •")
-  , ("cons",          "a0 List(a0) ⇒ List(a0)")
     -- the guard machine
   , ("if",            "ρ0 ⇒ (ρ1 | ρ0)")
   , ("otherwise",     "ρ0 ⇒ (ρ0 | ())")
@@ -125,11 +123,6 @@ passTests =
   , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
   , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [1 ... >> +] otherwise\nendif", "• ⇒ Int")
-    -- lists
-  , ("list(1, 2, 3)", "• ⇒ List(Int)")
-  , ("list()",        "• ⇒ List(a0)")
-  , ("map",           "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
-  , ("fold",          "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   ]
 
 -- (source, substring expected in the error)
@@ -153,7 +146,6 @@ failTests =
     -- uninhabited miss track, so the missing else is a TYPE error
   , ("7 >> if\n... | [dup >> *] odd?\nendif", "Cannot unify types")
     -- list elements must be pure pushes
-  , ("list(drop)",    "Cannot unify stacks")
   , ("list(1 2",      "Expected ',' or ')'")
   , ("f ... g",       "'...' must be the final atom")
   , ("1 >",           "Unexpected '>'")
@@ -195,6 +187,12 @@ moduleTypeTests =
   , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(a0) ⇒ (a0 | Tree(a0) Tree(a0))")
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
+    -- List is now a declared type in the prelude; the library is derived
+  , ("list()",  "• ⇒ List(a0)")
+  , ("uncons",  "List(a0) ⇒ (• | a0 List(a0))")
+  , ("cons",    "a0 List(a0) ⇒ List(a0)")
+  , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
+  , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   , ("list(1, 2, 3)",                           "• ⇒ List(Int)")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
@@ -373,7 +371,7 @@ evalTests =
   , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
-  , ("list(1, 2) >> uncons",               [],     "in2(1, list(2))")
+  , ("list(1, 2) >> uncons",               [],     "list(1, 2)")
   , ("list() >> uncons",                   [],     "in1()")
     -- multi-line rows: newlines adjacent to | are absorbed (both styles)
   , ("5 >> in1\ndup >> * |\n1 ... >> +\nmerge >> print", ["25"], "")
@@ -403,6 +401,8 @@ moduleFailTests =
     -- nominal rigidity: a data type is NOT its unfolding
   , ("type Nat = (• | Nat)\nin1 >> Nat >> unNat >> unNat", "Cannot unify types")
   , ("type dup = (• | dup)\n1",                  "collides")
+    -- list elements must be pure pushes (desugar makes it a unify error)
+  , ("list(drop)",                                "Cannot unify stacks")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
   ]

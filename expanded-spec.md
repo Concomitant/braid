@@ -188,8 +188,13 @@ Newline is strict `>>`, not implicit `pass`.
   `Tree(b)` argwise, never with its unfolding. Later declarations may
   reference earlier data types; mutual recursion between declarations
   is not yet supported. Hand recursion through `unName` remains available for
-  non-structural shapes (see examples/tree.braid). Built-in List migration to a declared type is
-  deferred.
+  non-structural shapes (see examples/tree.braid). **List is no longer primitive**: the prelude declares
+  `type List(a) = (• | a List(a))`; `nil`/`cons` are rolled
+  injections, `uncons = unList`, `foldList` is the generated
+  catamorphism (foldr), and `fold` (left fold) and `map` are derived
+  defs. `list(e1, …, en)` literals are parse-time sugar over
+  nil/cons. Runtime lists are ordinary sum values; cons-shaped spines
+  display as `list(…)`.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,
   `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,
