@@ -1,0 +1,17 @@
+# The ingestion story, now real: CSV cells are strings; a parse router
+# refines them; sequence commutes the column — typed data or evidence.
+
+list("1", "2", "3") >> [asInt?] ... >> map >> sequence >> print   # in1(list(1, 2, 3))
+list("1", "x", "3") >> [asInt?] ... >> map >> sequence >> print   # in2(x)
+
+# data rows with field-stack doors; symbols as keys
+data Ticket = (Str Int Sym)
+
+def isFaq = unTicket >> drop drop _ >> _ .faq >> eq? >> verdict
+
+"why?" 5 .faq >> Ticket >> isFaq >> print                          # in1()
+
+# templating with cat: the append idiom is _ "..." >> cat
+def template = (q a -> "Q: " q >> cat >> _ "\nA: " >> cat >> _ a >> cat)
+
+"why?" "because" >> template >> print

@@ -112,6 +112,12 @@ passTests =
   , ("eq?",           "a0 a0 ⇒ (a0 a0 | a0 a0)")
   , ("lt?",           "Int Int ⇒ (Int Int | Int Int)")
   , ("-",             "Int Int ⇒ Int")
+    -- strings and symbols
+  , ("\"hello\"",     "• ⇒ Str")
+  , (".red",          "• ⇒ Sym")
+  , ("cat",           "Str Str ⇒ Str")
+  , ("toStr",         "a0 ⇒ Str")
+  , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
     -- the guard machine
   , ("if",            "ρ0 ⇒ (ρ1 | ρ0)")
@@ -185,6 +191,12 @@ moduleTypeTests =
   , ("type Nat = (• | Nat)\nunNat",              "Nat ⇒ Maybe(Nat)")
   , ("type Nat = (• | Nat)\nNat",               "Maybe(Nat) ⇒ Nat")
   , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(a0) ⇒ (a0 | Tree(a0) Tree(a0))")
+    -- data keyword: nominal without recursion; single-alternative
+    -- bodies get doors against the field stack
+  , ("data Person = (Str Int)\nPerson",         "Str Int ⇒ Person")
+  , ("data Person = (Str Int)\nunPerson",       "Person ⇒ Str Int")
+  , ("data Pair(a, b) = (a b)\nPair",           "a0 a1 ⇒ Pair(a0, a1)")
+  , ("data Flag = (• | •)\nunFlag",             "Flag ⇒ Bool")
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
     -- List is now a declared type in the prelude; the library is derived
@@ -276,6 +288,10 @@ evalTests =
   , ("# header comment\n5 >> print # trailing", ["5"], "")
   , ("## doc for sq2\ndef sq2 = dup >> *\n3 >> sq2 >> print", ["9"], "")
   , ("type MInt = (• | Int)\n5 >> print",        ["5"], "")
+    -- data at runtime: bundle, spill, use
+  , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> _ drop >> print", ["ada"], "")
+  , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> drop ... >> print", ["36"], "")
+  , ("data Pair(a, b) = (a b)\n1 .one >> Pair >> unPair >> swap >> drop ... >> print", ["1"], "")
     -- Peano round-trip: folds by ordinary recursion through unNat
   , ("type Nat = (• | Nat)\ndef fromInt = zero? >> (drop >> in1 >> Nat | _ 1 >> - >> fromInt >> in2 >> Nat) >> merge\ndef toInt = unNat >> (0 | toInt >> 1 ... >> +) >> merge\n3 >> fromInt >> toInt >> print", ["3"], "")
     -- trees: build with rolled injections, fold with recursion
@@ -322,6 +338,18 @@ evalTests =
   , ("5 >> (1 >> odd) [dup >> *] ... >> when >> print", ["25"], "")
   , ("5 >> (2 >> odd) [dup >> *] ... >> when >> print", ["5"], "")
   , ("5 >> (2 >> odd) [dup >> *] ... >> unless >> print", ["25"], "")
+    -- strings, symbols, parse routers
+  , ("\"hello\" >> print", ["hello"], "")
+  , ("\"a\" \"b\" >> cat >> print", ["ab"], "")
+  , ("\"Q: \" \"why?\" >> cat >> print", ["Q: why?"], "")
+  , ("7 >> toStr >> \"n=\" ... >> cat >> print", ["n=7"], "")
+  , (".red .red >> eq? >> verdict >> print", ["in1()"], "")
+  , (".red .blue >> eq? >> verdict >> print", ["in2()"], "")
+  , ("\"42\" >> asInt? >> print", ["in1(42)"], "")
+  , ("\"4x\" >> asInt? >> print", ["in2(4x)"], "")
+    -- REAL column sniffing now: strings in, typed column or evidence out
+  , ("list(\"1\", \"2\", \"3\") >> [asInt?] ... >> map >> sequence >> print", ["in1(list(1, 2, 3))"], "")
+  , ("list(\"1\", \"x\", \"3\") >> [asInt?] ... >> map >> sequence >> print", ["in2(x)"], "")
     -- sequence: the List/Sum distributive law — column sniffing is
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")

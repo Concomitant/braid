@@ -9,6 +9,7 @@ import Data.List (nub, intercalate, (\\))
 import Control.Monad.State
 import Control.Monad (foldM)
 import Data.Char (isDigit, isSpace)
+import Data.Bifunctor (first)
 
 --------------------------------------------------------------------------------
 -- 1. Element types, stack types, and arrow types
@@ -47,6 +48,8 @@ instance Show RVar where
 data Ty
   = TVarTy TVar
   | TInt
+  | TStr               -- text
+  | TSym               -- interned symbol: .name literals
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
   | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
   | TData String [Ty]  -- a declared recursive (nominal) type: Name(args)
@@ -71,6 +74,8 @@ instance Show SumRow where
 instance Show Ty where
   show (TVarTy a)  = show a
   show TInt        = "Int"
+  show TStr        = "Str"
+  show TSym        = "Sym"
   show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
   show (TSum row)  = "(" ++ show row ++ ")"
   show (TData n []) = n
@@ -145,6 +150,8 @@ instance Substitutable Ty where
       Nothing -> t
       Just t' -> apply s t'   -- chase chains, like the SType instance
   apply _ TInt        = TInt
+  apply _ TStr        = TStr
+  apply _ TSym        = TSym
   apply s (TFn arr) = TFn (apply s arr)
   apply s (TData n as) = TData n (map (apply s) as)
   apply s (TSum row)  = TSum (apply s row)
@@ -197,6 +204,8 @@ type Vars = ([TVar], [SVar], [RVar])
 varsOfTy :: Ty -> Vars
 varsOfTy (TVarTy v)  = ([v], [], [])
 varsOfTy TInt        = ([], [], [])
+varsOfTy TStr        = ([], [], [])
+varsOfTy TSym        = ([], [], [])
 varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TSum row)  = varsOfRow row
 varsOfTy (TData _ as) = foldr (catVars . varsOfTy) ([], [], []) as
@@ -239,6 +248,8 @@ unifyTy s t1 t2 =
     (TVarTy a, t) -> bindTyVar s a t
     (t, TVarTy a) -> bindTyVar s a t
     (TInt, TInt)  -> Right s
+    (TStr, TStr)  -> Right s
+    (TSym, TSym)  -> Right s
     (TFn (Arrow i1 o1), TFn (Arrow i2 o2)) -> do
       s' <- unifyStack s i1 i2
       unifyStack s' o1 o2
@@ -438,11 +449,17 @@ tokenize = go
     go ('\r':'\n':cs) = (TokNewline :) <$> go cs
     go ('\n':cs)      = (TokNewline :) <$> go cs
     go ('#':cs)         = go (dropWhile (/= '\n') cs)  -- comment to EOL
+    go ('"':cs)         = do
+      (str, rest) <- lexStr cs
+      (TokIdent ('"' : str) :) <$> go rest
     go ('>':'=':'>':cs) = (TokKleisli :) <$> go cs
     go ('>':'>':'>':cs) = (TokSeqPass :) <$> go cs
     go ('>':'>':cs)     = (TokSeq :) <$> go cs
     go ('>':_)          = Left "Unexpected '>' without matching '>>'"
     go ('.':'.':'.':cs) = (TokEllipsis :) <$> go cs
+    go ('.':cs)
+      | (nm, rest) <- span isIdentChar cs
+      , not (null nm) = (TokIdent ('.' : nm) :) <$> go rest
     go ('…':cs)         = (TokEllipsis :) <$> go cs   -- U+2026, autocorrect's ...
     go ('.':_)          = Left "Unexpected '.' (did you mean '...'?)"
     go ('[':cs)         = (TokLBrack :) <$> go cs
@@ -463,7 +480,15 @@ tokenize = go
           in (TokIdent ident :) <$> go rest
 
     isIdentChar ch =
-      not (isSpace ch) && ch `notElem` (">.[](),-|#\8230" :: String)
+      not (isSpace ch) && ch `notElem` (">.[](),-|#\"\8230" :: String)
+
+    -- string literal body: minimal escapes \" \\ \n
+    lexStr ('\\':'"':cs)  = first ('"' :)  <$> lexStr cs
+    lexStr ('\\':'\\':cs) = first ('\\' :) <$> lexStr cs
+    lexStr ('\\':'n':cs)  = first ('\n' :) <$> lexStr cs
+    lexStr ('"':cs)       = Right ("", cs)
+    lexStr (c:cs)         = first (c :) <$> lexStr cs
+    lexStr []             = Left "Unterminated string literal"
 
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
 -- newlines adjacent to an explicit >> / >>> (the operator wins).
@@ -715,12 +740,20 @@ dataDeclArtifacts :: DataDecl
 dataDeclArtifacts d =
   ( [ (dName d,          Forall ps [] [] (Arrow bodyStack namedStack))
     , ("un" ++ dName d,  Forall ps [] [] (Arrow namedStack bodyStack)) ]
-  , [ (dName d,         (1, False, Prim "id"))
-    , ("un" ++ dName d, (1, False, Prim "id")) ] )
+  , [ (dName d,         (rollArity, False, rollTerm))
+    , ("un" ++ dName d, (1, False, unrollTerm)) ] )
   where
     ps         = dParams d
-    bodyStack  = SCons (dBody d) SEnd
     namedStack = SCons (TData (dName d) (map TVarTy ps)) SEnd
+    -- single-alternative bodies get doors against the field stack
+    -- (Person : Str Int => Person); multi-alternative bodies coerce
+    -- the sum wire itself.
+    (bodyStack, rollArity, rollTerm, unrollTerm) =
+      case dBody d of
+        TSum (RCons st RNil) ->
+          (st, closedArity st, Prim "in1", Prim "merge")
+        _ ->
+          (SCons (dBody d) SEnd, 1, Prim "id", Prim "id")
 
 -- Generated eliminator: definition by points.  For
 --   type Name(ps) = (alt1 | … | altk)
@@ -757,9 +790,12 @@ dataFoldSrc d =
                              ++ " >> " ++ fi ++ " ... >> apply"
                 in "(" ++ unwords xs ++ " -> " ++ body ++ ")"
 
-          comps = intercalate " | " (map comp (zip fs alts))
-          src   = "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un" ++ dName d
-                    ++ " >> (" ++ comps ++ ") >> merge)"
+          src = case map comp (zip fs alts) of
+            [c] -> "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un"
+                     ++ dName d ++ " >> " ++ c ++ ")"
+            cs  -> "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un"
+                     ++ dName d ++ " >> ("
+                     ++ intercalate " | " cs ++ ") >> merge)"
       pure (fname, src)
     _ -> Nothing
   where
@@ -797,14 +833,16 @@ parseTypeLine :: [Alias] -> [(String, Int)] -> String
 parseTypeLine aliases dataSigs line =
   case break (== '=') line of
     (lhs, '=' : rhs) -> do
-      (name, params) <- parseHead lhs
+      (kw, name, params) <- parseHead lhs
       let sigs = (name, length params) : dataSigs
       body <- parseTyBody aliases sigs params rhs
       if all (`occursIn` body) params
         then Right ()
         else Left $ "Type alias " ++ name
                  ++ ": every parameter must occur in the body"
-      pure $ if occursData name body
+      -- `data` is always nominal; `type` is a transparent alias unless
+      -- self-recursive (which forces nominality)
+      pure $ if kw == "data" || occursData name body
                then Right (DataDecl name params body)
                else Left  (Alias name params body)
     _ -> Left $ "Malformed type declaration (missing '='): " ++ line
@@ -812,15 +850,17 @@ parseTypeLine aliases dataSigs line =
     parseHead lhs = do
       toks <- normalizeToks <$> tokenize lhs
       case toks of
-        [TokIdent "type", TokIdent name]
-          | validName name -> Right (name, [])
-        (TokIdent "type" : TokIdent name : TokLParen : rest)
-          | validName name -> (,) name <$> paramList rest
+        [TokIdent kw, TokIdent name]
+          | kw `elem` ["type", "data"], validName name ->
+              Right (kw, name, [])
+        (TokIdent kw : TokIdent name : TokLParen : rest)
+          | kw `elem` ["type", "data"], validName name ->
+              (,,) kw name <$> paramList rest
         _ -> Left $ "Malformed type declaration: " ++ line
     paramList (TokIdent p : TokComma : rest) = (TV p :) <$> paramList rest
     paramList [TokIdent p, TokRParen]        = Right [TV p]
     paramList _ = Left "Malformed type parameter list"
-    validName n = n `notElem` ["Int", "type", "•"]
+    validName n = n `notElem` ["Int", "Str", "Sym", "type", "data", "•"]
     occursIn p t = p `elem` tyParamsIn t
     tyParamsIn (TVarTy v) = [v]
     tyParamsIn (TSum r)   = rowParams r
@@ -850,6 +890,8 @@ parseTyElem aliases dataSigs params toks = case toks of
     (alts, rest') <- goAlts rest
     pure (TSum (foldr RCons RNil alts), rest')
   (TokIdent "Int" : rest) -> pure (TInt, rest)
+  (TokIdent "Str" : rest) -> pure (TStr, rest)
+  (TokIdent "Sym" : rest) -> pure (TSym, rest)
   (TokIdent name : TokLParen : rest)
     | Just arity <- lookup name dataSigs -> do
         (args, rest') <- goArgs rest
@@ -917,6 +959,8 @@ substTyVars m = goT
   where
     goT t@(TVarTy v) = M.findWithDefault t v m
     goT TInt         = TInt
+    goT TStr         = TStr
+    goT TSym         = TSym
     goT (TFn arr)    = TFn arr
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goT as)
@@ -941,6 +985,8 @@ matchAlias al t = do
             Nothing -> Just (M.insert p x m)
             Just y  -> if x == y then Just m else Nothing
     goT TInt TInt m = Just m
+    goT TStr TStr m = Just m
+    goT TSym TSym m = Just m
     goT (TSum rb) (TSum rx) m = goR rb rx m
     goT (TData nb bs) (TData nx xs) m
       | nb == nx && length bs == length xs =
@@ -977,6 +1023,8 @@ showTyA as t =
     Nothing -> case t of
       TVarTy a  -> show a
       TInt      -> "Int"
+      TStr      -> "Str"
+      TSym      -> "Sym"
       TFn arr   -> "Fn⟨" ++ showArrowA as arr ++ "⟩"
       TSum row  -> "(" ++ showRowA as row ++ ")"
       TData n [] -> n
@@ -1081,6 +1129,10 @@ infer env (Seq t u) = do
 inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
+  | isStrLiteral name =
+      pick (Forall [] [] [] (Arrow SEnd (SCons TStr SEnd)))
+  | isSymLiteral name =
+      pick (Forall [] [] [] (Arrow SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
 
   | otherwise =
@@ -1159,6 +1211,14 @@ tailVar SEnd         = Nothing
 
 isIntLiteral :: String -> Bool
 isIntLiteral name = not (null name) && all isDigit name
+
+isStrLiteral :: String -> Bool
+isStrLiteral ('"' : _) = True
+isStrLiteral _         = False
+
+isSymLiteral :: String -> Bool
+isSymLiteral ('.' : _ : _) = True
+isSymLiteral _             = False
 
 -- The lexical injection family: in1, in2, … — position fixed, width
 -- open via the row tail.
@@ -1328,6 +1388,13 @@ primEnv =
        , ("eq?",       eqTy)
        , ("lt?",       int2Router)
        , ("-",         binIntTy)
+       , ("cat",       Forall [] [] []
+           (Arrow (SCons TStr (one TStr)) (one TStr)))
+       , ("toStr",     Forall [a] [] [] (Arrow (one ta) (one TStr)))
+       , ("asInt?",    Forall [] [] []
+           (Arrow (one TStr)
+                  (one (TSum (RCons (one TInt)
+                        (RCons (one TStr) RNil))))))
        , ("apply",     applyTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
@@ -1370,6 +1437,8 @@ inferTermIn :: Env -> Term -> Either String Arrow
 inferTermIn env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
+               , not (isStrLiteral n)
+               , not (isSymLiteral n)
                , not (M.member n env)
                , Nothing <- [injIndex n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
@@ -1390,6 +1459,8 @@ inferDefTermIn name env term
       case nub [ n | n <- primsIn term
                    , n /= name
                    , not (isIntLiteral n)
+                   , not (isStrLiteral n)
+                   , not (isSymLiteral n)
                    , not (M.member n env)
                    , Nothing <- [injIndex n] ] of
         (n : _) -> Left $ "Unknown primitive: " ++ n
@@ -1498,7 +1569,7 @@ splitDefs src = do
     go doc (l : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
-      | ("type" : _) <- words l = do
+      | (kw : _) <- words l, kw `elem` ["type", "data"] = do
           (ds, ts, ps) <- go Nothing rest
           pure (ds, (l, doc) : ts, ps)
       | ("def" : _) <- words l = do
@@ -1734,6 +1805,8 @@ type VarEnv = Map String Value
 -- quotations inside abstraction bodies are closures over the parameters.
 data Value
   = VInt Int
+  | VStr String
+  | VSym String
   | VFn VarEnv Term
   | VSum Int [Value]   -- tag (0-based) + the alternative's wire bundle
   deriving (Eq)
@@ -1753,6 +1826,8 @@ instance Show Value where
     | Just vs <- listView v =
         "list(" ++ intercalate ", " (map show vs) ++ ")"
   show (VInt n)      = show n
+  show (VStr t)      = t
+  show (VSym t)      = t
   show (VFn _ _)     = "[fn]"
   show (VSum i vs)   =
     "in" ++ show (i + 1) ++ "(" ++ intercalate ", " (map show vs) ++ ")"
@@ -1863,6 +1938,8 @@ evalTerm env defs vars term st =
     applyAtom isFinal (Prim name) stk
       | Just v <- M.lookup name vars = Right ([v], stk, [])
       | isIntLiteral name = Right ([VInt (read name)], stk, [])
+      | isStrLiteral name = Right ([VStr (drop 1 name)], stk, [])
+      | isSymLiteral name = Right ([VSym name], stk, [])
       | Just (k, open, body) <- M.lookup name defs =
           if open && isFinal
             then do
@@ -1956,6 +2033,12 @@ runBuiltin _ _ "zero?" [VInt n]         = Right ([VSum (if n == 0 then 0 else 1)
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
 runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])
+runBuiltin _ _ "cat"  [VStr x, VStr y]  = Right ([VStr (x ++ y)], [])
+runBuiltin _ _ "toStr" [v]              = Right ([VStr (show v)], [])
+runBuiltin _ _ "asInt?" [VStr t]        =
+  case reads t :: [(Int, String)] of
+    [(n, "")] -> Right ([VSum 0 [VInt n]], [])
+    _         -> Right ([VSum 1 [VStr t]], [])
 -- elif: fold one guard clause into the (Θ | Σ) state
 runBuiltin env defs "elif" [VSum 0 done'] = Right ([VSum 0 done'], [])
 runBuiltin env defs "elif" [VSum 1 [VFn cv act, VSum d payload]]
