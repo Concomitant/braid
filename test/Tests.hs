@@ -314,6 +314,14 @@ evalTests =
     -- a Bool drives a choice through an ordinary row
   , ("7 >> odd >> (1 | 0) >> merge >> print", ["1"], "")
   , ("8 >> odd >> (1 | 0) >> merge >> print", ["0"], "")
+    -- cond/when/unless: a Bool selects a quotation, run on the segment
+    -- (possible ONLY at the verdict tier: Bool's tracks are empty, so
+    -- selection commutes past the data)
+  , ("3 4 >> (1 >> odd) [+] [*] ... >> cond >> print", ["7"], "")
+  , ("3 4 >> (2 >> odd) [+] [*] ... >> cond >> print", ["12"], "")
+  , ("5 >> (1 >> odd) [dup >> *] ... >> when >> print", ["25"], "")
+  , ("5 >> (2 >> odd) [dup >> *] ... >> when >> print", ["5"], "")
+  , ("5 >> (2 >> odd) [dup >> *] ... >> unless >> print", ["25"], "")
     -- the list monad, all derived in the prelude:
     -- single = return, concat = join, flatMap = bind, filter via bind
   , ("list(1, 2, 3) >> reverse >> print", ["list(3, 2, 1)"], "")

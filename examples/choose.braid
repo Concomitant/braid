@@ -1,4 +1,14 @@
-def choose = (c t e -> c >> (t | e) >> merge)
+# Factor-style conditionals from the verdict tier: a Bool selects a
+# quotation and apply runs it on the rest of the stack. This only
+# works because Bool's tracks are empty — selection commutes with the
+# data, so the branches see wires the test never touched.
 
-true 1 2 >> choose >> print
-false 10 20 >> choose >> print
+3 4 >> (1 >> odd) [+] [*] ... >> cond >> print     # 7   (odd: then-branch)
+3 4 >> (2 >> odd) [+] [*] ... >> cond >> print     # 12  (even: else-branch)
+5 >> (1 >> odd) [dup >> *] ... >> when >> print    # 25
+5 >> (2 >> odd) [dup >> *] ... >> when >> print    # 5   (skipped)
+
+# Contrast: when the TESTED value is what the branches need, the
+# router form stays better — min keeps its data attached:
+def min = lt? >> (_ drop | drop ...) >> merge
+3 7 >> min >> print                                 # 3
