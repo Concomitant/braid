@@ -355,7 +355,7 @@ evalTests =
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
-  , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> _ toStr >> swap >> toStr ... >> cat >> print", ["715"], "")
+  , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> toStr _ >> _ toStr >> cat >> print", ["715"], "")
     -- split-apply-combine: dup broadcasts, filters split, folds apply
   , ("def sumL = [+] 0 ... >> fold\nlist(1, 2, 3, 4) >> dup >> ([odd?] ... >> filter >> sumL) _ >> _ ([even?] ... >> filter >> sumL) >> + >> print", ["10"], "")
     -- the list monad, all derived in the prelude:
