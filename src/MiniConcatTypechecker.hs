@@ -1674,6 +1674,8 @@ preludeSrc = unlines
   , "def single = _ list() >> cons"
   , "## map then flatten: bind of the list monad"
   , "def flatMap = map >> concat"
+  , "## commute List over the sum monad: all hits, or the first miss"
+  , "def sequence = [nil >> ok] [(x r -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"
   , "def filter = (p -> [p ... >> apply >> (single | drop >> list()) >> merge]) ... >> flatMap"
   , "## a Bool selects one of two quotations"

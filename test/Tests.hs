@@ -322,6 +322,10 @@ evalTests =
   , ("5 >> (1 >> odd) [dup >> *] ... >> when >> print", ["25"], "")
   , ("5 >> (2 >> odd) [dup >> *] ... >> when >> print", ["5"], "")
   , ("5 >> (2 >> odd) [dup >> *] ... >> unless >> print", ["25"], "")
+    -- sequence: the List/Sum distributive law — column sniffing is
+    -- map parse-router >> sequence
+  , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
+  , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
     -- split-apply-combine: dup broadcasts, filters split, folds apply
   , ("def sumL = [+] 0 ... >> fold\nlist(1, 2, 3, 4) >> dup >> ([odd?] ... >> filter >> sumL) _ >> _ ([even?] ... >> filter >> sumL) >> + >> print", ["10"], "")
     -- the list monad, all derived in the prelude:
