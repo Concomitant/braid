@@ -335,11 +335,12 @@ Monoid instances — the dictionary is just wires.
 
 `type Nat = (• | Nat)` and friends close the categorical loop: a
 recursive declaration is the initial algebra of a row functor, the
-`Name`/`Name?` coercions are the algebra isomorphism, and `Name?` is a
-router — data-type elimination IS the control-flow machinery of this
-chapter. Folds need no new primitive: they are `recurse`-style
-definitions through `Name?`, and the guard/row vocabulary applies to
-user data unchanged.
+`Name`/`unName` coercions are the algebra isomorphism, and `unName`
+output is a sum wire — data-type elimination IS the control-flow
+machinery of this chapter. Each declaration also generates `foldName`,
+the catamorphism: elimination by points (`[case1] [case2] ... >>
+foldName`, recursive slots pre-folded), with hand recursion through
+`unName` for everything else.
 
 ## 7. The two-level pattern
 

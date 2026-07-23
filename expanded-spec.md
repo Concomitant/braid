@@ -175,14 +175,20 @@ Newline is strict `>>`, not implicit `pass`.
   transparent alias — `type Nat = (• | Nat)`,
   `type Tree(a) = (a | Tree(a) Tree(a))`. Iso-recursive: the declared
   name in term position rolls (`in2 >> Tree` builds a node) and
-  `Name?` unrolls — a destructuring router in the `uncons` tradition
-  (decision by routing, data intact; the pair is a lossless iso and
-  both directions are runtime no-ops). `Tree(a)` unifies only with
+  `unName` unrolls (the Haskell-newtype `un-` tradition; `uncons`
+  already reads as un-cons). The pair is a lossless iso, both
+  directions runtime no-ops. The explicit coercion is deliberate: an
+  investigation showed fusing unroll into rows (ML-style invisible
+  case) makes unification order-dependent and forfeits principal
+  types. Each declaration with a sum body also GENERATES its
+  catamorphism `foldName` as derived Braid source — definition by
+  points: one quoted case per constructor, recursive slots pre-folded
+  (`[0] [1 ... >> +] ... >> foldNat` is toInt; folds terminate
+  structurally). `Tree(a)` unifies only with
   `Tree(b)` argwise, never with its unfolding. Later declarations may
   reference earlier data types; mutual recursion between declarations
-  is not yet supported. Folds are not generated — they are written
-  with ordinary recursion through `Name?` (see examples/nat.braid,
-  examples/tree.braid). Built-in List migration to a declared type is
+  is not yet supported. Hand recursion through `unName` remains available for
+  non-structural shapes (see examples/tree.braid). Built-in List migration to a declared type is
   deferred.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,

@@ -707,19 +707,67 @@ dataSig :: DataDecl -> (String, Int)
 dataSig d = (dName d, length (dParams d))
 
 -- The schemes and runtime entries a data declaration contributes:
---   Name  : ∀params. body ⇒ Name(params)      (roll)
---   Name? : ∀params. Name(params) ⇒ body      (unroll)
+--   Name   : ∀params. body ⇒ Name(params)      (roll)
+--   unName : ∀params. Name(params) ⇒ body      (unroll)
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,         Forall ps [] [] (Arrow bodyStack namedStack))
-    , (dName d ++ "?",  Forall ps [] [] (Arrow namedStack bodyStack)) ]
-  , [ (dName d,        (1, False, Prim "id"))
-    , (dName d ++ "?", (1, False, Prim "id")) ] )
+  ( [ (dName d,          Forall ps [] [] (Arrow bodyStack namedStack))
+    , ("un" ++ dName d,  Forall ps [] [] (Arrow namedStack bodyStack)) ]
+  , [ (dName d,         (1, False, Prim "id"))
+    , ("un" ++ dName d, (1, False, Prim "id")) ] )
   where
     ps         = dParams d
     bodyStack  = SCons (dBody d) SEnd
     namedStack = SCons (TData (dName d) (map TVarTy ps)) SEnd
+
+-- Generated eliminator: definition by points.  For
+--   type Name(ps) = (alt1 | … | altk)
+-- emit (as ordinary Braid source, name and body):
+--   foldName = (f1 … fk t -> t >> unName >> (C1 | … | Ck) >> merge)
+-- where Ci applies fi to alternative i's payload with every recursive
+-- slot (an element exactly Name(ps)) already folded.  Bodies that are
+-- not sums get no fold; recursion nested under other constructors
+-- (e.g. List(Rose(a))) is passed to the case untransformed.
+dataFoldSrc :: DataDecl -> Maybe (String, String)
+dataFoldSrc d =
+  case dBody d of
+    TSum row -> do
+      alts <- closedAlts row
+      let k      = length alts
+          fs     = [ "f" ++ show i | i <- [1 .. k] ]
+          selfTy = TData (dName d) (map TVarTy (dParams d))
+          fname  = "fold" ++ dName d
+
+          comp (fi, payload)
+            | null payload = fi ++ " ... >> apply"
+            | otherwise =
+                let xs = [ "x" ++ show j | j <- [1 .. length payload] ]
+                    slot (x, ty)
+                      | ty == selfTy =
+                          "(" ++ unwords (fs ++ [x]) ++ " >> " ++ fname ++ ")"
+                      | otherwise = "(" ++ x ++ ")"
+                    slots  = map slot (zip xs payload)
+                    stages =
+                      head slots
+                        : [ unwords (replicate n "_") ++ " " ++ sl
+                          | (n, sl) <- zip [1 :: Int ..] (tail slots) ]
+                    body = intercalate " >> " stages
+                             ++ " >> " ++ fi ++ " ... >> apply"
+                in "(" ++ unwords xs ++ " -> " ++ body ++ ")"
+
+          comps = intercalate " | " (map comp (zip fs alts))
+          src   = "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un" ++ dName d
+                    ++ " >> (" ++ comps ++ ") >> merge)"
+      pure (fname, src)
+    _ -> Nothing
+  where
+    closedAlts RNil          = Just []
+    closedAlts (RTail _)     = Nothing
+    closedAlts (RCons st r)  = (stackElems st :) <$> closedAlts r
+    stackElems SEnd          = []
+    stackElems (STail _)     = []
+    stackElems (SCons t st)  = t : stackElems st
 
 occursData :: String -> Ty -> Bool
 occursData n = goT
@@ -1557,7 +1605,13 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
   (defSrcs, tyLines, mainSrc) <- splitDefs src
   (env1, _, _, ownAliases, ownDatas, docs0) <-
     foldM addType (env0, aliases0, datas0, [], [], M.empty) tyLines
-  (env', _, defsRev, docs) <- foldM addDef (env1, shadow0, [], docs0) defSrcs
+  let genDefs =
+        [ (fn, body, Just ("definition by points: one quoted case per "
+                           ++ "constructor of " ++ dName dd
+                           ++ ", recursive slots pre-folded"))
+        | dd <- reverse ownDatas, Just (fn, body) <- [dataFoldSrc dd] ]
+  (env', _, defsRev, docs) <-
+    foldM addDef (env1, shadow0, [], docs0) (genDefs ++ defSrcs)
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
@@ -1588,7 +1642,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
                , al : filter ((/= n) . aName) aliasesIn
                , datasIn, al : ownAl, ownDt, docs' )
         Right dd -> do
-          if M.member n env || M.member (n ++ "?") env
+          if M.member n env || M.member ("un" ++ n) env
             then Left $ "Type " ++ n
                      ++ ": constructor name collides with an existing definition"
             else Right ()

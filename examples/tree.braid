@@ -1,4 +1,4 @@
-# User-declared binary trees. Tree? is a router — elimination IS
+# User-declared binary trees. unTree is a router — elimination IS
 # control flow — and folds are ordinary recursion.
 
 type Tree(a) = (a | Tree(a) Tree(a))
@@ -6,11 +6,11 @@ type Tree(a) = (a | Tree(a) Tree(a))
 def leaf = in1 >> Tree
 def node = in2 >> Tree
 
-## sum of the leaves
-def total = Tree? >> (_ | _ total >> swap >> _ total >> +) >> merge
+## sum of the leaves, by points: leaf keeps its value, node adds results
+def total = [_] [+] ... >> foldTree
 
-## number of leaves
-def size = Tree? >> (drop >> 1 | _ size >> swap >> _ size >> +) >> merge
+## number of leaves: hand-written recursion through unTree, for contrast
+def size = unTree >> (drop >> 1 | _ size >> swap >> _ size >> +) >> merge
 
 1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print   # 7
 1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> size >> print    # 3

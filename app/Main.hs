@@ -213,19 +213,40 @@ handleLine st line =
           let n = dName dd
               redecl = any ((== n) . dName) (rsDatas st)
               envClean
-                | redecl    = M.delete n (M.delete (n ++ "?") (rsEnv st))
+                | redecl    = M.delete n
+                                (M.delete ("un" ++ n)
+                                  (M.delete ("fold" ++ n) (rsEnv st)))
                 | otherwise = rsEnv st
-          if M.member n envClean || M.member (n ++ "?") envClean
+          if M.member n envClean || M.member ("un" ++ n) envClean
             then report $ "Type " ++ n
                    ++ ": constructor name collides with an existing definition"
             else do
               let (scs, runs) = dataDeclArtifacts dd
-              putStrLn $ "type " ++ n ++ "   (" ++ n ++ " rolls, "
-                       ++ n ++ "? unrolls)"
-              pure st { rsEnv     = foldr (uncurry M.insert) envClean scs
-                      , rsRun     = M.fromList runs `M.union` rsRun st
-                      , rsDatas   = dd : filter ((/= n) . dName) (rsDatas st)
-                      , rsAliases = filter ((/= n) . aName) (rsAliases st) }
+                  envCtors = foldr (uncurry M.insert) envClean scs
+                  st1 = st { rsEnv     = envCtors
+                           , rsRun     = M.fromList runs `M.union` rsRun st
+                           , rsDatas   = dd : filter ((/= n) . dName)
+                                                     (rsDatas st)
+                           , rsAliases = filter ((/= n) . aName)
+                                                (rsAliases st) }
+              putStrLn $ "type " ++ n ++ "   (" ++ n ++ " rolls, un"
+                       ++ n ++ " unrolls)"
+              case dataFoldSrc dd of
+                Nothing -> pure st1
+                Just (fn, body) ->
+                  case checkModuleWith (M.delete fn (rsEnv st1)) preludeNames
+                         (rsAliases st1) (rsDatas st1)
+                         ("def " ++ fn ++ " = " ++ body) of
+                    Left err -> do
+                      putStrLn $ "warning: could not derive " ++ fn
+                               ++ ": " ++ err
+                      pure st1
+                    Right m -> do
+                      putStrLn $ "def " ++ fn ++ " : "
+                               ++ maybe "?" (showSchemeA (rsAliases st1))
+                                    (M.lookup fn (modEnv m))
+                      pure st1 { rsEnv = modEnv m
+                               , rsRun = moduleRunDefs m `M.union` rsRun st1 }
 
     -- def name = program : extend (or replace) a user definition;
     -- prelude names may always be shadowed
