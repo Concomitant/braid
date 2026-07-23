@@ -1,0 +1,10 @@
+# Split-apply-combine: dup broadcasts the source, predicates split,
+# a fold applies per group, the combine is any monoid op. The dup is
+# where a future IR earns its keep: two filters over one pass.
+
+def sumL = [+] 0 ... >> fold
+def sumOdds = [odd?] ... >> filter >> sumL
+def sumEvens = [even?] ... >> filter >> sumL
+
+list(1, 2, 3, 4, 5, 6, 7, 8) >> dup >> sumOdds _ >> _ sumEvens >> print _ >> print
+list(1, 2, 3, 4, 5, 6, 7, 8) >> dup >> sumOdds _ >> _ sumEvens >> + >> print

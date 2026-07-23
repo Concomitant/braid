@@ -322,6 +322,8 @@ evalTests =
   , ("5 >> (1 >> odd) [dup >> *] ... >> when >> print", ["25"], "")
   , ("5 >> (2 >> odd) [dup >> *] ... >> when >> print", ["5"], "")
   , ("5 >> (2 >> odd) [dup >> *] ... >> unless >> print", ["25"], "")
+    -- split-apply-combine: dup broadcasts, filters split, folds apply
+  , ("def sumL = [+] 0 ... >> fold\nlist(1, 2, 3, 4) >> dup >> ([odd?] ... >> filter >> sumL) _ >> _ ([even?] ... >> filter >> sumL) >> + >> print", ["10"], "")
     -- the list monad, all derived in the prelude:
     -- single = return, concat = join, flatMap = bind, filter via bind
   , ("list(1, 2, 3) >> reverse >> print", ["list(3, 2, 1)"], "")
