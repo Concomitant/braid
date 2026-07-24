@@ -195,6 +195,18 @@ Newline is strict `>>`, not implicit `pass`.
   defs. `list(e1, …, en)` literals are parse-time sugar over
   nil/cons. Runtime lists are ordinary sum values; cons-shaped spines
   display as `list(…)`.
+* **Stack-kinded type parameters**: a constructor argument is a
+  STACK — `List(Int Sym)` is a list of flat two-wire elements, and
+  `zip : List(a) List(b) ⇒ List(a b)` needs no Pair box. Internally a
+  parameter before other elements is a *splice* (a stack variable in
+  non-tail position); the discipline is one splice per stack with a
+  closed suffix, unified right-anchored (unitary, principal; the
+  splice-vs-open-tail case resolves via a fresh bridge variable —
+  sound, incomplete in adversarial corners). Consequences: splice
+  constructors (`cons`) are segment-consuming (final position, like
+  injections); generated folds for splice types pass the FOLDED value
+  first and pin fold results to one wire; defs that name "one
+  element" (`map`) soundly self-constrain their element to width 1.
 * A **prelude** of derived definitions is auto-loaded into every
   module and REPL session: `not`, `negate`, `both`, `either`,
   `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,

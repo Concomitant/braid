@@ -190,7 +190,7 @@ moduleTypeTests =
     -- theorem: Nat ≅ Maybe(Nat) is the successor algebra
   , ("type Nat = (• | Nat)\nunNat",              "Nat ⇒ Maybe(Nat)")
   , ("type Nat = (• | Nat)\nNat",               "Maybe(Nat) ⇒ Nat")
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(a0) ⇒ (a0 | Tree(a0) Tree(a0))")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(ρ0) ⇒ (ρ0 | Tree(ρ0) Tree(ρ0))")
     -- data keyword: nominal without recursion; single-alternative
     -- bodies get doors against the field stack
   , ("data Person = (Str Int)\nPerson",         "Str Int ⇒ Person")
@@ -199,9 +199,11 @@ moduleTypeTests =
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
     -- List is now a declared type in the prelude; the library is derived
-  , ("list()",  "• ⇒ List(a0)")
-  , ("uncons",  "List(a0) ⇒ (• | a0 List(a0))")
-  , ("cons",    "a0 List(a0) ⇒ List(a0)")
+  , ("list()",  "• ⇒ List(ρ0)")
+  , ("uncons",  "List(ρ0) ⇒ (• | ρ0 List(ρ0))")
+  , ("cons",    "ρ0 List(ρ0) ⇒ List(ρ0)")
+    -- stack-kinded parameters: zip without Pair
+  , ("zip",     "List(a0) List(a1) ⇒ List(a0 a1)")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   , ("list(1, 2, 3)",                           "• ⇒ List(Int)")
@@ -352,6 +354,8 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- zip + a fold over flat two-wire elements: the dot product
+  , ("list(1, 2, 3) list(10, 20, 30) >> zip >> [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print", ["140"], "")
     -- arithmetic completeness + negative literals
   , ("7 3 >> div >> print",  ["2"], "")
   , ("15 3 >> mod >> print", ["0"], "")
@@ -479,6 +483,7 @@ moduleFailTests =
   , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
+  , ("data Bad(a, b) = (• | a b)\n1",            "ambiguous product split")
     -- nominal rigidity: a data type is NOT its unfolding
   , ("type Nat = (• | Nat)\nin1 >> Nat >> unNat >> unNat", "Cannot unify types")
   , ("type dup = (• | dup)\n1",                  "collides")

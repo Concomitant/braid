@@ -1,0 +1,6 @@
+# zip without a Pair box: type parameters are stack-kinded, so the
+# list element is a flat two-wire product — List(a) List(b) ⇒ List(a b).
+# Folds over such lists take one case argument per wire, folded first.
+
+list(1, 2, 3) list(10, 20, 30) >> zip
+    >> [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print   # dot product: 140
