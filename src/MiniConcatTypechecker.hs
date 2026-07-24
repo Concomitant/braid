@@ -7,6 +7,9 @@ import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing)
 import Data.List (nub, intercalate, elemIndex, (\\))
 import Control.Monad.State
+import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither)
+import Control.Monad.IO.Class (liftIO)
+import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
 import Data.Char (isDigit, isSpace)
 import Data.Bifunctor (first)
@@ -468,7 +471,10 @@ tokenize = go
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
-    go ('-':cs)         = (TokIdent "-" :) <$> go cs   -- subtraction
+    go ('-':cs)
+      | (ds@(_:_), rest) <- span isDigit cs =
+          (TokIdent ('-' : ds) :) <$> go rest          -- negative literal
+      | otherwise = (TokIdent "-" :) <$> go cs         -- subtraction
     go ('|':cs)         = (TokBar :) <$> go cs
     go (c:cs)
       | isSpace c = go cs
@@ -1231,7 +1237,8 @@ tailVar (SCons _ r)  = tailVar r
 tailVar SEnd         = Nothing
 
 isIntLiteral :: String -> Bool
-isIntLiteral name = not (null name) && all isDigit name
+isIntLiteral ('-' : ds) = not (null ds) && all isDigit ds
+isIntLiteral name       = not (null name) && all isDigit name
 
 isStrLiteral :: String -> Bool
 isStrLiteral ('"' : _) = True
@@ -1411,6 +1418,11 @@ primEnv =
        , ("eq?",       eqTy)
        , ("lt?",       int2Router)
        , ("-",         binIntTy)
+       , ("div",       binIntTy)
+       , ("mod",       binIntTy)
+       , ("gt?",       int2Router)
+       , ("gte?",      int2Router)
+       , ("lte?",      int2Router)
        , ("cat",       Forall [] [] []
            (Arrow (SCons TStr (one TStr)) (one TStr)))
        , ("toStr",     Forall [a] [] [] (Arrow (one ta) (one TStr)))
@@ -1419,6 +1431,18 @@ primEnv =
                   (one (TSum (RCons (one TInt)
                         (RCons (one TStr) RNil))))))
        , ("symStr",    Forall [] [] [] (Arrow (one TSym) (one TStr)))
+       , ("unparse",   Forall [] [] []
+           (Arrow (SCons codeStructTy SEnd) (one TStr)))
+       , ("parse",     Forall [] [] []
+           (Arrow (one TStr)
+                  (one (TSum (RCons (one codeStructTy)
+                        (RCons (one TStr) RNil))))))
+       , ("readFile",  Forall [] [] []
+           (Arrow (one TStr)
+                  (one (TSum (RCons (one TStr) (RCons (one TStr) RNil))))))
+       , ("writeFile", Forall [] [] []
+           (Arrow (SCons TStr (one TStr))
+                  (one (TSum (RCons SEnd (RCons (one TStr) RNil))))))
        , ("evalCode",  Forall [] [gam, del] []
            (Arrow (SCons codeStructTy (STail gam))
                   (one (TSum (RCons (STail del)
@@ -1704,13 +1728,18 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
                , al : filter ((/= n) . aName) aliasesIn
                , datasIn, al : ownAl, ownDt, docs' )
         Right dd -> do
-          if M.member n env || M.member ("un" ++ n) env
-               || M.member ("merge" ++ n) env
+          -- shadowing a prelude data type replaces its constructors
+          let envC
+                | n `elem` preludeTypeNames =
+                    foldr M.delete env [n, "un" ++ n, "merge" ++ n]
+                | otherwise = env
+          if M.member n envC || M.member ("un" ++ n) envC
+               || M.member ("merge" ++ n) envC
             then Left $ "Type " ++ n
                      ++ ": constructor name collides with an existing definition"
             else Right ()
           let (scs, _) = dataDeclArtifacts dd
-          pure ( foldr (uncurry M.insert) env scs
+          pure ( foldr (uncurry M.insert) envC scs
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs' )
@@ -1718,15 +1747,16 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
       if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
         else Right ()
-      term0 <- parseProgram bodySrc
+      term0 <- either (Left . inDef) Right (parseProgram bodySrc)
       let term = substRecurse name term0
           env1 = M.delete name env   -- a shadowed def must not leak in
-      arr  <- inferDefTermIn name env1 term
+      arr  <- either (Left . inDef) Right (inferDefTermIn name env1 term)
       let sc = generalize env1 arr
       pure ( M.insert name sc env
            , filter (/= name) shadow
            , (name, sc, term) : acc
            , maybe docs (\d -> M.insert name d docs) doc )
+      where inDef e = "in def " ++ name ++ ": " ++ e
 
 --------------------------------------------------------------------------------
 -- 10.5 Prelude: derived definitions available in every module and REPL
@@ -1800,6 +1830,25 @@ preludeSrc = unlines
   , "def unlessFn = (b t -> b >> ([...] | t) >> merge)"
   , "## run the quotation only when the Bool misses"
   , "def unless = unlessFn ... >> apply"
+  , "## the length of a list"
+  , "def len = [0] [drop ... >> 1 ... >> +] ... >> foldList"
+  , "## sum and product of an Int list"
+  , "def sum = [+] 0 ... >> fold"
+  , "def product = [*] 1 ... >> fold"
+  , "def downFrom = (n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> downFrom >> (m 1 >> -) ... >> cons)) >> merge)"
+  , "## list(0, 1, …, n-1)"
+  , "def range = downFrom >> reverse"
+  , "## conjunction / disjunction over a Bool list"
+  , "def all = [true] [(x r -> x [r] [false] ... >> cond)] ... >> foldList"
+  , "def any = [false] [(x r -> x [true] [r] ... >> cond)] ... >> foldList"
+  , "## a pair bundles two wires into one value"
+  , "data Pair(a, b) = (a b)"
+  , "## zip two lists into pairs, to the shorter length"
+  , "def zip = (l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> zip >> (x y >> Pair) ... >> cons)) >> merge)) >> merge)"
+  , "## split a list of sums into Pair(hits, misses)"
+  , "def partitionSum = [(nil) (nil) >> Pair] [(x p -> p >> unPair >> (as bs -> x >> ((v -> (v as >> cons) bs >> Pair) | (w -> as (w bs >> cons) >> Pair)) >> merge))] ... >> foldList"
+  , "## print every element, front to back"
+  , "def printAll = [(b x -> x >> print >> b)] 0 ... >> fold >> drop"
   , "## keep only a router's decision: collapse both payloads to nothing"
   , "def verdict = (forget | forget)"
   , "## long-form comparisons forget their input and answer Bool"
@@ -1900,8 +1949,10 @@ moduleRunDefs m =
 -- Evaluate a term: returns the final stack and the print log.  The Env
 -- is needed to compute closed arities of grouped compound operands; the
 -- VarEnv holds named-abstraction parameters in scope.
+type Eval = ExceptT String IO
+
 evalTerm :: Env -> RunDefs -> VarEnv -> Term -> [Value]
-         -> Either String ([Value], [String])
+         -> Eval ([Value], [String])
 evalTerm env defs vars term st =
   case term of
     Seq t u -> do
@@ -1914,7 +1965,7 @@ evalTerm env defs vars term st =
     o@(OpenAbs {}) -> goAtoms [o] st
     a@(Alts {})    -> goAtoms [a] st
   where
-    goAtoms [] stk = Right (stk, [])   -- leftover remainder flows through last
+    goAtoms [] stk = pure (stk, [])   -- leftover remainder flows through last
     goAtoms (a : more) stk = do
       (out, stk', logs) <- applyAtom (null more) a stk
       (outRest, logs') <- goAtoms more stk'
@@ -1933,7 +1984,7 @@ evalTerm env defs vars term st =
               (out, logs) <- evalTerm env defs cvars body seg
               pure (out, if isFinal then [] else stk', logs)
             _ ->
-              Left "Runtime type error in apply: expected a quotation"
+              throwError "Runtime type error in apply: expected a quotation"
     -- if / otherwise: segment-consuming entries into the guard machine
     -- (positional semantics like apply: whole stack in final position).
     -- evalCode: dynamically-checked splice.  Rebuild the term, infer
@@ -1952,28 +2003,77 @@ evalTerm env defs vars term st =
                 Right term ->
                   case inferTermIn env term of
                     Left e -> missWith e
-                    Right _ ->
-                      case evalTerm env defs M.empty term seg of
+                    Right _ -> do
+                      r <- liftIO (runExceptT
+                             (evalTerm env defs M.empty term seg))
+                      case r of
                         Left e -> missWith e
                         Right (out, logs) ->
                           pure ([VSum 0 out], keep, logs)
-            _ -> Left "evalCode: expected a Code value"
+            _ -> throwError "evalCode: expected a Code value"
+    -- elif / endif: the guard-machine folds (they evaluate actions)
+    applyAtom _ (Prim "elif") stk
+      | not (M.member "elif" vars), not (M.member "elif" defs) = do
+          (args, stk') <- takeWires "elif" 1 stk
+          case args of
+            [VSum 0 done'] -> pure ([VSum 0 done'], stk', [])
+            [VSum 1 [VFn cv act, VSum d payload]]
+              | d == 0 -> do
+                  (out, lg) <- evalTerm env defs cv act payload
+                  pure ([VSum 0 out], stk', lg)
+              | otherwise -> pure ([VSum 1 payload], stk', [])
+            _ -> throwError "elif: malformed guard state"
+    applyAtom _ (Prim "endif") stk
+      | not (M.member "endif" vars), not (M.member "endif" defs) = do
+          (args, stk') <- takeWires "endif" 1 stk
+          case args of
+            [VSum 0 done'] -> pure (done', stk', [])
+            [VSum 1 [VFn cv act, VSum 0 payload]] -> do
+              (out, lg) <- evalTerm env defs cv act payload
+              pure (out, stk', lg)
+            _ -> throwError
+                   "endif: absurd (unreachable: the otherwise-clause cannot miss)"
+    -- IO edges, in print's mold: effects with honest railway types
+    applyAtom _ (Prim "readFile") stk
+      | not (M.member "readFile" vars), not (M.member "readFile" defs) = do
+          (args, stk') <- takeWires "readFile" 1 stk
+          case args of
+            [VStr path] -> do
+              r <- liftIO (try (do t <- readFile path
+                                   _ <- evaluate (length t)
+                                   pure t))
+              case r of
+                Left e  ->
+                  pure ([VSum 1 [VStr (show (e :: IOException))]], stk', [])
+                Right t -> pure ([VSum 0 [VStr t]], stk', [])
+            _ -> throwError "readFile: expected a Str path"
+    applyAtom _ (Prim "writeFile") stk
+      | not (M.member "writeFile" vars), not (M.member "writeFile" defs) = do
+          (args, stk') <- takeWires "writeFile" 2 stk
+          case args of
+            [VStr path, VStr contents] -> do
+              r <- liftIO (try (writeFile path contents))
+              case r of
+                Left e  ->
+                  pure ([VSum 1 [VStr (show (e :: IOException))]], stk', [])
+                Right () -> pure ([VSum 0 []], stk', [])
+            _ -> throwError "writeFile: expected Str path and contents"
     -- forget: the terminal morphism — consume the segment, emit nothing
     applyAtom isFinal (Prim "forget") stk
       | not (M.member "forget" vars), not (M.member "forget" defs) =
           if isFinal
-            then Right ([], [], [])
-            else Right ([], stk, [])
+            then pure ([], [], [])
+            else pure ([], stk, [])
     applyAtom isFinal (Prim "if") stk
       | not (M.member "if" vars), not (M.member "if" defs) =
           if isFinal
-            then Right ([VSum 1 stk], [], [])
-            else Right ([VSum 1 []], stk, [])
+            then pure ([VSum 1 stk], [], [])
+            else pure ([VSum 1 []], stk, [])
     applyAtom isFinal (Prim "otherwise") stk
       | not (M.member "otherwise" vars), not (M.member "otherwise" defs) =
           if isFinal
-            then Right ([VSum 0 stk], [], [])
-            else Right ([VSum 0 []], stk, [])
+            then pure ([VSum 0 stk], [], [])
+            else pure ([VSum 0 []], stk, [])
     -- loop: Elgot iteration — run the body on the segment; the continue
     -- track re-enters, the done track exits.
     applyAtom isFinal (Prim "loop") stk
@@ -1986,23 +2086,23 @@ evalTerm env defs vars term st =
                     (out, lg) <- evalTerm env defs cv body seg
                     case out of
                       [VSum 0 bundle] -> go bundle (logs ++ lg)
-                      [VSum 1 bundle] -> Right (bundle, logs ++ lg)
-                      _ -> Left "Runtime type error in loop: body must return a (continue | done) decision"
+                      [VSum 1 bundle] -> pure (bundle, logs ++ lg)
+                      _ -> throwError "Runtime type error in loop: body must return a (continue | done) decision"
               (result, logs) <- go seg0 []
               pure (result, if isFinal then [] else stk', logs)
-            _ -> Left "Runtime type error in loop: expected a body quotation"
+            _ -> throwError "Runtime type error in loop: expected a body quotation"
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
       , not (M.member name defs) =
           if isFinal
-            then Right ([VSum (n - 1) stk], [], [])
-            else Right ([VSum (n - 1) []], stk, [])
+            then pure ([VSum (n - 1) stk], [], [])
+            else pure ([VSum (n - 1) []], stk, [])
     applyAtom isFinal (Prim name) stk
-      | Just v <- M.lookup name vars = Right ([v], stk, [])
-      | isIntLiteral name = Right ([VInt (read name)], stk, [])
-      | isStrLiteral name = Right ([VStr (drop 1 name)], stk, [])
-      | isSymLiteral name = Right ([VSym name], stk, [])
+      | Just v <- M.lookup name vars = pure ([v], stk, [])
+      | isIntLiteral name = pure ([VInt (read name)], stk, [])
+      | isStrLiteral name = pure ([VStr (drop 1 name)], stk, [])
+      | isSymLiteral name = pure ([VSym name], stk, [])
       | Just (k, open, body) <- M.lookup name defs =
           if open && isFinal
             then do
@@ -2013,11 +2113,11 @@ evalTerm env defs vars term st =
               (out, logs) <- evalTerm env defs M.empty body args
               pure (out, stk', logs)
       | otherwise = do
-          k <- builtinArity name
+          k <- liftEither (builtinArity name)
           (args, stk') <- takeWires name k stk
-          (out, logs) <- runBuiltin env defs name args
+          (out, logs) <- liftEither (runBuiltin env defs name args)
           pure (out, stk', logs)
-    applyAtom _ (Quote body) stk = Right ([VFn vars body], stk, [])
+    applyAtom _ (Quote body) stk = pure ([VFn vars body], stk, [])
     -- Code row: consume the sum wire, dispatch on the tag, run the
     -- matching component on the bundle, re-tag the result.  Tags past
     -- the components fall to the residual (identity).
@@ -2031,8 +2131,8 @@ evalTerm env defs vars term st =
           | residual ->
               pure ([VSum tag bundle], stk', [])
           | otherwise ->
-              Left "Runtime error in code row: tag out of range"
-        _ -> Left "Runtime type error in code row: expected a sum value"
+              throwError "Runtime error in code row: tag out of range"
+        _ -> throwError "Runtime type error in code row: expected a sum value"
     -- Named abstraction: bind the parameter wires (left to right), run
     -- the body on the empty stack in the extended scope.
     applyAtom _ (OpenAbs ps body) stk = do
@@ -2056,16 +2156,16 @@ evalTerm env defs vars term st =
                 Forall [dummy] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
               arityEnv = foldr (\n -> M.insert n dummyScheme)
                                env (M.keys vars)
-          Arrow i _ <- inferTermIn arityEnv t'
+          Arrow i _ <- liftEither (inferTermIn arityEnv t')
           let k = closedArity i
           (args, stk') <- takeWires "grouped program" k stk
           (out, logs) <- evalTerm env defs vars t' args
           pure (out, stk', logs)
 
     takeWires name k stk
-      | length stk >= k = Right (take k stk, drop k stk)
+      | length stk >= k = pure (take k stk, drop k stk)
       | otherwise =
-          Left $ "Runtime stack underflow in " ++ name
+          throwError $ "Runtime stack underflow in " ++ name
                ++ " (unreachable on typechecked programs)"
 
 builtinArity :: String -> Either String Int
@@ -2096,9 +2196,23 @@ runBuiltin _ _ "zero?" [VInt n]         = Right ([VSum (if n == 0 then 0 else 1)
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
 runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])
+runBuiltin _ _ "div"  [VInt _, VInt 0]  = Left "division by zero"
+runBuiltin _ _ "div"  [VInt x, VInt y]  = Right ([VInt (x `div` y)], [])
+runBuiltin _ _ "mod"  [VInt _, VInt 0]  = Left "modulo by zero"
+runBuiltin _ _ "mod"  [VInt x, VInt y]  = Right ([VInt (x `mod` y)], [])
+runBuiltin _ _ "gt?"  [VInt x, VInt y]  = Right ([VSum (if x > y then 0 else 1) [VInt x, VInt y]], [])
+runBuiltin _ _ "gte?" [VInt x, VInt y]  = Right ([VSum (if x >= y then 0 else 1) [VInt x, VInt y]], [])
+runBuiltin _ _ "lte?" [VInt x, VInt y]  = Right ([VSum (if x <= y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "cat"  [VStr x, VStr y]  = Right ([VStr (x ++ y)], [])
 runBuiltin _ _ "toStr" [v]              = Right ([VStr (show v)], [])
 runBuiltin _ _ "symStr" [VSym t]        = Right ([VStr (drop 1 t)], [])
+runBuiltin _ _ "unparse" [c]            = do
+  t <- codeToTermV c
+  Right ([VStr (renderTerm t)], [])
+runBuiltin env _ "parse" [VStr src]     =
+  case parseProgram src >>= reflectPure env of
+    Right c -> Right ([VSum 0 [c]], [])
+    Left e  -> Right ([VSum 1 [VStr e]], [])
 runBuiltin env _ "reflect" [VFn cv t]   =
   case reflectFn env cv t of
     Right c -> Right ([VSum 0 [c]], [])
@@ -2107,20 +2221,6 @@ runBuiltin _ _ "asInt?" [VStr t]        =
   case reads t :: [(Int, String)] of
     [(n, "")] -> Right ([VSum 0 [VInt n]], [])
     _         -> Right ([VSum 1 [VStr t]], [])
--- elif: fold one guard clause into the (Θ | Σ) state
-runBuiltin env defs "elif" [VSum 0 done'] = Right ([VSum 0 done'], [])
-runBuiltin env defs "elif" [VSum 1 [VFn cv act, VSum d payload]]
-  | d == 0 = do
-      (out, lg) <- evalTerm env defs cv act payload
-      Right ([VSum 0 out], lg)               -- hit: action ran, done track
-  | otherwise = Right ([VSum 1 payload], []) -- miss: payload to residual
--- endif: fold the final clause and close; the miss branch is the
--- absurdity map (its track is uninhabited) — defensive error only
-runBuiltin env defs "endif" [VSum 0 done'] = Right (done', [])
-runBuiltin env defs "endif" [VSum 1 [VFn cv act, VSum 0 payload]] =
-  evalTerm env defs cv act payload
-runBuiltin _ _ "endif" [VSum 1 _] =
-  Left "endif: absurd (unreachable: the otherwise-clause cannot miss)"
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin _ _ name args =
@@ -2167,6 +2267,32 @@ chainTerm ss =
   where
     stageT [t] = t
     stageT ts' = Tensor ts'
+
+-- render code back to source text (inverse-ish of the parser; spine
+-- normal form in, canonical text out)
+renderTerm :: Term -> String
+renderTerm t =
+  case filter (not . null) (spineOf t) of
+    [] -> "pass"
+    ss -> intercalate " >> " (map rStage ss)
+  where
+    rStage ats = unwords (map rAtom ats)
+    rAtom (Prim ('"' : str)) = '"' : concatMap esc str ++ "\""
+    rAtom (Prim n)      = n
+    rAtom (Quote q)     = "[" ++ renderTerm q ++ "]"
+    rAtom (Alts cs res) =
+      "(" ++ intercalate " | " (map renderTerm cs)
+          ++ (if res then " | ..." else "") ++ ")"
+    rAtom (OpenAbs ps b) =
+      "(" ++ unwords ps ++ " -> " ++ renderTerm b ++ ")"
+    rAtom g = "(" ++ renderTerm g ++ ")"
+    esc '"'  = "\\\""
+    esc '\\' = "\\\\"
+    esc '\n' = "\\n"
+    esc c    = [c]
+
+reflectPure :: Env -> Term -> Either String Value
+reflectPure env = reflectFn env M.empty
 
 -- reflect a closure: ground captured values, eliminate abstractions,
 -- then encode the spine
@@ -2391,12 +2517,12 @@ openTailedS (STail _)   = True
 openTailedS SEnd        = False
 
 -- Typecheck and run a whole module; main runs on the empty stack.
-runModule :: String -> Either String ([Value], [String])
-runModule src = do
-  m <- checkModule src
+runModule :: String -> IO (Either String ([Value], [String]))
+runModule src = runExceptT $ do
+  m <- liftEither (checkModule src)
   case modMain m of
-    Nothing -> Right ([], [])
+    Nothing -> pure ([], [])
     Just (term, arr@(Arrow i _))
       | closedArity i > 0 ->
-          Left $ "main requires a nonempty input stack: " ++ show arr
+          throwError $ "main requires a nonempty input stack: " ++ show arr
       | otherwise -> evalTerm (modEnv m) (moduleRunDefs m) M.empty term []

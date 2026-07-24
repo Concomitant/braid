@@ -28,6 +28,7 @@ executable braid
     build-depends:    base
                     , braid
                     , containers
+                    , mtl
     hs-source-dirs:   app
     default-language: GHC2021
 

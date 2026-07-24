@@ -1,6 +1,7 @@
 module Main (main) where
 
 import MiniConcatTypechecker
+import Control.Monad.Except (runExceptT, liftEither)
 import qualified Data.Map as M
 import Data.Char (isSpace)
 import Data.List (isPrefixOf, intercalate)
@@ -25,7 +26,8 @@ main = do
 runFile :: FilePath -> IO ()
 runFile path = do
   src <- readFile path
-  case runModule src of
+  res <- runModule src
+  case res of
     Left err -> do
       hPutStrLn stderr $ "error: " ++ err
       exitFailure
@@ -273,8 +275,9 @@ handleLine st line =
     programLine =
       case checkLine of
         Left err -> report err
-        Right newTy ->
-          case evalLine of
+        Right newTy -> do
+          r <- evalLine
+          case r of
             Left err -> report ("runtime error: " ++ err)
             Right (stack', logs) -> do
               mapM_ putStrLn logs
@@ -289,8 +292,8 @@ handleLine st line =
       s <- solve [CEqStack i (rsStackTy st)]
       pure (apply s o)
 
-    evalLine = do
-      term <- parseProgram line
+    evalLine = runExceptT $ do
+      term <- liftEither (parseProgram line)
       evalTerm (rsEnv st) (rsRun st) M.empty term (rsStack st)
 
 -- Rename the stack type's free variables into a namespace the inference

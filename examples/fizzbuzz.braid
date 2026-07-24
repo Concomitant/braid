@@ -1,0 +1,5 @@
+# The citizenship test.
+
+def fizzbuzz = (n -> (n 15 >> mod >> zero) ["FizzBuzz"] [(n 3 >> mod >> zero) ["Fizz"] [(n 5 >> mod >> zero) ["Buzz"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)
+
+15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll

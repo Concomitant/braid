@@ -1,196 +1,103 @@
 # Braid
 
-## Implementation Plan (Cartesian Variant)
+A strongly typed, concatenative, stack-based language — a textual
+syntax for cartesian string diagrams. Programs are wiring diagrams:
+juxtaposition is parallel wires, `>>` is composition, and the type
+system infers a principal type for every diagram with no annotations,
+ever.
 
-### 1) Language Design Freeze
-- **Core semantics**: every program is a stack transformer with judgment `Σ_in ⇒ Σ_out`.
-- **Stacks**: `Γ ::= • | Γ · A` (lists, not nested pairs). The empty stack `•` is the tensor unit.
-- **Composition**:
-  - **Sequential**: `t >> u` (pipe output of `t` into input of `u`).
-  - **Tensor (juxtaposition)**: `t u` runs in parallel on disjoint stack blocks (block split tensor).
-- **Cartesian structure**: build in **copy** and **discard** by default. This is the cartesian (symmetric monoidal) variant where each object has a canonical commutative comonoid structure.
-- **Decisions to lock**:
-  - Precedence: juxtaposition binds tighter than `>>`.
-  - Left-associativity for both operators.
-  - Type names, literal syntax, and primitive catalog.
+The design bet: keep the primitive set tiny (~35 morphisms) and prove
+it spans everything else **in the language itself**. The entire
+standard library is derived user code: booleans, comparisons, `while`
+and `until`, the list type and its library, the sum and list monads
+and their distributive law, conditionals, data-type folds — and the
+metaprogramming layer, where reflected code is a list you munge with
+the same library.
 
-### 2) Syntax & Parsing
-- **AST nodes**:
-  - `Prim(name)`
-  - `Tensor(left, right)` for juxtaposition
-  - `Seq(left, right)` for `>>`
-- **Parser**:
-  - Tokenize identifiers, integers, and `>>`.
-  - Parse juxtaposition by whitespace adjacency with higher precedence than `>>`.
+```text
+def fizzbuzz = (n -> (n 15 >> mod >> zero) ["FizzBuzz"] [(n 3 >> mod >> zero) ["Fizz"] [(n 5 >> mod >> zero) ["Buzz"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)
 
-### 3) Type Representation
-- **Stack types**:
-  - `Empty | Cons(Stack, Type) | Var(ρ)`
-- **Program type**:
-  - `Arrow(Stack_in, Stack_out)`
-- **Polymorphism**:
-  - Stack variables `ρ` provide row-polymorphic prefixes.
-
-### 4) Constraint Generation
-- For each AST node, assign a fresh `Σ_in ⇒ Σ_out`.
-- **Sequential**: add constraint `Σ_out(left) = Σ_in(right)`.
-- **Tensor**: build `Σ_in = Σ1 ⧺ Σ3`, `Σ_out = Σ2 ⧺ Σ4`.
-
-### 5) Unification with Stack Variables
-- Represent stacks as **list + tail var**: `[T1, T2, … | ρ]`.
-- Unify lists elementwise, allowing tail-variable substitution with occurs-check.
-- This yields HM-style principal types extended to stacks.
-
-### 6) Core IR & Semantics
-- Use a **DAG/string-diagram IR** as the canonical representation (not just an AST).
-- Implement an interpreter where the runtime stack is a vector of values.
-- **Tensor**: split the stack into two blocks based on inferred arities and run both sides in parallel.
-- **Sequential**: run left, then right.
-
-### 7) Standard Library Primitives
-- **Required cartesian basis**: `id`, `swap`, `dup`, `drop`.
-- **Arithmetic & IO**: `1`, `2`, `+`, `print` as examples.
-- **Derived utilities**: `rotl`, `rotr`, and future `dip`-like operators if higher-order features are added.
-
-### 8) Testing
-- Parser tests for precedence and associativity.
-- Type inference tests for stack-polymorphic primitives.
-- Combinator law tests via rewrite normalization.
-- Interpreter tests for stack traces.
-
-### 9) Stretch Goals
-- Graph-based IR for diagrammatic optimization.
-- Quotations + higher-order combinators.
-- Bytecode backend.
-
----
-
-## Language Specification (Cartesian, Concatenative, Stack-Based)
-
-### 1) Core Typing Shape
-All programs are stack transformers.
-
-- **Types (elements)**: `A, B, C, ...`
-- **Stacks**: `Γ ::= • | Γ · A`
-- **Programs**: `Γ ⇒ Δ`
-
-**Composition**
-
-- **Sequential (`>>`)**: if `t : Γ ⇒ Δ` and `u : Δ ⇒ Θ`, then `t >> u : Γ ⇒ Θ`.
-- **Tensor / Juxtaposition**: if `t : Γ1 ⇒ Δ1` and `u : Γ2 ⇒ Δ2`, then
-  `t u : (Γ1 ⧺ Γ2) ⇒ (Δ1 ⧺ Δ2)`.
-
-The empty stack `•` is the tensor unit. Stacks are lists, so associativity/unit are definitional.
-
-### 2) Required Primitive Combinators (Cartesian Basis)
-
-**Identity**
-
-- For each type `A`:
-  - `id_A : A ⇒ A`
-- Generalize via tensor: `id_Γ` is the tensor of `id` across the stack.
-
-**Symmetry (wire crossing)**
-
-- For each `A, B`:
-  - `swap_{A,B} : A B ⇒ B A`
-- Permutations are derived from swaps.
-
-**Copy and Discard (Cartesian / Comonoid Structure)**
-
-- For each `A`:
-  - `dup_A : A ⇒ A A`
-  - `drop_A : A ⇒ •`
-
-These make the monoidal product cartesian (values can be duplicated and discarded).
-
-### 3) Derived Conveniences (Optional)
-
-- `rotl : A B C ⇒ B C A`
-- `rotr : A B C ⇒ C A B`
-- “Apply under a block” combinators (dips) derived from permutations + tensor.
-
-### 4) Laws (Definitional Equalities / Rewrites)
-
-#### 4.1 Category Laws (for `>>` and `id`)
-- Left identity: `id >> f = f`
-- Right identity: `f >> id = f`
-- Associativity: `(f >> g) >> h = f >> (g >> h)`
-
-#### 4.2 Monoidal Laws (for tensor/juxtaposition)
-- Tensor functoriality:
-  `(f1 >> g1) (f2 >> g2) = (f1 f2) >> (g1 g2)`
-- Tensor unit: `•` is the unit for concatenation.
-
-#### 4.3 Symmetry Laws (swap)
-- Involution: `swap_{A,B} >> swap_{B,A} = id_{A B}`
-- Coherence/naturality: swaps behave like wire crossings (can be enforced by permutation normalization).
-
-#### 4.4 Cartesian/Comonoid Laws (dup, drop)
-For each `A`, `dup_A` and `drop_A` form a commutative comonoid.
-
-- **Coassociativity**:
-  - `dup >> (dup id) = dup >> (id dup)`
-
-- **Counit laws**:
-  - `dup >> (drop id) = id`
-  - `dup >> (id drop) = id`
-
-- **Commutativity**:
-  - `dup >> swap = dup`
-
-#### 4.5 Naturality (Interaction with Arbitrary Functions)
-For `f : A ⇒ B`:
-
-- **Dup naturality**:
-  - `f >> dup_B = dup_A >> (f f)`
-
-- **Drop naturality**:
-  - `f >> drop_B = drop_A`
-
-These yield the equational theory of cartesian categories (up to strictness).
-
-### 5) Stack-Polymorphic Primitives
-Primitives are polymorphic over an untouched stack prefix `ρ`.
-
-Examples:
-
-- `1 : ∀ρ. ρ ⇒ ρ · Int`
-- `f : ∀ρ. ρ · Int ⇒ ρ · Int`
-- `+ : ∀ρ. ρ · Int · Int ⇒ ρ · Int`
-- `print : ∀ρ. ρ · Int ⇒ ρ`
-
-### 6) Example Program
-
-Program:
-
-```
-1 2 >> f g >> + >> print
+15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll
 ```
 
-Typing summary:
+## Build and run
 
-- `1 2` pushes two `Int`s in parallel (tensor).
-- `f g` applies to each `Int` in parallel.
-- `+` consumes two `Int`s.
-- `print` consumes the final `Int`.
+No local GHC needed — a Docker one-liner:
 
-Inferred overall type:
-
-```
-• ⇒ •
+```sh
+docker run --rm -it -v "$PWD":/w -w /w haskell:9.4-slim \
+  sh -c "cabal build exe:braid && cabal run -v0 braid -- examples/fizzbuzz.braid"
 ```
 
-Or stack-polymorphic:
+`braid <file>` runs a file; `braid` alone opens the REPL:
 
+```text
+braid> :t true
+true : • ⇒ Bool
+braid> 7 >> [_ 100 >> less?] [2 _ >> *] ... >> while
+stack: 112  :  Int
+braid> :doc while
+## run step while predicate hits; exit with the miss payload
 ```
-∀ρ. ρ ⇒ ρ
-```
 
-### 7) Implementation Notes
+`:t` shows a type (`:t!` raw, un-folded); `:doc` and `:defs` browse
+the prelude; every REPL line runs against a persistent typed stack.
 
-We are committing to a **graph-based IR**:
+## A tour, in ten ideas
 
-- Parse into a **DAG / string-diagram IR** with explicit `dup/drop/swap` nodes.
-- Perform graph rewriting for coherence and optimization.
-- This aligns with cartesian string-diagram semantics and makes normalization (permutations + comonoid “spider” fusion) straightforward.
+1. **Everything exact.** Constants are maps from nothing (`1 : • ⇒
+   Int`), operations consume exactly their inputs (`+ : Int Int ⇒
+   Int`). Passing other wires along is always explicit: `1 ... >> +`
+   is increment. No implicit anything — this is what keeps inference
+   principal.
+2. **Sums are alternate flows.** `(Int | Str)` is one wire carrying
+   either. Rows `(f | g)` run one branch; `merge` rejoins. Bool is
+   just `(• | •)`.
+3. **Predicates are routers.** `odd? : Int ⇒ (Int | Int)` *routes*
+   its input instead of returning a detached boolean — branches
+   receive the data. Drop the `?` to forget instead: `odd : Int ⇒
+   Bool`, then `[then] [else] ... >> cond`.
+4. **Failure is a track.** `>=>` composes hit-tracks and lets misses
+   fall through: `even? >=> _ 100 >> less? >=> double >> ok` is a
+   validation railway. `readFile` and `parse` are railway stages too.
+5. **Guards are total.** `if … | [action] router … otherwise …
+   endif` — omitting the otherwise-clause is a *type error* (the miss
+   track is the empty sum).
+6. **Loops are values.** `loop` is Elgot iteration; `while` and
+   `until` are three-line prelude defs; general recursion uses
+   `recurse` with a placement discipline.
+7. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
+   Tree(a))` — the name rolls, `unTree` unrolls (both free at
+   runtime), and `foldTree` is *generated*: elimination by points,
+   `tree >> [leafCase] [nodeCase] ... >> foldTree`.
+8. **The list defines itself.** `type List(a) = (• | a List(a))` in
+   the prelude; literals, `map`, `fold`, `filter` are all derived.
+9. **Laws are programs.** Associativity checks run as code
+   (`examples/laws.braid`), and they're operational: a checked monoid
+   is a license to parallelize its fold (`examples/parallel.braid`).
+10. **Code is data.** `reflect` turns a quotation into its spine — a
+    list of stages of atoms — so `take`/`map`/`reverse` slice and
+    transform *programs*; `evalCode` runs them (dynamically checked,
+    failures on the miss track); `unparse`/`parse` and
+    `readFile`/`writeFile` round-trip code through disk. The
+    graphical-linear-algebra transpose is `reverse >> map dualize`
+    (`examples/transpose.braid`).
+
+## Examples
+
+`examples/` is the guided tour: start with `fizzbuzz`, `validate`
+(railway), `guards`, `iterate` (while), then `nat` and `tree` (data
+types and folds), `lists`, `sniff` (typed CSV-cell refinement),
+`sac` (split-apply-combine), `laws`, `parallel`, `matrices`, and
+finish with `code`, `transpose`, and `io`.
+
+## Status
+
+A design-driven prototype: one Haskell module for the whole language
+(typechecker, interpreter, REPL), a 320+ case test suite, and spec
+notes (`expanded-spec.md`, `spec-sums.md`, `spec-code.md`) recording
+each design decision and the theorems that forced it (why sums never
+flatten, why the unroll is explicit, why n-ary eliminators are
+generated per type). Deliberately absent so far: floats, modules
+beyond the auto-loaded prelude, typed splicing, labeled record
+fields, effect types.

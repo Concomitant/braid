@@ -354,6 +354,31 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- arithmetic completeness + negative literals
+  , ("7 3 >> div >> print",  ["2"], "")
+  , ("15 3 >> mod >> print", ["0"], "")
+  , ("-5 >> print",          ["-5"], "")
+  , ("-5 3 >> + >> print",   ["-2"], "")
+  , ("5 3 >> gt? >> verdict >> print", ["in1()"], "")
+  , ("3 3 >> lte? >> verdict >> print", ["in1()"], "")
+    -- prelude round-out
+  , ("5 >> range >> print",  ["list(0, 1, 2, 3, 4)"], "")
+  , ("5 >> range >> len >> print", ["5"], "")
+  , ("5 >> range >> sum >> print", ["10"], "")
+  , ("list(2, 3, 4) >> product >> print", ["24"], "")
+  , ("list(1, 3, 5) >> [odd] ... >> map >> all >> print", ["in1()"], "")
+  , ("list(2, 4) >> [odd] ... >> map >> any >> print", ["in2()"], "")
+  , ("list(1, 2) list(10, 20) >> zip >> len >> print", ["2"], "")
+  , ("list(1, 2, 3) >> [odd?] ... >> map >> partitionSum >> unPair >> len _ >> print _ >> len >> print", ["2", "1"], "")
+  , ("list(7, 8) >> printAll", ["7", "8"], "")
+    -- fizzbuzz, the citizenship test
+  , ("def fizzbuzz = (n -> (n 15 >> mod >> zero) [\"FizzBuzz\"] [(n 3 >> mod >> zero) [\"Fizz\"] [(n 5 >> mod >> zero) [\"Buzz\"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)\n15 >> fizzbuzz >> print\n9 >> fizzbuzz >> print\n4 >> fizzbuzz >> print", ["FizzBuzz", "Fizz", "4"], "")
+    -- unparse / parse round trip; parse feeds evalCode
+  , ("\"dup >> *\" >> parse >> (unparse >> print | print) >> forget", ["dup >> *"], "")
+  , ("\"dup >> *\" >> parse >> ((c -> c (6) >> evalCode >> print) | print) >> forget", ["in1(36)"], "")
+  , ("\"dup >>\" >> parse >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
+    -- file IO round trip (railway edges)
+  , ("\"/tmp/braid-sprint-test.txt\" \"hi\" >> writeFile >> (\"/tmp/braid-sprint-test.txt\" >> readFile >> (print | print) >> forget | print) >> forget", ["hi"], "")
     -- take / skip
   , ("list(1, 2, 3, 4) >> 2 _ >> take >> print", ["list(1, 2)"], "")
   , ("list(1, 2, 3, 4) >> 2 _ >> skip >> print", ["list(3, 4)"], "")
@@ -501,9 +526,10 @@ runModuleType (src, expected) =
                    ++ ", got " ++ rendered
           where rendered = showArrowA (modAliases m) (normalizeArrow arr)
 
-runEval :: (String, [String], String) -> Maybe String
-runEval (src, wantLog, wantStack) =
-  case runModule src of
+runEval :: (String, [String], String) -> IO (Maybe String)
+runEval (src, wantLog, wantStack) = do
+  r <- runModule src
+  pure $ case r of
     Left err -> Just $ show src ++ ": runtime/type error: " ++ err
     Right (stack, logs)
       | logs == wantLog && unwords (map show stack) == wantStack -> Nothing
@@ -513,9 +539,10 @@ runEval (src, wantLog, wantStack) =
                ++ ", got log " ++ show logs
                ++ " stack " ++ show (unwords (map show stack))
 
-runModuleFail :: (String, String) -> Maybe String
-runModuleFail (src, fragment) =
-  case runModule src of
+runModuleFail :: (String, String) -> IO (Maybe String)
+runModuleFail (src, fragment) = do
+  r <- runModule src
+  pure $ case r of
     Right (stack, logs) ->
       Just $ show src ++ ": expected failure containing " ++ show fragment
            ++ ", but ran with stack " ++ show (unwords (map show stack))
@@ -528,12 +555,14 @@ runModuleFail (src, fragment) =
 
 main :: IO ()
 main = do
+  evalFs <- mapM runEval evalTests
+  mfailFs <- mapM runModuleFail moduleFailTests
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
         ++ map runFail failTests
         ++ map runModuleType moduleTypeTests
-        ++ map runEval evalTests
-        ++ map runModuleFail moduleFailTests
+        ++ evalFs
+        ++ mfailFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
