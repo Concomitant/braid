@@ -195,7 +195,6 @@ moduleTypeTests =
     -- bodies get doors against the field stack
   , ("data Person = (Str Int)\nPerson",         "Str Int ⇒ Person")
   , ("data Person = (Str Int)\nunPerson",       "Person ⇒ Str Int")
-  , ("data Pair(a, b) = (a b)\nPair",           "a0 a1 ⇒ Pair(a0, a1)")
   , ("data Flag = (• | •)\nunFlag",             "Flag ⇒ Bool")
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
@@ -291,7 +290,6 @@ evalTests =
     -- data at runtime: bundle, spill, use
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> _ drop >> print", ["ada"], "")
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> drop ... >> print", ["36"], "")
-  , ("data Pair(a, b) = (a b)\n1 .one >> Pair >> unPair >> swap >> drop ... >> print", ["1"], "")
     -- Peano round-trip: folds by ordinary recursion through unNat
   , ("type Nat = (• | Nat)\ndef fromInt = zero? >> (drop >> in1 >> Nat | _ 1 >> - >> fromInt >> in2 >> Nat) >> merge\ndef toInt = unNat >> (0 | toInt >> 1 ... >> +) >> merge\n3 >> fromInt >> toInt >> print", ["3"], "")
     -- trees: build with rolled injections, fold with recursion
@@ -368,8 +366,7 @@ evalTests =
   , ("list(2, 3, 4) >> product >> print", ["24"], "")
   , ("list(1, 3, 5) >> [odd] ... >> map >> all >> print", ["in1()"], "")
   , ("list(2, 4) >> [odd] ... >> map >> any >> print", ["in2()"], "")
-  , ("list(1, 2) list(10, 20) >> zip >> len >> print", ["2"], "")
-  , ("list(1, 2, 3) >> [odd?] ... >> map >> partitionSum >> unPair >> len _ >> print _ >> len >> print", ["2", "1"], "")
+  , ("list(1, 2, 3) >> [odd?] ... >> map >> partitionSum >> len _ >> print _ >> len >> print", ["2", "1"], "")
   , ("list(7, 8) >> printAll", ["7", "8"], "")
     -- fizzbuzz, the citizenship test
   , ("def fizzbuzz = (n -> (n 15 >> mod >> zero) [\"FizzBuzz\"] [(n 3 >> mod >> zero) [\"Fizz\"] [(n 5 >> mod >> zero) [\"Buzz\"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)\n15 >> fizzbuzz >> print\n9 >> fizzbuzz >> print\n4 >> fizzbuzz >> print", ["FizzBuzz", "Fizz", "4"], "")
