@@ -4,8 +4,8 @@ module MiniConcatTypechecker where
 
 import qualified Data.Map as M
 import Data.Map (Map)
-import Data.Maybe (fromMaybe)
-import Data.List (nub, intercalate, (\\))
+import Data.Maybe (fromMaybe, isNothing)
+import Data.List (nub, intercalate, elemIndex, (\\))
 import Control.Monad.State
 import Control.Monad (foldM)
 import Data.Char (isDigit, isSpace)
@@ -740,11 +740,31 @@ dataDeclArtifacts :: DataDecl
 dataDeclArtifacts d =
   ( [ (dName d,          Forall ps [] [] (Arrow bodyStack namedStack))
     , ("un" ++ dName d,  Forall ps [] [] (Arrow namedStack bodyStack)) ]
+      ++ mergeSchemes
   , [ (dName d,         (rollArity, False, rollTerm))
-    , ("un" ++ dName d, (1, False, unrollTerm)) ] )
+    , ("un" ++ dName d, (1, False, unrollTerm)) ]
+      ++ mergeRuns )
   where
     ps         = dParams d
     namedStack = SCons (TData (dName d) (map TVarTy ps)) SEnd
+    -- an n-ary uniform collapse for this declaration's arity: the
+    -- runtime merge strips any tag; only the SCHEME is arity-specific,
+    -- so we generate it per declaration (the counting-theorem dodge)
+    (mergeSchemes, mergeRuns) =
+      case dBody d of
+        TSum row | k >= 2 ->
+          ( [ ("merge" ++ dName d
+            , Forall [] [SV "ρ"] []
+                (Arrow (SCons (TSum uniformRow) SEnd) (STail (SV "ρ")))) ]
+          , [ ("merge" ++ dName d, (1, False, Prim "merge")) ] )
+          where
+            k = rowLen row
+            uniformRow =
+              foldr RCons RNil (replicate k (STail (SV "ρ")))
+            rowLen RNil        = 0
+            rowLen (RTail _)   = 0
+            rowLen (RCons _ r) = 1 + rowLen r
+        _ -> ([], [])
     -- single-alternative bodies get doors against the field stack
     -- (Person : Str Int => Person); multi-alternative bodies coerce
     -- the sum wire itself.
@@ -795,7 +815,8 @@ dataFoldSrc d =
                      ++ dName d ++ " >> " ++ c ++ ")"
             cs  -> "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un"
                      ++ dName d ++ " >> ("
-                     ++ intercalate " | " cs ++ ") >> merge)"
+                     ++ intercalate " | " cs ++ ") >> merge"
+                     ++ dName d ++ ")"
       pure (fname, src)
     _ -> Nothing
   where
@@ -1352,6 +1373,8 @@ primEnv =
         (Arrow (one TInt)
                (one (TSum (RCons (one TInt) (RCons (one TInt) RNil)))))
       int2 = SCons TInt (one TInt)
+      codeStructTy =
+        TData "List" [TData "List" [TData "Atom" []]]
       int2Router = Forall [] [] []
         (Arrow int2
                (one (TSum (RCons int2 (RCons int2 RNil)))))
@@ -1394,6 +1417,15 @@ primEnv =
        , ("asInt?",    Forall [] [] []
            (Arrow (one TStr)
                   (one (TSum (RCons (one TInt)
+                        (RCons (one TStr) RNil))))))
+       , ("symStr",    Forall [] [] [] (Arrow (one TSym) (one TStr)))
+       , ("evalCode",  Forall [] [gam, del] []
+           (Arrow (SCons codeStructTy (STail gam))
+                  (one (TSum (RCons (STail del)
+                        (RCons (SCons TStr (STail gam)) RNil))))))
+       , ("reflect",   Forall [] [gam, del] []
+           (Arrow (one (TFn (Arrow (STail gam) (STail del))))
+                  (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
        , ("apply",     applyTy)
        , ("there",     thereTy)
@@ -1673,6 +1705,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
                , datasIn, al : ownAl, ownDt, docs' )
         Right dd -> do
           if M.member n env || M.member ("un" ++ n) env
+               || M.member ("merge" ++ n) env
             then Left $ "Type " ++ n
                      ++ ": constructor name collides with an existing definition"
             else Right ()
@@ -1717,6 +1750,14 @@ preludeSrc = unlines
   , "def uncons = unList"
   , "## left fold: step sees [acc, elem], list consumed left to right"
   , "def fold = (f b l -> l >> unList >> (b | (x r -> f b x >> apply >> f _ r >> fold)) >> merge)"
+  , "## a reflected atom: prim | int | str | sym | quote | row | group"
+  , "data Atom = (Sym | Int | Str | Sym | List(List(Atom)) | List(List(List(Atom))) Bool | List(List(Atom)))"
+  , "## code is a chain of tensor stages of atoms (spine normal form)"
+  , "type Stage = List(Atom)"
+  , "type Code = List(Stage)"
+  , "## take the first n elements; skip drops them instead"
+  , "def take = (n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> take >> x ... >> cons)) >> merge)) >> merge)"
+  , "def skip = (n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> skip)) >> merge)) >> merge)"
   , "## apply a quoted function to every element"
   , "def map = (f l -> l >> [nil] [(x r -> f x >> apply >> _ r >> cons)] ... >> foldList)"
   , "## invert a router: swap the hit and miss tracks"
@@ -1895,6 +1936,28 @@ evalTerm env defs vars term st =
               Left "Runtime type error in apply: expected a quotation"
     -- if / otherwise: segment-consuming entries into the guard machine
     -- (positional semantics like apply: whole stack in final position).
+    -- evalCode: dynamically-checked splice.  Rebuild the term, infer
+    -- its type in-process, run it on the segment; failures ride the
+    -- miss track WITH the untouched segment as evidence.
+    applyAtom isFinal (Prim "evalCode") stk
+      | not (M.member "evalCode" vars), not (M.member "evalCode" defs) = do
+          (args, stk') <- takeWires "evalCode" 1 stk
+          let seg = if isFinal then stk' else []
+              keep = if isFinal then [] else stk'
+              missWith msg = pure ([VSum 1 (VStr msg : seg)], keep, [])
+          case args of
+            [c] ->
+              case codeToTermV c of
+                Left e -> missWith e
+                Right term ->
+                  case inferTermIn env term of
+                    Left e -> missWith e
+                    Right _ ->
+                      case evalTerm env defs M.empty term seg of
+                        Left e -> missWith e
+                        Right (out, logs) ->
+                          pure ([VSum 0 out], keep, logs)
+            _ -> Left "evalCode: expected a Code value"
     -- forget: the terminal morphism — consume the segment, emit nothing
     applyAtom isFinal (Prim "forget") stk
       | not (M.member "forget" vars), not (M.member "forget" defs) =
@@ -2035,6 +2098,11 @@ runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) 
 runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])
 runBuiltin _ _ "cat"  [VStr x, VStr y]  = Right ([VStr (x ++ y)], [])
 runBuiltin _ _ "toStr" [v]              = Right ([VStr (show v)], [])
+runBuiltin _ _ "symStr" [VSym t]        = Right ([VStr (drop 1 t)], [])
+runBuiltin env _ "reflect" [VFn cv t]   =
+  case reflectFn env cv t of
+    Right c -> Right ([VSum 0 [c]], [])
+    Left e  -> Right ([VSum 1 [VStr e]], [])
 runBuiltin _ _ "asInt?" [VStr t]        =
   case reads t :: [(Int, String)] of
     [(n, "")] -> Right ([VSum 0 [VInt n]], [])
@@ -2058,6 +2126,269 @@ runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin _ _ name args =
   Left $ "Runtime type error in " ++ name ++ " applied to "
        ++ show args ++ " (unreachable on typechecked programs)"
+
+--------------------------------------------------------------------------------
+-- 11.5 Code reflection (spine normal form) and abstraction elimination
+--
+-- Code = data (List(List(Atom))); Atom = (prim | int | str | sym |
+-- quote | row | group), encoded as VSum tags 0..6.  reflect grounds a
+-- closure's captured values into literal-pushing code and compiles
+-- named abstractions away into pure wiring (parameters as leading
+-- input wires, a parameter block threaded at the BACK of the stack).
+-- v1 gate: bodies whose atoms all have closed arities (wiring,
+-- arithmetic, literals, groups, closed rows, exact defs).  Parameters
+-- captured in quotations or row components (true closures) and
+-- segment-consuming atoms (apply, injections, merge, loop, …) are
+-- rejected onto the miss track with an explanation.
+--------------------------------------------------------------------------------
+
+encodeListV :: [Value] -> Value
+encodeListV = foldr (\v r -> VSum 1 [v, r]) (VSum 0 [])
+
+decodeListV :: Value -> Either String [Value]
+decodeListV (VSum 0 [])     = Right []
+decodeListV (VSum 1 [v, r]) = (v :) <$> decodeListV r
+decodeListV v = Left $ "malformed list value: " ++ show v
+
+encodeBoolV :: Bool -> Value
+encodeBoolV b = VSum (if b then 0 else 1) []
+
+-- spine normal form of a term: stages of atoms
+spineOf :: Term -> [[Term]]
+spineOf (Seq a b)  = spineOf a ++ spineOf b
+spineOf (Tensor ts) = [ts]
+spineOf t          = [[t]]
+
+chainTerm :: [[Term]] -> Term
+chainTerm ss =
+  case map stageT (filter (not . null) ss) of
+    [] -> Prim "pass"
+    ts -> foldr1 Seq ts
+  where
+    stageT [t] = t
+    stageT ts' = Tensor ts'
+
+-- reflect a closure: ground captured values, eliminate abstractions,
+-- then encode the spine
+reflectFn :: Env -> VarEnv -> Term -> Either String Value
+reflectFn env cv t0 = do
+  t1 <- groundTerm env cv t0
+  t2 <- elimAbsTerm env t1
+  termToCodeV env t2
+
+termToCodeV :: Env -> Term -> Either String Value
+termToCodeV env t = do
+  stages <- mapM (mapM atomVal) (spineOf t)
+  pure (encodeListV (map encodeListV stages))
+  where
+    atomVal (Prim n)
+      | isIntLiteral n = Right (VSum 1 [VInt (read n)])
+      | isStrLiteral n = Right (VSum 2 [VStr (drop 1 n)])
+      | isSymLiteral n = Right (VSum 3 [VSym n])
+      | otherwise      = Right (VSum 0 [VSym ('.' : n)])
+    atomVal (Quote q) = do
+      c <- termToCodeV env q
+      pure (VSum 4 [c])
+    atomVal (Alts comps residual) = do
+      cs <- mapM (termToCodeV env) comps
+      pure (VSum 5 [encodeListV cs, encodeBoolV residual])
+    atomVal (OpenAbs _ _) =
+      Left "internal: abstraction survived elimination"
+    atomVal g = do
+      c <- termToCodeV env g
+      pure (VSum 6 [c])
+
+-- inverse: rebuild a Term from a Code value (a list of stages)
+codeToTermV :: Value -> Either String Term
+codeToTermV stagesV = do
+  stageVs <- decodeListV stagesV
+  stages  <- mapM (\sv -> decodeListV sv >>= mapM atomTerm) stageVs
+  pure (chainTerm stages)
+  where
+    atomTerm (VSum 0 [VSym ('.' : n)]) = Right (Prim n)
+    atomTerm (VSum 1 [VInt n])  = Right (Prim (show n))
+    atomTerm (VSum 2 [VStr t])  = Right (Prim ('"' : t))
+    atomTerm (VSum 3 [VSym t])  = Right (Prim t)
+    atomTerm (VSum 4 [c])       = Quote <$> codeToTermV c
+    atomTerm (VSum 5 [csV, bV]) = do
+      cs <- decodeListV csV >>= mapM codeToTermV
+      res <- case bV of
+        VSum 0 [] -> Right True
+        VSum 1 [] -> Right False
+        _         -> Left "malformed residual flag"
+      pure (Alts cs res)
+    atomTerm (VSum 6 [c])       = codeToTermV c
+    atomTerm v = Left $ "malformed atom value: " ++ show v
+
+-- embed a runtime value as code that pushes it
+valueToCode :: Env -> Value -> Either String Term
+valueToCode _   (VInt n)  = Right (Prim (show n))
+valueToCode _   (VStr t)  = Right (Prim ('"' : t))
+valueToCode _   (VSym t)  = Right (Prim t)
+valueToCode env (VFn cv t) = do
+  t1 <- groundTerm env cv t
+  t2 <- elimAbsTerm env t1
+  pure (Quote t2)
+valueToCode env (VSum tag vs) = do
+  fields <- mapM (valueToCode env) vs
+  let inj = Prim ("in" ++ show (tag + 1))
+  pure $ if null fields then inj else Seq (Tensor fields) inj
+
+-- substitute captured closure values (shadow-aware)
+groundTerm :: Env -> VarEnv -> Term -> Either String Term
+groundTerm env cv = go cv
+  where
+    go vars t@(Prim n)
+      | Just v <- M.lookup n vars = valueToCode env v
+      | otherwise                 = Right t
+    go vars (Seq a b)    = Seq <$> go vars a <*> go vars b
+    go vars (Tensor ts)  = Tensor <$> mapM (go vars) ts
+    go vars (Quote t)    = Quote <$> go vars t
+    go vars (Alts cs r)  = Alts <$> mapM (go vars) cs <*> pure r
+    go vars (OpenAbs ps b) =
+      OpenAbs ps <$> go (foldr M.delete vars ps) b
+
+--------------------------------------------------------------------------------
+-- 11.6 Abstraction elimination (grinding the non-concatenative edges)
+--------------------------------------------------------------------------------
+
+elimAbsTerm :: Env -> Term -> Either String Term
+elimAbsTerm env = go
+  where
+    go (Seq a b)      = Seq <$> go a <*> go b
+    go (Tensor ts)    = Tensor <$> mapM go ts
+    go (Quote t)      = Quote <$> go t
+    go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
+    go (OpenAbs ps b) = do
+      b' <- go b
+      compileAbs env ps b'
+    go t = Right t
+
+freeNamesIn :: Term -> [String]
+freeNamesIn = go
+  where
+    go (Prim n)       = [n]
+    go (Seq a b)      = go a ++ go b
+    go (Tensor ts)    = concatMap go ts
+    go (Quote t)      = go t
+    go (Alts cs _)    = concatMap go cs
+    go (OpenAbs ps b) = filter (`notElem` ps) (go b)
+
+-- (input arity, output arity, param copies to insert at relative input
+-- offsets, replacement atom)
+data AtomInfo = AtomInfo Int Int [(Int, Int)] Term
+
+compileAbs :: Env -> [String] -> Term -> Either String Term
+compileAbs env ps body = compileAbsOpen env ps 0 body
+
+-- Rewrite `body` (consuming k0 underlying wires) so the parameters
+-- arrive as a block of wires BELOW those inputs; the block is dropped
+-- at the end.
+compileAbsOpen :: Env -> [String] -> Int -> Term -> Either String Term
+compileAbsOpen env ps k0 body = do
+  stages <- rewriteChain k0 (spineOf body)
+  pure (chainTerm stages)
+  where
+    n = length ps
+
+    swapAt d = replicate d (Prim "_") ++ [Prim "swap", Prim "pass"]
+    dupAt d  = replicate d (Prim "_") ++ [Prim "dup", Prim "pass"]
+    -- copy the wire at depth `from` up to depth `to` (to <= from)
+    fetchTo from to =
+      dupAt from : [ swapAt j | j <- [from - 1, from - 2 .. to] ]
+
+    rewriteChain k [] = Right [finalStage k]
+    rewriteChain k (stage : rest) = do
+      (pres, stage', k') <- rewriteStage k stage
+      ((pres ++ [stage']) ++) <$> rewriteChain k' rest
+
+    finalStage k = replicate k (Prim "_") ++ replicate n (Prim "drop")
+
+    rewriteStage k atoms0 = do
+      let (atoms, _) = case reverse atoms0 of
+            (Prim "pass" : rs) -> (reverse rs, True)
+            _                  -> (atoms0, False)
+      infos <- mapM classify atoms
+      let inAs    = [ i | AtomInfo i _ _ _ <- infos ]
+          offsets = init (scanl (+) 0 inAs)
+          inserts = [ (off + rel, idx)
+                    | (AtomInfo _ _ specs _, off) <- zip infos offsets
+                    , (rel, idx) <- specs ]
+          -- insert left-to-right: shallower targets first; offsets are
+          -- final-layout positions, so each target is correct at its
+          -- moment of insertion
+          fetches = concat
+            [ fetchTo (k + j + idx) tgt
+            | (j, (tgt, idx)) <- zip [0 ..] inserts ]
+          p       = length inserts
+          bigA    = sum inAs - p
+          bigO    = sum [ o | AtomInfo _ o _ _ <- infos ] - p
+          atoms'  = [ a | AtomInfo _ _ _ a <- infos ]
+          k'      = (bigO + p) + (k - bigA)
+      if bigA > k
+        then Left "abstraction body consumes more than it has (internal)"
+        else Right (fetches, atoms' ++ [Prim "pass"], k')
+
+    classify :: Term -> Either String AtomInfo
+    classify t@(Prim nm)
+      | Just i <- elemIndex nm ps = Right (AtomInfo 1 1 [(0, i)] (Prim "_"))
+      | nm == "pass" = Left "reflect: '...' before the end of a stage in an abstraction body"
+      | isIntLiteral nm || isStrLiteral nm || isSymLiteral nm =
+          Right (AtomInfo 0 1 [] t)
+      | Just _ <- injIndex nm = segErr nm
+      | otherwise =
+          case M.lookup nm env of
+            Nothing -> Left $ "reflect: unknown name in abstraction body: " ++ nm
+            Just (Forall _ _ _ (Arrow i o))
+              | openTailedS i || openTailedS o -> segErr nm
+              | otherwise ->
+                  Right (AtomInfo (closedArity i) (closedArity o) [] t)
+    classify t@(Quote b)
+      | any (`elem` ps) (freeNamesIn b) =
+          Left "reflect: parameter captured in a quotation (a closure) — not reflectable yet"
+      | otherwise = Right (AtomInfo 0 1 [] t)
+    classify t@(Alts cs _)
+      | any (any (`elem` ps) . freeNamesIn) cs =
+          Left "reflect: parameter used inside a row component — not reflectable yet"
+      | otherwise = Right (AtomInfo 1 1 [] t)
+    classify (OpenAbs _ _) =
+      Left "internal: nested abstraction not yet eliminated"
+    classify g = groupInfo g
+
+    -- a grouped compound: recursively thread the parameters it uses
+    groupInfo g = do
+      let used = nub [ nm | nm <- freeNamesIn g, nm `elem` ps ]
+          usedIdx = [ i | Just i <- map (`elemIndex` ps) used ]
+      Arrow gi go <- inferGroupArrow g
+      if openTailedS gi || openTailedS go
+        then segErr "grouped program"
+        else do
+          let gIn  = closedArity gi
+              gOut = closedArity go
+          if null used
+            then Right (AtomInfo gIn gOut [] g)
+            else do
+              g' <- compileAbsOpen env used gIn g
+              pure (AtomInfo (gIn + length used) gOut
+                             [ (gIn + j, idx)
+                             | (j, idx) <- zip [0 ..] usedIdx ]
+                             g')
+
+    inferGroupArrow g = do
+      let dummy = TV "_p"
+          dummyScheme =
+            Forall [dummy] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+          arityEnv = foldr (\nm -> M.insert nm dummyScheme) env ps
+      inferTermIn arityEnv g
+
+    segErr nm = Left $
+      "reflect: segment-consuming or open-arity atom '" ++ nm
+        ++ "' in an abstraction body — not reflectable yet"
+
+openTailedS :: SType -> Bool
+openTailedS (SCons _ r) = openTailedS r
+openTailedS (STail _)   = True
+openTailedS SEnd        = False
 
 -- Typecheck and run a whole module; main runs on the empty stack.
 runModule :: String -> Either String ([Value], [String])

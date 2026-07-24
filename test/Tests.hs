@@ -354,6 +354,21 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- take / skip
+  , ("list(1, 2, 3, 4) >> 2 _ >> take >> print", ["list(1, 2)"], "")
+  , ("list(1, 2, 3, 4) >> 2 _ >> skip >> print", ["list(3, 4)"], "")
+  , (".red >> symStr >> \"k=\" ... >> cat >> print", ["k=red"], "")
+    -- Code v1: reflect / sections / evalCode / abstraction elimination
+  , ("[dup >> *] >> reflect >> ((c -> c (7) >> evalCode >> print) | print) >> forget", ["in1(49)"], "")
+  , ("[dup >> * >> 1 ... >> +] >> reflect >> ((c -> (2 c >> take) (6) >> evalCode >> print) | print) >> forget", ["in1(36)"], "")
+  , ("[(x y -> x (2 y >> *) >> +)] >> reflect >> ((c -> c (3) (4) >> evalCode >> print) | print) >> forget", ["in1(11)"], "")
+  , ("[(x y -> y)] >> reflect >> ((c -> c (3) (4) >> evalCode >> print) | print) >> forget", ["in1(4)"], "")
+    -- the closure gate: (x -> [x]) is a true closure, missed with a message
+  , ("[(x -> [x])] >> reflect >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
+    -- evalCode dynamic check: + on one wire misses, evidence kept
+  , ("[+] >> reflect >> ((c -> c (5) >> evalCode >> (forget >> 0 | forget >> 1) >> merge >> print) | forget >> 2 >> print) >> forget", ["1"], "")
+    -- GLA: transpose of add is copy; linearity checked over reflected code
+  , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> (c >> transposeC) (5) >> evalCode >> print) | print) >> forget", ["in1(5, 5)"], "")
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
   , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> toStr _ >> _ toStr >> cat >> print", ["715"], "")
     -- split-apply-combine: dup broadcasts, filters split, folds apply

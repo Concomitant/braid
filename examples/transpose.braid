@@ -1,0 +1,20 @@
+# GLA transforms as code munging: transpose reverses the spine and
+# dualizes each atom (copy <-> add); linear? checks a diagram uses
+# only linear generators. Both are ordinary folds over reflected code.
+
+def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)
+def dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom
+def transposeC = reverse >> [[dualAtom] ... >> map] ... >> map
+
+[+] >> reflect >> ((c -> (c >> transposeC) (5) >> evalCode >> print) | print) >> forget        # in1(5, 5)
+[dup >> +] >> reflect >> ((c -> (c >> transposeC) (6) >> evalCode >> print) | print) >> forget  # in1(12): x+x is symmetric
+
+def andB = (a b -> a [b] [false] ... >> cond)
+def allB = [true] [andB] ... >> foldList
+def linSym = (s -> (s .dup >> equals) [true] [(s .+ >> equals) [true] [(s .swap >> equals) [true] [(s ._ >> equals) [true] [false] ... >> cond] ... >> cond] ... >> cond] ... >> cond)
+def linAtom = [linSym] [drop >> true] [drop >> false] [drop >> false] [drop >> false] [drop drop >> false] [drop >> false] ... >> foldAtom
+def linStage = [linAtom] ... >> map >> allB
+def linear? = [linStage] ... >> map >> allB
+
+[dup >> swap >> +] >> reflect >> (linear? >> print | print) >> forget    # in1()
+[eq? >> verdict] >> reflect >> (linear? >> print | print) >> forget      # in2()

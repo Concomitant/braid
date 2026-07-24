@@ -199,7 +199,9 @@ Newline is strict `>>`, not implicit `pass`.
   module and REPL session: `not`, `negate`, `both`, `either`,
   `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,
   `while`, `untilFn`, `until`, `reverse`, `append`, `concat`, `single`,
-  `flatMap`, `filter` (see `preludeSrc` in the implementation; all are
+  `flatMap`, `filter`, `sequence`, `take`, `skip`, `cond`/`when`/`unless`,
+  plus the Code⟨⟩ layer (`Atom`/`Stage`/`Code`, `reflect`, `evalCode`,
+  `symStr` — see spec-code.md) (see `preludeSrc` in the implementation; all are
   user-level code over the primitive set). A user `def` of a prelude
   name shadows it silently, once; redefining any name twice is still
   an error. `>=>` (see spec-sums §6c) is Kleisli composition for the
