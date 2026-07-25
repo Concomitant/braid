@@ -354,6 +354,9 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- folding a sum: row of handlers + generated mergeName / foldName
+  , ("data Shape = (Int | Int Int | Int Int Int)\ndef rect = in2 >> Shape\n3 4 >> rect >> unShape >> (dup >> * | * | + ... >> +) >> mergeShape >> print", ["12"], "")
+  , ("data Shape = (Int | Int Int | Int Int Int)\ndef tri = in3 >> Shape\n1 2 3 >> tri >> [dup >> *] [*] [+ ... >> +] ... >> foldShape >> print", ["6"], "")
     -- multi-wire list literals + matchWith: data-driven first-match guard
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n9 [toStr] list([by3?] [drop >> \"fizz\"]) >> matchWith >> print", ["fizz"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n7 [toStr] list([by3?] [drop >> \"fizz\"]) >> matchWith >> print", ["7"], "")

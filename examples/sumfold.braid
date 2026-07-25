@@ -1,0 +1,19 @@
+# Folding a sum type: a row of handlers, one per alternative, then a
+# collapse. This is the copair [h1, h2, h3] — the fundamental sum
+# eliminator, and the dual of folding a list.
+
+data Shape = (Int | Int Int | Int Int Int)     # radius | w h | a b c
+def circle = in1 >> Shape
+def rect   = in2 >> Shape
+def tri    = in3 >> Shape
+
+# a row of handlers (each alternative to Int) collapsed by the
+# generated n-ary mergeShape:
+def measure = unShape >> (dup >> * | * | + ... >> +) >> mergeShape
+
+5 >> circle >> measure >> print       # 25
+3 4 >> rect >> measure >> print       # 12
+1 2 3 >> tri >> measure >> print      # 6
+
+# the generated foldShape is the same fold, written by points:
+5 >> circle >> [dup >> *] [*] [+ ... >> +] ... >> foldShape >> print   # 25
