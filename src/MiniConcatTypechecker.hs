@@ -515,6 +515,8 @@ data Token
   | TokArrow      -- -> (parameter list separator)
   | TokBar        -- | (code-row / sum alternative separator)
   | TokKleisli    -- >=> (Kleisli composition in the sum monad)
+  | TokOrElse     -- >?> (the dual: chain along the miss track)
+  | TokOrClose    -- >!> (close a >?> chain with a total default)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -528,6 +530,8 @@ tokenize = go
       (str, rest) <- lexStr cs
       (TokIdent ('"' : str) :) <$> go rest
     go ('>':'=':'>':cs) = (TokKleisli :) <$> go cs
+    go ('>':'?':'>':cs) = (TokOrElse :) <$> go cs
+    go ('>':'!':'>':cs) = (TokOrClose :) <$> go cs
     go ('>':'>':'>':cs) = (TokSeqPass :) <$> go cs
     go ('>':'>':cs)     = (TokSeq :) <$> go cs
     go ('>':_)          = Left "Unexpected '>' without matching '>>'"
@@ -586,7 +590,8 @@ normalizeToks = trim . collapse
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
     isSeqOp t =
-      t == TokSeq || t == TokSeqPass || t == TokBar || t == TokKleisli
+      t == TokSeq || t == TokSeqPass || t == TokBar
+        || t == TokKleisli || t == TokOrElse || t == TokOrClose
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -663,10 +668,22 @@ parseKleisli toks = do
     loop acc (TokKleisli : rest) = do
       (s, rest') <- parseSeqStmt rest
       loop (kleisli acc (desugarStmt s)) rest'
+    loop acc (TokOrElse : rest) = do
+      (s, rest') <- parseSeqStmt rest
+      loop (orElse acc (desugarStmt s)) rest'
+    loop acc (TokOrClose : rest) = do
+      (s, rest') <- parseSeqStmt rest
+      loop (orClose acc (desugarStmt s)) rest'
     loop acc rest = Right (acc, rest)
 
+    -- >=> threads the hit track (bind of (·|E)); >?> threads the miss
+    -- track (bind of (B|·)): keep an answer, else try the next stage
     kleisli t1 t2 =
       Seq t1 (Seq (Alts [t2, Prim "in2"] False) (Prim "merge"))
+    orElse t1 t2 =
+      Seq t1 (Seq (Alts [Prim "in1", t2] False) (Prim "merge"))
+    orClose t1 t2 =
+      Seq t1 (Seq (Alts [Prim "pass", t2] False) (Prim "merge"))
 
 -- sequence level: stages joined by >> / >>> only
 parseSeqStmt :: [Token] -> Either String (Stmt, [Token])

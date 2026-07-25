@@ -342,6 +342,11 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- >?> / >!> : guard chains along the miss track (dual of >=>)
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n9 >> fz >> print", ["fizz"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n10 >> fz >> print", ["b"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
     -- branchless tier: swapIf (Fredkin) and select (mux) route
     -- already-computed values; no quotation runs
   , ("true 1 2 >> swapIf >> print _ >> print",  ["2", "1"], "")

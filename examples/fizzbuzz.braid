@@ -1,5 +1,16 @@
-# The citizenship test.
+# The citizenship test — written as a guard chain: >?> tries the next
+# clause on a miss (the dual of >=>, which chains hits); >!> closes
+# the chain with the total default. Bare actions need no brackets:
+# inside a row, code is already delayed (the delay law).
 
-def fizzbuzz = (n -> (n 15 >> mod >> zero) ["FizzBuzz"] [(n 3 >> mod >> zero) ["Fizz"] [(n 5 >> mod >> zero) ["Buzz"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)
+def by15? = (n -> n 15 >> mod >> zero >> (n | n))
+def by3? = (n -> n 3 >> mod >> zero >> (n | n))
+def by5? = (n -> n 5 >> mod >> zero >> (n | n))
+
+def fizzbuzz =
+    by15? >> (drop >> "FizzBuzz" | ...)
+    >?> by3? >> (drop >> "Fizz" | ...)
+    >?> by5? >> (drop >> "Buzz" | ...)
+    >!> toStr
 
 15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll
