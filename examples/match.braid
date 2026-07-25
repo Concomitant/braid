@@ -1,0 +1,14 @@
+# Control flow as a fold over data. A clause list — each element a
+# [router] [action] pair, a two-wire List element — is folded with
+# matchWith: the FIRST router that hits runs its action on the input,
+# else the default. This is the guard machine as ordinary user code
+# over a value, so the clauses are data: build, filter, reorder them
+# like any list.
+
+def by15? = (n -> n 15 >> mod >> zero >> (n | n))
+def by3? = (n -> n 3 >> mod >> zero >> (n | n))
+def by5? = (n -> n 5 >> mod >> zero >> (n | n))
+
+def fizzbuzz = (n -> n [toStr] list([by15?] [drop >> "FizzBuzz"], [by3?] [drop >> "Fizz"], [by5?] [drop >> "Buzz"]) >> matchWith)
+
+15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll

@@ -342,6 +342,33 @@ the catamorphism: elimination by points (`[case1] [case2] ... >>
 foldName`, recursive slots pre-folded), with hand recursion through
 `unName` for everything else.
 
+## 6f. Guards as a fold over data (matchWith)
+
+The `if`/`elif`/`otherwise`/`endif` machine bakes the clause chain into
+primitives with static totality — but its fold threads a fresh
+done/continue split per clause, which currently mis-instantiates when
+the done-type differs from the continue-type across ≥2 interior
+clauses (a real limitation; homogeneous chains are fine). The
+list-fold alternative sidesteps it entirely: a clause list
+`List(Fn⟨A ⇒ (A|A)⟩ Fn⟨A ⇒ B⟩)` — each element a `[router] [action]`
+two-wire pair (multi-wire list literals, cf. `List(A B)`) — folded by
+
+```text
+def matchWith = (x default clauses ->
+  clauses >> [x >> default ... >> apply]
+             [(rest p f -> x >> p ... >> apply
+                >> (f ... >> apply | drop >> rest) >> merge)]
+          ... >> foldList)
+```
+
+`foldList` is a right fold, so the head clause is checked first
+(first-match); the accumulator is one fixed monomorphic type `B`, so
+there is no per-clause instantiation and no bug. The trade: totality
+becomes dynamic (the `default` supplies the fall-through the
+`otherwise`-clause made static). Because clauses are *data*, they can
+be built, filtered, and reordered like any list — control flow you can
+compute. See examples/match.braid (FizzBuzz).
+
 ## 7. The two-level pattern
 
 A recurring law of this design: each concept has a **flat spelling**

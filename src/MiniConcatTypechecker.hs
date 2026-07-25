@@ -742,26 +742,38 @@ parseDelimited toks =
     paramsPrefix acc (TokArrow : rest)   = Just (reverse acc, rest)
     paramsPrefix _   _                   = Nothing
 
--- Elements of list(…): atoms only, comma-separated.
--- list(e1, …, en) is sugar: build with nil/cons from the prelude.
--- The result is a compound atom (a group), composing like any
--- parenthesized program.
-desugarList :: [Term] -> Term
+-- Elements of list(…): comma-separated, each a JUXTAPOSITION of atoms
+-- (a tensor stage), so a list element may be multi-wire — e.g. a
+-- clause [pred] [action], matching List(A B).  list(e1, …, en) is
+-- sugar: build with nil/cons from the prelude.  The result is a
+-- compound atom (a group), composing like any parenthesized program.
+desugarList :: [[Term]] -> Term
 desugarList es = foldl step (Prim "nil") (reverse es)
   where
-    step acc e = Seq acc (Seq (Tensor [e, Prim "pass"]) (Prim "cons"))
+    step acc atoms = Seq acc (Seq (Tensor (atoms ++ [Prim "pass"]))
+                                  (Prim "cons"))
 
-parseListElems :: [Token] -> Either String ([Term], [Token])
+parseListElems :: [Token] -> Either String ([[Term]], [Token])
 parseListElems (TokRParen : rest) = Right ([], rest)
 parseListElems toks = do
-  (e, rest) <- elemAtom toks
+  (atoms, rest) <- elemAtoms [] toks
   case rest of
     (TokComma : rest')  -> do
       (es, rest'') <- parseListElems rest'
-      Right (e : es, rest'')
-    (TokRParen : rest') -> Right ([e], rest')
+      Right (atoms : es, rest'')
+    (TokRParen : rest') -> Right ([atoms], rest')
     _ -> Left "Expected ',' or ')' in list literal"
   where
+    -- one element: one or more atoms, up to a comma or ')'
+    elemAtoms acc ts@(TokComma : _)  = done acc ts
+    elemAtoms acc ts@(TokRParen : _) = done acc ts
+    elemAtoms acc ts = do
+      (a, rest) <- elemAtom ts
+      elemAtoms (a : acc) rest
+    done acc ts
+      | null acc  = Left "Empty list element"
+      | otherwise = Right (reverse acc, ts)
+
     elemAtom (TokIdent "list" : TokLParen : rest) = do
       (elems, rest') <- parseListElems rest
       Right (desugarList elems, rest')
@@ -772,6 +784,11 @@ parseListElems toks = do
       case rest' of
         (TokRBrack : rest'') -> Right (Quote t, rest'')
         _ -> Left "Unclosed quotation (expected ']')"
+    elemAtom (TokLParen : rest)     = do
+      (t, rest') <- parseDelimited rest
+      case rest' of
+        (TokRParen : rest'') -> Right (t, rest'')
+        _ -> Left "Unclosed group in list element (expected ')')"
     elemAtom ts =
       Left $ "Expected a list element" ++
         case ts of
@@ -1956,6 +1973,9 @@ preludeSrc = unlines
   , "def single = _ list() >> cons"
   , "## map then flatten: bind of the list monad"
   , "def flatMap = map >> concat"
+  , "## first-match over a clause list: each clause is [router] [action];"
+  , "## the first router that hits runs its action on x, else the default."
+  , "def matchWith = (x default clauses -> clauses >> [x >> default ... >> apply] [(rest p f -> x >> p ... >> apply >> (f ... >> apply | drop >> rest) >> merge)] ... >> foldList)"
   , "## commute List over the sum monad: all hits, or the first miss"
   , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"

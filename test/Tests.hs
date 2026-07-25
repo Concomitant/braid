@@ -152,7 +152,7 @@ failTests =
     -- uninhabited miss track, so the missing else is a TYPE error
   , ("7 >> if\n... | [dup >> *] odd?\nendif", "Cannot unify types")
     -- list elements must be pure pushes
-  , ("list(1 2",      "Expected ',' or ')'")
+  , ("list(1 2",      "unexpected end of input")
   , ("f ... g",       "'...' must be the final atom")
   , ("1 >",           "Unexpected '>'")
   , ("nonsense42x",   "Unknown primitive")
@@ -354,6 +354,9 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- multi-wire list literals + matchWith: data-driven first-match guard
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n9 [toStr] list([by3?] [drop >> \"fizz\"]) >> matchWith >> print", ["fizz"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n7 [toStr] list([by3?] [drop >> \"fizz\"]) >> matchWith >> print", ["7"], "")
     -- zip + a fold over flat two-wire elements: the dot product
   , ("list(1, 2, 3) list(10, 20, 30) >> zip >> [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print", ["140"], "")
     -- arithmetic completeness + negative literals
