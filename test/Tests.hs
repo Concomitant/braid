@@ -354,6 +354,15 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- boolean connectives (two Bool wires, cond-dispatched)
+  , ("true false >> and >> print",  ["in2()"], "")
+  , ("true true >> and >> print",   ["in1()"], "")
+  , ("false true >> or >> print",   ["in1()"], "")
+  , ("true true >> xor >> print",   ["in2()"], "")
+  , ("true false >> xor >> print",  ["in1()"], "")
+  , ("false true >> implies >> print", ["in1()"], "")
+  , ("true false >> implies >> print", ["in2()"], "")
+  , ("true >> not >> print",        ["in2()"], "")
     -- folding a sum: row of handlers + generated mergeName / foldName
   , ("data Shape = (Int | Int Int | Int Int Int)\ndef rect = in2 >> Shape\n3 4 >> rect >> unShape >> (dup >> * | * | + ... >> +) >> mergeShape >> print", ["12"], "")
   , ("data Shape = (Int | Int Int | Int Int Int)\ndef tri = in3 >> Shape\n1 2 3 >> tri >> [dup >> *] [*] [+ ... >> +] ... >> foldShape >> print", ["6"], "")
