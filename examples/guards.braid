@@ -1,17 +1,9 @@
-7 >> if
-... | [dup >> *]  odd?
-elif
-... | [drop >> 0] negative?
-elif
-... | [1 ... >> +] otherwise
-endif
-print
+# Guard chains are a fold over a clause list (matchWith): the first
+# router that hits runs its action; the default is the fall-through.
+# (The old if/elif/otherwise/endif primitive machine is retired — see
+# spec-sums history of cuts.)
 
-8 >> if
-... | [dup >> *]  odd?
-elif
-... | [drop >> 0] negative?
-elif
-... | [1 ... >> +] otherwise
-endif
-print
+def classify = (n -> n [1 ... >> +] list([odd?] [dup >> *], [negative?] [drop >> 0]) >> matchWith)
+
+7 >> classify >> print    # odd: squared → 49
+8 >> classify >> print    # falls through: incremented → 9

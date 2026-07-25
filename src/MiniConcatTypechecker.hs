@@ -1499,44 +1499,6 @@ primEnv =
       thereTy = Forall [] [SV "Δ"] [RV "σ"]
         (Arrow (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
-      -- Guard machine (if/elif/otherwise/endif); state (Θ | Σ).
-      -- if : Σ ⇒ (Θ | Σ) — entry: the value starts on the residual track
-      ifTy =
-        let th = SV "Θ"; sg = SV "Σ"
-        in Forall [] [th, sg] []
-             (Arrow (STail sg)
-                    (one (TSum (RCons (STail th)
-                          (RCons (STail sg) RNil)))))
-      -- elif : (Θ | (Σh|Σm) Fn⟨Σh⇒Θ⟩) ⇒ (Θ | Σm) — fold one clause;
-      -- asymmetric routers welcome (pattern-matching clauses)
-      elifTy =
-        let th = SV "Θ"; sh = SV "Σh"; sm = SV "Σm"
-            dec = TSum (RCons (STail sh) (RCons (STail sm) RNil))
-            act = TFn (Arrow (STail sh) (STail th))
-        in Forall [] [th, sh, sm] []
-             (Arrow (one (TSum (RCons (STail th)
-                          (RCons (SCons act (one dec)) RNil))))
-                    (one (TSum (RCons (STail th)
-                          (RCons (STail sm) RNil)))))
-      -- otherwise : Σ ⇒ (Σ | ()) — the always-hit router: the unit iso
-      -- Σ ≅ Σ+0; its miss track carries the empty sum (uninhabited)
-      voidW = one (TSum RNil)
-      otherwiseTy =
-        let sg = SV "Σ"
-        in Forall [] [sg] []
-             (Arrow (STail sg)
-                    (one (TSum (RCons (STail sg) (RCons voidW RNil)))))
-      -- endif : (Θ | (Σ | ()) Fn⟨Σ⇒Θ⟩) ⇒ Θ — fold-and-close; demands the
-      -- uninhabited miss track: the otherwise-clause is statically
-      -- mandatory.  The dead branch is the absurdity map 0 ⇒ Θ.
-      endifTy =
-        let th = SV "Θ"; sh = SV "Σ"
-            dec = TSum (RCons (STail sh) (RCons voidW RNil))
-            act = TFn (Arrow (STail sh) (STail th))
-        in Forall [] [th, sh] []
-             (Arrow (one (TSum (RCons (STail th)
-                          (RCons (SCons act (one dec)) RNil))))
-                    (STail th))
       -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ ⇒ Θ — Elgot iteration: the body routes
       -- to continue (re-enter) or done (exit)
       loopTy =
@@ -1631,10 +1593,6 @@ primEnv =
        , ("apply",     applyTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
-       , ("if",        ifTy)
-       , ("elif",      elifTy)
-       , ("otherwise", otherwiseTy)
-       , ("endif",     endifTy)
        , ("loop",      loopTy)
        ]
 
@@ -2176,8 +2134,6 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               throwError "Runtime type error in apply: expected a quotation"
-    -- if / otherwise: segment-consuming entries into the guard machine
-    -- (positional semantics like apply: whole stack in final position).
     -- evalCode: dynamically-checked splice.  Rebuild the term, infer
     -- its type in-process, run it on the segment; failures ride the
     -- miss track WITH the untouched segment as evidence.
@@ -2202,28 +2158,6 @@ evalTerm env defs vars term st =
                         Right (out, logs) ->
                           pure ([VSum 0 out], keep, logs)
             _ -> throwError "evalCode: expected a Code value"
-    -- elif / endif: the guard-machine folds (they evaluate actions)
-    applyAtom _ (Prim "elif") stk
-      | not (M.member "elif" vars), not (M.member "elif" defs) = do
-          (args, stk') <- takeWires "elif" 1 stk
-          case args of
-            [VSum 0 done'] -> pure ([VSum 0 done'], stk', [])
-            [VSum 1 [VFn cv act, VSum d payload]]
-              | d == 0 -> do
-                  (out, lg) <- evalTerm env defs cv act payload
-                  pure ([VSum 0 out], stk', lg)
-              | otherwise -> pure ([VSum 1 payload], stk', [])
-            _ -> throwError "elif: malformed guard state"
-    applyAtom _ (Prim "endif") stk
-      | not (M.member "endif" vars), not (M.member "endif" defs) = do
-          (args, stk') <- takeWires "endif" 1 stk
-          case args of
-            [VSum 0 done'] -> pure (done', stk', [])
-            [VSum 1 [VFn cv act, VSum 0 payload]] -> do
-              (out, lg) <- evalTerm env defs cv act payload
-              pure (out, stk', lg)
-            _ -> throwError
-                   "endif: absurd (unreachable: the otherwise-clause cannot miss)"
     -- IO edges, in print's mold: effects with honest railway types
     applyAtom _ (Prim "readFile") stk
       | not (M.member "readFile" vars), not (M.member "readFile" defs) = do
@@ -2265,16 +2199,6 @@ evalTerm env defs vars term st =
           if isFinal
             then pure ([], [], [])
             else pure ([], stk, [])
-    applyAtom isFinal (Prim "if") stk
-      | not (M.member "if" vars), not (M.member "if" defs) =
-          if isFinal
-            then pure ([VSum 1 stk], [], [])
-            else pure ([VSum 1 []], stk, [])
-    applyAtom isFinal (Prim "otherwise") stk
-      | not (M.member "otherwise" vars), not (M.member "otherwise" defs) =
-          if isFinal
-            then pure ([VSum 0 stk], [], [])
-            else pure ([VSum 0 []], stk, [])
     -- loop: Elgot iteration — run the body on the segment; the continue
     -- track re-enters, the done track exits.
     applyAtom isFinal (Prim "loop") stk

@@ -396,3 +396,12 @@ Recorded so the git history reads sanely:
 * `clause`/`finish` (two-quote guard machine) → superseded by the
   router-based `if`/`elif`/`otherwise`/`endif`.
 * Verdict predicates (`Int ⇒ Bool`) → routers.
+* The `if`/`elif`/`otherwise`/`endif` primitive guard machine →
+  superseded by `matchWith` (guards as a fold over a clause list, §6f)
+  plus `cond`/rows. Cut because: `if` name-squatted on a guard-state
+  initializer of type `ρ ⇒ (Θ | ρ)` (a phantom done-track); the fold
+  mis-instantiated heterogeneous done/continue types across ≥2 interior
+  clauses (never fixed); and every use case had a better home. Its one
+  real loss — static chain-totality via the `()`-typed miss track —
+  survives in spirit: rows remain statically total (every track must
+  be covered), and matchWith's `default` is the dynamic residue.

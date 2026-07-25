@@ -4,11 +4,8 @@ def sumTo = [sumStep] ... >> loop
 
 0 5 >> sumTo >> print
 
+# same loop, body written inline as a router row
 0 4
-[(a n -> n >> if
-... | [(z -> a >> done)] zero?
-elif
-... | [(m -> (a m >> +) (m >> decr) >> again)] otherwise
-endif)] ...
+[(a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m >> decr) >> again)) >> merge)] ...
 loop
 print

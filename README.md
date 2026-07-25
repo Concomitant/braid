@@ -60,9 +60,11 @@ the prelude; every REPL line runs against a persistent typed stack.
 4. **Failure is a track.** `>=>` composes hit-tracks and lets misses
    fall through: `even? >=> _ 100 >> less? >=> double >> ok` is a
    validation railway. `readFile` and `parse` are railway stages too.
-5. **Guards are total.** `if … | [action] router … otherwise …
-   endif` — omitting the otherwise-clause is a *type error* (the miss
-   track is the empty sum).
+5. **Guards are data.** A guard chain is a fold over a clause list:
+   `x [default] list([p?] [action], …) >> matchWith` — first router
+   that hits runs its action. Clauses are values: build, filter, and
+   reorder them. (Sum elimination by rows stays statically total —
+   every track must be covered.)
 6. **Loops are values.** `loop` is Elgot iteration; `while` and
    `until` are three-line prelude defs; general recursion uses
    `recurse` with a placement discipline.

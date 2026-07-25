@@ -119,16 +119,10 @@ passTests =
   , ("toStr",         "a0 ⇒ Str")
   , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
-    -- the guard machine
-  , ("if",            "ρ0 ⇒ (ρ1 | ρ0)")
-  , ("otherwise",     "ρ0 ⇒ (ρ0 | ())")
-  , ("elif",          "(ρ0 | Fn⟨ρ1 ⇒ ρ0⟩ (ρ1 | ρ2)) ⇒ (ρ0 | ρ2)")
-  , ("endif",         "(ρ0 | Fn⟨ρ1 ⇒ ρ0⟩ (ρ1 | ())) ⇒ ρ0")
   , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 ⇒ ρ1")
     -- loop protocol aliases: again ≡ in1 (continue), done ≡ in2 (exit)
   , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
   , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
-  , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [1 ... >> +] otherwise\nendif", "• ⇒ Int")
   ]
 
 -- (source, substring expected in the error)
@@ -148,9 +142,6 @@ failTests =
   , ("[dup",          "Unclosed quotation")
   , ("]",             "Expected a tensor stage")
   , ("(1",            "Unclosed group")
-    -- a guard chain without its otherwise-clause: endif demands the
-    -- uninhabited miss track, so the missing else is a TYPE error
-  , ("7 >> if\n... | [dup >> *] odd?\nendif", "Cannot unify types")
     -- list elements must be pure pushes
   , ("list(1 2",      "unexpected end of input")
   , ("f ... g",       "'...' must be the final atom")
@@ -269,13 +260,10 @@ evalTests =
     -- if-then-else is route >> row >> merge
   , ("5 >> odd? >> (id | drop >> 0) >> merge >> print", ["5"], "")
   , ("4 >> odd? >> (id | drop >> 0) >> merge >> print", ["0"], "")
-    -- the if/elif/otherwise/endif idiom
-  , ("7 >> if\n... | [dup >> *] odd?\nelif\n... | [drop >> 0] negative?\nelif\n... | [1 ... >> +] otherwise\nendif\nprint", ["49"], "")
-  , ("8 >> if\n... | [dup >> *] odd?\nelif\n... | [drop >> 0] negative?\nelif\n... | [1 ... >> +] otherwise\nendif\nprint", ["9"], "")
     -- loop: Elgot iteration (sum 1..5)
   , ("def decr = (x -> x 1 >> -)\ndef sumStep = (a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m >> decr) >> again)) >> merge)\n0 5 >> [sumStep] ... >> loop >> print", ["15"], "")
     -- the guard machine as a loop body
-  , ("0 3 >> [(a n -> n >> if\n... | [(z -> a >> done)] zero?\nelif\n... | [(m -> (a m >> +) (m 1 >> -) >> again)] otherwise\nendif)] ... >> loop >> print", ["6"], "")
+  , ("0 3 >> [(a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m 1 >> -) >> again)) >> merge)] ... >> loop >> print", ["6"], "")
   , ("5 3 >> - >> print",                  ["2"],  "")
   , ("7 >> (2 _ >> *) >> print",           ["14"], "")
     -- multi-line def bodies + recurse (anonymous self-reference)
