@@ -170,6 +170,11 @@ docOf st name
                 []       -> name
 
 
+renderStackTy :: ReplState -> String
+renderStackTy st =
+  let Arrow _ o = normalizeArrow (Arrow SEnd (rsStackTy st))
+  in showStackA (rsAliases st) o
+
 renderStack :: ReplState -> String
 renderStack st =
   case rsStack st of
@@ -289,8 +294,16 @@ handleLine st line =
     checkLine = do
       term <- parseProgram line
       Arrow i o <- inferTermIn (rsEnv st) term
-      s <- solve [CEqStack i (rsStackTy st)]
-      pure (apply s o)
+      case solve [CEqStack i (rsStackTy st)] of
+        Right s -> pure (apply s o)
+        Left _ ->
+          -- the mismatch is against the persistent REPL stack: say so
+          Left $ "this line needs input stack '"
+               ++ showStackA (rsAliases st)
+                    (let Arrow i' _ = normalizeArrow (Arrow i SEnd) in i')
+               ++ "' but the current stack is '"
+               ++ renderStackTy st
+               ++ "'  (:s to inspect, :clear to reset, or pass it along with ...)"
 
     evalLine = runExceptT $ do
       term <- liftEither (parseProgram line)
