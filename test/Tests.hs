@@ -354,6 +354,14 @@ evalTests =
     -- map parse-router >> sequence
   , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
   , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+    -- branchless tier: swapIf (Fredkin) and select (mux) route
+    -- already-computed values; no quotation runs
+  , ("true 1 2 >> swapIf >> print _ >> print",  ["2", "1"], "")
+  , ("false 1 2 >> swapIf >> print _ >> print", ["1", "2"], "")
+  , ("true 1 2 >> select >> print",  ["1"], "")
+  , ("false 1 2 >> select >> print", ["2"], "")
+    -- swapIf twice with the same control = id (reversibility)
+  , ("true 1 2 >> swapIf >> true ... >> swapIf >> print _ >> print", ["1", "2"], "")
     -- boolean connectives (two Bool wires, cond-dispatched)
   , ("true false >> and >> print",  ["in2()"], "")
   , ("true true >> and >> print",   ["in1()"], "")
