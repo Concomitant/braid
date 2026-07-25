@@ -1,16 +1,17 @@
-# The citizenship test — written as a guard chain: >?> tries the next
-# clause on a miss (the dual of >=>, which chains hits); >!> closes
-# the chain with the total default. Bare actions need no brackets:
-# inside a row, code is already delayed (the delay law).
+# The citizenship test, as a guard chain: >?> tries the next clause on
+# a miss (the dual of >=>); >!> closes with the total default. The
+# predicates are asymmetric routers — a hit carries NOTHING (the label
+# needs no evidence), a miss carries the number onward — so actions
+# are bare pushes: no brackets, no drops.
 
-def by15? = (n -> n 15 >> mod >> zero >> (n | n))
-def by3? = (n -> n 3 >> mod >> zero >> (n | n))
-def by5? = (n -> n 5 >> mod >> zero >> (n | n))
+def by15? = (n -> n 15 >> mod >> zero >> (... | n))
+def by3?  = (n -> n 3 >> mod >> zero >> (... | n))
+def by5?  = (n -> n 5 >> mod >> zero >> (... | n))
 
 def fizzbuzz =
-    by15? >> (drop >> "FizzBuzz" | ...)
-    >?> by3? >> (drop >> "Fizz" | ...)
-    >?> by5? >> (drop >> "Buzz" | ...)
+    by15? >> ("FizzBuzz" | ...)
+    >?> by3? >> ("Fizz" | ...)
+    >?> by5? >> ("Buzz" | ...)
     >!> toStr
 
 15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll
