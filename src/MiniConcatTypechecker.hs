@@ -215,6 +215,7 @@ instance Substitutable Env where
 data Constraint
   = CEqTy Ty Ty
   | CEqStack SType SType
+  | CFail String   -- carry a deferred inference error to the solver
   deriving (Eq, Show)
 
 -- All variables (type, stack, row) in order of first appearance,
@@ -386,6 +387,7 @@ solve = foldM step emptySubst
   where
     step s (CEqTy t1 t2)      = unifyTy s t1 t2
     step s (CEqStack st1 st2) = unifyStack s st1 st2
+    step _ (CFail msg)        = Left msg
 
 --------------------------------------------------------------------------------
 -- 5. Inference monad and helpers (for fresh vars and instantiation)
@@ -1286,8 +1288,24 @@ infer env (Tensor ts) = do
   let n = length ts
   results <- sequence
     [ inferOperand env (ix == n - 1) t | (ix, t) <- zip [0 ..] ts ]
-  let arrows = map fst results
-      cs     = concatMap snd results
+  -- Non-final operands are instantiated closed — EXCEPT a recursive
+  -- self-reference, whose knot shares open metavariables that nothing
+  -- may close.  Report the placement rule instead of panicking in
+  -- appendStack (dummy-arrow pattern, cf. ill-typed groups).
+  let arrows0 = map fst results
+      cs0     = concatMap snd results
+      openNonFinal =
+        [ () | (Arrow i o, ix) <- zip arrows0 [0 :: Int ..]
+             , ix /= n - 1
+             , openTailedS i || openTailedS o ]
+      (arrows, cs) =
+        if null openNonFinal
+          then (arrows0, cs0)
+          else ( [ if ix == n - 1 || not (openTailedS i || openTailedS o)
+                     then a else Arrow SEnd SEnd
+                 | (a@(Arrow i o), ix) <- zip arrows0 [0 :: Int ..] ]
+               , CFail ("A recursive call (or other open-arity atom) must \
+                        \be the final atom of its tensor stage") : cs0 )
       inS    = foldr1 appendStack [ i | Arrow i _ <- arrows ]
       outS   = foldr1 appendStack [ o | Arrow _ o <- arrows ]
   pure (Arrow inS outS, cs)

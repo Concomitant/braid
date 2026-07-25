@@ -490,6 +490,9 @@ moduleFailTests =
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
   , ("data Bad(a, b) = (• | a b)\n1",            "ambiguous product split")
+    -- a non-final recursive call must report the placement rule, not
+    -- panic in appendStack (regression: was a Haskell error)
+  , ("def x = x x ... >> +\n1",                  "final atom of its tensor stage")
     -- nominal rigidity: a data type is NOT its unfolding
   , ("type Nat = (• | Nat)\nin1 >> Nat >> unNat >> unNat", "Cannot unify types")
   , ("type dup = (• | dup)\n1",                  "collides")
