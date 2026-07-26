@@ -198,7 +198,8 @@ endif     : ∀Θ Σ. (Θ | Fn⟨Σ⇒Θ⟩ (Σ | ())) ⇒ Θ                  -
 
 A code row may begin with `|`, defaulting its first alternative to
 identity (`pass`): `(| f)` ≡ `(pass | f)`, `(| f | g)` ≡
-`(pass | f | g)`. Useful for the common "keep one track, transform the
+`(pass | f | g)`; symmetrically a trailing `|` defaults the LAST arm
+(`(f |)` ≡ `(f | pass)`). Useful for the common "keep one track, transform the
 other" conditional — `router >> (| f) >> merge` passes the hit track
 and applies `f` to the miss — and it lets a vertical row put every arm
 on its own `|`-led line.

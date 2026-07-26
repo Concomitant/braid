@@ -682,6 +682,10 @@ parseRow toks =
     loop acc (TokBar : TokEllipsis : rest)
       | endsRow rest = Right (Alts (reverse acc) True, rest)
       | otherwise    = Left "'| ...' must end its row"
+    -- a trailing `|` defaults the LAST alternative to identity:
+    -- `(f |)` ≡ `(f | pass)`
+    loop acc (TokBar : rest)
+      | endsRow rest = Right (Alts (reverse (Prim "pass" : acc)) False, rest)
     loop acc (TokBar : rest) = do
       (t, rest') <- parseKleisli rest
       loop (t : acc) rest'

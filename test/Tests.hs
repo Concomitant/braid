@@ -357,6 +357,9 @@ evalTests =
   , ("def k = odd? >> (| dup >> *) >> merge\n4 >> k >> print", ["16"], "")
   , ("5 >> zero? >> (| drop >> 99) >> merge >> print", ["99"], "")
   , ("0 >> zero? >> (| drop >> 99) >> merge >> print", ["0"], "")
+    -- trailing | defaults the LAST arm to pass: (f |) == (f | pass)
+  , ("def k = odd? >> (dup >> * |) >> merge\n5 >> k >> print", ["25"], "")
+  , ("def k = odd? >> (dup >> * |) >> merge\n4 >> k >> print", ["4"], "")
     -- factorial / fibonacci / exponentiation, recursive and iterative
   , ("def fac = n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> fac) >> *)) >> merge\n5 >> fac >> print", ["120"], "")
   , ("def fib = n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")
