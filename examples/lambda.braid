@@ -1,0 +1,23 @@
+# Naming wires, concatenatively. `x y ->` is a postfix binder: it names
+# the top wires and the REST of the scope is the body. No wrapping
+# parens needed — the binder is a pipeline stage. It compiles to pure
+# dup/swap/drop wiring (a named abstraction IS a string diagram); try
+# `[x -> x x >> *] >> reflect >> unparse` to see the wiring.
+
+# bare def body
+def square = x -> x x >> *
+
+# multi-arg, on its own line; body juxtaposes two squared differences
+def dist =
+    x1 y1 x2 y2 ->
+    (x2 x1 >> - >> dup >> *) (y2 y1 >> - >> dup >> *) >> +
+
+# mid-pipeline: compute on the input first, THEN bind the result
+def doubleThenTwice =
+    dup >> +
+    d ->
+    d d >> +
+
+5 >> square >> print              # 25
+0 0 3 4 >> dist >> print          # 3² + 4² = 25
+7 >> doubleThenTwice >> print     # 14, then 14+14 = 28

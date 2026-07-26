@@ -147,6 +147,20 @@ a >> b >>> c   ≡   a >> (b pass) >> c
 
 Newline is strict `>>`, not implicit `pass`.
 
+## Surface: postfix binders
+
+`x y z ->` is a **postfix binder**: a run of identifiers immediately
+followed by `->` names the top wires, and the REST of the current
+scope (def body, group `(…)`, quote `[…]`) is the body — an ordinary
+`OpenAbs` over those names. It may open a scope (`def f = x y -> …`,
+no wrapping parens) or appear as a pipeline stage after a newline
+(`… \n x y -> …` ≡ `… >> (x y -> …)`). The newline after `->` is
+absorbed so the body may start on the next line. `(x y -> body)` and
+`[x y -> body]` are the same construct wrapped in a group/quote — one
+code path. A named abstraction compiles to pure dup/swap/drop wiring
+(reflect it to see), so binders are string-diagram sugar, not a
+separate mechanism.
+
 ## Surface: comments, docs, prelude
 
 * `#` starts a comment running to end of line (lexer trivia).

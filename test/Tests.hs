@@ -351,6 +351,14 @@ evalTests =
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n10 >> fz >> print", ["b"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
+    -- postfix binder: `x y ->` names the top wires, rest of scope is the
+    -- body (same OpenAbs as (x y -> …), now usable bare / as a stage)
+  , ("def sq = x -> x x >> *\n5 >> sq >> print", ["25"], "")
+  , ("def dst = x1 y1 x2 y2 -> (x2 x1 >> - >> dup >> *) (y2 y1 >> - >> dup >> *) >> +\n0 0 3 4 >> dst >> print", ["25"], "")
+    -- mid-pipeline: compute then bind
+  , ("def ts =\n dup >> +\n d ->\n d d >> +\n7 >> ts >> print", ["28"], "")
+    -- the parenthesized form still works (one code path)
+  , ("3 4 >> (x y -> y x >> -) >> print", ["1"], "")
     -- || vertical list literal (a product of lanes) + choose guard fold
   , ("|| [1] || [2] || [3] >> len >> print", ["3"], "")
   , ("|| [1] || [2] || [3] >> [pass] ... >> map >> len >> print", ["3"], "")

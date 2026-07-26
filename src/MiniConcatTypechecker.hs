@@ -628,15 +628,45 @@ parseProgram input = do
     _  -> Left $ "Unexpected tokens at end: " ++ show rest
 
 -- program level: rows joined by newline
+-- `x y z ->` is a postfix binder: it names the top wires and the REST
+-- of the current scope is the body (an OpenAbs over those names).  It
+-- may open a scope (`def f = x y -> …`) or appear as a pipeline stage
+-- after a newline (`… \n x y -> …` ≡ `… >> (x y -> …)`).  A run of
+-- identifiers immediately followed by `->` is a binder.
 parseProgramToks :: [Token] -> Either String (Term, [Token])
-parseProgramToks toks = do
-  (t0, rest) <- parseRow toks
-  loop t0 rest
+parseProgramToks toks =
+  case binderPrefix toks of
+    Just (ps, rest) -> mkAbs ps rest
+    Nothing -> do
+      (t0, rest) <- parseRow toks
+      loop t0 rest
   where
-    loop acc (TokNewline : rest) = do
-      (t, rest') <- parseRow rest
-      loop (Seq acc t) rest'
+    loop acc (TokNewline : rest)
+      | Just (ps, r) <- binderPrefix rest = do
+          (abs', r') <- mkAbs ps r
+          Right (Seq acc abs', r')
+      | otherwise = do
+          (t, rest') <- parseRow rest
+          loop (Seq acc t) rest'
     loop acc rest = Right (acc, rest)
+
+    mkAbs ps rest = do
+      case [ p | (p, n) <- zip ps [0 :: Int ..], p `elem` take n ps ] of
+        (p : _) -> Left $ "Duplicate parameter: " ++ p
+        []      -> Right ()
+      (body, rest') <- parseProgramToks rest
+      Right (OpenAbs ps body, rest')
+
+    -- a maximal run of identifiers immediately followed by `->`; the
+    -- newline(s) after the arrow are absorbed so the body may start on
+    -- the next line (`x y ->` on its own pipeline stage)
+    binderPrefix ts =
+      case span isIdentTok ts of
+        (ids@(_ : _), TokArrow : r) ->
+          Just ([n | TokIdent n <- ids], dropWhile (== TokNewline) r)
+        _                           -> Nothing
+    isIdentTok (TokIdent _) = True
+    isIdentTok _            = False
 
 -- row level: sequences joined by |, optional trailing `| ...` residual
 parseRow :: [Token] -> Either String (Term, [Token])
@@ -768,21 +798,11 @@ parseStage = go []
 -- tensor stage), then a full program, possibly a |-separated code row.
 -- A 1-ary row is plain grouping.  A trailing `| ...` marks the residual:
 -- identity on the remaining alternatives (open row).
+-- A delimited scope (group or quote body).  Binder recognition lives
+-- in parseProgramToks now, so `(x y -> body)` and `[x y -> body]` are
+-- handled there (a leading binder in the delimited scope).
 parseDelimited :: [Token] -> Either String (Term, [Token])
-parseDelimited toks =
-  case paramsPrefix [] toks of
-    Just (ps, rest) -> do
-      case [ p | (p, n) <- zip ps [0 :: Int ..]
-               , p `elem` take n ps ] of
-        (p : _) -> Left $ "Duplicate parameter: " ++ p
-        []      -> Right ()
-      (body, rest') <- parseProgramToks rest
-      pure (OpenAbs ps body, rest')
-    Nothing -> parseProgramToks toks
-  where
-    paramsPrefix acc (TokIdent n : rest) = paramsPrefix (n : acc) rest
-    paramsPrefix acc (TokArrow : rest)   = Just (reverse acc, rest)
-    paramsPrefix _   _                   = Nothing
+parseDelimited = parseProgramToks
 
 -- Elements of list(…): comma-separated, each a JUXTAPOSITION of atoms
 -- (a tensor stage), so a list element may be multi-wire — e.g. a
