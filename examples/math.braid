@@ -1,0 +1,20 @@
+# Factorial, Fibonacci, exponentiation — recursive and iterative.
+# Every one is the same shape: a router picks base-vs-step, the two
+# arms are (base | step) >> merge, and postfix binders name the wires.
+
+# --- recursive (recurse: self-call in final atom position) ------------
+def fac = n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> fac) >> *)) >> merge
+def fib = n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +)) >> merge
+def pow = b e -> e >> zero? >> ((z -> 1) | (m -> b (b (m 1 >> -) >> pow) >> *)) >> merge
+
+# --- iterative (loop: state is a stack, again re-enters / done exits) --
+def facL = n -> 1 n >> [(acc k -> k >> zero? >> ((z -> acc >> done) | (m -> (acc m >> *) (m 1 >> -) >> again)) >> merge)] ... >> loop
+def powL = b e -> 1 e >> [(acc k -> k >> zero? >> ((z -> acc >> done) | (m -> (acc b >> *) (m 1 >> -) >> again)) >> merge)] ... >> loop
+def fibL = n -> 0 1 n >> [(a b k -> k >> zero? >> ((z -> a >> done) | (m -> b (a b >> +) (m 1 >> -) >> again)) >> merge)] ... >> loop
+
+5 >> fac >> print       # 120
+10 >> fib >> print      # 55
+2 8 >> pow >> print     # 256
+6 >> facL >> print      # 720
+2 8 >> powL >> print    # 256
+20 >> fibL >> print     # 6765  (linear — fib recursion would crawl)
