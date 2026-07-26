@@ -670,9 +670,14 @@ parseProgramToks toks =
 
 -- row level: sequences joined by |, optional trailing `| ...` residual
 parseRow :: [Token] -> Either String (Term, [Token])
-parseRow toks = do
-  (t0, rest) <- parseKleisli toks
-  loop [t0] rest
+parseRow toks =
+  case toks of
+    -- a leading `|` defaults the first alternative to identity:
+    -- `(| f)` ≡ `(pass | f)`, `(| f | g)` ≡ `(pass | f | g)`.  Lets a
+    -- vertical row put every arm on a `|`-led line.
+    (TokBar : _) -> loop [Prim "pass"] toks
+    _            -> do (t0, rest) <- parseKleisli toks
+                       loop [t0] rest
   where
     loop acc (TokBar : TokEllipsis : rest)
       | endsRow rest = Right (Alts (reverse acc) True, rest)

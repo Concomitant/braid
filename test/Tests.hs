@@ -351,6 +351,12 @@ evalTests =
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n10 >> fz >> print", ["b"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
+    -- leading | in a row defaults the first arm to pass (id):
+    -- (| f) == (pass | f)
+  , ("def k = odd? >> (| dup >> *) >> merge\n5 >> k >> print", ["5"], "")
+  , ("def k = odd? >> (| dup >> *) >> merge\n4 >> k >> print", ["16"], "")
+  , ("5 >> zero? >> (| drop >> 99) >> merge >> print", ["99"], "")
+  , ("0 >> zero? >> (| drop >> 99) >> merge >> print", ["0"], "")
     -- factorial / fibonacci / exponentiation, recursive and iterative
   , ("def fac = n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> fac) >> *)) >> merge\n5 >> fac >> print", ["120"], "")
   , ("def fib = n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")

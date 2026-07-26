@@ -194,6 +194,15 @@ endif     : ∀Θ Σ. (Θ | Fn⟨Σ⇒Θ⟩ (Σ | ())) ⇒ Θ                  -
   from the initial object, which is why it needs no runtime code.
   Partial guard chains are inexpressible (there is no bottom).
 
+### Leading `|`: identity default
+
+A code row may begin with `|`, defaulting its first alternative to
+identity (`pass`): `(| f)` ≡ `(pass | f)`, `(| f | g)` ≡
+`(pass | f | g)`. Useful for the common "keep one track, transform the
+other" conditional — `router >> (| f) >> merge` passes the hit track
+and applies `f` to the miss — and it lets a vertical row put every arm
+on its own `|`-led line.
+
 ### Why no single n-ary case/merge primitive exists
 
 The obvious alternative — `caseN`/`mergeN` families routing onto n flat
