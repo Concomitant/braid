@@ -369,6 +369,27 @@ becomes dynamic (the `default` supplies the fall-through the
 be built, filtered, and reordered like any list — control flow you can
 compute. See examples/match.braid (FizzBuzz).
 
+## 6g. Guards as `||` clause-products
+
+A guard is a **product** of lanes, not a coproduct: to probe each
+predicate you need all n lanes present at once. So it is written with a
+distinct delimiter `||` (leaving `|` entirely for sums), which reads as
+"or" — first-true-wins is short-circuit or.
+
+`|| e1 || e2 || e3` is a **vertical list literal** — the same value as
+`list(e1, e2, e3)`, each element an arbitrary bracketed program, so
+`||`-lists compose with `map`/`fold` like any list. For guards, each
+lane is `[router] [action]`, and the value has type
+`List(Fn⟨A ⇒ (A|A)⟩ Fn⟨A ⇒ B⟩)` — a first-class value that
+type-checks alone and can be bound, passed, and reused.
+
+`choose : A List(Fn⟨A⇒(A|A)⟩ Fn⟨A⇒B⟩) ⇒ (B | A)` folds the product,
+running the first lane whose router hits (`in1(result)`), or `in2(input)`
+if none. `else? = in1` is the always-hit router — a final
+`|| [else?] [d]` lane makes the guard total. No dependent types (a
+product is a plain List); `|` is untouched. See examples/fizzbuzz.braid,
+examples/guards.braid.
+
 ## 7. The two-level pattern
 
 A recurring law of this design: each concept has a **flat spelling**

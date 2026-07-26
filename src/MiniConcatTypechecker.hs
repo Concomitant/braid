@@ -514,6 +514,7 @@ data Token
   | TokComma      -- ,
   | TokArrow      -- -> (parameter list separator)
   | TokBar        -- | (code-row / sum alternative separator)
+  | TokBarBar     -- || (vertical list literal: || e1 || e2 || … )
   | TokKleisli    -- >=> (Kleisli composition in the sum monad)
   | TokOrElse     -- >?> (the dual: chain along the miss track)
   | TokOrClose    -- >!> (close a >?> chain with a total default)
@@ -551,6 +552,7 @@ tokenize = go
       | (ds@(_:_), rest) <- span isDigit cs =
           (TokIdent ('-' : ds) :) <$> go rest          -- negative literal
       | otherwise = (TokIdent "-" :) <$> go cs         -- subtraction
+    go ('|':'|':cs)     = (TokBarBar :) <$> go cs
     go ('|':cs)         = (TokBar :) <$> go cs
     go (c:cs)
       | isSpace c = go cs
@@ -592,6 +594,7 @@ normalizeToks = trim . collapse
     isSeqOp t =
       t == TokSeq || t == TokSeqPass || t == TokBar
         || t == TokKleisli || t == TokOrElse || t == TokOrClose
+        || t == TokBarBar
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -700,9 +703,29 @@ parseSeqStmt toks = do
       (stage, rest'') <- parseStage rest'
       go ((op, stage) : acc) rest''
 
+-- || e1 || e2 || … : a vertical list literal (a product of lanes).
+-- Each lane is a full program (the user writes [P] [F] for guards, but
+-- any program is legal); the whole thing is ONE list value.  Keeps `|`
+-- (TokBar) entirely for sums.
+parseBarBarList :: [Token] -> Either String (Term, [Token])
+parseBarBarList (TokBarBar : rest) = do
+  (lane, rest') <- parseStage rest
+  go [stageAtoms lane] rest'
+  where
+    -- each lane is a single juxtaposition stage (no top-level >>, so a
+    -- trailing `>> f` applies to the whole list, not the last lane)
+    go acc (TokBarBar : r) = do
+      (lane, r') <- parseStage r
+      go (stageAtoms lane : acc) r'
+    go acc r = Right (desugarList (reverse acc), r)
+parseBarBarList ts = Left $ "Expected '||' to start a list, got: " ++ show ts
+
 parseStage :: [Token] -> Either String (Stage, [Token])
 parseStage = go []
   where
+    go [] ts@(TokBarBar : _) = do
+      (lst, rest') <- parseBarBarList ts
+      go [lst] rest'
     go acc (TokIdent "list" : TokLParen : rest) = do
       (elems, rest') <- parseListElems rest
       go (desugarList elems : acc) rest'
@@ -1969,6 +1992,11 @@ preludeSrc = unlines
   , "## first-match over a clause list: each clause is [router] [action];"
   , "## the first router that hits runs its action on x, else the default."
   , "def matchWith = (x default clauses -> clauses >> [x >> default ... >> apply] [(rest p f -> x >> p ... >> apply >> (f ... >> apply | drop >> rest) >> merge)] ... >> foldList)"
+  , "## the always-hit router: the last lane of a || guard list"
+  , "def else? = in1"
+  , "## probe a || clause list: run the first lane whose router hits;"
+  , "## in1(result) on a hit, in2(input) if none hit"
+  , "def choose = (x clauses -> clauses >> [x >> in2] [(rest p f -> x >> p ... >> apply >> (f ... >> apply >> in1 | drop >> rest) >> merge)] ... >> foldList)"
   , "## commute List over the sum monad: all hits, or the first miss"
   , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"

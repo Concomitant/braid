@@ -351,6 +351,18 @@ evalTests =
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n10 >> fz >> print", ["b"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
+    -- || vertical list literal (a product of lanes) + choose guard fold
+  , ("|| [1] || [2] || [3] >> len >> print", ["3"], "")
+  , ("|| [1] || [2] || [3] >> [pass] ... >> map >> len >> print", ["3"], "")
+  , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n7 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["49"], "")
+  , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n8 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["9"], "")
+  , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n-4 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["0"], "")
+    -- no else lane: none hit -> in2(input)
+  , ("5 (|| [odd?] [dup >> *]) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["hit"], "")
+  , ("6 (|| [odd?] [dup >> *]) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["miss"], "")
+    -- a bound || value reused; and | sum rows still work
+  , ("def og = || [odd?] [drop >> \"odd\"]\n3 og >> choose >> (id | drop >> \"even\") >> merge >> print\n4 og >> choose >> (id | drop >> \"even\") >> merge >> print", ["odd", "even"], "")
+  , ("5 >> odd? >> (drop >> \"o\" | drop >> \"e\") >> merge >> print", ["o"], "")
     -- branchless tier: swapIf (Fredkin) and select (mux) route
     -- already-computed values; no quotation runs
   , ("true 1 2 >> swapIf >> print _ >> print",  ["2", "1"], "")

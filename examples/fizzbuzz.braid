@@ -1,17 +1,19 @@
-# The citizenship test, as a guard chain: >?> tries the next clause on
-# a miss (the dual of >=>); >!> closes with the total default. The
-# predicates are asymmetric routers — a hit carries NOTHING (the label
-# needs no evidence), a miss carries the number onward — so actions
-# are bare pushes: no brackets, no drops.
+# The citizenship test. A guard is a || list of [router] [action] lanes
+# — a first-class value (a product, so `choose` probes each) — fed to
+# `choose`, which runs the first lane whose router hits and returns
+# (result | unmatched-input). The final (id | else) >> merge supplies
+# the default. `||` reads as "or"; `|` stays reserved for sum types.
 
-def by15? = (n -> n 15 >> mod >> zero >> (... | n))
-def by3?  = (n -> n 3 >> mod >> zero >> (... | n))
-def by5?  = (n -> n 5 >> mod >> zero >> (... | n))
+def by15? = (n -> n 15 >> mod >> zero >> (n | n))
+def by3?  = (n -> n 3 >> mod >> zero >> (n | n))
+def by5?  = (n -> n 5 >> mod >> zero >> (n | n))
 
-def fizzbuzz =
-    by15? >> ("FizzBuzz" | ...)
-    >?> by3? >> ("Fizz" | ...)
-    >?> by5? >> ("Buzz" | ...)
-    >!> toStr
+# the guard list is an ordinary value — bound here, used below:
+def fbCases =
+    || [by15?] [drop >> "FizzBuzz"]
+    || [by3?]  [drop >> "Fizz"]
+    || [by5?]  [drop >> "Buzz"]
+
+def fizzbuzz = (n -> n fbCases >> choose >> (id | toStr) >> merge)
 
 15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll

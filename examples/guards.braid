@@ -1,9 +1,11 @@
-# Guard chains are a fold over a clause list (matchWith): the first
-# router that hits runs its action; the default is the fall-through.
-# (The old if/elif/otherwise/endif primitive machine is retired — see
-# spec-sums history of cuts.)
+# Guards are a || clause-product + choose. Each lane is [router] [action];
+# `choose` runs the first router that hits and returns (result | unmatched).
+# The default is the miss-track handler in the final merge. The || value
+# is first-class — bind it, pass it, reuse it — because it is a List.
 
-def classify = (n -> n [1 ... >> +] list([odd?] [dup >> *], [negative?] [drop >> 0]) >> matchWith)
+def classify =
+    || [odd?]      [dup >> *]
+    || [negative?] [drop >> 0]
 
-7 >> classify >> print    # odd: squared → 49
-8 >> classify >> print    # falls through: incremented → 9
+7 classify >> choose >> (id | 1 ... >> +) >> merge >> print    # odd → squared → 49
+8 classify >> choose >> (id | 1 ... >> +) >> merge >> print    # unmatched → +1 → 9
