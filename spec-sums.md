@@ -101,6 +101,15 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
   start are two rows, not a collided `| |`. Continuation-absorption
   survives only for operators a newline cannot express: the railway ops
   `>=>`/`>?>`/`>!>` and the `||` list-literal, which may span lines.
+  * The fish is *not* a separate composition — it is `>>` plus a lift:
+    `t1 >=> t2 ≡ t1 >> (t2 | in2) >> merge` (dually `>?>` uses `(in1 |
+    t2)`, `>!>` uses `(pass | t2)`), all the shape `t1 >> (a|b) >>
+    merge` with the stage on one track and a default injector on the
+    other. So a railway *already* decomposes into a plain newline-`>>`
+    stack of rows — `even?` ⏎ `(g | in2) >> merge` ⏎ … — with no
+    absorption. `>=>` keeps its line-spanning as a deliberate terseness
+    sugar that bundles the `>>` and the lift into one infix token; the
+    row form is always available when you'd rather stay purely `>>`.
 * `merge : (Θ | Θ) ⇒ Θ` is the binary codiagonal ∇ (dual of `dup`),
   rejoining agreeing tracks.
 
