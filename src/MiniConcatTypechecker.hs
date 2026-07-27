@@ -772,6 +772,13 @@ parseStage = go []
     go acc (TokIdent "list" : TokLParen : rest) = do
       (elems, rest') <- parseListElems rest
       go (desugarList elems : acc) rest'
+    -- case(b1, …, bn): eliminate a right-nested sum (X1 | (X2 | … | Xn))
+    -- by one handler per track, all landing on a common result.  Each
+    -- branch is a full program spliced BARE onto its arm (no quoting,
+    -- like the >=> desugar); the desugaring is the nested rows + merge.
+    go acc (TokIdent "case" : TokLParen : rest) = do
+      (branches, rest') <- parseCaseBranches rest
+      go (desugarCase branches : acc) rest'
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
@@ -827,6 +834,30 @@ desugarList es = foldl step (Prim "nil") (reverse es)
   where
     step acc atoms = Seq acc (Seq (Tensor (atoms ++ [Prim "pass"]))
                                   (Prim "cons"))
+
+-- case(b1, …, bn): the coproduct eliminator for a right-nested sum.
+--   case(a)          = a
+--   case(a, b, …)    = (a | case(b, …)) >> merge
+-- so case(a, b, c) is (a | (b | c) >> merge) >> merge, mapping the
+-- nested sum (A | (B | (C))) onto the arms' common result.
+desugarCase :: [Term] -> Term
+desugarCase []       = Prim "pass"
+desugarCase [b]      = b
+desugarCase (b : bs) = Seq (Alts [b, desugarCase bs] False) (Prim "merge")
+
+-- Branches of case(…): comma-separated FULL programs (unlike list(…)
+-- elements, which are bare juxtapositions).  parseProgramToks stops at
+-- the comma / close paren, so a branch may use >>, rows, binders, etc.
+parseCaseBranches :: [Token] -> Either String ([Term], [Token])
+parseCaseBranches (TokRParen : rest) = Right ([], rest)
+parseCaseBranches toks = do
+  (b, rest) <- parseProgramToks toks
+  case rest of
+    (TokComma : rest')  -> do
+      (bs, rest'') <- parseCaseBranches rest'
+      Right (b : bs, rest'')
+    (TokRParen : rest') -> Right ([b], rest')
+    _ -> Left "Expected ',' or ')' in case(…)"
 
 parseListElems :: [Token] -> Either String ([[Term]], [Token])
 parseListElems (TokRParen : rest) = Right ([], rest)
@@ -2000,6 +2031,10 @@ preludeSrc = unlines
   , "def map = (f l -> l >> [nil] [(r x -> f x >> apply >> _ r >> cons)] ... >> foldList)"
   , "## invert a router: swap the hit and miss tracks"
   , "def not = (miss | ok) >> merge"
+  , "## re-nest a sum leftward: (A | (B | C)) => ((A | B) | C)"
+  , "def assocL = (in1 >> in1 | (in2 >> in1 | in2) >> merge) >> merge"
+  , "## re-nest a sum rightward: ((A | B) | C) => (A | (B | C))"
+  , "def assocR = ((in1 | in1 >> in2) >> merge | in2 >> in2) >> merge"
   , "## negate a quoted router, as a value"
   , "def negate = (p -> [p ... >> apply >> (miss | ok) >> merge])"
   , "## and on quoted routers: hit iff both hit; q runs only on p's hit"

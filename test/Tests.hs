@@ -98,6 +98,12 @@ passTests =
   , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
   , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
   , ("[dup >> * | drop]", "• ⇒ Fn⟨(Int | a0) ⇒ (Int | •)⟩")
+    -- case(…): the coproduct eliminator — one handler per nested track,
+    -- all landing on a common result.  Branches are full programs, bare.
+    -- (associators, which need the prelude, are in moduleTypeTests.)
+  , ("case(dup >> +)",                          "Int ⇒ Int")
+  , ("case(drop >> \"neg\", drop >> \"zero\", toStr)", "(a0 | (a1 | a2)) ⇒ Str")
+  , ("case(dup >> +, drop >> 3)",               "(Int | a0) ⇒ Int")
     -- bare rows: each LINE is a code row (>> binds tighter than |,
     -- | tighter than newline)
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
@@ -167,6 +173,9 @@ moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
+    -- sum associators re-nest a decision tree (open tails from in1/in2)
+  , ("assocL", "(ρ0 | (ρ1 | ρ2)) ⇒ ((ρ0 | ρ1 | σ0) | ρ2 | σ1)")
+  , ("assocR", "((ρ0 | ρ1) | ρ2) ⇒ (ρ0 | (ρ1 | ρ2 | σ0) | σ1)")
     -- type aliases: display folding (Bool/Maybe from the prelude;
     -- user aliases beat prelude; fewest-params-bound wins ties)
   , ("5 >> odd? >> verdict",                    "• ⇒ Bool")
@@ -521,6 +530,10 @@ evalTests =
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
   , ("list(1, 2) >> uncons",               [],     "list(1, 2)")
   , ("list() >> uncons",                   [],     "in1()")
+    -- deferred peel builds a nested sum; case(…) folds the whole spine
+  , ("def classify = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?) >> case(pass, drop >> \"zero\", toStr)\n-4 >> classify >> print\n0 >> classify >> print\n7 >> classify >> print", ["neg", "zero", "7"], "")
+    -- associator round-trip is identity on the routed value
+  , ("def tag = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?)\n5 >> tag >> assocL >> assocR >> case(pass, drop >> \"zero\", toStr) >> print", ["5"], "")
     -- aligned track-columns: | no longer absorbs newlines, so each line
     -- is one complete row (pass sugar fills the empty arm) and the rows
     -- compose by newline-as->>.  Two rows here == the row (dup>>* | 1..+).

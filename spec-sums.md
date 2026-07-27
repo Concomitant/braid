@@ -112,6 +112,25 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
     row form is always available when you'd rather stay purely `>>`.
 * `merge : (Θ | Θ) ⇒ Θ` is the binary codiagonal ∇ (dual of `dup`),
   rejoining agreeing tracks.
+* **The decision tree is a right-nested sum.** Deferred routers stack:
+  each answers its track and passes the rest down (`(handle | pass)`
+  then `(pass | route)`), so the leftover sum grows to the right —
+  `(A | (B | (C | …)))`, the branch structure written in the type. Two
+  structural tools tame it:
+  * `assocL : (A | (B | C)) ⇒ ((A | B) | C)` and `assocR` (its inverse)
+    re-nest the tree — pure `in1`/`in2`/`merge` rewiring, no data
+    touched. With `not` (the sum braiding) they let you rebalance a
+    tree before eliminating it. (Both carry open row tails from the
+    injections; they are isos up to that openness.)
+  * `case(b1, …, bn)` is the **coproduct eliminator**: one handler per
+    nested track, each a bare program, all landing on a common result.
+    Parse sugar for the nested rows —
+    `case(a, b, c) ≡ (a | (b | c) >> merge) >> merge` — so it is to a
+    sum what a generated `foldName` is to a data type: it folds the
+    whole `(·|·)` spine in one stage instead of unwinding by hand with
+    N `merge`s. Branches are spliced bare (like the `>=>` lift), so no
+    quoting or `apply` — the handlers may have *different* domains as
+    long as they agree on the result.
 
 **The delay law.** Bare code is conditional only *inside a row* (a row
 is the one context where exactly one component runs). Quoted code is
