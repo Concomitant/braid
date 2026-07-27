@@ -365,7 +365,7 @@ evalTests =
     -- deferred branches: handle one track, pass the rest, handle later
   , ("def c = negative? >> (drop >> \"neg\" |) >> (| zero? >> (drop >> \"zero\" | toStr) >> merge) >> merge\n-3 >> c >> print\n0 >> c >> print\n5 >> c >> print", ["neg", "zero", "5"], "")
     -- no >>, aligned-pipe track columns
-  , ("def label =\n odd?\n ( drop | )\n ( \"odd\" | )\n ( | drop )\n ( | \"even\" )\n merge\n5 >> label >> print\n4 >> label >> print", ["odd", "even"], "")
+  , ("def label =\n odd?\n drop | pass\n \"odd\" | pass\n pass | drop\n pass | \"even\"\n merge\n5 >> label >> print\n4 >> label >> print", ["odd", "even"], "")
     -- factorial / fibonacci / exponentiation, recursive and iterative
   , ("def fac = n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> fac) >> *)) >> merge\n5 >> fac >> print", ["120"], "")
   , ("def fib = n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")

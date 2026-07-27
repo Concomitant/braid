@@ -36,15 +36,16 @@ def classify =
 0  >> classify >> print     # zero
 5  >> classify >> print     # 5
 
-# The same idea with NO >>, pipes aligned into a spine: two tracks are
-# two columns, each row does one thing to one column, the empty side
-# passes. Read a column top-to-bottom for that track's path.
+# The same idea with NO >> and NO parens: bare rows, both arms explicit,
+# the | a central spine. Two tracks are two columns; `pass` is a wire
+# flowing straight through; each line is a complete row. Read a column
+# top-to-bottom for that track's path.
 def label =
     odd?
-    ( drop   |        )     # odd track  → •
-    ( "odd"  |        )     # odd track  → "odd"
-    (        | drop   )     # even track → •  (empty left passes the done "odd")
-    (        | "even" )     # even track → "even"
+    drop  | pass
+    "odd" | pass
+    pass  | drop
+    pass  | "even"
     merge
 
 5 >> label >> print     # odd
