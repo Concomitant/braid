@@ -362,6 +362,8 @@ evalTests =
   , ("def k = odd? >> (dup >> * |) >> merge\n4 >> k >> print", ["4"], "")
     -- a comment on the `def =` line still triggers block-body form
   , ("def relu =  # cap below at 0\n negative?\n (drop >> 0 |)\n merge\n-3 >> relu >> print", ["0"], "")
+    -- deferred branches: handle one track, pass the rest, handle later
+  , ("def c = negative? >> (drop >> \"neg\" |) >> (| zero? >> (drop >> \"zero\" | toStr) >> merge) >> merge\n-3 >> c >> print\n0 >> c >> print\n5 >> c >> print", ["neg", "zero", "5"], "")
     -- factorial / fibonacci / exponentiation, recursive and iterative
   , ("def fac = n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> fac) >> *)) >> merge\n5 >> fac >> print", ["120"], "")
   , ("def fib = n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")

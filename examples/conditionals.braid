@@ -22,3 +22,16 @@ def sqIfEven =             # even → square, else keep  (leading | keeps track 
 8 >> doubleIfOdd >> print   # 8
 4 >> sqIfEven >> print      # 16
 5 >> sqIfEven >> print      # 5
+
+# Deferred branches: each stage (its own line) peels one case off the
+# sum and passes the rest down. The sum threads down the page — you
+# don't have to decide every branch in one row.
+def classify =
+    negative?                                          # (neg | nonneg)
+    ( drop >> "neg" | )                                # handle neg; defer nonneg
+    ( | zero? >> (drop >> "zero" | toStr) >> merge )   # on the deferred Int
+    merge
+
+-3 >> classify >> print     # neg
+0  >> classify >> print     # zero
+5  >> classify >> print     # 5
