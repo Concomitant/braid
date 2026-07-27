@@ -35,3 +35,17 @@ def classify =
 -3 >> classify >> print     # neg
 0  >> classify >> print     # zero
 5  >> classify >> print     # 5
+
+# The same idea with NO >>, pipes aligned into a spine: two tracks are
+# two columns, each row does one thing to one column, the empty side
+# passes. Read a column top-to-bottom for that track's path.
+def label =
+    odd?
+    ( drop   |        )     # odd track  → •
+    ( "odd"  |        )     # odd track  → "odd"
+    (        | drop   )     # even track → •  (empty left passes the done "odd")
+    (        | "even" )     # even track → "even"
+    merge
+
+5 >> label >> print     # odd
+4 >> label >> print     # even
