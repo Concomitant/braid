@@ -42,7 +42,6 @@ passTests =
     -- newline is strict >>
   , ("1 2\nf g\n+\nprint",       "• ⇒ •")
   , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
-  , ("1 2 >>\n+",                "• ⇒ Int")   -- newline after >> absorbed
 
     -- worked schemes from the spec (now exact, matching it verbatim)
   , ("dup >> *",      "Int ⇒ Int")           -- square
@@ -146,6 +145,10 @@ failTests =
   , ("list(1 2",      "unexpected end of input")
   , ("f ... g",       "'...' must be the final atom")
   , ("1 >",           "Unexpected '>'")
+    -- a newline is a strict >>, so a trailing >> before one is >> >>:
+    -- the continuation-absorption rule was ditched for >> and | (it
+    -- survives only for >=>, >?>, >!>, ||, which a newline can't express)
+  , ("1 2 >>\n+",     "Expected a tensor stage")
   , ("nonsense42x",   "Unknown primitive")
   , ("",              "Expected a tensor stage")
     -- sums
@@ -518,8 +521,10 @@ evalTests =
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
   , ("list(1, 2) >> uncons",               [],     "list(1, 2)")
   , ("list() >> uncons",                   [],     "in1()")
-    -- multi-line rows: newlines adjacent to | are absorbed (both styles)
-  , ("5 >> in1\ndup >> * |\n1 ... >> +\nmerge >> print", ["25"], "")
+    -- aligned track-columns: | no longer absorbs newlines, so each line
+    -- is one complete row (pass sugar fills the empty arm) and the rows
+    -- compose by newline-as->>.  Two rows here == the row (dup>>* | 1..+).
+  , ("5 >> in1\ndup >> * | pass\npass     | 1 ... >> +\nmerge >> print", ["25"], "")
     -- bare rows, line-scoped
   , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")

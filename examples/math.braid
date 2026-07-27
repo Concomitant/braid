@@ -1,6 +1,6 @@
 # Factorial, Fibonacci, exponentiation — recursive and iterative.
 # Newlines are strict >>, so each step gets its own line. Every one is
-# the same shape: a router picks base-vs-step, the arms are
+# the same shape: a router picks base-vs-step, then one router row
 # (base | step) >> merge, and postfix binders name the wires.
 
 # --- recursive (recurse: self-call in final atom position) ------------
@@ -8,28 +8,21 @@ def fac =
     n ->
     n
     zero?
-    ( (z -> 1)
-    | (m -> m (m 1 >> - >> fac)
-            * ) )
+    ( (z -> 1) | (m -> m (m 1 >> - >> fac) >> *) )
     merge
 
 def fib =
     n ->
     n 2
     lt?
-    ( (x y -> x)
-    | (x y -> (x 1 >> - >> fib)
-              _ (x 2 >> - >> fib)
-              + ) )
+    ( (x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +) )
     merge
 
 def pow =
     b e ->
     e
     zero?
-    ( (z -> 1)
-    | (m -> b (b (m 1 >> -) >> pow)
-            * ) )
+    ( (z -> 1) | (m -> b (b (m 1 >> -) >> pow) >> *) )
     merge
 
 # --- iterative (loop: state is a stack, again re-enters / done exits) --
@@ -39,9 +32,7 @@ def facL =
     [ acc k ->
         k
         zero?
-        ( (z -> acc >> done)
-        | (m -> (acc m >> *) (m 1 >> -)
-                again ) )
+        ( (z -> acc >> done) | (m -> (acc m >> *) (m 1 >> -) >> again) )
         merge ] ...
     loop
 
@@ -51,9 +42,7 @@ def fibL =
     [ a b k ->
         k
         zero?
-        ( (z -> a >> done)
-        | (m -> b (a b >> +) (m 1 >> -)
-                again ) )
+        ( (z -> a >> done) | (m -> b (a b >> +) (m 1 >> -) >> again) )
         merge ] ...
     loop
 

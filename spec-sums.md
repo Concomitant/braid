@@ -94,8 +94,13 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
   dimensions (stack tail, row tail).
 * Precedence, loosest to tightest: newline (strict `>>`), then `|`, then
   `>>`, then juxtaposition — so **each line is a row**, mirroring the
-  type grammar. Newlines adjacent to `|` are absorbed (continuation
-  layout).
+  type grammar. A newline is a strict `>>` and does **not** absorb around
+  `|` or `>>`: a line is a complete row, and rows stack by newline. This
+  is what makes aligned track-columns work bare — a trailing `|` (empty
+  arm = `pass`) at a line's end and a leading `|` at the next line's
+  start are two rows, not a collided `| |`. Continuation-absorption
+  survives only for operators a newline cannot express: the railway ops
+  `>=>`/`>?>`/`>!>` and the `||` list-literal, which may span lines.
 * `merge : (Θ | Θ) ⇒ Θ` is the binary codiagonal ∇ (dual of `dup`),
   rejoining agreeing tracks.
 

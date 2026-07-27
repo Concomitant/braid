@@ -579,22 +579,26 @@ tokenize = go
 normalizeToks :: [Token] -> [Token]
 normalizeToks = trim . collapse
   where
+    -- A newline is a strict `>>`.  It is absorbed only next to an
+    -- operator a newline cannot itself express: the railway operators
+    -- (`>=>`, `>?>`, `>!>`) and the `||` list-literal continuation.
+    -- `>>` and `|` never absorb — a newline already *is* `>>`, and the
+    -- row separator `|` must stay put so aligned track-columns work
+    -- (`f |` ⏎ `| g` is two rows, not one collided `| |`).
     collapse [] = []
     collapse (TokNewline : ts) =
       case dropWhile (== TokNewline) ts of
-        rest@(t : _) | isSeqOp t -> collapse rest
+        rest@(t : _) | absorbs t -> collapse rest
         rest                     -> TokNewline : collapse rest
     collapse (t : ts)
-      | isSeqOp t = t : collapse (dropWhile (== TokNewline) ts)
+      | absorbs t = t : collapse (dropWhile (== TokNewline) ts)
       | otherwise = t : collapse ts
 
     trim = dropWhile (== TokNewline) . dropTrailing
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
-    isSeqOp t =
-      t == TokSeq || t == TokSeqPass || t == TokBar
-        || t == TokKleisli || t == TokOrElse || t == TokOrClose
-        || t == TokBarBar
+    absorbs t =
+      t == TokKleisli || t == TokOrElse || t == TokOrClose || t == TokBarBar
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
