@@ -1834,7 +1834,9 @@ splitDefs src = do
           pure (ds, (l, doc) : ts, ps)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
-          if all isSpace body
+          -- a `#` comment on the `=` line is not code: treat a
+          -- comment-only body as blank so the block-body form triggers
+          if all isSpace (takeWhile (/= '#') body)
             then do
               -- block body: the following indented lines (blank ends it)
               let indented ln = not (all isSpace ln) && isSpace (head ln)

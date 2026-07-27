@@ -1,0 +1,24 @@
+# "Do something on one track, keep the other" — vertical rows with
+# identity defaults. Leading | keeps track 1; trailing | keeps track 2.
+
+def relu =                 # negative → 0, else keep
+    negative?
+    ( drop >> 0 | )
+    merge
+
+def doubleIfOdd =          # odd → double, else keep
+    odd?
+    ( dup >> + | )
+    merge
+
+def sqIfEven =             # even → square, else keep  (leading | keeps track 1)
+    odd?
+    ( | dup >> * )
+    merge
+
+-3 >> relu >> print         # 0
+5 >> relu >> print          # 5
+7 >> doubleIfOdd >> print   # 14
+8 >> doubleIfOdd >> print   # 8
+4 >> sqIfEven >> print      # 16
+5 >> sqIfEven >> print      # 5
