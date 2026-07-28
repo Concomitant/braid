@@ -188,6 +188,10 @@ moduleTypeTests =
   , ("type T3 = (Int^3 | Str)\n1 2 3 >> in1 >> (pass | drop >> \"x\")", "• ⇒ T3")
   , ("type W = (• | Int³)\n1 2 3 >> in2 >> (forget | pass)", "• ⇒ W")
   , ("type PP = ((Int Str)^2 | •)\n1 \"a\" 2 \"b\" >> in1 >> (pass | forget)", "• ⇒ PP")
+    -- foldExp: the exponent eliminator — variadic folds over bare stack
+    -- products; n is erased and generalizes per def
+  , ("[+] 0 ... >> foldExp",                    "Intⁿ⁰ ⇒ Int")
+  , ("def total = [+] 0 ... >> foldExp\ntotal", "Intⁿ⁰ ⇒ Int")
     -- two-tier control flow: p? routes and keeps, bare p forgets to Bool
   , ("equals",                                  "a0 a0 ⇒ Bool")
   , ("less",                                    "Int Int ⇒ Bool")
@@ -562,6 +566,12 @@ evalTests =
   , ("list(1, 2, 3)",                      [],     "list(1, 2, 3)")
   , ("[dup >> *] list(1, 2, 3, 4, 5)\nmap\n[+] 0 id\nfold\nprint",
                                            ["55"], "")
+    -- foldExp at three widths through ONE polymorphic def (n erased;
+    -- the runtime segment width is the witness), including n = 0
+  , ("1 2 3 >> [+] 0 ... >> foldExp >> print", ["6"], "")
+  , ("def total = [+] 0 ... >> foldExp\n1 2 3 4 5 >> total >> print", ["15"], "")
+  , ("def total = [+] 0 ... >> foldExp\n10 20 >> total >> print\ntotal >> print", ["30", "0"], "")
+  , ("def biggest = [(a x -> a x >> lt? >> ((p q -> q) | (p q -> p)) >> merge)] 0 ... >> foldExp\n3 9 4 >> biggest >> print", ["9"], "")
   ]
 
 -- (module source, substring expected in the error)

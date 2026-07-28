@@ -649,13 +649,28 @@ instantiateClosed (Forall tvars svars rvars nvars arr@(Arrow i o)) = do
                           then pure Nothing
                           else Just <$> freshSVarName) svars
   newRVs <- mapM (const freshRVarName) rvars
-  newNVs <- mapM (const freshNVarName) nvars
+  -- exponents in SPINE position are widths of the atom's own segment:
+  -- close them (n := 0), like ρ := •.  Exponents living inside element
+  -- types are the atom's polymorphism: freshen.
+  let spineNVs = spineExpVars i ++ spineExpVars o
+  newNVs <- mapM (\v -> if v `elem` spineNVs
+                          then pure Nothing
+                          else Just <$> freshNVarName) nvars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
       sSub = M.fromList [ (v, maybe SEnd STail mn)
                         | (v, mn) <- zip svars newSVs ]
       rSub = M.fromList (zip rvars (map RTail newRVs))
-      nSub = M.fromList (zip nvars (map (Exp 0 . Just) newNVs))
+      nSub = M.fromList [ (v, maybe (Exp 0 Nothing) (Exp 0 . Just) mn)
+                        | (v, mn) <- zip nvars newNVs ]
   pure (substOnce (Subst tSub sSub rSub nSub) arr)
+
+-- exponent variables on a stack's spine (not inside element types)
+spineExpVars :: SType -> [NVar]
+spineExpVars (SExp _ (Exp _ (Just n)) r) = n : spineExpVars r
+spineExpVars (SExp _ _ r)                = spineExpVars r
+spineExpVars (SCons _ r)                 = spineExpVars r
+spineExpVars (SSplice _ r)               = spineExpVars r
+spineExpVars _                           = []
 
 --------------------------------------------------------------------------------
 -- 6. Terms
@@ -1854,6 +1869,15 @@ primEnv =
       -- Bool ≡ (• | •): two payload-free tracks; true = in1, false = in2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
       boolLit  = Forall [] [] [] [] (Arrow SEnd (one tBool))
+      -- foldExp: the eliminator of an exponent bundle aⁿ (the stack-level
+      -- foldList).  n is erased; at runtime the bundle is the final
+      -- segment and its width is the witness.
+      foldExpTy =
+        let stepArr = Arrow (SCons tb (one ta)) (one tb)
+        in Forall [a, b] [] [] [NV "n"]
+             (Arrow (SCons (TFn stepArr)
+                      (SCons tb (SExp (one ta) (Exp 0 (Just (NV "n"))) SEnd)))
+                    (one tb))
   in M.fromList
        [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
        , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
@@ -1920,6 +1944,7 @@ primEnv =
        , ("there",     thereTy)
        , ("merge",     mergeTy)
        , ("loop",      loopTy)
+       , ("foldExp",   foldExpTy)
        ]
 
 --------------------------------------------------------------------------------
@@ -2446,6 +2471,7 @@ moduleRunDefs m =
     openTailed (SCons _ rest) = openTailed rest
     openTailed (STail _)      = True
     openTailed (SSplice _ _)  = True
+    openTailed (SExp _ _ _)   = True   -- erased width: needs the whole segment
     openTailed SEnd           = False
 
 -- Evaluate a term: returns the final stack and the print log.  The Env
@@ -2569,6 +2595,24 @@ evalTerm env defs vars term st =
               (result, logs) <- go seg0 []
               pure (result, if isFinal then [] else stk', logs)
             _ -> throwError "Runtime type error in loop: expected a body quotation"
+    -- foldExp: eliminate an exponent bundle aⁿ.  n is erased, so the
+    -- bundle is the final segment and its runtime width is the witness
+    -- (the forget/rotLast convention).  Non-final was typed at n := 0.
+    applyAtom isFinal (Prim "foldExp") stk
+      | not (M.member "foldExp" vars), not (M.member "foldExp" defs) = do
+          (args, stk') <- takeWires "foldExp" 2 stk
+          case args of
+            [VFn cv body, b0] -> do
+              let bundle = if isFinal then stk' else []
+                  go acc [] logs = pure (acc, logs)
+                  go acc (x : xs) logs = do
+                    (out, lg) <- evalTerm env defs cv body [acc, x]
+                    case out of
+                      [acc'] -> go acc' xs (logs ++ lg)
+                      _ -> throwError "Runtime type error in foldExp: the step must return exactly the accumulator"
+              (result, logs) <- go b0 bundle []
+              pure ([result], if isFinal then [] else stk', logs)
+            _ -> throwError "Runtime type error in foldExp: expected a step quotation and an initial accumulator"
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
