@@ -550,11 +550,11 @@ evalTests =
   , ("def classify = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?) >> case(pass, drop >> \"zero\", toStr)\n-4 >> classify >> print\n0 >> classify >> print\n7 >> classify >> print", ["neg", "zero", "7"], "")
     -- associator round-trip is identity on the routed value
   , ("def tag = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?)\n5 >> tag >> assocL >> assocR >> case(pass, drop >> \"zero\", toStr) >> print", ["5"], "")
-    -- guard ladder words: [cond] [action] joined by if/elif/otherwise.
-    -- decision form: condition may be a router OR a bare Bool; the action
-    -- runs on a kept copy of the subject.
-  , ("def sign = _ [negative?] [drop >> \"neg\"] >> if >> _ [zero?] [drop >> \"zero\"] >> elif >> _ [toStr] >> otherwise\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
-  , ("def sign = _ [negative] [drop >> \"neg\"] >> if >> _ [zero] [drop >> \"zero\"] >> elif >> _ [toStr] >> otherwise\n-4 >> sign >> print\n7 >> sign >> print", ["neg", "7"], "")
+    -- guard ladder words: bound subject, bare Bool conditions, answers
+    -- as plain values; if opens, elif probes while undecided, else /
+    -- otherwise (lazy, quoted) close.  One guard per line, constant _.
+  , ("def sign = x -> (x >> negative) \"neg\" >> if >> _ (x >> zero) \"zero\" >> elif >> _ (x >> toStr) >> else\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
+  , ("def grade = x -> (89 x >> less) \"A\" >> if >> _ (79 x >> less) \"B\" >> elif >> _ (69 x >> less) \"C\" >> elif >> _ [\"F\"] >> otherwise\n95 >> grade >> print\n85 >> grade >> print\n75 >> grade >> print\n50 >> grade >> print", ["A", "B", "C", "F"], "")
     -- routing form: the router's hit value flows into the action
   , ("def cl = _ [odd?] [dup >> *] >> ifRoute >> _ [negative?] [drop >> 0] >> elifRoute >> _ [pass] >> otherwise\n7 >> cl >> print\n-4 >> cl >> print\n6 >> cl >> print", ["49", "0", "6"], "")
     -- aligned track-columns: | no longer absorbs newlines, so each line

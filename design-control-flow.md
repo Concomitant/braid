@@ -63,12 +63,23 @@ Unresolved.
 
 | idiom | shape | needs | best for |
 |---|---|---|---|
-| **bound-x railway** (winner) | `x -> … 89 x >> less >> ("A" \|) >?> … >!> "F"` | binder, Bool conds, railway ops | elif ladders; prettiest |
-| sugar-free flat rows | `ok \| guard` / `merge` line pairs | nothing beyond core | same, operator-free |
+| **word chain** (winner, 2026-07-28) | `x ->` ⏎ `(x >> negative) "neg" >> if` ⏎ `_ (x >> zero) "zero" >> elif` ⏎ `_ (x >> toStr) >> else` | prelude words if/elif/else/otherwise (shipped) | THE multi-line elif ladder: bare Bool conds, value answers, one guard per line, constant `_` |
+| bound-x railway | `x -> … 89 x >> less >> ("A" \|) >?> … >!> "F"` | binder, Bool conds, railway ops | same ladder via operators |
+| `firstTrue` product | lanes flat `(Bool Fn)ⁿ`, default on top, one fold | exponents (shipped) | guards as a first-class bundle; width = guard count |
+| sugar-free flat rows | `ok \| guard` / `merge` line pairs | nothing beyond core | operator-free spelling |
 | deferred peel | conds in miss slots, sum deepens, `case`/merge-ladder collapse | core (+`case`) | seeing the whole tree in the type |
-| quoted words | `_ [c] [a] >> if / elif / otherwise` (+`ifRoute`/`elifRoute`) | prelude words (shipped) | guards as data; unbound subject |
+| routing words | `_ [p?] [a] >> ifRoute / elifRoute … >> otherwise` | shipped | router refines; action sees routed value |
 | `\|\|` + `choose` | clause list, `[p] [a]` lanes | shipped | guard lists you build/filter/reorder |
 | `cond` tree | `x >> negative ["neg"] [ … ] >> cond` | core | nested if-then-else, fully `_`-free |
+
+The word chain's mechanics: `if : Bool a ⇒ (a | •)` opens,
+`elif : (a | •) Bool a ⇒ (a | •)` probes only while undecided,
+`else : (a | •) a ⇒ a` closes with a value, `otherwise` closes with a
+quoted (lazy) default. The running wire is the (decided | •) sum — a
+decision, once made, rides through. Answers are ANY values (quote only
+when the answer does work); all conditions evaluate (pure, so
+harmless); the quoted-condition `if`/`elif` of the earlier design are
+retired (superseded — the bound subject makes conditions plain Bools).
 
 Key discovery behind the winner: with the subject **bound**, conditions
 are points and `Bool = (•|•)` tracks are empty, so row arms are points

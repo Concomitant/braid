@@ -1,38 +1,37 @@
-# Guard ladders as ordinary words — no parser support. `if`/`elif`/
-# `otherwise` are three prelude defs; each guard is two quoted values,
-# [condition] [action]. `if` opens, `elif` threads the still-unanswered
-# (miss) track, `otherwise` closes with a total default. First hit wins.
-
-# Vertical: one guard per line. The leading _ passes the subject along so
-# the two quotes sit beside it — a quote is (• ⇒ Fn) and can't ride a >>
-# onto a non-empty stack, so _ frames it (the same tax as ...).
+# Guard ladders as ordinary words — no parser support, no sugar.
+# `if` / `elif` / `else` are three tiny prelude defs. Bind the subject,
+# and a guard is a bare Bool condition beside its answer — no quotes,
+# no routers, one guard per line. The running wire is (decided | •):
+# the first true lane decides, and a decision rides through the rest.
+# The `_` passes it along each continuation line (the usual frame tax,
+# constant — one per line).
 def sign =
-    _ [negative?] [drop >> "neg"]   >> if
-    _ [zero?]     [drop >> "zero"]  >> elif
-    _ [toStr]                       >> otherwise
+    x ->
+    (x >> negative) "neg"  >> if
+    _ (x >> zero)   "zero" >> elif
+    _ (x >> toStr)         >> else
 
 -4 >> sign >> print     # neg
 0  >> sign >> print     # zero
 7  >> sign >> print     # 7
 
-# The condition only has to DECIDE. A router (keeps its value) or a bare
-# Bool (throws it away) both work: verdict collapses either to a Bool, and
-# the action always runs on a kept copy of the subject.
-def sign2 =
-    _ [negative] [drop >> "neg"]    >> if      # `negative` : Int ⇒ Bool
-    _ [zero]     [drop >> "zero"]   >> elif
-    _ [toStr]                       >> otherwise
+# Answers are ANY values; quote only when the answer does work, and
+# close with `otherwise` (quoted default = lazy: runs only if nothing
+# hit).  Conditions are arbitrary Bool expressions.
+def grade =
+    x ->
+    (89 x >> less) "A"   >> if
+    _ (79 x >> less) "B" >> elif
+    _ (69 x >> less) "C" >> elif
+    _ ["F"]              >> otherwise
 
--4 >> sign2 >> print    # neg
-7  >> sign2 >> print    # 7
+95 >> grade >> print    # A
+75 >> grade >> print    # C
+50 >> grade >> print    # F
 
-# One line needs no _ — juxtaposition already tensors subject and quotes.
-# (Every arm must land on one type: here square-or-keep, both Int.)
-9 [odd?] [dup >> *] >> if [pass] >> otherwise >> print   # odd  → 81
-4 [odd?] [dup >> *] >> if [pass] >> otherwise >> print   # even → 4
-
-# Routing variant: ifRoute / elifRoute require a router and feed its hit
-# VALUE into the action (the action sees the routed value, not a fresh x).
+# Routing variant: ifRoute / elifRoute take a quoted ROUTER and feed its
+# hit value into the action (the action sees the routed value, not a
+# fresh subject); `otherwise` closes on the still-routed miss track.
 def classify =
     _ [odd?]      [dup >> *]    >> ifRoute      # square the odd value
     _ [negative?] [drop >> 0]   >> elifRoute    # clamp negatives to 0
