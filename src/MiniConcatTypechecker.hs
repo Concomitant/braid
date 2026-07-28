@@ -4,7 +4,7 @@ module MiniConcatTypechecker where
 
 import qualified Data.Map as M
 import Data.Map (Map)
-import Data.Maybe (fromMaybe, isNothing)
+import Data.Maybe (fromMaybe, isNothing, isJust, fromJust)
 import Data.List (nub, intercalate, elemIndex, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither)
@@ -701,6 +701,7 @@ data Token
   | TokKleisli    -- >=> (Kleisli composition in the sum monad)
   | TokOrElse     -- >?> (the dual: chain along the miss track)
   | TokOrClose    -- >!> (close a >?> chain with a total default)
+  | TokCaret      -- ^ (exponent in type expressions: Int^3, (A B)^n)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -737,8 +738,14 @@ tokenize = go
       | otherwise = (TokIdent "-" :) <$> go cs         -- subtraction
     go ('|':'|':cs)     = (TokBarBar :) <$> go cs
     go ('|':cs)         = (TokBar :) <$> go cs
+    go ('^':cs)         = (TokCaret :) <$> go cs
     go (c:cs)
       | isSpace c = go cs
+      -- Unicode superscripts lex as ^ + the translated exponent
+      | Just _ <- unSup c =
+          let (sups, rest) = span (isJust . unSup) (c:cs)
+              plain = map (fromJust . unSup) sups
+          in ((TokCaret :) . (supTok plain :)) <$> go rest
       | isDigit c =
           let (digits, rest) = span isDigit (c:cs)
           in (TokInt (read digits) :) <$> go rest
@@ -746,8 +753,15 @@ tokenize = go
           let (ident, rest) = span isIdentChar (c:cs)
           in (TokIdent ident :) <$> go rest
 
+    supTok plain
+      | all isDigit plain = TokInt (read plain)
+      | otherwise         = TokIdent plain
+
+    unSup ch = lookup ch (zip "⁰¹²³⁴⁵⁶⁷⁸⁹ⁿᵐᵏⁱʲ" "0123456789nmkij")
+
     isIdentChar ch =
-      not (isSpace ch) && ch `notElem` (">.[](),-|#\"\8230" :: String)
+      not (isSpace ch) && isNothing (unSup ch)
+        && ch `notElem` (">.[](),-|#\"^\8230" :: String)
 
     -- string literal body: minimal escapes \" \\ \n
     lexStr ('\\':'"':cs)  = first ('"' :)  <$> lexStr cs
@@ -1378,8 +1392,29 @@ parseTyElem aliases dataSigs params toks = case toks of
     goStack ts = goStackElem ts
     goStackElem ts = do
       (t, rest) <- parseTyElem aliases dataSigs params ts
-      (suffix, rest') <- goStackEnd rest
-      pure (SCons t suffix, rest')
+      case rest of
+        -- exponent: T^3 repeats one wire; (A B)^3 repeats a segment
+        -- (a 1-ary parenthesized "sum" before ^ is read as a segment).
+        (TokCaret : rest1) -> do
+          (e, rest2) <- expLit rest1
+          base <- case t of
+            TSum (RCons st RNil) -> Right st
+            _                    -> Right (SCons t SEnd)
+          if openTailedS base
+            then Left "Exponent base must be a closed segment"
+            else do
+              (suffix, rest') <- goStackEnd rest2
+              pure (sexp base e suffix, rest')
+        _ -> do
+          (suffix, rest') <- goStackEnd rest
+          pure (SCons t suffix, rest')
+    -- stage 3: literal exponents only.  Exponent VARIABLES arrive with
+    -- exponent parameters (design-exponents.md); reject with direction.
+    expLit (TokInt k : rest) | k >= 0 = Right (Exp k Nothing, rest)
+    expLit (TokIdent nm : _) =
+      Left $ "Exponent variables (^" ++ nm ++ ") are not yet supported in "
+           ++ "type declarations — only literal exponents (Int^3)"
+    expLit _ = Left "Expected an exponent (a number) after '^'"
     goStackEnd rest = case rest of
       (TokBar : _)    -> pure (SEnd, rest)
       (TokRParen : _) -> pure (SEnd, rest)

@@ -183,6 +183,11 @@ moduleTypeTests =
   , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
   , ("type YN = Bool\ntrue",                    "• ⇒ YN")
+    -- exponent syntax in type declarations: literal ^k (and Unicode
+    -- superscript input) expands to k copies; segments repeat wholesale
+  , ("type T3 = (Int^3 | Str)\n1 2 3 >> in1 >> (pass | drop >> \"x\")", "• ⇒ T3")
+  , ("type W = (• | Int³)\n1 2 3 >> in2 >> (forget | pass)", "• ⇒ W")
+  , ("type PP = ((Int Str)^2 | •)\n1 \"a\" 2 \"b\" >> in1 >> (pass | forget)", "• ⇒ PP")
     -- two-tier control flow: p? routes and keeps, bare p forgets to Bool
   , ("equals",                                  "a0 a0 ⇒ Bool")
   , ("less",                                    "Int Int ⇒ Bool")
@@ -566,6 +571,8 @@ moduleFailTests =
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
   , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
+  , ("type Bad = (• | Int^n)\n1",                "Exponent variables")
+  , ("type Bad = (• | Int^)\n1",                 "Expected an exponent")
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
   , ("data Bad(a, b) = (• | a b)\n1",            "ambiguous product split")
