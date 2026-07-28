@@ -1,0 +1,21 @@
+# Graphical linear algebra, level 1. A vector is a BUNDLE — n bare
+# wires, typed Intⁿ — and the generators are width-polymorphic: one
+# word, every dimension. No boxes: the stack is the vector.
+#   dupN : aⁿ ⇒ aⁿ aⁿ            copy (Δ)
+#   addN : Intⁿ Intⁿ ⇒ Intⁿ     pointwise add (∇)
+#   zipN : aⁿ bⁿ ⇒ (a b)ⁿ       pair two bundles
+#   sumN : Intⁿ ⇒ Int           fold a bundle
+# A matrix is just a value Fn⟨Intⁿ ⇒ Intᵐ⟩.
+
+1 2 3 >> dupN >> addN >> sumN >> print      # Δ then ∇ = x+x pointwise → 12
+
+# the bialgebra check, operationally: copy-then-add = scale-by-2
+def dbl  = dupN >> addN
+def dblS = 2 ... >> scaleN
+20 30 >> dbl  >> sumN >> print              # 100
+20 30 >> dblS >> sumN >> print              # 100
+
+# dot product: zip the bundles, fold the pairs — dimension-checked
+# (zipN forces the two widths equal at compile time)
+def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2
+1 2 3 4 5 6 >> dot >> print                 # 1·4 + 2·5 + 3·6 = 32

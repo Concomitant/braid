@@ -192,6 +192,13 @@ moduleTypeTests =
     -- products; n is erased and generalizes per def
   , ("[+] 0 ... >> foldExp",                    "Intⁿ⁰ ⇒ Int")
   , ("def total = [+] 0 ... >> foldExp\ntotal", "Intⁿ⁰ ⇒ Int")
+    -- GLA generators: width-polymorphic wiring over bundles
+  , ("dupN",   "a0ⁿ⁰ ⇒ a0ⁿ⁰ a0ⁿ⁰")
+  , ("addN",   "Intⁿ⁰ Intⁿ⁰ ⇒ Intⁿ⁰")
+  , ("zipN",   "a0ⁿ⁰ a1ⁿ⁰ ⇒ (a0 a1)ⁿ⁰")
+  , ("sumN",   "Intⁿ⁰ ⇒ Int")
+  , ("firstTrue", "((• | •) Fn⟨• ⇒ ρ0⟩)ⁿ⁰ Fn⟨• ⇒ ρ0⟩ ⇒ ρ0")
+  , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\ndot", "a0ⁿ⁰ a1ⁿ⁰ ⇒ Int")
     -- two-tier control flow: p? routes and keeps, bare p forgets to Bool
   , ("equals",                                  "a0 a0 ⇒ Bool")
   , ("less",                                    "Int Int ⇒ Bool")
@@ -572,6 +579,16 @@ evalTests =
   , ("def total = [+] 0 ... >> foldExp\n1 2 3 4 5 >> total >> print", ["15"], "")
   , ("def total = [+] 0 ... >> foldExp\n10 20 >> total >> print\ntotal >> print", ["30", "0"], "")
   , ("def biggest = [(a x -> a x >> lt? >> ((p q -> q) | (p q -> p)) >> merge)] 0 ... >> foldExp\n3 9 4 >> biggest >> print", ["9"], "")
+    -- GLA: pointwise ops on bundles; the linear 2n = w case resolves
+    -- addN/zipN against concrete stacks
+  , ("1 2 3 >> dupN >> addN >> sumN >> print", ["12"], "")
+  , ("1 2 3 10 20 30 >> addN >> sumN >> print", ["66"], "")
+  , ("2 1 2 3 >> scaleN >> sumN >> print", ["12"], "")
+    -- the bialgebra check, operationally: copy-then-add = scale-by-2
+  , ("def dbl = dupN >> addN\ndef dblS = 2 ... >> scaleN\n20 30 >> dbl >> sumN >> print\n20 30 >> dblS >> sumN >> print", ["100", "100"], "")
+  , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\n1 2 3 4 5 6 >> dot >> print", ["32"], "")
+    -- firstTrue: guard lanes as a bare product, first true wins
+  , ("def sign = x -> (x >> negative) [\"neg\"] (x >> zero) [\"zero\"] [x >> toStr] >> firstTrue\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
   ]
 
 -- (module source, substring expected in the error)

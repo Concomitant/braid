@@ -194,6 +194,47 @@ sharing one variable and one base width ⇒ divide). Deliberately
 deferred to the stage where a prelude def actually demands it; the
 general multi-variable case stays rejected (ambiguous, non-principal).
 
+## Stage 4–5 implementation notes (2026-07-28)
+
+**Stage 4 — the eliminator.** `foldExp : Fn⟨b a ⇒ b⟩ b aⁿ ⇒ b` (and
+the pair twin `foldExp2` over `(a c)ⁿ`) shipped as prims. Open
+question 1 is ANSWERED: erased exponents execute via the existing
+final-atom convention — a width-polymorphic prim in final position
+receives the whole remaining segment, and that segment's runtime width
+is the erased n's witness (the forget/rotLast/loop mechanism; no
+elaboration, no tags, no monomorphization). One polymorphic def runs
+at every width, n = 0 included. `instantiateClosed` closes SPINE
+exponents to 0 for non-final atoms (the ρ := • policy one level up);
+element-type exponents still freshen. **No `unExp`**: unrolling one
+layer would need n = 0 and n = S m to share a scheme — a dependent
+sum. The fold is the honest eliminator.
+
+**Stage 5 — the payoffs.** The linear same-var chain shipped in
+`expSplit` (k exponents over one variable, bases may differ, closed
+tail, closed other ⇒ divide), which is exactly what `addN` and `zipN`
+need against concrete stacks. Prims `dupN/addN/zipN/scaleN` + derived
+`sumN`; `examples/gla.braid` runs Δ∇ = scale-by-2 as an operational
+bialgebra check and a dimension-checked dot product. `firstTrue`
+landed as a derived prelude def over `foldExp2` — the guard-lanes
+product from the control-flow arc, `(Bool Fn⟨•⇒r⟩)ⁿ Fn⟨•⇒r⟩ ⇒ r`,
+first-true-wins via a (decided | default) accumulator sum so exactly
+one action runs.
+
+Findings for the record:
+- **Binders close their body's input** — a `(d -> …)` cannot take one
+  wire and leave an open bundle below; `firstTrue` routes the default
+  through `rotLast` and the accumulator sum instead. Any future
+  exponent-consuming def faces the same constraint.
+- **`zeroN : • ⇒ Intⁿ` is operationally uninhabitable**: an
+  output-only exponent has no witness (nothing on the stack determines
+  n at runtime). Producing bundles from nothing needs value-directed
+  width — the `tabulate`/`Fin(n)` side, or literal-exponent
+  monomorphic uses only. Excluded for now.
+- Observed (pre-existing, not exponent-related): grouped compounds
+  close with freshened element vars, so a binder param used only
+  inside groups/quotes can display unconstrained (`sign : a0 ⇒ Str`
+  where Int is forced at runtime). Worth a separate look.
+
 ## Open questions
 
 1. Does `unExp`'s nil/cons refinement interact with the persistent

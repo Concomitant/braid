@@ -437,12 +437,35 @@ unifyStack s st1 st2 =
       | bw == 0 || openTailedS base =
           Left $ "Cannot unify stacks (exponent base): "
                ++ show (SExp base e rest) ++ " vs " ++ show other
+      -- the linear case: k exponents over ONE variable n (bases may
+      -- differ — aⁿ bⁿ), then a closed tail, against a closed stack:
+      -- k·n·|b| = w is solvable by division.  Covers addN (ℝⁿ ℝⁿ) and
+      -- zip (aⁿ bⁿ); multi-VARIABLE regions stay rejected (ambiguous).
+      | Just (perCopy, chainEnd) <- sameVarChain e rest
+      , not (openTailedS chainEnd), not (openTailedS other) =
+          let w = closedArity other - closedArity chainEnd
+          in if w < 0 || w `mod` perCopy /= 0
+               then Left $ "Cannot unify stacks (exponent split): "
+                         ++ show (SExp base e rest) ++ " vs " ++ show other
+               else do
+                 s1 <- unifyExp s0 e (Exp (w `div` perCopy) Nothing)
+                 unifyStack s1 (apply s1 (SExp base e rest)) (apply s1 other)
       | openTailedS rest =
           Left $ "Cannot unify stacks (open tail after exponent): "
                ++ show (SExp base e rest) ++ " vs " ++ show other
       | otherwise = go s0 e other
       where
         bw = segArity base
+        -- a run of ≥2 exponents all over the same variable, offset-free
+        sameVarChain (Exp 0 (Just n)) r0 = chase (1 :: Int) bw r0
+          where
+            chase k acc (SExp b' (Exp 0 (Just n')) r')
+              | n' == n, not (openTailedS b') =
+                  chase (k + 1) (acc + segArity b') r'
+            chase k acc r'
+              | k >= 2    = Just (acc, r')
+              | otherwise = Nothing
+        sameVarChain _ _ = Nothing
         rw = closedArity rest
         err oth = Left $ "Cannot unify stacks (exponent split): "
                        ++ show (SExp base e rest) ++ " vs " ++ show oth
@@ -1872,12 +1895,36 @@ primEnv =
       -- foldExp: the eliminator of an exponent bundle aⁿ (the stack-level
       -- foldList).  n is erased; at runtime the bundle is the final
       -- segment and its width is the witness.
+      nExp = Exp 0 (Just (NV "n"))
       foldExpTy =
         let stepArr = Arrow (SCons tb (one ta)) (one tb)
         in Forall [a, b] [] [] [NV "n"]
              (Arrow (SCons (TFn stepArr)
-                      (SCons tb (SExp (one ta) (Exp 0 (Just (NV "n"))) SEnd)))
+                      (SCons tb (SExp (one ta) nExp SEnd)))
                     (one tb))
+      -- foldExp2: the two-wide twin — eliminate a bundle of PAIRS
+      -- (a c)ⁿ; the step sees [acc, a, c]
+      foldExp2Ty =
+        let c  = TV "c"
+            tc = TVarTy c
+            stepArr = Arrow (SCons tb (SCons ta (one tc))) (one tb)
+        in Forall [a, b, c] [] [] [NV "n"]
+             (Arrow (SCons (TFn stepArr)
+                      (SCons tb (SExp (SCons ta (one tc)) nExp SEnd)))
+                    (one tb))
+      -- GLA generators, width-polymorphic in n (design-exponents.md)
+      dupNTy = Forall [a] [] [] [NV "n"]
+        (Arrow (SExp (one ta) nExp SEnd)
+               (SExp (one ta) nExp (SExp (one ta) nExp SEnd)))
+      addNTy = Forall [] [] [] [NV "n"]
+        (Arrow (SExp (one TInt) nExp (SExp (one TInt) nExp SEnd))
+               (SExp (one TInt) nExp SEnd))
+      zipNTy = Forall [a, b] [] [] [NV "n"]
+        (Arrow (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
+               (SExp (SCons ta (one tb)) nExp SEnd))
+      scaleNTy = Forall [] [] [] [NV "n"]
+        (Arrow (SCons TInt (SExp (one TInt) nExp SEnd))
+               (SExp (one TInt) nExp SEnd))
   in M.fromList
        [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
        , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
@@ -1945,6 +1992,11 @@ primEnv =
        , ("merge",     mergeTy)
        , ("loop",      loopTy)
        , ("foldExp",   foldExpTy)
+       , ("foldExp2",  foldExp2Ty)
+       , ("dupN",      dupNTy)
+       , ("addN",      addNTy)
+       , ("zipN",      zipNTy)
+       , ("scaleN",    scaleNTy)
        ]
 
 --------------------------------------------------------------------------------
@@ -2385,6 +2437,15 @@ preludeSrc = unlines
   , "## flows into the action (so the action sees the routed/refined type)."
   , "def ifRoute   = (x p a -> x >> p ... >> apply >> (a ... >> apply | pass))"
   , "def elifRoute = (s p a -> s >> (in1 | p ... >> apply >> (a ... >> apply | pass)) >> merge)"
+  , "## sum an Int bundle: the variadic +"
+  , "def sumN = [+] 0 ... >> foldExp"
+  , "## guard lanes as a bare product: (Bool Fn)^n lanes, default Fn on"
+  , "## top.  All conditions are pre-evaluated (probe every lane); the"
+  , "## FIRST true lane's action runs, else the default — exactly one"
+  , "## action ever runs (the fold selects quotes, applies once).  The"
+  , "## accumulator is (decided | default): a true lane decides once;"
+  , "## later lanes leave a decision alone."
+  , "def firstTrue = rotLast >> (d -> d >> in2) ... >> [(acc b f -> acc >> (in1 | (g -> b [f >> in1] [g >> in2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> apply"
   , "## assemble a loop body from a quoted predicate and step"
   , "def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
@@ -2613,6 +2674,57 @@ evalTerm env defs vars term st =
               (result, logs) <- go b0 bundle []
               pure ([result], if isFinal then [] else stk', logs)
             _ -> throwError "Runtime type error in foldExp: expected a step quotation and an initial accumulator"
+    -- foldExp2: the pair-bundle twin — chunk the segment in twos
+    applyAtom isFinal (Prim "foldExp2") stk
+      | not (M.member "foldExp2" vars), not (M.member "foldExp2" defs) = do
+          (args, stk') <- takeWires "foldExp2" 2 stk
+          case args of
+            [VFn cv body, b0] -> do
+              let bundle = if isFinal then stk' else []
+                  go acc (x : y : xs) logs = do
+                    (out, lg) <- evalTerm env defs cv body [acc, x, y]
+                    case out of
+                      [acc'] -> go acc' xs (logs ++ lg)
+                      _ -> throwError "Runtime type error in foldExp2: the step must return exactly the accumulator"
+                  go acc [] logs = pure (acc, logs)
+                  go _ _ _ = throwError "foldExp2: odd segment (unreachable on typechecked programs)"
+              (result, logs) <- go b0 bundle []
+              pure ([result], if isFinal then [] else stk', logs)
+            _ -> throwError "Runtime type error in foldExp2: expected a step quotation and an initial accumulator"
+    -- GLA generators: width-polymorphic wiring; the segment IS the witness
+    applyAtom isFinal (Prim "dupN") stk
+      | not (M.member "dupN" vars), not (M.member "dupN" defs) =
+          if isFinal then pure (stk ++ stk, [], [])
+                     else pure ([], stk, [])
+    applyAtom isFinal (Prim "addN") stk
+      | not (M.member "addN" vars), not (M.member "addN" defs) =
+          if not isFinal then pure ([], stk, [])
+          else do
+            let m = length stk
+                (xs, ys) = splitAt (m `div` 2) stk
+                add (VInt x) (VInt y) = pure (VInt (x + y))
+                add _ _ = throwError "Runtime type error in addN: expected Int wires"
+            if odd m then throwError "addN: odd segment (unreachable on typechecked programs)"
+                     else do out <- sequence (zipWith add xs ys)
+                             pure (out, [], [])
+    applyAtom isFinal (Prim "zipN") stk
+      | not (M.member "zipN" vars), not (M.member "zipN" defs) =
+          if not isFinal then pure ([], stk, [])
+          else if odd (length stk)
+            then throwError "zipN: odd segment (unreachable on typechecked programs)"
+            else let (xs, ys) = splitAt (length stk `div` 2) stk
+                 in pure (concat (zipWith (\x y -> [x, y]) xs ys), [], [])
+    applyAtom isFinal (Prim "scaleN") stk
+      | not (M.member "scaleN" vars), not (M.member "scaleN" defs) = do
+          (args, stk') <- takeWires "scaleN" 1 stk
+          case args of
+            [VInt k] -> do
+              let bundle = if isFinal then stk' else []
+                  scale (VInt x) = pure (VInt (k * x))
+                  scale _ = throwError "Runtime type error in scaleN: expected Int wires"
+              out <- mapM scale bundle
+              pure (out, if isFinal then [] else stk', [])
+            _ -> throwError "Runtime type error in scaleN: expected an Int scalar"
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
