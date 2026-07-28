@@ -555,6 +555,10 @@ evalTests =
     -- otherwise (lazy, quoted) close.  One guard per line, constant _.
   , ("def sign = x -> (x >> negative) \"neg\" >> if >> _ (x >> zero) \"zero\" >> elif >> _ (x >> toStr) >> else\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
   , ("def grade = x -> (89 x >> less) \"A\" >> if >> _ (79 x >> less) \"B\" >> elif >> _ (69 x >> less) \"C\" >> elif >> _ [\"F\"] >> otherwise\n95 >> grade >> print\n85 >> grade >> print\n75 >> grade >> print\n50 >> grade >> print", ["A", "B", "C", "F"], "")
+    -- lane accumulation: each `...` line pushes a (cond, answer) pair
+    -- UNDER the product; decide folds — first-written true lane wins
+  , ("def sign =\n    x ->\n    (x >> negative) \"neg\" ...\n    (x >> zero) \"zero\" ...\n    (x >> toStr) ...\n    decide\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
+  , ("def grade =\n    x ->\n    (89 x >> less) \"A\" ...\n    (79 x >> less) \"B\" ...\n    (69 x >> less) \"C\" ...\n    \"F\" ...\n    decide\n95 >> grade >> print\n85 >> grade >> print\n50 >> grade >> print", ["A", "B", "F"], "")
     -- routing form: the router's hit value flows into the action
   , ("def cl = _ [odd?] [dup >> *] >> ifRoute >> _ [negative?] [drop >> 0] >> elifRoute >> _ [pass] >> otherwise\n7 >> cl >> print\n-4 >> cl >> print\n6 >> cl >> print", ["49", "0", "6"], "")
     -- aligned track-columns: | no longer absorbs newlines, so each line

@@ -1,31 +1,52 @@
 # Guard ladders as ordinary words — no parser support, no sugar.
-# `if` / `elif` / `else` are three tiny prelude defs. Bind the subject,
-# and a guard is a bare Bool condition beside its answer — no quotes,
-# no routers, one guard per line. The running wire is (decided | •):
-# the first true lane decides, and a decision rides through the rest.
-# The `_` passes it along each continuation line (the usual frame tax,
-# constant — one per line).
+#
+# The headline form: one lane per line, `...` accumulates, `decide`
+# folds. A lane is a bare Bool condition beside its answer; the final
+# lane is the default (no condition). The trailing `...` is the
+# ordinary explicit-remainder marker — each lane line pushes UNDER the
+# growing product, so lanes stack reversed and decide's overwrite fold
+# (deepest first) makes the FIRST-written true lane win. All conditions
+# are probed (a product — pure, so harmless); answers are plain values.
 def sign =
     x ->
-    (x >> negative) "neg"  >> if
-    _ (x >> zero)   "zero" >> elif
-    _ (x >> toStr)         >> else
+    (x >> negative) "neg"  ...
+    (x >> zero)     "zero" ...
+    (x >> toStr)           ...
+    decide
 
 -4 >> sign >> print     # neg
 0  >> sign >> print     # zero
 7  >> sign >> print     # 7
 
-# Answers are ANY values; quote only when the answer does work, and
-# close with `otherwise` (quoted default = lazy: runs only if nothing
-# hit).  Conditions are arbitrary Bool expressions.
+# Word-chain form: fold as you go instead. `if` opens a (decided | •)
+# wire, `elif` probes only while undecided, `else` closes. One `_` per
+# continuation line passes the running wire along (the frame tax,
+# constant). Equivalent railway spelling: chain `>> if` lines with
+# >?> and close with >!> — no `_` (the miss track is empty, so lane
+# pushes are free there).
+def sign2 =
+    x ->
+    (x >> negative) "neg"  >> if
+    _ (x >> zero)   "zero" >> elif
+    _ (x >> toStr)         >> else
+
+-4 >> sign2 >> print    # neg
+0  >> sign2 >> print    # zero
+7  >> sign2 >> print    # 7
+
+# Deeper ladder in the headline style; conditions are arbitrary Bool
+# expressions. (For lazy answers, quote them and `decide >> apply` —
+# or use the word chain with `otherwise` and a quoted default.)
 def grade =
     x ->
-    (89 x >> less) "A"   >> if
-    _ (79 x >> less) "B" >> elif
-    _ (69 x >> less) "C" >> elif
-    _ ["F"]              >> otherwise
+    (89 x >> less) "A" ...
+    (79 x >> less) "B" ...
+    (69 x >> less) "C" ...
+    "F"                ...
+    decide
 
 95 >> grade >> print    # A
+85 >> grade >> print    # B
 75 >> grade >> print    # C
 50 >> grade >> print    # F
 
