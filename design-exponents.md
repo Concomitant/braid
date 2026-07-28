@@ -230,10 +230,17 @@ Findings for the record:
   n at runtime). Producing bundles from nothing needs value-directed
   width — the `tabulate`/`Fin(n)` side, or literal-exponent
   monomorphic uses only. Excluded for now.
-- Observed (pre-existing, not exponent-related): grouped compounds
+- ~~Observed (pre-existing, not exponent-related): grouped compounds
   close with freshened element vars, so a binder param used only
   inside groups/quotes can display unconstrained (`sign : a0 ⇒ Str`
-  where Int is forced at runtime). Worth a separate look.
+  where Int is forced at runtime).~~ **FIXED 2026-07-28**: this was a
+  genuine soundness hole (`"oops" >> sign` typechecked, crashed at
+  runtime). Cause: the grouped-compound non-final path in
+  `inferOperand` solved the group's constraints locally (to find
+  closable tails) and then DISCARDED them, losing any binding between
+  the group's interior and outer metavariables (binder params). Fix:
+  propagate `cs`. Fallout was all good news: `dot` tightened from the
+  fake-polymorphic `aⁿ bⁿ ⇒ Int` to the honest `Intⁿ Intⁿ ⇒ Int`.
 
 ## Open questions
 

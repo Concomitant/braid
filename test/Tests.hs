@@ -202,7 +202,9 @@ moduleTypeTests =
   , ("zipN",   "a0ⁿ⁰ a1ⁿ⁰ ⇒ (a0 a1)ⁿ⁰")
   , ("sumN",   "Intⁿ⁰ ⇒ Int")
   , ("firstTrue", "((• | •) Fn⟨• ⇒ ρ0⟩)ⁿ⁰ Fn⟨• ⇒ ρ0⟩ ⇒ ρ0")
-  , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\ndot", "a0ⁿ⁰ a1ⁿ⁰ ⇒ Int")
+    -- (before the grouped-compound constraint fix this leaked fake
+    -- polymorphism: a0ⁿ a1ⁿ ⇒ Int, crashing on non-Int bundles)
+  , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\ndot", "Intⁿ⁰ Intⁿ⁰ ⇒ Int")
     -- two-tier control flow: p? routes and keeps, bare p forgets to Bool
   , ("equals",                                  "a0 a0 ⇒ Bool")
   , ("less",                                    "Int Int ⇒ Bool")

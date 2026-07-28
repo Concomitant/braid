@@ -1746,6 +1746,14 @@ inferOperand env final t
       -- variables — e.g. (pass >> drop) solves to A ρ ⇒ ρ and closes to
       -- A ⇒ •.  Element-internal variables (inside Fn⟨…⟩) stay open,
       -- matching how closed quote operands behave.
+      --
+      -- The constraints are PROPAGATED, not discarded: the local solve
+      -- only exists to find the closable tails, but the group may
+      -- constrain OUTER metavariables (a binder parameter used inside —
+      -- (x >> negative) forces x : Int), and dropping cs would lose
+      -- that link (the old soundness hole: sign typed a0 ⇒ Str and
+      -- crashed on "oops" >> sign).  Re-solving them globally is
+      -- redundant for the interior but preserves every outer binding.
       (arr, cs) <- infer env t
       case solve cs of
         Left _ ->
@@ -1758,7 +1766,7 @@ inferOperand env final t
               tails = nub ([ v | Just v <- [tailVar i] ]
                         ++ [ v | Just v <- [tailVar o] ])
               sm = M.fromList [ (v, SEnd) | v <- tails ]
-          in pure (substOnce (Subst M.empty sm M.empty M.empty) arr', [])
+          in pure (substOnce (Subst M.empty sm M.empty M.empty) arr', cs)
 
 -- The open stack variables of a stack: the tail, plus any splices.
 openVarsS :: SType -> [SVar]
