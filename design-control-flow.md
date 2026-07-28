@@ -119,14 +119,22 @@ openness. Mostly harmless, occasionally bites. Consider: closed
 variants, a tail-closing combinator, or checker-side finesse when a
 closed row is demanded. Unexplored.
 
-### 9. n-ary sum elimination
+### 9. n-ary sum elimination — CORRECTED 2026-07-28
 
-`eitherV` doesn't nest; `case(…)` is the only flat eliminator of a
-deep sum. A value-level n-ary fold is blocked: heterogeneous branch
-domains can't share a `List`, and nesting trips the same
-scrutinee-vs-parameter issue that killed nested `eitherV`. If labeled
-rows/records ever land, revisit (a record of handlers is the missing
-type).
+`eitherV` **does** nest — the earlier "doesn't nest" finding only holds
+point-free. Wrap the inner eliminator in a binder-closure and it works
+(verified: `x >> tag [h1] [(s -> s [h2] [h3] >> eitherV)] >> eitherV`
+→ 100/200/49 on a 3-track sum). So value-level n-ary elimination
+exists today at the cost of one binder per level; `case(…)` remains
+the only *flat* spelling. Partial application is likewise derivable
+today: `def bake = (v q -> [v ... >> q ... >> apply])` (Factor's
+curry). Task #15's real control-flow content is therefore completion,
+not unblocking: point-free closure manufacture for guards-as-data, the
+de-nesting law (curry/uncurry witness nested ladders ≅ flat dispatch
+tables on products), and the deduction theorem completing the
+apply-is-modus-ponens story. Caveat for #15's design: `bakeTop` (close
+the TOP slot) hits the push-onto-open-width wall — the frame question
+(§1) in another costume.
 
 ---
 
