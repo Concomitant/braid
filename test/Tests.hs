@@ -42,6 +42,10 @@ passTests =
     -- newline is strict >>
   , ("1 2\nf g\n+\nprint",       "• ⇒ •")
   , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
+    -- ; is a synonym for >>
+  , ("1 2 ; +",                  "• ⇒ Int")
+  , ("dup ; * ; toStr",          "Int ⇒ Str")
+  , ("5;dup;*",                  "• ⇒ Int")   -- no whitespace needed
 
     -- worked schemes from the spec (now exact, matching it verbatim)
   , ("dup >> *",      "Int ⇒ Int")           -- square

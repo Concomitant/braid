@@ -777,6 +777,8 @@ tokenize = go
     go ('|':'|':cs)     = (TokBarBar :) <$> go cs
     go ('|':cs)         = (TokBar :) <$> go cs
     go ('^':cs)         = (TokCaret :) <$> go cs
+    go (';':cs)         = (TokSeq :) <$> go cs   -- ; is a synonym for >>
+
     go (c:cs)
       | isSpace c = go cs
       -- Unicode superscripts lex as ^ + the translated exponent
@@ -799,7 +801,7 @@ tokenize = go
 
     isIdentChar ch =
       not (isSpace ch) && isNothing (unSup ch)
-        && ch `notElem` (">.[](),-|#\"^\8230" :: String)
+        && ch `notElem` (">.[](),-|#\"^;\8230" :: String)
 
     -- string literal body: minimal escapes \" \\ \n
     lexStr ('\\':'"':cs)  = first ('"' :)  <$> lexStr cs
