@@ -1,0 +1,43 @@
+# Guard ladders as ordinary words — no parser support. `if`/`elif`/
+# `otherwise` are three prelude defs; each guard is two quoted values,
+# [condition] [action]. `if` opens, `elif` threads the still-unanswered
+# (miss) track, `otherwise` closes with a total default. First hit wins.
+
+# Vertical: one guard per line. The leading _ passes the subject along so
+# the two quotes sit beside it — a quote is (• ⇒ Fn) and can't ride a >>
+# onto a non-empty stack, so _ frames it (the same tax as ...).
+def sign =
+    _ [negative?] [drop >> "neg"]   >> if
+    _ [zero?]     [drop >> "zero"]  >> elif
+    _ [toStr]                       >> otherwise
+
+-4 >> sign >> print     # neg
+0  >> sign >> print     # zero
+7  >> sign >> print     # 7
+
+# The condition only has to DECIDE. A router (keeps its value) or a bare
+# Bool (throws it away) both work: verdict collapses either to a Bool, and
+# the action always runs on a kept copy of the subject.
+def sign2 =
+    _ [negative] [drop >> "neg"]    >> if      # `negative` : Int ⇒ Bool
+    _ [zero]     [drop >> "zero"]   >> elif
+    _ [toStr]                       >> otherwise
+
+-4 >> sign2 >> print    # neg
+7  >> sign2 >> print    # 7
+
+# One line needs no _ — juxtaposition already tensors subject and quotes.
+# (Every arm must land on one type: here square-or-keep, both Int.)
+9 [odd?] [dup >> *] >> if [pass] >> otherwise >> print   # odd  → 81
+4 [odd?] [dup >> *] >> if [pass] >> otherwise >> print   # even → 4
+
+# Routing variant: ifRoute / elifRoute require a router and feed its hit
+# VALUE into the action (the action sees the routed value, not a fresh x).
+def classify =
+    _ [odd?]      [dup >> *]    >> ifRoute      # square the odd value
+    _ [negative?] [drop >> 0]   >> elifRoute    # clamp negatives to 0
+    _ [pass]                    >> otherwise    # keep it (all arms are Int)
+
+7  >> classify >> print   # 49
+-4 >> classify >> print   # 0
+6  >> classify >> print   # 6
