@@ -45,6 +45,24 @@ newtype RVar = RV String
 instance Show RVar where
   show (RV s) = s
 
+-- Exponent variables (n): type-level widths, kind Nat.  Unary naturals
+-- only — zero and successor, no arithmetic (design-exponents.md).
+newtype NVar = NV String
+  deriving (Eq, Ord)
+
+instance Show NVar where
+  show (NV s) = s
+
+-- An exponent in canonical form: k successors over a variable or zero.
+-- `Exp 2 (Just n)` is S(S(n)); `Exp 3 Nothing` is the literal 3.
+data Exp = Exp Int (Maybe NVar)
+  deriving (Eq, Ord)
+
+instance Show Exp where
+  show (Exp k Nothing)  = show k
+  show (Exp 0 (Just n)) = show n
+  show (Exp k (Just n)) = show n ++ "+" ++ show k
+
 -- Element types.  TFn nests whole arrows inside element types, so
 -- stack variables can occur inside types — all traversals (occurs
 -- checks, substitution, unification) must recurse through it.
@@ -91,6 +109,7 @@ data SType
   | STail SVar       -- open end: remainder variable ρ
   | SCons Ty SType   -- τ Σ (τ is the leftmost wire)
   | SSplice SVar SType -- a stack variable spliced before a closed suffix
+  | SExp SType Exp SType -- base^e: a CLOSED segment repeated e times, then rest
   deriving (Eq, Ord)
 
 -- smart constructor: a splice before nothing is just a tail
@@ -98,12 +117,46 @@ ssplice :: SVar -> SType -> SType
 ssplice v SEnd = STail v
 ssplice v r    = SSplice v r
 
+-- smart constructor, canonical form: a concrete exponent expands away,
+-- and a concrete OFFSET (base^(n+k)) expands into k real copies before
+-- an offset-free exponent — so equal stacks are structurally equal.
+-- The base's element vars are SHARED across copies (Aⁿ is n copies of
+-- the same A).
+sexp :: SType -> Exp -> SType -> SType
+sexp base (Exp k Nothing) rest = expandCopies k base rest
+sexp base (Exp k mv) rest
+  | k > 0     = expandCopies k base (SExp base (Exp 0 mv) rest)
+  | otherwise = SExp base (Exp 0 mv) rest
+
+expandCopies :: Int -> SType -> SType -> SType
+expandCopies 0 _    rest = rest
+expandCopies k base rest = appendS base (expandCopies (k - 1) base rest)
+
+-- number of wires in one copy of a base segment (bases are closed)
+segArity :: SType -> Int
+segArity = closedArity
+
 -- total append: an open front becomes a splice
 appendS :: SType -> SType -> SType
 appendS SEnd r           = r
 appendS (SCons t s) r    = SCons t (appendS s r)
 appendS (STail v) r      = ssplice v r
 appendS (SSplice v s) r  = SSplice v (appendS s r)
+appendS (SExp b e s) r   = SExp b e (appendS s r)
+
+-- superscript display: Intⁿ, Int³, (A B)ⁿ; caret fallback for exotic names
+supScript :: String -> Maybe String
+supScript = mapM sup
+  where
+    sup c = lookup c (zip "0123456789nmkij" "⁰¹²³⁴⁵⁶⁷⁸⁹ⁿᵐᵏⁱʲ")
+
+showExpAt :: SType -> Exp -> String
+showExpAt base e =
+  baseStr ++ fromMaybe ("^" ++ show e) (supScript (show e))
+  where
+    baseStr = case base of
+      SCons _ SEnd -> show base            -- single wire: Intⁿ
+      _            -> "(" ++ show base ++ ")"
 
 instance Show SType where
   show SEnd       = "•"
@@ -114,6 +167,7 @@ instance Show SType where
       go (STail v)        = [show v]
       go (SCons t rest)   = show t : go rest
       go (SSplice v rest) = show v : go rest
+      go (SExp b e rest)  = showExpAt b e : go rest
 
 -- Arrows: stack transformers Σ_in ⇒ Σ_out
 data Arrow = Arrow SType SType
@@ -126,12 +180,13 @@ instance Show Arrow where
 -- 2. Schemes and environments (only polymorphism over stack vars & type vars)
 --------------------------------------------------------------------------------
 
-data Scheme = Forall [TVar] [SVar] [RVar] Arrow
+data Scheme = Forall [TVar] [SVar] [RVar] [NVar] Arrow
   deriving (Eq, Ord)
 
 instance Show Scheme where
-  show (Forall tvars svars rvars arr) =
-    "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars)
+  show (Forall tvars svars rvars nvars arr) =
+    "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
+                       ++ map show nvars)
          ++ ". " ++ show arr
 
 type Env = Map String Scheme
@@ -144,10 +199,11 @@ data Subst = Subst
   { tySub  :: Map TVar Ty
   , stSub  :: Map SVar SType
   , rowSub :: Map RVar SumRow
+  , expSub :: Map NVar Exp
   } deriving (Eq, Show)
 
 emptySubst :: Subst
-emptySubst = Subst M.empty M.empty M.empty
+emptySubst = Subst M.empty M.empty M.empty M.empty
 
 -- composeSubst s2 s1 = apply s2 after s1
 composeSubst :: Subst -> Subst -> Subst
@@ -156,6 +212,7 @@ composeSubst s2 s1 =
     { tySub  = M.map (apply s2) (tySub s1) `M.union` tySub s2
     , stSub  = M.map (apply s2) (stSub s1) `M.union` stSub s2
     , rowSub = M.map (apply s2) (rowSub s1) `M.union` rowSub s2
+    , expSub = M.map (apply s2) (expSub s1) `M.union` expSub s2
     }
 
 class Substitutable a where
@@ -173,6 +230,14 @@ instance Substitutable Ty where
   apply s (TData n as) = TData n (map (apply s) as)
   apply s (TSum row)  = TSum (apply s row)
 
+instance Substitutable Exp where
+  apply s e@(Exp k mv) =
+    case mv of
+      Nothing -> e
+      Just n  -> case M.lookup n (expSub s) of
+        Nothing          -> e
+        Just e'          -> let Exp k' mv' = apply s e' in Exp (k + k') mv'
+
 instance Substitutable SType where
   apply _ SEnd = SEnd
   apply s st@(STail v) =
@@ -184,6 +249,8 @@ instance Substitutable SType where
     case M.lookup v (stSub s) of
       Nothing  -> SSplice v (apply s rest)
       Just st' -> appendS (apply s st') (apply s rest)
+  -- sexp normalizes: a concrete exponent expands into copies
+  apply s (SExp b e rest) = sexp (apply s b) (apply s e) (apply s rest)
 
 instance Substitutable SumRow where
   apply _ RNil = RNil
@@ -199,11 +266,12 @@ instance Substitutable Arrow where
 instance Substitutable Scheme where
   -- Bound variables are removed from the substitution before it touches
   -- the arrow, so quantified names are never captured.
-  apply s (Forall tv sv rv arr) =
+  apply s (Forall tv sv rv nv arr) =
     let s' = Subst (foldr M.delete (tySub s) tv)
                    (foldr M.delete (stSub s) sv)
                    (foldr M.delete (rowSub s) rv)
-    in Forall tv sv rv (apply s' arr)
+                   (foldr M.delete (expSub s) nv)
+    in Forall tv sv rv nv (apply s' arr)
 
 instance Substitutable Env where
   apply s = M.map (apply s)
@@ -218,49 +286,60 @@ data Constraint
   | CFail String   -- carry a deferred inference error to the solver
   deriving (Eq, Show)
 
--- All variables (type, stack, row) in order of first appearance,
--- recursing through Fn⟨Γ ⇒ Δ⟩ and (… | …) element types.  The single
--- traversal backing occurs checks, generalization, and normalization.
-type Vars = ([TVar], [SVar], [RVar])
+-- All variables (type, stack, row, exponent) in order of first
+-- appearance, recursing through Fn⟨Γ ⇒ Δ⟩ and (… | …) element types.
+-- The single traversal backing occurs checks, generalization, and
+-- normalization.
+type Vars = ([TVar], [SVar], [RVar], [NVar])
+
+noVars :: Vars
+noVars = ([], [], [], [])
 
 varsOfTy :: Ty -> Vars
-varsOfTy (TVarTy v)  = ([v], [], [])
-varsOfTy TInt        = ([], [], [])
-varsOfTy TStr        = ([], [], [])
-varsOfTy TSym        = ([], [], [])
+varsOfTy (TVarTy v)  = ([v], [], [], [])
+varsOfTy TInt        = noVars
+varsOfTy TStr        = noVars
+varsOfTy TSym        = noVars
 varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TSum row)  = varsOfRow row
-varsOfTy (TData _ as) = foldr (catVars . varsOfStack) ([], [], []) as
+varsOfTy (TData _ as) = foldr (catVars . varsOfStack) noVars as
 
 varsOfStack :: SType -> Vars
-varsOfStack SEnd             = ([], [], [])
-varsOfStack (STail v)        = ([], [v], [])
+varsOfStack SEnd             = noVars
+varsOfStack (STail v)        = ([], [v], [], [])
 varsOfStack (SCons t rest)   = varsOfTy t `catVars` varsOfStack rest
-varsOfStack (SSplice v rest) = ([], [v], []) `catVars` varsOfStack rest
+varsOfStack (SSplice v rest) = ([], [v], [], []) `catVars` varsOfStack rest
+varsOfStack (SExp b e rest)  =
+  varsOfStack b `catVars` varsOfExp e `catVars` varsOfStack rest
+
+varsOfExp :: Exp -> Vars
+varsOfExp (Exp _ (Just n)) = ([], [], [], [n])
+varsOfExp _                = noVars
 
 varsOfRow :: SumRow -> Vars
-varsOfRow RNil            = ([], [], [])
-varsOfRow (RTail v)       = ([], [], [v])
+varsOfRow RNil            = noVars
+varsOfRow (RTail v)       = ([], [], [v], [])
 varsOfRow (RCons st rest) = varsOfStack st `catVars` varsOfRow rest
 
 catVars :: Vars -> Vars -> Vars
-catVars (t1, s1, r1) (t2, s2, r2) = (t1 ++ t2, s1 ++ s2, r1 ++ r2)
+catVars (t1, s1, r1, n1) (t2, s2, r2, n2) =
+  (t1 ++ t2, s1 ++ s2, r1 ++ r2, n1 ++ n2)
 
 varsOfArrow :: Arrow -> Vars
 varsOfArrow (Arrow i o) =
-  let (ts, ss, rs) = varsOfStack i `catVars` varsOfStack o
-  in (nub ts, nub ss, nub rs)
+  let (ts, ss, rs, ns) = varsOfStack i `catVars` varsOfStack o
+  in (nub ts, nub ss, nub rs, nub ns)
 
 -- Occurs checks.  Callers (bind*Var) only ever check against
 -- fully-applied targets, so a pure structural traversal is sufficient.
 occursTy :: TVar -> Ty -> Bool
-occursTy a t = let (ts, _, _) = varsOfTy t in a `elem` ts
+occursTy a t = let (ts, _, _, _) = varsOfTy t in a `elem` ts
 
 occursStack :: SVar -> SType -> Bool
-occursStack v st = let (_, ss, _) = varsOfStack st in v `elem` ss
+occursStack v st = let (_, ss, _, _) = varsOfStack st in v `elem` ss
 
 occursRow :: RVar -> SumRow -> Bool
-occursRow v row = let (_, _, rs) = varsOfRow row in v `elem` rs
+occursRow v row = let (_, _, rs, _) = varsOfRow row in v `elem` rs
 
 -- Unify simple element types
 unifyTy :: Subst -> Ty -> Ty -> Either String Subst
@@ -288,6 +367,34 @@ bindTyVar s a t
   | occursTy a t = Left $ "Occurs check failed: " ++ show a ++ " in " ++ show t
   | otherwise     = Right s { tySub = M.insert a t (tySub s) }
 
+-- Unify exponents (unary naturals in canonical form k + var?)
+unifyExp :: Subst -> Exp -> Exp -> Either String Subst
+unifyExp s e1 e2 =
+  let e1' = apply s e1
+      e2' = apply s e2
+  in case (e1', e2') of
+    (Exp k1 Nothing, Exp k2 Nothing)
+      | k1 == k2  -> Right s
+      | otherwise -> Left $ "Cannot unify exponents: "
+                          ++ show e1' ++ " vs " ++ show e2'
+    (Exp k1 (Just n), Exp k2 mv) -> bindNVar s n k1 (Exp k2 mv)
+    (Exp k1 mv, Exp k2 (Just n)) -> bindNVar s n k2 (Exp k1 mv)
+
+-- solve k + n = e for n
+bindNVar :: Subst -> NVar -> Int -> Exp -> Either String Subst
+bindNVar s n k (Exp k' mv')
+  | mv' == Just n =
+      if k == k' then Right s
+      else Left $ "Occurs check failed on exponent: " ++ show n
+  | k' < k =
+      case mv' of
+        Just m ->  -- k + n = k' + m, k' < k: bind m := n + (k - k')
+          Right s { expSub = M.insert m (Exp (k - k') (Just n)) (expSub s) }
+        Nothing -> Left $ "Cannot unify exponents: "
+                        ++ show (Exp k (Just n)) ++ " vs " ++ show (Exp k' mv')
+  | otherwise =
+      Right s { expSub = M.insert n (Exp (k' - k) mv') (expSub s) }
+
 -- Unify stack types (plain list unification with an optional tail variable)
 unifyStack :: Subst -> SType -> SType -> Either String Subst
 unifyStack s st1 st2 =
@@ -297,6 +404,14 @@ unifyStack s st1 st2 =
     (SEnd, SEnd) -> Right s
     (STail v, st) -> bindStackVar s v st
     (st, STail v) -> bindStackVar s v st
+    -- exponents: same-shape bases unify pointwise (widths correlate)
+    (SExp b1 e1 r1, SExp b2 e2 r2)
+      | segArity b1 == segArity b2 -> do
+          s1 <- unifyStack s b1 b2
+          s2 <- unifyExp s1 e1 e2
+          unifyStack s2 r1 r2
+    (SExp b e r, st) -> expSplit s b e r st
+    (st, SExp b e r) -> expSplit s b e r st
     (SSplice v1 r1, SSplice v2 r2) ->
       let m1 = closedArity r1
           m2 = closedArity r2
@@ -313,6 +428,59 @@ unifyStack s st1 st2 =
       unifyStack s' r1 r2
     _ -> Left $ "Cannot unify stacks: " ++ show st1' ++ " vs " ++ show st2'
   where
+    -- base^e ⧺ rest ~ other.  Copies are peeled off the FRONT of other
+    -- one segment-width at a time (each peel refines e by one
+    -- successor); the copies share the base's element vars, so all
+    -- chunks are forced equal.  rest must be closed (right-anchoring —
+    -- "one open exponent per segment region", design-exponents.md).
+    expSplit s0 base e rest other
+      | bw == 0 || openTailedS base =
+          Left $ "Cannot unify stacks (exponent base): "
+               ++ show (SExp base e rest) ++ " vs " ++ show other
+      | openTailedS rest =
+          Left $ "Cannot unify stacks (open tail after exponent): "
+               ++ show (SExp base e rest) ++ " vs " ++ show other
+      | otherwise = go s0 e other
+      where
+        bw = segArity base
+        rw = closedArity rest
+        err oth = Left $ "Cannot unify stacks (exponent split): "
+                       ++ show (SExp base e rest) ++ " vs " ++ show oth
+        go s1 e1 oth
+          | not (openTailedS oth) =
+              let w = closedArity oth - rw
+              in if w < 0 || w `mod` bw /= 0
+                   then err oth
+                   else if w == 0
+                     then do s2 <- unifyExp s1 e1 (Exp 0 Nothing)
+                             unifyStack s2 rest oth
+                     else peel s1 e1 oth
+          | closedArity oth >= bw = peel s1 e1 oth
+          | otherwise =
+              case oth of
+                STail u -> bindStackVar s1 u (sexp base e1 rest)
+                SSplice u suffix
+                  | closedArity oth == 0 && not (openTailedS suffix)
+                  , rw >= closedArity suffix ->
+                      let (rf, rb) = splitStackAt (rw - closedArity suffix) rest
+                      in do s2 <- unifyStack s1 rb suffix
+                            bindStackVar s2 u (sexp base e1 rf)
+                _ -> err oth
+        peel s1 e1 oth = do
+          (e2, s2) <- peelExp s1 e1
+          let (chunk, oth') = splitStackAt bw oth
+          s3 <- unifyStack s2 base chunk
+          go s3 (apply s3 e2) oth'
+        -- e ≥ 1: strip one successor, refining an open exponent if needed
+        peelExp s1 (Exp k mv) | k > 0 = Right (Exp (k - 1) mv, s1)
+        peelExp s1 (Exp 0 (Just n)) =
+          let m = NV (show n ++ "'")
+          in Right ( Exp 0 (Just m)
+                   , s1 { expSub = M.insert n (Exp 1 (Just m)) (expSub s1) } )
+        peelExp _ (Exp 0 Nothing) =
+          Left $ "Cannot unify stacks (exponent split): "
+               ++ show (SExp base e rest) ++ " vs " ++ show other
+
     -- (v ⧺ suffix) ~ other: right-anchored split.  Closed other: the
     -- last |suffix| positions unify with suffix, the prefix binds v.
     -- Open-tailed other (P ⧺ t): bind v := P ⧺ b and t := b ⧺ suffix
@@ -417,6 +585,12 @@ freshRVarName = Infer $ do
   put (n + 1)
   pure (RV ("σ" ++ show n))
 
+freshNVarName :: Infer NVar
+freshNVarName = Infer $ do
+  n <- get
+  put (n + 1)
+  pure (NV ("n" ++ show n))
+
 -- One-shot simultaneous substitution, NO chasing.  Instantiation is a
 -- rename: a scheme generalized in one inference run may bind names (a0,
 -- ρ1, …) that textually coincide with this run's fresh names, so using
@@ -430,6 +604,11 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goS (SCons t rest) = SCons (goT t) (goS rest)
     goS (SSplice v rest) =
       appendS (fromMaybe (STail v) (M.lookup v (stSub s))) (goS rest)
+    goS (SExp b e rest) = SExp (goS b) (goE e) (goS rest)
+
+    goE e@(Exp k mv) = case mv of
+      Just n | Just (Exp k' mv') <- M.lookup n (expSub s) -> Exp (k + k') mv'
+      _ -> e
 
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
     goT (TFn arr)  = TFn (substOnce s arr)
@@ -445,14 +624,16 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
 -- variables (used for the final atom of a tensor chain, which may stay
 -- open).
 instantiate :: Scheme -> Infer Arrow
-instantiate (Forall tvars svars rvars arr) = do
+instantiate (Forall tvars svars rvars nvars arr) = do
   newTVs <- mapM (const freshTyVarName) tvars
   newSVs <- mapM (const freshSVarName) svars
   newRVs <- mapM (const freshRVarName) rvars
+  newNVs <- mapM (const freshNVarName) nvars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
       sSub = M.fromList (zip svars (map STail newSVs))
       rSub = M.fromList (zip rvars (map RTail newRVs))
-  pure (substOnce (Subst tSub sSub rSub) arr)
+      nSub = M.fromList (zip nvars (map (Exp 0 . Just) newNVs))
+  pure (substOnce (Subst tSub sSub rSub nSub) arr)
 
 -- Instantiate a scheme *closed* for a non-final tensor atom: only the
 -- OUTER TAILS of the arrow are closed (ρ := •) — that is all appendStack
@@ -461,18 +642,20 @@ instantiate (Forall tvars svars rvars arr) = do
 -- polymorphism, not a remainder.  (Matches the grouped-compound closing
 -- policy.)
 instantiateClosed :: Scheme -> Infer Arrow
-instantiateClosed (Forall tvars svars rvars arr@(Arrow i o)) = do
+instantiateClosed (Forall tvars svars rvars nvars arr@(Arrow i o)) = do
   newTVs <- mapM (const freshTyVarName) tvars
   let tailVs = openVarsS i ++ openVarsS o
   newSVs <- mapM (\v -> if v `elem` tailVs
                           then pure Nothing
                           else Just <$> freshSVarName) svars
   newRVs <- mapM (const freshRVarName) rvars
+  newNVs <- mapM (const freshNVarName) nvars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
       sSub = M.fromList [ (v, maybe SEnd STail mn)
                         | (v, mn) <- zip svars newSVs ]
       rSub = M.fromList (zip rvars (map RTail newRVs))
-  pure (substOnce (Subst tSub sSub rSub) arr)
+      nSub = M.fromList (zip nvars (map (Exp 0 . Just) newNVs))
+  pure (substOnce (Subst tSub sSub rSub nSub) arr)
 
 --------------------------------------------------------------------------------
 -- 6. Terms
@@ -937,8 +1120,8 @@ dataSig d = (dName d, length (dParams d))
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall [] ps [] (Arrow bodyStack namedStack))
-    , ("un" ++ dName d,  Forall [] ps [] (Arrow namedStack bodyStack)) ]
+  ( [ (dName d,          Forall [] ps [] [] (Arrow bodyStack namedStack))
+    , ("un" ++ dName d,  Forall [] ps [] [] (Arrow namedStack bodyStack)) ]
       ++ mergeSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
@@ -954,7 +1137,7 @@ dataDeclArtifacts d =
       case dBody d of
         TSum row | k >= 2 ->
           ( [ ("merge" ++ dName d
-            , Forall [] [SV "ρ"] []
+            , Forall [] [SV "ρ"] [] []
                 (Arrow (SCons (TSum uniformRow) SEnd) (STail (SV "ρ")))) ]
           , [ ("merge" ++ dName d, (1, False, Prim "merge")) ] )
           where
@@ -1119,7 +1302,7 @@ parseTypeLine aliases dataSigs line =
     paramList [TokIdent p, TokRParen]        = Right [SV p]
     paramList _ = Left "Malformed type parameter list"
     validName n = n `notElem` ["Int", "Str", "Sym", "type", "data", "•"]
-    tyParams t = let (_, ss, _) = varsOfTy t in ss
+    tyParams t = let (_, ss, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
     stacksOf (TSum r)     = rowStacks r
@@ -1326,13 +1509,15 @@ showStackA as st          = unwords (go st)
     go (STail v)        = [show v]
     go (SCons t rest)   = showTyA as t : go rest
     go (SSplice v rest) = show v : go rest
+    go (SExp b e rest)  = showExpAt b e : go rest
 
 showArrowA :: [Alias] -> Arrow -> String
 showArrowA as (Arrow s1 s2) = showStackA as s1 ++ " ⇒ " ++ showStackA as s2
 
 showSchemeA :: [Alias] -> Scheme -> String
-showSchemeA as (Forall tvars svars rvars arr) =
-  "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars)
+showSchemeA as (Forall tvars svars rvars nvars arr) =
+  "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
+                     ++ map show nvars)
        ++ ". " ++ showArrowA as arr
 
 --------------------------------------------------------------------------------
@@ -1377,6 +1562,7 @@ desugarStmt (Stmt firstStage rest) =
 appendStack :: SType -> SType -> SType
 appendStack SEnd s2           = s2
 appendStack (SCons t rest) s2 = SCons t (appendStack rest s2)
+appendStack (SExp b e r) s2   = SExp b e (appendStack r s2)
 appendStack (STail v) _ =
   error $ "appendStack: open stack " ++ show v
        ++ " in non-final tensor position (remainder discipline violation)"
@@ -1426,9 +1612,9 @@ inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
   | isStrLiteral name =
-      pick (Forall [] [] [] (Arrow SEnd (SCons TStr SEnd)))
+      pick (Forall [] [] [] [] (Arrow SEnd (SCons TStr SEnd)))
   | isSymLiteral name =
-      pick (Forall [] [] [] (Arrow SEnd (SCons TSym SEnd)))
+      pick (Forall [] [] [] [] (Arrow SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
 
   | otherwise =
@@ -1469,7 +1655,7 @@ inferOperand env _ (OpenAbs ps body) = do
   -- be input-closed: all input arrives through the parameters.  The
   -- abstraction is exact in every position: A₁ … Aₙ ⇒ Δ.
   ptys <- mapM (const freshTyVarName) ps
-  let paramScheme av = Forall [] [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
+  let paramScheme av = Forall [] [] [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
       env' = foldr (\(p, av) -> M.insert p (paramScheme av))
                    env (zip ps ptys)
   (Arrow bi bo, cs) <- infer env' body
@@ -1497,13 +1683,14 @@ inferOperand env final t
               tails = nub ([ v | Just v <- [tailVar i] ]
                         ++ [ v | Just v <- [tailVar o] ])
               sm = M.fromList [ (v, SEnd) | v <- tails ]
-          in pure (substOnce (Subst M.empty sm M.empty) arr', [])
+          in pure (substOnce (Subst M.empty sm M.empty M.empty) arr', [])
 
 -- The open stack variables of a stack: the tail, plus any splices.
 openVarsS :: SType -> [SVar]
 openVarsS (STail v)      = [v]
 openVarsS (SCons _ r)    = openVarsS r
 openVarsS (SSplice v r)  = v : openVarsS r
+openVarsS (SExp _ _ r)   = openVarsS r
 openVarsS SEnd           = []
 
 tailVar :: SType -> Maybe SVar
@@ -1544,14 +1731,14 @@ injScheme n =
       ps  = [ SV ("Δ" ++ show i) | i <- [1 .. n - 1] ]
       rv  = RV "σ"
       row = foldr (RCons . STail) (RCons (STail d) (RTail rv)) ps
-  in Forall [] (ps ++ [d]) [rv]
+  in Forall [] (ps ++ [d]) [rv] []
        (Arrow (STail d) (SCons (TSum row) SEnd))
 
 -- Integer literals are terminal-source: • ⇒ Int.  Constants have NO
 -- implicit remainder — pushing onto a nonempty stack requires explicit
 -- `...` (e.g. `1 ...` : ρ ⇒ Int ρ).  See spec-update-exponentials.md.
 intLitScheme :: Scheme
-intLitScheme = Forall [] [] [] (Arrow SEnd (SCons TInt SEnd))
+intLitScheme = Forall [] [] [] [] (Arrow SEnd (SCons TInt SEnd))
 
 --------------------------------------------------------------------------------
 -- 7. The primitive environment
@@ -1591,16 +1778,16 @@ primEnv =
       del = SV "Δ"
       one t = SCons t SEnd
       fnGD = TFn (Arrow (STail gam) (STail del))
-      applyTy = Forall [] [gam, del] []
+      applyTy = Forall [] [gam, del] [] []
         (Arrow (SCons fnGD (STail gam)) (STail del))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
-      mergeTy = Forall [] [SV "Θ"] []
+      mergeTy = Forall [] [SV "Θ"] [] []
         (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
       -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
-      thereTy = Forall [] [SV "Δ"] [RV "σ"]
+      thereTy = Forall [] [SV "Δ"] [RV "σ"] []
         (Arrow (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
       -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ ⇒ Θ — Elgot iteration: the body routes
@@ -1610,48 +1797,48 @@ primEnv =
             body = TFn (Arrow (STail sg)
                      (one (TSum (RCons (STail sg)
                            (RCons (STail th) RNil)))))
-        in Forall [] [sg, th] []
+        in Forall [] [sg, th] [] []
              (Arrow (SCons body (STail sg)) (STail th))
       -- routers: predicates keep and route their input (hit = track 1)
-      intRouter = Forall [] [] []
+      intRouter = Forall [] [] [] []
         (Arrow (one TInt)
                (one (TSum (RCons (one TInt) (RCons (one TInt) RNil)))))
       int2 = SCons TInt (one TInt)
       codeStructTy =
         TData "List"
           [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
-      int2Router = Forall [] [] []
+      int2Router = Forall [] [] [] []
         (Arrow int2
                (one (TSum (RCons int2 (RCons int2 RNil)))))
-      eqTy = Forall [a] [] []
+      eqTy = Forall [a] [] [] []
         (let aa = SCons ta (one ta)
          in Arrow aa (one (TSum (RCons aa (RCons aa RNil)))))
-      unaryTy  = Forall [] [] [] (Arrow (one TInt) (one TInt))
-      binIntTy = Forall [] [] []
+      unaryTy  = Forall [] [] [] [] (Arrow (one TInt) (one TInt))
+      binIntTy = Forall [] [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
       -- Bool ≡ (• | •): two payload-free tracks; true = in1, false = in2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
-      boolLit  = Forall [] [] [] (Arrow SEnd (one tBool))
+      boolLit  = Forall [] [] [] [] (Arrow SEnd (one tBool))
   in M.fromList
-       [ ("id",    Forall [a]    [] [] (Arrow (one ta) (one ta)))
-       , ("_",     Forall [a]    [] [] (Arrow (one ta) (one ta)))  -- hole: id
-       , ("swap",  Forall [a, b] [] []
+       [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
+       , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
+       , ("swap",  Forall [a, b] [] [] []
            (Arrow (SCons ta (one tb)) (SCons tb (one ta))))
-       , ("dup",   Forall [a]    [] [] (Arrow (one ta) (SCons ta (one ta))))
-       , ("drop",  Forall [a]    [] [] (Arrow (one ta) SEnd))
-       , ("pass",  Forall []     [rho] [] (Arrow (STail rho) (STail rho)))
+       , ("dup",   Forall [a]    [] [] [] (Arrow (one ta) (SCons ta (one ta))))
+       , ("drop",  Forall [a]    [] [] [] (Arrow (one ta) SEnd))
+       , ("pass",  Forall []     [rho] [] [] (Arrow (STail rho) (STail rho)))
          -- the terminal morphism: forget the whole segment
-       , ("forget", Forall []    [rho] [] (Arrow (STail rho) SEnd))
+       , ("forget", Forall []    [rho] [] [] (Arrow (STail rho) SEnd))
          -- rotate the LAST wire of the segment to the front: the
          -- reach-the-end primitive, typed via a splice
-       , ("rotLast", Forall [a]  [rho] []
+       , ("rotLast", Forall [a]  [rho] [] []
            (Arrow (SSplice rho (SCons ta SEnd))
                   (SCons ta (STail rho))))
        , ("f",     unaryTy)
        , ("g",     unaryTy)
        , ("+",     binIntTy)
        , ("*",     binIntTy)
-       , ("print", Forall [a]    [] [] (Arrow (one ta) SEnd))
+       , ("print", Forall [a]    [] [] [] (Arrow (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
        , ("negative?", intRouter)
@@ -1666,31 +1853,31 @@ primEnv =
        , ("gt?",       int2Router)
        , ("gte?",      int2Router)
        , ("lte?",      int2Router)
-       , ("cat",       Forall [] [] []
+       , ("cat",       Forall [] [] [] []
            (Arrow (SCons TStr (one TStr)) (one TStr)))
-       , ("toStr",     Forall [a] [] [] (Arrow (one ta) (one TStr)))
-       , ("asInt?",    Forall [] [] []
+       , ("toStr",     Forall [a] [] [] [] (Arrow (one ta) (one TStr)))
+       , ("asInt?",    Forall [] [] [] []
            (Arrow (one TStr)
                   (one (TSum (RCons (one TInt)
                         (RCons (one TStr) RNil))))))
-       , ("symStr",    Forall [] [] [] (Arrow (one TSym) (one TStr)))
-       , ("unparse",   Forall [] [] []
+       , ("symStr",    Forall [] [] [] [] (Arrow (one TSym) (one TStr)))
+       , ("unparse",   Forall [] [] [] []
            (Arrow (SCons codeStructTy SEnd) (one TStr)))
-       , ("parse",     Forall [] [] []
+       , ("parse",     Forall [] [] [] []
            (Arrow (one TStr)
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
-       , ("readFile",  Forall [] [] []
+       , ("readFile",  Forall [] [] [] []
            (Arrow (one TStr)
                   (one (TSum (RCons (one TStr) (RCons (one TStr) RNil))))))
-       , ("writeFile", Forall [] [] []
+       , ("writeFile", Forall [] [] [] []
            (Arrow (SCons TStr (one TStr))
                   (one (TSum (RCons SEnd (RCons (one TStr) RNil))))))
-       , ("evalCode",  Forall [] [gam, del] []
+       , ("evalCode",  Forall [] [gam, del] [] []
            (Arrow (SCons codeStructTy (STail gam))
                   (one (TSum (RCons (STail del)
                         (RCons (SCons TStr (STail gam)) RNil))))))
-       , ("reflect",   Forall [] [gam, del] []
+       , ("reflect",   Forall [] [gam, del] [] []
            (Arrow (one (TFn (Arrow (STail gam) (STail del))))
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
@@ -1763,7 +1950,7 @@ inferDefTermIn name env term
           let (arr, cs) = runInfer0 $ do
                 fi <- freshSVarName
                 fo <- freshSVarName
-                let mono = Forall [] [] []
+                let mono = Forall [] [] [] []
                              (Arrow (STail fi) (STail fo))
                 (a@(Arrow bi bo), cs') <-
                   infer (M.insert name mono env) term
@@ -1799,14 +1986,16 @@ prettyInferExample =
 -- (a simultaneous rename, so substOnce is exactly the right applicator).
 normalizeArrow :: Arrow -> Arrow
 normalizeArrow arr =
-  let (tvs, svs, rvs) = varsOfArrow arr
+  let (tvs, svs, rvs, nvs) = varsOfArrow arr
       tm = M.fromList
              (zip tvs [ TVarTy (TV ("a" ++ show n)) | n <- [0 :: Int ..] ])
       sm = M.fromList
              (zip svs [ STail (SV ("ρ" ++ show n)) | n <- [0 :: Int ..] ])
       rm = M.fromList
              (zip rvs [ RTail (RV ("σ" ++ show n)) | n <- [0 :: Int ..] ])
-  in substOnce (Subst tm sm rm) arr
+      nm = M.fromList
+             (zip nvs [ Exp 0 (Just (NV ("n" ++ show n))) | n <- [0 :: Int ..] ])
+  in substOnce (Subst tm sm rm nm) arr
 
 -- Infer and alpha-normalize; the workhorse for tests.
 inferNormalized :: String -> Either String Arrow
@@ -1821,21 +2010,21 @@ freeVarsArrow :: Arrow -> Vars
 freeVarsArrow = varsOfArrow
 
 freeVarsScheme :: Scheme -> Vars
-freeVarsScheme (Forall tv sv rv arr) =
-  let (ft, fs, fr) = freeVarsArrow arr
-  in (ft \\ tv, fs \\ sv, fr \\ rv)
+freeVarsScheme (Forall tv sv rv nv arr) =
+  let (ft, fs, fr, fn) = freeVarsArrow arr
+  in (ft \\ tv, fs \\ sv, fr \\ rv, fn \\ nv)
 
 freeVarsEnv :: Env -> Vars
 freeVarsEnv env =
-  foldr (catVars . freeVarsScheme) ([], [], []) (M.elems env)
+  foldr (catVars . freeVarsScheme) noVars (M.elems env)
 
--- Generalize all free type, stack, and row variables not fixed by the
--- environment.
+-- Generalize all free type, stack, row, and exponent variables not
+-- fixed by the environment.
 generalize :: Env -> Arrow -> Scheme
 generalize env arr =
-  let (ftv, fsv, frv) = freeVarsArrow arr
-      (etv, esv, erv) = freeVarsEnv env
-  in Forall (ftv \\ etv) (fsv \\ esv) (frv \\ erv) arr
+  let (ftv, fsv, frv, fnv) = freeVarsArrow arr
+      (etv, esv, erv, env') = freeVarsEnv env
+  in Forall (ftv \\ etv) (fsv \\ esv) (frv \\ erv) (fnv \\ env') arr
 
 -- A checked module: definitions in order, plus an optional main program.
 data Module = Module
@@ -2217,8 +2406,8 @@ moduleRunDefs m =
     ++ [ (name, (arityOf sc, openOf sc, term))
        | (name, sc, term) <- modDefs m ] )
   where
-    arityOf (Forall _ _ _ (Arrow i _)) = closedArity i
-    openOf  (Forall _ _ _ (Arrow i _)) = openTailed i
+    arityOf (Forall _ _ _ _ (Arrow i _)) = closedArity i
+    openOf  (Forall _ _ _ _ (Arrow i _)) = openTailed i
     openTailed (SCons _ rest) = openTailed rest
     openTailed (STail _)      = True
     openTailed (SSplice _ _)  = True
@@ -2407,7 +2596,7 @@ evalTerm env defs vars term st =
           -- dummies suffice.
           let dummy = TV "_param"
               dummyScheme =
-                Forall [dummy] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+                Forall [dummy] [] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
               arityEnv = foldr (\n -> M.insert n dummyScheme)
                                env (M.keys vars)
           Arrow i _ <- liftEither (inferTermIn arityEnv t')
@@ -2425,7 +2614,7 @@ evalTerm env defs vars term st =
 builtinArity :: String -> Either String Int
 builtinArity name =
   case M.lookup name primEnv of
-    Just (Forall _ _ _ (Arrow i _)) -> Right (closedArity i)
+    Just (Forall _ _ _ _ (Arrow i _)) -> Right (closedArity i)
     Nothing -> Left $ "Unknown primitive at runtime: " ++ name
 
 runBuiltin :: Env -> RunDefs -> String -> [Value]
@@ -2719,7 +2908,7 @@ compileAbsOpen env ps k0 body = do
       | otherwise =
           case M.lookup nm env of
             Nothing -> Left $ "reflect: unknown name in abstraction body: " ++ nm
-            Just (Forall _ _ _ (Arrow i o))
+            Just (Forall _ _ _ _ (Arrow i o))
               | openTailedS i || openTailedS o -> segErr nm
               | otherwise ->
                   Right (AtomInfo (closedArity i) (closedArity o) [] t)
@@ -2757,7 +2946,7 @@ compileAbsOpen env ps k0 body = do
     inferGroupArrow g = do
       let dummy = TV "_p"
           dummyScheme =
-            Forall [dummy] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+            Forall [dummy] [] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
           arityEnv = foldr (\nm -> M.insert nm dummyScheme) env ps
       inferTermIn arityEnv g
 
@@ -2769,6 +2958,7 @@ openTailedS :: SType -> Bool
 openTailedS (SCons _ r)   = openTailedS r
 openTailedS (STail _)     = True
 openTailedS (SSplice _ _) = True
+openTailedS (SExp _ _ _)  = True   -- unknown width: not a closed stack
 openTailedS SEnd          = False
 
 -- Typecheck and run a whole module; main runs on the empty stack.

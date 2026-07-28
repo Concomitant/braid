@@ -643,6 +643,49 @@ runModuleFail (src, fragment) = do
           Just $ show src ++ ": expected error containing " ++ show fragment
                ++ ", got: " ++ err
 
+--------------------------------------------------------------------------------
+-- Exponent unification (stage 1–2 of design-exponents.md): no surface
+-- syntax yet, so these drive unifyStack/unifyExp directly.  On success
+-- the invariant is apply s a == apply s b (the unifier really unified).
+--------------------------------------------------------------------------------
+
+unifTests :: [(String, SType, SType, Bool)]
+unifTests =
+  [ ("Int^n ~ Int Int Int (n:=3)",     expN "n" intS,  ints 3,          True)
+  , ("Int^n ~ • (n:=0)",               expN "n" intS,  SEnd,            True)
+  , ("Int^n ~ Int Str Int",            expN "n" intS,  SCons TInt (SCons TStr (SCons TInt SEnd)), False)
+  , ("Int^n ~ Int Int rho (bridge)",   expN "n" intS,  SCons TInt (SCons TInt (STail (SV "rho"))), True)
+  , ("Int^n ~ rho (tail binds whole)", expN "n" intS,  STail (SV "rho"), True)
+  , ("Int^n ~ Int^m (n~m)",            expN "n" intS,  expN "m" intS,   True)
+  , ("Int^(n+1) ~ Int Int Int (n:=2)", SExp intS (Exp 1 (Just (NV "n"))) SEnd, ints 3, True)
+  , ("Int^(n+1) ~ • (impossible)",     SExp intS (Exp 1 (Just (NV "n"))) SEnd, SEnd, False)
+  , ("(Int Str)^n ~ Int Str Int Str",  expN "n" istS,  SCons TInt (SCons TStr (SCons TInt (SCons TStr SEnd))), True)
+  , ("(Int Str)^n ~ Int Str Int (odd width)", expN "n" istS, SCons TInt (SCons TStr (SCons TInt SEnd)), False)
+  , ("a^n ~ Int Int (copies share a)", expN "n" (SCons (TVarTy (TV "a")) SEnd), ints 2, True)
+  , ("a^n ~ Int Str (copies clash)",   expN "n" (SCons (TVarTy (TV "a")) SEnd), SCons TInt (SCons TStr SEnd), False)
+  , ("Int^n Str ~ Int Int Str (rest anchored)", expNr "n" intS (SCons TStr SEnd), SCons TInt (SCons TInt (SCons TStr SEnd)), True)
+  , ("Int^n Str ~ Int Int (no anchor)", expNr "n" intS (SCons TStr SEnd), ints 2, False)
+  ]
+  where
+    intS = SCons TInt SEnd
+    istS = SCons TInt (SCons TStr SEnd)
+    ints k = foldr SCons SEnd (replicate k TInt)
+    expN nm b = SExp b (Exp 0 (Just (NV nm))) SEnd
+    expNr nm b r = SExp b (Exp 0 (Just (NV nm))) r
+
+runUnif :: (String, SType, SType, Bool) -> Maybe String
+runUnif (name, a, b, wantOk) =
+  case unifyStack emptySubst a b of
+    Left err
+      | wantOk    -> Just $ name ++ ": expected success, got: " ++ err
+      | otherwise -> Nothing
+    Right s
+      | not wantOk -> Just $ name ++ ": expected failure, but unified to "
+                           ++ show (apply s a)
+      | apply s a == apply s b -> Nothing
+      | otherwise -> Just $ name ++ ": unified but applied sides differ: "
+                          ++ show (apply s a) ++ " vs " ++ show (apply s b)
+
 main :: IO ()
 main = do
   evalFs <- mapM runEval evalTests
@@ -653,9 +696,11 @@ main = do
         ++ map runModuleType moduleTypeTests
         ++ evalFs
         ++ mfailFs
+        ++ map runUnif unifTests
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
+            + length unifTests
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

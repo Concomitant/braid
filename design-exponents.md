@@ -173,6 +173,27 @@ Generators, all width-polymorphic in `n`:
 - **Constraint kinds beyond element type** (e.g. "sorted", bounds):
   out of scope.
 
+## Stage 1–2 implementation notes (2026-07-28)
+
+Implemented: NVar sort (`Exp Int (Maybe NVar)` canonical form — k
+successors over a variable or zero), `SExp base exp rest` stack node,
+full Subst/Vars/Scheme plumbing, and unification: pointwise for
+same-width bases, front-peeling `expSplit` against concrete stacks
+(each peel refines the exponent by one successor; copies share the
+base's element vars, so all chunks are forced equal), tail-binding and
+splice-bridging for open stacks. Canonical form: concrete exponents
+and concrete offsets expand into real copies (`base^(n+2)` ≡ two
+copies then `baseⁿ`), so equal stacks are structurally equal. 14
+unification tests; the pre-existing 380 unaffected.
+
+**Known limitation**: a region with TWO exponents over the same
+variable — `ℝⁿ ℝⁿ`, the `addN` input — unifies against symbolic
+stacks (`ℝᵐ ℝᵐ`, pointwise) but not yet against concrete ones: that
+needs the linear special case `2n = w` (all exponents in the region
+sharing one variable and one base width ⇒ divide). Deliberately
+deferred to the stage where a prelude def actually demands it; the
+general multi-variable case stays rejected (ambiguous, non-principal).
+
 ## Open questions
 
 1. Does `unExp`'s nil/cons refinement interact with the persistent
