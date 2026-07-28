@@ -1,0 +1,50 @@
+# The registrar's office, wired.
+#
+# A student's scores travel as a bare bundle — three wires, no box.
+# Weighting is a dot product against the syllabus; the letter is a
+# decision ladder; fairness is a law you can run. Everything is exact:
+# every wire is visible, every join is chosen.
+
+# ---- the workhorse -----------------------------------------------------
+# dot : Intⁿ Intⁿ ⇒ Int — dimension-checked: a 3-weight syllabus
+# cannot meet a 4-score transcript.
+def dot = zipN ; [(acc a b -> (a b ; *) acc ; +)] 0 ... ; foldExp2
+
+# ---- the syllabus ------------------------------------------------------
+# homework 20%, midterm 30%, final 50% — weights are just wires
+def weighted =
+    h m f ->
+    2 3 5 h m f ; dot ; _ 10 ; div
+
+# ---- the verdict -------------------------------------------------------
+# one lane per line: condition, answer, "and so on…"; the last lane is
+# the default; decide folds the product — first true lane wins.
+def letter =
+    p ->
+    (89 p ; less) "A" ...
+    (79 p ; less) "B" ...
+    (69 p ; less) "C" ...
+    (59 p ; less) "D" ...
+    "F"               ...
+    decide
+
+def grade = weighted ; letter
+
+# ---- the class ---------------------------------------------------------
+95 90 95   ; grade ; print     # A   (93%)
+60 70 55   ; grade ; print     # D   (60%)
+100 100 40 ; grade ; print     # C   (aced the term, slept through the final)
+40 50 30   ; grade ; print     # F
+
+# ---- the audit ---------------------------------------------------------
+# Laws are programs. Fairness of the weighting is dot's symmetry —
+# scores against weights, weights against scores, same number. Run it.
+2 3 5 95 90 95 ; dot ; print   # 935
+95 90 95 2 3 5 ; dot ; print   # 935
+
+# And a curve is just linear algebra: doubling extra credit is the
+# bialgebra law — copy-then-add IS scale-by-two, checkably.
+def doubled  = dupN ; addN
+def doubled' = 2 ... ; scaleN
+10 15 5 ; doubled  ; sumN ; print   # 60
+10 15 5 ; doubled' ; sumN ; print   # 60
