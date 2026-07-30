@@ -1,0 +1,33 @@
+# Braid is already an Arrow. Control.Arrow's interface is not a library
+# here — it is the syntax:
+#
+#   arr f      = any pure program        f >>> g   = f ; g
+#   first f    = f _                     second f  = _ f
+#   f *** g    = f g   (one stage!)      f &&& g   = dup ; f g
+#   left f     = (f |)                   right f   = (| f)
+#   f +++ g    = (f | g)                 f ||| g   = (f | g) ; merge
+#   app        = apply
+#
+# The laws run below — with sq = square, db = double, on the pair 3 7.
+
+def sq = dup ; *
+def db = 2 _ ; *
+def pair = (a b -> (a ; toStr) " " (b ; toStr) ; cat ... ; cat ; print)
+
+# interchange: first f ; second g  =  second g ; first f  =  f *** g
+# (the law premonoidal effects would break — pure Braid keeps it)
+3 7 ; (sq _) ; (_ db) ; pair       # 9 14
+3 7 ; (_ db) ; (sq _) ; pair       # 9 14
+3 7 ; sq db   ; pair               # 9 14
+
+# first is functorial: first (sq ; db) = first f ; first g
+3 7 ; (sq ; db) _     ; pair       # 18 7
+3 7 ; (sq _) ; (db _) ; pair       # 18 7
+
+# naturality of fst (fst = id drop): first f ; fst = fst ; f
+3 7 ; (sq _) ; id drop ; print    # 9
+3 7 ; id drop ; sq     ; print    # 9
+
+# ArrowChoice and ArrowApply
+5 ; in1 ; (sq | db) ; merge ; print    # 25 — f ||| g on the left track
+[sq] 6 ; apply ; print                # 36 — app
