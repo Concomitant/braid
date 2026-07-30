@@ -254,3 +254,11 @@ Findings for the record:
 3. Patterned exponents `(A B)^n` in *element* position of `List(…)` —
    compose with SSplice or restrict initially?
 4. Whether `A*` sugar is worth keeping once `^` lands (leaning: no).
+5. (2026-07-30, from the functors discussion) **The exponent functor
+   has no morphism action**: `mapN : Fn⟨a ⇒ b⟩ aⁿ ⇒ bⁿ` is not
+   derivable — `foldExp`'s accumulator is a single wire, so a fold
+   cannot *grow* a bundle. `(-)ⁿ` currently has objects but no fmap.
+   Needs a small prim in the foldExp family; it is the pointwise lift
+   GLA wants (scaleN = mapN of a section, etc.) and would make the
+   bundle tier functorial like List already is (`fmapList`,
+   examples/functors.braid).
