@@ -130,8 +130,10 @@ grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 420+ case test suite, and design
-notes recording each decision and the theorems that forced it —
+(typechecker, interpreter, REPL), a 420+ case test suite, a full
+reference (`MANUAL.md` — every feature, with checker-verified types),
+and design notes recording each decision and the theorems that forced
+it —
 `expanded-spec.md`, `spec-sums.md`, `spec-code.md`,
 `design-control-flow.md` (why guard syntax kept getting built and torn
 out, and what replaced it), `design-exponents.md` (dimension-indexed
