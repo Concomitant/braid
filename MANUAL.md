@@ -265,7 +265,6 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | word | type |
 |---|---|
 | `+` `-` `*` `div` `mod` | `Int Int ⇒ Int` |
-| `f` / `g` | `Int ⇒ Int` — sample successor / double (test words) |
 | `cat` | `Str Str ⇒ Str` |
 | `toStr` | `a0 ⇒ Str` |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
@@ -430,8 +429,8 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - Sums never flatten; use `assocL`/`assocR`/`case(…)` to manage
   nesting, and one `merge` per level to collapse.
 - Recursive calls and open-arity words: final atom of their stage.
-- `f` and `g` are (sample) prims — shadowing them in examples is a
-  classic accidental collision.
+- Short names are yours: `f`, `g`, `x`, `succ`, `double` are all free
+  (there are no placeholder prims — every primitive earns its name).
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
 

@@ -1896,7 +1896,6 @@ primEnv =
       eqTy = Forall [a] [] [] []
         (let aa = SCons ta (one ta)
          in Arrow aa (one (TSum (RCons aa (RCons aa RNil)))))
-      unaryTy  = Forall [] [] [] [] (Arrow (one TInt) (one TInt))
       binIntTy = Forall [] [] [] []
         (Arrow (SCons TInt (one TInt)) (one TInt))
       -- Bool ≡ (• | •): two payload-free tracks; true = in1, false = in2
@@ -1950,8 +1949,6 @@ primEnv =
        , ("rotLast", Forall [a]  [rho] [] []
            (Arrow (SSplice rho (SCons ta SEnd))
                   (SCons ta (STail rho))))
-       , ("f",     unaryTy)
-       , ("g",     unaryTy)
        , ("+",     binIntTy)
        , ("*",     binIntTy)
        , ("print", Forall [a]    [] [] [] (Arrow (one ta) SEnd))
@@ -2841,8 +2838,6 @@ runBuiltin _ _ "swap"  [x, y]           = Right ([y, x], [])
 runBuiltin _ _ "dup"   [v]              = Right ([v, v], [])
 runBuiltin _ _ "drop"  [_]              = Right ([], [])
 runBuiltin _ _ "pass"  []               = Right ([], [])
-runBuiltin _ _ "f"     [VInt n]         = Right ([VInt (n + 1)], [])   -- sample unary: successor
-runBuiltin _ _ "g"     [VInt n]         = Right ([VInt (2 * n)], [])   -- sample unary: double
 runBuiltin _ _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
 runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
 runBuiltin _ _ "print" [v]              = Right ([], [show v])

@@ -37,10 +37,10 @@ passTests =
   , ("1 2 >> +",      "• ⇒ Int")
     -- strict tensor: `1 +` is (• ⇒ Int) ⊗ (Int Int ⇒ Int), NOT increment
   , ("1 +",           "Int Int ⇒ Int Int")
-  , ("1 2 >> f g >> + >> print", "• ⇒ •")
+  , ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", "• ⇒ •")
 
     -- newline is strict >>
-  , ("1 2\nf g\n+\nprint",       "• ⇒ •")
+  , ("1 2\n(1 ... >> +) (2 _ >> *)\n+\nprint", "• ⇒ •")
   , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
     -- ; is a synonym for >>
   , ("1 2 ; +",                  "• ⇒ Int")
@@ -55,9 +55,9 @@ passTests =
   , ("swap >> swap",  "a0 a1 ⇒ a0 a1")       -- involution
 
     -- trailing remainder: ... and >>> (ops are exact, so deep stacks need it too)
-  , ("1 2 3 >> f ... >> + ...",  "• ⇒ Int Int")
-  , ("1 2 3 >> f >>> + ...",     "• ⇒ Int Int")   -- >>> ≡ the ... form
-  , ("1 2 3\nf ...\n+ ...",      "• ⇒ Int Int")   -- same, via newlines
+  , ("1 2 3 >> (1 ... >> +) ... >> + ...",  "• ⇒ Int Int")
+  , ("1 2 3 >> (1 ... >> +) >>> + ...",     "• ⇒ Int Int")   -- >>> ≡ the ... form
+  , ("1 2 3\n(1 ... >> +) ...\n+ ...", "• ⇒ Int Int")   -- same, via newlines
   , ("...",                      "ρ0 ⇒ ρ0")       -- bare remainder stage
 
     -- quotations and apply (quotes are terminal-source constants)
@@ -71,9 +71,9 @@ passTests =
   , ("7 >> (dup >> *)",  "• ⇒ Int")
   , ("(1 4 5)",          "• ⇒ Int Int Int")
   , ("(1 ... >> +)",     "Int ⇒ Int")          -- the increment
-  , ("(1 ... >> +) f",   "Int Int ⇒ Int Int")  -- compound closed non-finally
-  , ("f (1 ... >> +)",   "Int Int ⇒ Int Int")  -- compound open finally
-  , ("(pass >> drop) f", "a0 Int ⇒ Int")       -- linked tails close soundly
+  , ("(1 ... >> +) (2 _ >> *)",   "Int Int ⇒ Int Int")  -- compound closed non-finally
+  , ("(2 _ >> *) (1 ... >> +)",   "Int Int ⇒ Int Int")  -- compound open finally
+  , ("(pass >> drop) (1 ... >> +)", "a0 Int ⇒ Int")       -- linked tails close soundly
 
     -- named open abstractions (spec examples, exact types)
   , ("(x -> x)",              "a0 ⇒ a0")
@@ -83,7 +83,7 @@ passTests =
   , ("(x -> x 1 >> +)",       "Int ⇒ Int")          -- named increment
   , ("(x y -> x y >> +)",     "Int Int ⇒ Int")
   , ("(x y -> x x >> * >> y ... >> +)", "Int Int ⇒ Int")  -- reuse + reorder
-  , ("(f -> f)",              "a0 ⇒ a0")            -- parameters shadow globals
+  , ("(w -> w)",              "a0 ⇒ a0")            -- parameters shadow globals
   , ("[x -> x 1 >> +]",       "• ⇒ Fn⟨Int ⇒ Int⟩")
   , ("[x y -> x]",            "• ⇒ Fn⟨a0 a1 ⇒ a0⟩")
   , ("(x -> [x])",            "a0 ⇒ Fn⟨• ⇒ a0⟩")   -- closure over a parameter
@@ -138,7 +138,7 @@ passTests =
 failTests :: [(String, String)]
 failTests =
   [ ("1 true >> +",   "Cannot unify types")
-  , ("true >> f",     "Cannot unify types")
+  , ("true >> (1 ... >> +)",     "Cannot unify types")
     -- nothing has an implicit remainder: 1 makes exactly one wire,
     -- + consumes exactly two
   , ("1 >> +",        "Cannot unify stacks")
@@ -153,7 +153,7 @@ failTests =
   , ("(1",            "Unclosed group")
     -- list elements must be pure pushes
   , ("list(1 2",      "unexpected end of input")
-  , ("f ... g",       "'...' must be the final atom")
+  , ("dup ... drop",       "'...' must be the final atom")
   , ("1 >",           "Unexpected '>'")
     -- a newline is a strict >>, so a trailing >> before one is >> >>:
     -- the continuation-absorption rule was ditched for >> and | (it
@@ -243,10 +243,10 @@ moduleTypeTests =
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
-  [ ("1 2 >> f g >> + >> print",           ["6"],  "")      -- f=succ, g=double
+  [ ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", ["6"],  "")   -- succ, double
   , ("1 2 >> swap",                        [],     "2 1")
-  , ("1 2 3 >> f ... >> + ...",            [],     "4 3")
-  , ("1 2 3 >> f >>> + ...",               [],     "4 3")
+  , ("1 2 3 >> (1 ... >> +) ... >> + ...",   [],     "4 3")
+  , ("1 2 3 >> (1 ... >> +) >>> + ...",      [],     "4 3")
   , ("def square = dup >> *\n5 >> square >> print", ["25"], "")
   , ("true false",                         [],     "in1() in2()")
   , ("1 2\nswap\nprint ...\nprint",        ["2", "1"], "")
@@ -266,7 +266,7 @@ evalTests =
 
     -- grouping
   , ("7 >> (dup >> *) >> print",           ["49"], "")
-  , ("5 8 >> (1 ... >> +) f >> + >> print", ["15"], "")
+  , ("5 8 >> (1 ... >> +) (1 ... >> +) >> + >> print", ["15"], "")
 
     -- named abstractions
   , ("7 >> (x -> x x >> *) >> print",      ["49"], "")
@@ -508,8 +508,8 @@ evalTests =
     -- parallel reduce)
   , ("def w = list(1, 2, 3, 4, 5, 6) >> [*] 1 ... >> fold\ndef l = list(1, 2, 3) >> [*] 1 ... >> fold\ndef r = list(4, 5, 6) >> [*] 1 ... >> fold\nw >> _ (l >> _ r >> *) >> eq? >> verdict >> print", ["in1()"], "")
     -- laws as programs, presentations as enumerators
-  , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f >> f] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
-  , ("def xs = list(0, 1, 2, 3)\nxs >> [f >> g] ... >> map >> _ (xs >> [g >> f] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
+  , ("def xs = list(0, 1, 2, 3)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def xs = list(0, 1, 2, 3)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
     -- multi-line kleisli: newline absorption around >=> (either side)
   , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less?\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
   , ("0 >> (even? >=>\nzero?) >> print", ["in1(0)"], "")
