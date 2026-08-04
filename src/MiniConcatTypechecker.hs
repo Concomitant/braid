@@ -1834,10 +1834,6 @@ primEnv =
                            (RCons (STail th) RNil)))))
         in Forall [] [sg, th] [] []
              (Arrow (SCons body (STail sg)) (STail th))
-      -- routers: predicates keep and route their input (hit = track 1)
-      intRouter = Forall [] [] [] []
-        (Arrow (one TInt)
-               (one (TSum (RCons (one TInt) (RCons (one TInt) RNil)))))
       int2 = SCons TInt (one TInt)
       codeStructTy =
         TData "List"
@@ -1886,15 +1882,6 @@ primEnv =
       scaleNTy = Forall [] [] [] [NV "n"]
         (Arrow (SCons TInt (SExp (one TInt) nExp SEnd))
                (SExp (one TInt) nExp SEnd))
-      -- pack: list introduction from a bundle — the stack IS the list;
-      -- pack draws the box.  One-way: no unpack (the width of a list is
-      -- runtime data; a List(a) ⇒ aⁿ would let callers assume it).
-      packTy = Forall [a] [] [] [NV "n"]
-        (Arrow (SExp (one ta) nExp SEnd)
-               (one (TData "List" [one ta])))
-      pack2Ty = Forall [a, b] [] [] [NV "n"]
-        (Arrow (SExp (SCons ta (one tb)) nExp SEnd)
-               (one (TData "List" [SCons ta (one tb)])))
   in M.fromList
        [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
        , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
@@ -1915,10 +1902,6 @@ primEnv =
        , ("print", Forall [a]    [] [] [] (Arrow (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
-       , ("negative?", intRouter)
-       , ("even?",     intRouter)
-       , ("odd?",      intRouter)
-       , ("zero?",     intRouter)
        , ("eq?",       eqTy)
        , ("lt?",       int2Router)
        , ("-",         binIntTy)
@@ -1965,8 +1948,6 @@ primEnv =
        , ("addN",      addNTy)
        , ("zipN",      zipNTy)
        , ("scaleN",    scaleNTy)
-       , ("pack",      packTy)
-       , ("pack2",     pack2Ty)
        ]
 
 --------------------------------------------------------------------------------
@@ -2302,6 +2283,22 @@ preludeSrc = unlines
   , "def map = (f l -> l >> [nil] [(r x -> f x >> apply >> _ r >> cons)] ... >> foldList)"
   , "## invert a router: swap the hit and miss tracks"
   , "def not = (miss | ok) >> merge"
+  , "## keep only a router's decision: collapse both payloads to nothing"
+  , "def verdict = (forget | forget)"
+  , "## long-form comparisons forget their input and answer Bool"
+  , "def equals = eq? >> verdict"
+  , "def less = lt? >> verdict"
+  , "## long-form predicates, from arithmetic and the comparators"
+  , "def odd = _ 2 >> mod >> 1 _ >> equals"
+  , "def even = _ 2 >> mod >> 0 _ >> equals"
+  , "def zero = 0 _ >> equals"
+  , "def negative = _ 0 >> less"
+  , "## routers, DERIVED: decide with the Bool, then re-route the kept"
+  , "## value onto the winning track — the (n | n) pattern"
+  , "def odd? = (n -> n >> odd >> (n | n))"
+  , "def even? = (n -> n >> even >> (n | n))"
+  , "def zero? = (n -> n >> zero >> (n | n))"
+  , "def negative? = (n -> n >> negative >> (n | n))"
   , "## re-nest a sum leftward: (A | (B | C)) => ((A | B) | C)"
   , "def assocL = (in1 >> in1 | (in2 >> in1 | in2) >> merge) >> merge"
   , "## re-nest a sum rightward: ((A | B) | C) => (A | (B | C))"
@@ -2330,6 +2327,13 @@ preludeSrc = unlines
   , "def single = _ nil >> cons"
   , "## map then flatten: bind of the list monad"
   , "def flatMap = map >> concat"
+  , "## box a bundle as a list, DERIVED from its own eliminator:"
+  , "## pack : aⁿ ⇒ List(a) — the flat list constructor; groups delimit"
+  , "def pack = [(l x -> x l >> cons)] nil ... >> foldExp >> reverse"
+  , "## two-wire elements: (a b)ⁿ ⇒ List(a b).  reverse/append are"
+  , "## single-wire words, so order is kept Church-style: fold up a"
+  , "## FUNCTION, then apply it to nil"
+  , "def pack2 = [(f x y -> [(l -> f (x y l >> cons) >> apply)])] [pass] ... >> foldExp2 >> _ nil >> apply"
   , "## first-match over a clause list: each clause is [router] [action];"
   , "## the first router that hits runs its action on x, else the default."
   , "def matchWith = (x default clauses -> clauses >> [x >> default ... >> apply] [(rest p f -> x >> p ... >> apply >> (f ... >> apply | drop >> rest) >> merge)] ... >> foldList)"
@@ -2383,16 +2387,6 @@ preludeSrc = unlines
   , "def partitionSum = (l -> l >> unList >> ((nil) (nil) | (x r -> r >> partitionSum >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)"
   , "## print every element, front to back"
   , "def printAll = [(b x -> x >> print >> b)] 0 ... >> fold >> drop"
-  , "## keep only a router's decision: collapse both payloads to nothing"
-  , "def verdict = (forget | forget)"
-  , "## long-form comparisons forget their input and answer Bool"
-  , "def equals = eq? >> verdict"
-  , "def less = lt? >> verdict"
-  , "## long-form predicates: drop the ? to forget the data"
-  , "def odd = odd? >> verdict"
-  , "def even = even? >> verdict"
-  , "def zero = zero? >> verdict"
-  , "def negative = negative? >> verdict"
   , "## guard ladders as first-class words, one guard per line.  A lane"
   , "## is a bare Bool condition and an answer (any value — quote only"
   , "## if the answer does work).  `if` opens the ladder, `elif` probes"
@@ -2714,20 +2708,6 @@ evalTerm env defs vars term st =
               out <- mapM scale bundle
               pure (out, if isFinal then [] else stk', [])
             _ -> throwError "Runtime type error in scaleN: expected an Int scalar"
-    -- pack / pack2: box the segment as a list (the stack IS the list)
-    applyAtom isFinal (Prim "pack") stk
-      | not (M.member "pack" vars), not (M.member "pack" defs) =
-          if isFinal then pure ([encodeListV stk], [], [])
-                     else pure ([VSum 0 []], stk, [])
-    applyAtom isFinal (Prim "pack2") stk
-      | not (M.member "pack2" vars), not (M.member "pack2" defs) =
-          if not isFinal then pure ([VSum 0 []], stk, [])
-          else
-            let go (x : y : rest) = VSum 1 [x, y, go rest]
-                go _              = VSum 0 []
-            in if odd (length stk)
-                 then throwError "pack2: odd segment (unreachable on typechecked programs)"
-                 else pure ([go stk], [], [])
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
@@ -2824,10 +2804,6 @@ runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
 runBuiltin _ _ "print" [v]              = Right ([], [show v])
 runBuiltin _ _ "true"  []               = Right ([VSum 0 []], [])
 runBuiltin _ _ "false" []               = Right ([VSum 1 []], [])
-runBuiltin _ _ "negative?" [VInt n]     = Right ([VSum (if n < 0 then 0 else 1) [VInt n]], [])
-runBuiltin _ _ "even?" [VInt n]         = Right ([VSum (if even n then 0 else 1) [VInt n]], [])
-runBuiltin _ _ "odd?"  [VInt n]         = Right ([VSum (if odd n then 0 else 1) [VInt n]], [])
-runBuiltin _ _ "zero?" [VInt n]         = Right ([VSum (if n == 0 then 0 else 1) [VInt n]], [])
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
 runBuiltin _ _ "lt?"  [VInt x, VInt y]  = Right ([VSum (if x < y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "-"    [VInt x, VInt y]  = Right ([VInt (x - y)], [])

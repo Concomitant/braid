@@ -262,6 +262,20 @@ but not nameable (see `design-exponents.md` notes / open questions).
 
 ## 9. Primitive reference
 
+**The kernel admits three presentations** (each derives the others,
+verified): the single-wire generators `{id, dup, swap, drop}`; binders
+(`dup = (x -> x x)` …), which abstraction elimination compiles back
+into the generators; and the segment tier (`dup = (x -> x >> dupN)`,
+`drop = (x -> x >> forget)`, `swap = (x y -> x y >> rotLast)` — the
+generators are the width-1 shadows of the open-width words). The
+single-wire basis stays primitive because it is the normal-form
+alphabet reflected `Code` is written in. `pass` is not merely
+equivalent to `...` — the remainder marker *denotes* `pass`; they are
+one term with two spellings. Derived-but-primitive-looking words
+(`odd?`-family, `pack`/`pack2`, `sumN`, `true`-almost) live in the
+prelude — the design bet ("primitives span everything else in the
+language itself") is proven in both directions.
+
 Wiring (cartesian structure):
 
 | word | type | note |
@@ -286,12 +300,13 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | `print` | `a0 ⇒ •` |
 | `true` / `false` | `• ⇒ Bool` |
 
-Routers (predicates that keep and route; hit = track 1):
+Routers (the primitive comparators; hit = track 1 — the predicate
+routers `odd?` `even?` `zero?` `negative?` are DERIVED prelude words
+now, via `mod`/`equals`/`less` and the `(n | n)` re-routing pattern):
 
 | word | type |
 |---|---|
-| `odd?` `even?` `zero?` `negative?` | `Int ⇒ (Int \| Int)` |
-| `eq?` | `a0 a0 ⇒ (a0 a0 \| a0 a0)` |
+| `eq?` | `a0 a0 ⇒ (a0 a0 \| a0 a0)` — structural equality, any value |
 | `lt?` | `Int Int ⇒ (Int Int \| Int Int)` |
 
 Sums & control:
@@ -325,8 +340,6 @@ Exponent tier (widths erased; see §13):
 | `addN` | `Intⁿ Intⁿ ⇒ Intⁿ` |
 | `zipN` | `a0ⁿ a1ⁿ ⇒ (a0 a1)ⁿ` |
 | `scaleN` | `Int Intⁿ ⇒ Intⁿ` |
-| `pack` | `a0ⁿ ⇒ List(a0)` — box a bundle as a list |
-| `pack2` | `(a0 a1)ⁿ ⇒ List(a0 a1)` |
 
 ## 10. Prelude reference (all derived user code — `:defs` for types)
 
@@ -352,7 +365,9 @@ Exponent tier (widths erased; see §13):
 **Loops**: `while` `until` (+ `whileFn`/`untilFn`) — three-line defs
 over `loop`.
 
-**Bundles**: `sumN : Intⁿ ⇒ Int`.
+**Bundles**: `sumN : Intⁿ ⇒ Int`; `pack : aⁿ ⇒ List(a)` and `pack2`
+(derived from their own eliminators — `foldExp` + `cons`/`reverse`,
+Church-style for `pack2`).
 
 ## 11. Control flow — the idioms
 
@@ -454,6 +469,10 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - Recursive calls and open-arity words: final atom of their stage.
 - Short names are yours: `f`, `g`, `x`, `succ`, `double` are all free
   (there are no placeholder prims — every primitive earns its name).
+- Shadowing a prelude word rebinds it INSIDE other prelude definitions
+  too — runtime def-resolution is late-bound. Shadow `equals` and the
+  derived `odd?` (which calls it) changes behaviour. Shadow whole
+  words, not their ingredients.
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
 

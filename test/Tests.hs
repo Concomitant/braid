@@ -114,10 +114,8 @@ passTests =
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
 
-    -- routers: predicates keep and route their input (hit = track 1)
-  , ("negative?",     "Int ⇒ (Int | Int)")
-  , ("odd?",          "Int ⇒ (Int | Int)")
-  , ("zero?",         "Int ⇒ (Int | Int)")
+    -- routers: the primitive comparators (predicates are now DERIVED —
+    -- their tests live in moduleTypeTests)
   , ("eq?",           "a0 a0 ⇒ (a0 a0 | a0 a0)")
   , ("lt?",           "Int Int ⇒ (Int Int | Int Int)")
   , ("-",             "Int Int ⇒ Int")
@@ -177,6 +175,11 @@ moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
+    -- routers, now derived in the prelude from eq?/lt?/mod via the
+    -- (n | n) pattern — same closed types as the old prims
+  , ("negative?",     "Int ⇒ (Int | Int)")
+  , ("odd?",          "Int ⇒ (Int | Int)")
+  , ("zero?",         "Int ⇒ (Int | Int)")
     -- sum associators re-nest a decision tree (open tails from in1/in2)
   , ("assocL", "(ρ0 | (ρ1 | ρ2)) ⇒ ((ρ0 | ρ1 | σ0) | ρ2 | σ1)")
   , ("assocR", "((ρ0 | ρ1) | ρ2) ⇒ (ρ0 | (ρ1 | ρ2 | σ0) | σ1)")
@@ -519,7 +522,7 @@ evalTests =
     -- cleanup-baked comparison routers and quoted sections: predicates
     -- built inline, no lambda, no factory
   , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals? >> print", ["in1(5)"], "")
-  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in1(5)"], "")
+  , ("def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in1(5)"], "")
   , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in2(6)"], "")
   , ("def less = lt? >> (_ drop | _ drop)\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
     -- user-built predicates: scaffold-test-cleanup, and factories that
