@@ -176,14 +176,26 @@ at position N (open row tail). Aliases: `ok`/`here`/`again` ≡ `in1`,
 `miss`/`done` ≡ `in2`. `there : (σ0) ⇒ (ρ0 | σ0)` shifts tags by one
 (`here >> there ≡ in2`).
 
-### List literals
-`list(e1, e2, …)` — comma-separated elements, each a **juxtaposition
-of atoms** (no top-level `>>`/`;` — wrap in a group: `list((1 2 ; +))`).
-Elements may be multi-wire: `list(1 "a", 2 "b") : List(Int Str)`
-(stack-kinded type parameters). Desugars to `nil`/`cons`.
+### Building lists: `pack`
+The primary list introduction is a word, not syntax — `pack : aⁿ ⇒
+List(a)` boxes a bundle, and a **group is the delimiter**:
 
-`|| e1 || e2 || …` — the vertical list literal: same value as
-`list(…)`, each lane an arbitrary bracketed program, may span lines.
+```braid
+(1 2 3 ; pack)              # List(Int) — the stack IS the list
+(x (10 x ; *) ; pack)       # elements are FULL programs, no special grammar
+((1 2 ; pack) (3 ; pack) ; pack)     # nesting
+(1 "a" 2 "b" ; pack2)       # two-wire elements: List(Int Str)
+(pack)                      # empty (≡ nil); in final position it is open
+```
+
+One-way by design: there is no `unpack : List(a) ⇒ aⁿ` — a list's
+length is runtime data, and the exponent is erased (elimination is
+`foldList`/`uncons`).
+
+Legacy forms, still supported: `list(e1, e2, …)` — comma-separated
+elements, each a *juxtaposition* (a `;`/`>>` inside an element needs a
+group) — deprecated in favour of `pack`; and `|| e1 || e2 || …`, the
+vertical list literal (multi-line lanes), which keeps its layout job.
 
 ### `case(b1, …, bn)`
 The coproduct eliminator for a right-nested sum:
@@ -311,6 +323,8 @@ Exponent tier (widths erased; see §13):
 | `addN` | `Intⁿ Intⁿ ⇒ Intⁿ` |
 | `zipN` | `a0ⁿ a1ⁿ ⇒ (a0 a1)ⁿ` |
 | `scaleN` | `Int Intⁿ ⇒ Intⁿ` |
+| `pack` | `a0ⁿ ⇒ List(a0)` — box a bundle as a list |
+| `pack2` | `(a0 a1)ⁿ ⇒ List(a0 a1)` |
 
 ## 10. Prelude reference (all derived user code — `:defs` for types)
 

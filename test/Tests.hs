@@ -187,6 +187,11 @@ moduleTypeTests =
   , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
   , ("type YN = Bool\ntrue",                    "• ⇒ YN")
+    -- pack: list introduction from a bundle — (elements ; pack) replaces
+    -- the list(…) special form; elements are full programs, groups delimit
+  , ("(1 2 3 >> pack)",          "• ⇒ List(Int)")
+  , ("(pack)",                   "a0ⁿ⁰ ⇒ List(a0)")   -- final position: open
+  , ("(1 \"a\" 2 \"b\" >> pack2)", "• ⇒ List(Int Str)")
     -- exponent syntax in type declarations: literal ^k (and Unicode
     -- superscript input) expands to k copies; segments repeat wholesale
   , ("type T3 = (Int^3 | Str)\n1 2 3 >> in1 >> (pass | drop >> \"x\")", "• ⇒ T3")
@@ -606,6 +611,12 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef s0 = ([1 2 >> +] >> getCode) >> uncons >> (nil | (s r -> s)) >> merge\n(1 s0 >> take >> single) >> evalCode >> (print | forget) >> merge\n(1 s0 >> skip >> single) >> evalCode >> (print | forget) >> merge", ["1", "2"], "")
     -- box: Code -> Fn without running; the check fires at apply
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge", ["3"], "")
+    -- pack builds the same value as the list(…) literal; pack2 makes
+    -- two-wire elements; the empty pack is nil
+  , ("def a = list(1, 2, 3)\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
+  , ("(1 2 3 >> pack) >> sum >> print\n(pack) >> len >> print", ["6", "0"], "")
+  , ("(1 10 2 20 >> pack2) >> [0] [(acc a b -> (a b >> *) acc >> +)] ... >> foldList >> print", ["50"], "")
+  , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> apply >> print", ["list(7, 70)"], "")
   ]
 
 -- (module source, substring expected in the error)

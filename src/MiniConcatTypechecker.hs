@@ -1934,6 +1934,15 @@ primEnv =
       scaleNTy = Forall [] [] [] [NV "n"]
         (Arrow (SCons TInt (SExp (one TInt) nExp SEnd))
                (SExp (one TInt) nExp SEnd))
+      -- pack: list introduction from a bundle — the stack IS the list;
+      -- pack draws the box.  One-way: no unpack (the width of a list is
+      -- runtime data; a List(a) ⇒ aⁿ would let callers assume it).
+      packTy = Forall [a] [] [] [NV "n"]
+        (Arrow (SExp (one ta) nExp SEnd)
+               (one (TData "List" [one ta])))
+      pack2Ty = Forall [a, b] [] [] [NV "n"]
+        (Arrow (SExp (SCons ta (one tb)) nExp SEnd)
+               (one (TData "List" [SCons ta (one tb)])))
   in M.fromList
        [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
        , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
@@ -2004,6 +2013,8 @@ primEnv =
        , ("addN",      addNTy)
        , ("zipN",      zipNTy)
        , ("scaleN",    scaleNTy)
+       , ("pack",      packTy)
+       , ("pack2",     pack2Ty)
        ]
 
 --------------------------------------------------------------------------------
@@ -2358,13 +2369,13 @@ preludeSrc = unlines
   , "## predicate factory: k >> lessThan is a quoted below-k router"
   , "def lessThan = (k -> [_ k >> less?])"
   , "## reverse a list"
-  , "def reverse = [swap >> cons] list() ... >> fold"
+  , "def reverse = [swap >> cons] nil ... >> fold"
   , "## append two lists"
   , "def append = swap >> _ reverse >> [swap >> cons] ... >> fold"
   , "## flatten one layer: join of the list monad"
-  , "def concat = [append] list() ... >> fold"
+  , "def concat = [append] nil ... >> fold"
   , "## one-element list: return of the list monad"
-  , "def single = _ list() >> cons"
+  , "def single = _ nil >> cons"
   , "## map then flatten: bind of the list monad"
   , "def flatMap = map >> concat"
   , "## first-match over a clause list: each clause is [router] [action];"
@@ -2378,7 +2389,7 @@ preludeSrc = unlines
   , "## commute List over the sum monad: all hits, or the first miss"
   , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"
-  , "def filter = (p -> [p ... >> apply >> (single | drop >> list()) >> merge]) ... >> flatMap"
+  , "def filter = (p -> [p ... >> apply >> (single | drop >> nil) >> merge]) ... >> flatMap"
   , "## a Bool selects one of two quotations"
   , "def condFn = (b t e -> b >> (t | e) >> merge)"
   , "## a Bool selects a quotation; apply runs it on the rest of the stack"
@@ -2751,6 +2762,20 @@ evalTerm env defs vars term st =
               out <- mapM scale bundle
               pure (out, if isFinal then [] else stk', [])
             _ -> throwError "Runtime type error in scaleN: expected an Int scalar"
+    -- pack / pack2: box the segment as a list (the stack IS the list)
+    applyAtom isFinal (Prim "pack") stk
+      | not (M.member "pack" vars), not (M.member "pack" defs) =
+          if isFinal then pure ([encodeListV stk], [], [])
+                     else pure ([VSum 0 []], stk, [])
+    applyAtom isFinal (Prim "pack2") stk
+      | not (M.member "pack2" vars), not (M.member "pack2" defs) =
+          if not isFinal then pure ([VSum 0 []], stk, [])
+          else
+            let go (x : y : rest) = VSum 1 [x, y, go rest]
+                go _              = VSum 0 []
+            in if odd (length stk)
+                 then throwError "pack2: odd segment (unreachable on typechecked programs)"
+                 else pure ([go stk], [], [])
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)

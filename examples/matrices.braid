@@ -16,7 +16,7 @@ def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))
 1 0 >> swap >> m >> print _ >> print  # (m after swap) col 1 = m col 2: 2, 4
 
 ## the bialgebra law relating copy and add, checked on a sample
-def pack2 = (a b -> a >> toStr >> _ (b >> toStr) >> cat)
+def showPair = (a b -> a >> toStr >> _ (b >> toStr) >> cat)
 def lhsB = + >> dup
 def rhsB = (x y -> x y >> + >> _ (x y >> +))
-3 4 >> lhsB >> pack2 >> _ (3 4 >> rhsB >> pack2) >> eq? >> verdict >> print   # in1()
+3 4 >> lhsB >> showPair >> _ (3 4 >> rhsB >> showPair) >> eq? >> verdict >> print   # in1()
