@@ -1,7 +1,8 @@
 # Guards are a || clause-product + choose. Each lane is [router] [action];
 # `choose` runs the first router that hits and returns (result | unmatched).
 # The default is the miss-track handler in the final merge. The || value
-# is first-class — bind it, pass it, reuse it — because it is a List.
+# is first-class — bind it, pass it, reuse it — because it is a List
+# (the same value `([odd?] [dup >> *] … >> pack2)` builds flat).
 
 def classify =
     || [odd?]      [dup >> *]

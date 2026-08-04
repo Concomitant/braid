@@ -1,8 +1,8 @@
 # The ingestion story, now real: CSV cells are strings; a parse router
 # refines them; sequence commutes the column — typed data or evidence.
 
-list("1", "2", "3") >> [asInt?] ... >> map >> sequence >> print   # in1(list(1, 2, 3))
-list("1", "x", "3") >> [asInt?] ... >> map >> sequence >> print   # in2(x)
+("1" "2" "3" >> pack) >> [asInt?] ... >> map >> sequence >> print   # in1(list(1, 2, 3))
+("1" "x" "3" >> pack) >> [asInt?] ... >> map >> sequence >> print   # in2(x)
 
 # data rows with field-stack doors; symbols as keys
 data Ticket = (Str Int Sym)

@@ -152,7 +152,7 @@ failTests =
   , ("]",             "Expected a tensor stage")
   , ("(1",            "Unclosed group")
     -- list elements must be pure pushes
-  , ("list(1 2",      "unexpected end of input")
+  , ("list(1, 2)",   "Unclosed group")   -- the literal is GONE: bare ident + a comma in a group
   , ("dup ... drop",       "'...' must be the final atom")
   , ("1 >",           "Unexpected '>'")
     -- a newline is a strict >>, so a trailing >> before one is >> >>:
@@ -229,14 +229,12 @@ moduleTypeTests =
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
     -- List is now a declared type in the prelude; the library is derived
-  , ("list()",  "• ⇒ List(ρ0)")
   , ("uncons",  "List(ρ0) ⇒ (• | ρ0 List(ρ0))")
   , ("cons",    "ρ0 List(ρ0) ⇒ List(ρ0)")
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) ⇒ List(a0 a1)")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
-  , ("list(1, 2, 3)",                           "• ⇒ List(Int)")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
   , ("def first = id drop\n1 2 >> first",       "• ⇒ Int")
     -- one def used at two different types = let-polymorphism
@@ -375,12 +373,12 @@ evalTests =
   , ("\"42\" >> asInt? >> print", ["in1(42)"], "")
   , ("\"4x\" >> asInt? >> print", ["in2(4x)"], "")
     -- REAL column sniffing now: strings in, typed column or evidence out
-  , ("list(\"1\", \"2\", \"3\") >> [asInt?] ... >> map >> sequence >> print", ["in1(list(1, 2, 3))"], "")
-  , ("list(\"1\", \"x\", \"3\") >> [asInt?] ... >> map >> sequence >> print", ["in2(x)"], "")
+  , ("(\"1\" \"2\" \"3\" >> pack) >> [asInt?] ... >> map >> sequence >> print", ["in1(list(1, 2, 3))"], "")
+  , ("(\"1\" \"x\" \"3\" >> pack) >> [asInt?] ... >> map >> sequence >> print", ["in2(x)"], "")
     -- sequence: the List/Sum distributive law — column sniffing is
     -- map parse-router >> sequence
-  , ("list(1, 3, 5) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
-  , ("list(1, 4, 5) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+  , ("(1 3 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
+  , ("(1 4 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
     -- >?> / >!> : guard chains along the miss track (dual of >=>)
     -- asymmetric guard predicates: hit carries nothing (drop-free
     -- actions); infers as Int => Maybe(Int)
@@ -420,13 +418,13 @@ evalTests =
   , ("3 4 >> (x y -> y x >> -) >> print", ["1"], "")
     -- || vertical list literal (a product of lanes) + choose guard fold
   , ("|| [1] || [2] || [3] >> len >> print", ["3"], "")
-  , ("|| [1] || [2] || [3] >> [pass] ... >> map >> len >> print", ["3"], "")
+  , ("([1] [2] [3] >> pack) >> [pass] ... >> map >> len >> print", ["3"], "")
   , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n7 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["49"], "")
-  , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n8 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["9"], "")
+  , ("def sign = ([odd?] [dup >> *] [negative?] [drop >> 0] >> pack2)\n8 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["9"], "")
   , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n-4 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["0"], "")
     -- no else lane: none hit -> in2(input)
-  , ("5 (|| [odd?] [dup >> *]) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["hit"], "")
-  , ("6 (|| [odd?] [dup >> *]) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["miss"], "")
+  , ("5 ([odd?] [dup >> *] >> pack2) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["hit"], "")
+  , ("6 ([odd?] [dup >> *] >> pack2) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["miss"], "")
     -- a bound || value reused; and | sum rows still work
   , ("def og = || [odd?] [drop >> \"odd\"]\n3 og >> choose >> (id | drop >> \"even\") >> merge >> print\n4 og >> choose >> (id | drop >> \"even\") >> merge >> print", ["odd", "even"], "")
   , ("5 >> odd? >> (drop >> \"o\" | drop >> \"e\") >> merge >> print", ["o"], "")
@@ -451,10 +449,10 @@ evalTests =
   , ("data Shape = (Int | Int Int | Int Int Int)\ndef rect = in2 >> Shape\n3 4 >> rect >> unShape >> (dup >> * | * | + ... >> +) >> mergeShape >> print", ["12"], "")
   , ("data Shape = (Int | Int Int | Int Int Int)\ndef tri = in3 >> Shape\n1 2 3 >> tri >> [dup >> *] [*] [+ ... >> +] ... >> foldShape >> print", ["6"], "")
     -- multi-wire list literals + matchWith: data-driven first-match guard
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n9 [toStr] list([by3?] [drop >> \"fizz\"]) >> matchWith >> print", ["fizz"], "")
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n7 [toStr] list([by3?] [drop >> \"fizz\"]) >> matchWith >> print", ["7"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n9 [toStr] ([by3?] [drop >> \"fizz\"] >> pack2) >> matchWith >> print", ["fizz"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n7 [toStr] ([by3?] [drop >> \"fizz\"] >> pack2) >> matchWith >> print", ["7"], "")
     -- zip + a fold over flat two-wire elements: the dot product
-  , ("list(1, 2, 3) list(10, 20, 30) >> zip >> [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print", ["140"], "")
+  , ("(1 2 3 >> pack) (10 20 30 >> pack) >> zip >> [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print", ["140"], "")
     -- arithmetic completeness + negative literals
   , ("7 3 >> div >> print",  ["2"], "")
   , ("15 3 >> mod >> print", ["0"], "")
@@ -466,11 +464,11 @@ evalTests =
   , ("5 >> range >> print",  ["list(0, 1, 2, 3, 4)"], "")
   , ("5 >> range >> len >> print", ["5"], "")
   , ("5 >> range >> sum >> print", ["10"], "")
-  , ("list(2, 3, 4) >> product >> print", ["24"], "")
-  , ("list(1, 3, 5) >> [odd] ... >> map >> all >> print", ["in1()"], "")
-  , ("list(2, 4) >> [odd] ... >> map >> any >> print", ["in2()"], "")
-  , ("list(1, 2, 3) >> [odd?] ... >> map >> partitionSum >> len _ >> print _ >> len >> print", ["2", "1"], "")
-  , ("list(7, 8) >> printAll", ["7", "8"], "")
+  , ("(2 3 4 >> pack) >> product >> print", ["24"], "")
+  , ("(1 3 5 >> pack) >> [odd] ... >> map >> all >> print", ["in1()"], "")
+  , ("(2 4 >> pack) >> [odd] ... >> map >> any >> print", ["in2()"], "")
+  , ("(1 2 3 >> pack) >> [odd?] ... >> map >> partitionSum >> len _ >> print _ >> len >> print", ["2", "1"], "")
+  , ("(7 8 >> pack) >> printAll", ["7", "8"], "")
     -- fizzbuzz, the citizenship test
   , ("def fizzbuzz = (n -> (n 15 >> mod >> zero) [\"FizzBuzz\"] [(n 3 >> mod >> zero) [\"Fizz\"] [(n 5 >> mod >> zero) [\"Buzz\"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)\n15 >> fizzbuzz >> print\n9 >> fizzbuzz >> print\n4 >> fizzbuzz >> print", ["FizzBuzz", "Fizz", "4"], "")
     -- unparse / parse round trip; parse feeds evalCode
@@ -480,8 +478,8 @@ evalTests =
     -- file IO round trip (railway edges)
   , ("\"/tmp/braid-sprint-test.txt\" \"hi\" >> writeFile >> (\"/tmp/braid-sprint-test.txt\" >> readFile >> (print | print) >> forget | print) >> forget", ["hi"], "")
     -- take / skip
-  , ("list(1, 2, 3, 4) >> 2 _ >> take >> print", ["list(1, 2)"], "")
-  , ("list(1, 2, 3, 4) >> 2 _ >> skip >> print", ["list(3, 4)"], "")
+  , ("(1 2 3 4 >> pack) >> 2 _ >> take >> print", ["list(1, 2)"], "")
+  , ("(1 2 3 4 >> pack) >> 2 _ >> skip >> print", ["list(3, 4)"], "")
   , (".red >> symStr >> \"k=\" ... >> cat >> print", ["k=red"], "")
     -- Code v1: reflect / sections / evalCode / abstraction elimination
   , ("[dup >> *] >> reflect >> ((c -> c (7) >> evalCode >> print) | print) >> forget", ["in1(49)"], "")
@@ -497,24 +495,24 @@ evalTests =
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
   , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> toStr _ >> _ toStr >> cat >> print", ["715"], "")
     -- split-apply-combine: dup broadcasts, filters split, folds apply
-  , ("def sumL = [+] 0 ... >> fold\nlist(1, 2, 3, 4) >> dup >> ([odd?] ... >> filter >> sumL) _ >> _ ([even?] ... >> filter >> sumL) >> + >> print", ["10"], "")
+  , ("def sumL = [+] 0 ... >> fold\n(1 2 3 4 >> pack) >> dup >> ([odd?] ... >> filter >> sumL) _ >> _ ([even?] ... >> filter >> sumL) >> + >> print", ["10"], "")
     -- the list monad, all derived in the prelude:
     -- single = return, concat = join, flatMap = bind, filter via bind
-  , ("list(1, 2, 3) >> reverse >> print", ["list(3, 2, 1)"], "")
-  , ("list(1, 2) list(3, 4) >> append >> print", ["list(1, 2, 3, 4)"], "")
-  , ("list(list(1, 2), list(), list(3)) >> concat >> print", ["list(1, 2, 3)"], "")
+  , ("(1 2 3 >> pack) >> reverse >> print", ["list(3, 2, 1)"], "")
+  , ("(1 2 >> pack) (3 4 >> pack) >> append >> print", ["list(1, 2, 3, 4)"], "")
+  , ("((1 2 >> pack) nil (3 >> pack) >> pack) >> concat >> print", ["list(1, 2, 3)"], "")
   , ("5 >> single >> print", ["list(5)"], "")
-  , ("list(1, 2, 3, 4) >> [odd?] ... >> filter >> print", ["list(1, 3)"], "")
-  , ("list(1, 2, 3) >> [dup >> _ single >> cons] ... >> flatMap >> print", ["list(1, 1, 2, 2, 3, 3)"], "")
+  , ("(1 2 3 4 >> pack) >> [odd?] ... >> filter >> print", ["list(1, 3)"], "")
+  , ("(1 2 3 >> pack) >> [dup >> _ single >> cons] ... >> flatMap >> print", ["list(1, 1, 2, 2, 3, 3)"], "")
     -- one generic reduction, two Monoid instances (dictionaries as wires)
-  , ("list(1, 2, 3, 4) >> [+] 0 ... >> fold >> print", ["10"], "")
-  , ("list(list(1, 2), list(3), list()) >> [append] list() ... >> fold >> print", ["list(1, 2, 3)"], "")
+  , ("(1 2 3 4 >> pack) >> [+] 0 ... >> fold >> print", ["10"], "")
+  , ("((1 2 >> pack) (3 >> pack) nil >> pack) >> [append] nil ... >> fold >> print", ["list(1, 2, 3)"], "")
     -- chunked fold + combine = whole fold (associativity licenses
     -- parallel reduce)
-  , ("def w = list(1, 2, 3, 4, 5, 6) >> [*] 1 ... >> fold\ndef l = list(1, 2, 3) >> [*] 1 ... >> fold\ndef r = list(4, 5, 6) >> [*] 1 ... >> fold\nw >> _ (l >> _ r >> *) >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def w = (1 2 3 4 5 6 >> pack) >> [*] 1 ... >> fold\ndef l = (1 2 3 >> pack) >> [*] 1 ... >> fold\ndef r = (4 5 6 >> pack) >> [*] 1 ... >> fold\nw >> _ (l >> _ r >> *) >> eq? >> verdict >> print", ["in1()"], "")
     -- laws as programs, presentations as enumerators
-  , ("def xs = list(0, 1, 2, 3)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
-  , ("def xs = list(0, 1, 2, 3)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
+  , ("def xs = (0 1 2 3 >> pack)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def xs = (0 1 2 3 >> pack)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
     -- multi-line kleisli: newline absorption around >=> (either side)
   , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less?\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
   , ("0 >> (even? >=>\nzero?) >> print", ["in1(0)"], "")
@@ -555,8 +553,8 @@ evalTests =
   , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
-  , ("list(1, 2) >> uncons",               [],     "list(1, 2)")
-  , ("list() >> uncons",                   [],     "in1()")
+  , ("(1 2 >> pack) >> uncons",               [],     "list(1, 2)")
+  , ("nil >> uncons",                   [],     "in1()")
     -- deferred peel builds a nested sum; case(…) folds the whole spine
   , ("def classify = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?) >> case(pass, drop >> \"zero\", toStr)\n-4 >> classify >> print\n0 >> classify >> print\n7 >> classify >> print", ["neg", "zero", "7"], "")
     -- associator round-trip is identity on the routed value
@@ -585,8 +583,8 @@ evalTests =
                                            ["25"], "")
 
     -- lists: the spec's sum-of-squares program
-  , ("list(1, 2, 3)",                      [],     "list(1, 2, 3)")
-  , ("[dup >> *] list(1, 2, 3, 4, 5)\nmap\n[+] 0 id\nfold\nprint",
+  , ("(1 2 3 >> pack)",                  [],     "list(1, 2, 3)")   -- display keeps list(…)
+  , ("[dup >> *] (1 2 3 4 5 >> pack)\nmap\n[+] 0 id\nfold\nprint",
                                            ["55"], "")
     -- foldExp at three widths through ONE polymorphic def (n erased;
     -- the runtime segment width is the witness), including n = 0
@@ -613,7 +611,7 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge", ["3"], "")
     -- pack builds the same value as the list(…) literal; pack2 makes
     -- two-wire elements; the empty pack is nil
-  , ("def a = list(1, 2, 3)\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
   , ("(1 2 3 >> pack) >> sum >> print\n(pack) >> len >> print", ["6", "0"], "")
   , ("(1 10 2 20 >> pack2) >> [0] [(acc a b -> (a b >> *) acc >> +)] ... >> foldList >> print", ["50"], "")
   , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> apply >> print", ["list(7, 70)"], "")
@@ -638,7 +636,7 @@ moduleFailTests =
   , ("type Nat = (• | Nat)\nin1 >> Nat >> unNat >> unNat", "Cannot unify types")
   , ("type dup = (• | dup)\n1",                  "collides")
     -- list elements must be pure pushes (desugar makes it a unify error)
-  , ("list(drop)",                                "Cannot unify stacks")
+  , ("list(1, 2) >> len >> print",                  "Unclosed group")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
   ]

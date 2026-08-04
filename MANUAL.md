@@ -40,7 +40,7 @@ the current stack is rejected with a message naming the stack.
 | `[` `]` | quotation |
 | `(` `)` | grouping / rows / list & case arguments / binders |
 | `\|` , `\|\|` | row separator; vertical list literal |
-| `,` | separator in `list(…)`, `case(…)`, type arguments |
+| `,` | separator in `case(…)` and type arguments |
 | `->` | binder arrow |
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
@@ -192,10 +192,12 @@ One-way by design: there is no `unpack : List(a) ⇒ aⁿ` — a list's
 length is runtime data, and the exponent is erased (elimination is
 `foldList`/`uncons`).
 
-Legacy forms, still supported: `list(e1, e2, …)` — comma-separated
-elements, each a *juxtaposition* (a `;`/`>>` inside an element needs a
-group) — deprecated in favour of `pack`; and `|| e1 || e2 || …`, the
-vertical list literal (multi-line lanes), which keeps its layout job.
+The **vertical** form is `|| e1 || e2 || …` — one lane per `||`, may
+span lines (each lane a juxtaposition; `[router] [action]` lanes make
+`choose`-able guard lists). It builds the same `List` value as `pack`.
+
+(The old flat literal `list(e1, e2, …)` is REMOVED — `list` is now an
+ordinary identifier. `(… ; pack)` is the flat form.)
 
 ### `case(b1, …, bn)`
 The coproduct eliminator for a right-nested sum:
@@ -389,7 +391,7 @@ negative? >> (drop ; "neg" | pass) >> (pass | zero?)
     >> case(pass, drop ; "zero", toStr)
 
 # guards as data: || clause lists, probed by choose / matchWith
-x [default] list([p?] [action], …) >> matchWith
+x [default] ([p?] [action] … >> pack2) >> matchWith
 
 # loops
 7 >> [_ 100 >> less?] [2 _ >> *] ... >> while      # → 112
@@ -444,7 +446,7 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - Quotes are points (`• ⇒ Fn`): pushing one beside live wires needs
   `_` or `...` — the same frame discipline as every constant.
 - Row arms must fit on one line; arms must agree in type to `merge`.
-- `list(…)` elements are juxtapositions — group any `;`/`>>`.
+- `||` lanes are juxtapositions — a `;`/`>>` inside a lane needs a group.
 - `def name = x -> …` ends at the line; use the block form (`def name =`
   newline `x ->`) for multi-line bodies.
 - Sums never flatten; use `assocL`/`assocR`/`case(…)` to manage

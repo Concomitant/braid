@@ -5,7 +5,7 @@
 def succ   = 1 ... ; +
 def double = 2 _ ; *
 
-def samples = list(0, 1, 2, 3, 4, 5)
+def samples = (0 1 2 3 4 5 ; pack)
 def lhs = [succ ; double]        ... ; map
 def rhs = [double ; succ ; succ] ... ; map
 

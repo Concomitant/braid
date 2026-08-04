@@ -3,14 +3,14 @@
 # equals folding the whole. Associativity IS the parallelization
 # license — the law is what lets a scheduler split the fold.
 
-def whole = list(1, 2, 3, 4, 5, 6, 7, 8) >> [+] 0 ... >> fold
-def left  = list(1, 2, 3, 4) >> [+] 0 ... >> fold
-def right = list(5, 6, 7, 8) >> [+] 0 ... >> fold
+def whole = (1 2 3 4 5 6 7 8 >> pack) >> [+] 0 ... >> fold
+def left  = (1 2 3 4 >> pack) >> [+] 0 ... >> fold
+def right = (5 6 7 8 >> pack) >> [+] 0 ... >> fold
 
 whole >> print
 left >> _ right >> + >> print
 whole >> _ (left >> _ right >> +) >> eq? >> verdict >> print   # in1()
 
 # Same theorem, list monoid: concat of chunk-concats = concat.
-def parts = list(list(1, 2), list(3), list(), list(4, 5))
+def parts = ((1 2 >> pack) (3 >> pack) nil (4 5 >> pack) >> pack)
 parts >> concat >> print

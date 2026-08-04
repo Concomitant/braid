@@ -9,6 +9,6 @@ def by15? = (n -> n 15 >> mod >> zero >> (n | n))
 def by3? = (n -> n 3 >> mod >> zero >> (n | n))
 def by5? = (n -> n 5 >> mod >> zero >> (n | n))
 
-def fizzbuzz = (n -> n [toStr] list([by15?] [drop >> "FizzBuzz"], [by3?] [drop >> "Fizz"], [by5?] [drop >> "Buzz"]) >> matchWith)
+def fizzbuzz = (n -> n [toStr] ([by15?] [drop >> "FizzBuzz"] [by3?] [drop >> "Fizz"] [by5?] [drop >> "Buzz"] >> pack2) >> matchWith)
 
 15 >> range >> [1 ... >> + >> fizzbuzz] ... >> map >> printAll

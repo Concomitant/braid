@@ -735,11 +735,11 @@ data Token
   | TokComma      -- ,
   | TokArrow      -- -> (parameter list separator)
   | TokBar        -- | (code-row / sum alternative separator)
-  | TokBarBar     -- || (vertical list literal: || e1 || e2 || … )
   | TokKleisli    -- >=> (Kleisli composition in the sum monad)
   | TokOrElse     -- >?> (the dual: chain along the miss track)
   | TokOrClose    -- >!> (close a >?> chain with a total default)
   | TokCaret      -- ^ (exponent in type expressions: Int^3, (A B)^n)
+  | TokBarBar     -- || (vertical list literal: || e1 || e2 || … )
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -819,9 +819,10 @@ normalizeToks = trim . collapse
     -- A newline is a strict `>>`.  It is absorbed only next to an
     -- operator a newline cannot itself express: the railway operators
     -- (`>=>`, `>?>`, `>!>`) and the `||` list-literal continuation.
-    -- `>>` and `|` never absorb — a newline already *is* `>>`, and the
-    -- row separator `|` must stay put so aligned track-columns work
-    -- (`f |` ⏎ `| g` is two rows, not one collided `| |`).
+    -- `>>` and `|` never absorb — a newline
+    -- already *is* `>>`, and the row separator `|` must stay put so
+    -- aligned track-columns work (`f |` ⏎ `| g` is two rows, not one
+    -- collided `| |`).
     collapse [] = []
     collapse (TokNewline : ts) =
       case dropWhile (== TokNewline) ts of
@@ -835,7 +836,8 @@ normalizeToks = trim . collapse
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
     absorbs t =
-      t == TokKleisli || t == TokOrElse || t == TokOrClose || t == TokBarBar
+      t == TokKleisli || t == TokOrElse || t == TokOrClose
+        || t == TokBarBar
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -984,21 +986,27 @@ parseSeqStmt toks = do
       go ((op, stage) : acc) rest''
 
 -- || e1 || e2 || … : a vertical list literal (a product of lanes).
--- Each lane is a full program (the user writes [P] [F] for guards, but
--- any program is legal); the whole thing is ONE list value.  Keeps `|`
--- (TokBar) entirely for sums.
+-- Each lane is a single juxtaposition stage (the user writes [P] [F]
+-- for guards); the whole thing is ONE list value, built by nil/cons.
+-- Keeps `|` (TokBar) entirely for sums.  This is the ONLY list
+-- literal — the flat form is (e1 e2 … ; pack).
 parseBarBarList :: [Token] -> Either String (Term, [Token])
 parseBarBarList (TokBarBar : rest) = do
   (lane, rest') <- parseStage rest
   go [stageAtoms lane] rest'
   where
-    -- each lane is a single juxtaposition stage (no top-level >>, so a
-    -- trailing `>> f` applies to the whole list, not the last lane)
     go acc (TokBarBar : r) = do
       (lane, r') <- parseStage r
       go (stageAtoms lane : acc) r'
     go acc r = Right (desugarList (reverse acc), r)
 parseBarBarList ts = Left $ "Expected '||' to start a list, got: " ++ show ts
+
+-- build a list value from lanes with nil/cons (the || desugaring)
+desugarList :: [[Term]] -> Term
+desugarList es = foldl step (Prim "nil") (reverse es)
+  where
+    step acc atoms = Seq acc (Seq (Tensor (atoms ++ [Prim "pass"]))
+                                  (Prim "cons"))
 
 parseStage :: [Token] -> Either String (Stage, [Token])
 parseStage = go []
@@ -1006,9 +1014,6 @@ parseStage = go []
     go [] ts@(TokBarBar : _) = do
       (lst, rest') <- parseBarBarList ts
       go [lst] rest'
-    go acc (TokIdent "list" : TokLParen : rest) = do
-      (elems, rest') <- parseListElems rest
-      go (desugarList elems : acc) rest'
     -- case(b1, …, bn): eliminate a right-nested sum (X1 | (X2 | … | Xn))
     -- by one handler per track, all landing on a common result.  Each
     -- branch is a full program spliced BARE onto its arm (no quoting,
@@ -1061,17 +1066,6 @@ parseStage = go []
 parseDelimited :: [Token] -> Either String (Term, [Token])
 parseDelimited = parseProgramToks
 
--- Elements of list(…): comma-separated, each a JUXTAPOSITION of atoms
--- (a tensor stage), so a list element may be multi-wire — e.g. a
--- clause [pred] [action], matching List(A B).  list(e1, …, en) is
--- sugar: build with nil/cons from the prelude.  The result is a
--- compound atom (a group), composing like any parenthesized program.
-desugarList :: [[Term]] -> Term
-desugarList es = foldl step (Prim "nil") (reverse es)
-  where
-    step acc atoms = Seq acc (Seq (Tensor (atoms ++ [Prim "pass"]))
-                                  (Prim "cons"))
-
 -- case(b1, …, bn): the coproduct eliminator for a right-nested sum.
 --   case(a)          = a
 --   case(a, b, …)    = (a | case(b, …)) >> merge
@@ -1095,48 +1089,6 @@ parseCaseBranches toks = do
       Right (b : bs, rest'')
     (TokRParen : rest') -> Right ([b], rest')
     _ -> Left "Expected ',' or ')' in case(…)"
-
-parseListElems :: [Token] -> Either String ([[Term]], [Token])
-parseListElems (TokRParen : rest) = Right ([], rest)
-parseListElems toks = do
-  (atoms, rest) <- elemAtoms [] toks
-  case rest of
-    (TokComma : rest')  -> do
-      (es, rest'') <- parseListElems rest'
-      Right (atoms : es, rest'')
-    (TokRParen : rest') -> Right ([atoms], rest')
-    _ -> Left "Expected ',' or ')' in list literal"
-  where
-    -- one element: one or more atoms, up to a comma or ')'
-    elemAtoms acc ts@(TokComma : _)  = done acc ts
-    elemAtoms acc ts@(TokRParen : _) = done acc ts
-    elemAtoms acc ts = do
-      (a, rest) <- elemAtom ts
-      elemAtoms (a : acc) rest
-    done acc ts
-      | null acc  = Left "Empty list element"
-      | otherwise = Right (reverse acc, ts)
-
-    elemAtom (TokIdent "list" : TokLParen : rest) = do
-      (elems, rest') <- parseListElems rest
-      Right (desugarList elems, rest')
-    elemAtom (TokIdent name : rest) = Right (Prim name, rest)
-    elemAtom (TokInt n : rest)      = Right (Prim (show n), rest)
-    elemAtom (TokLBrack : rest)     = do
-      (t, rest') <- parseDelimited rest
-      case rest' of
-        (TokRBrack : rest'') -> Right (Quote t, rest'')
-        _ -> Left "Unclosed quotation (expected ']')"
-    elemAtom (TokLParen : rest)     = do
-      (t, rest') <- parseDelimited rest
-      case rest' of
-        (TokRParen : rest'') -> Right (t, rest'')
-        _ -> Left "Unclosed group in list element (expected ')')"
-    elemAtom ts =
-      Left $ "Expected a list element" ++
-        case ts of
-          []      -> " (unexpected end of input)"
-          (t : _) -> ", got: " ++ show t
 
 --------------------------------------------------------------------------------
 -- 6.5 Type aliases (stage 1: transparent, display-only)
@@ -2383,7 +2335,7 @@ preludeSrc = unlines
   , "def matchWith = (x default clauses -> clauses >> [x >> default ... >> apply] [(rest p f -> x >> p ... >> apply >> (f ... >> apply | drop >> rest) >> merge)] ... >> foldList)"
   , "## the always-hit router: the last lane of a || guard list"
   , "def else? = in1"
-  , "## probe a || clause list: run the first lane whose router hits;"
+  , "## probe a clause list (|| lanes or pack2): run the first hit;"
   , "## in1(result) on a hit, in2(input) if none hit"
   , "def choose = (x clauses -> clauses >> [x >> in2] [(rest p f -> x >> p ... >> apply >> (f ... >> apply >> in1 | drop >> rest) >> merge)] ... >> foldList)"
   , "## commute List over the sum monad: all hits, or the first miss"
