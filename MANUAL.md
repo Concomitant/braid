@@ -396,7 +396,14 @@ with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
 `code.braid`). `evalCode` re-checks dynamically and runs; failures
 ride the miss track *with the untouched segment as evidence*.
 `unparse`/`parse` + `readFile`/`writeFile` round-trip code through
-disk (`examples/io.braid`).
+disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ ⇒ (r | Str ρ)⟩` defers
+instead of running — the other half of `reflect`'s round trip.
+
+**Cut soundness** (`examples/cuts.braid`): Braid is not
+token-concatenative, but at spine granularity the concatenative
+property is a runnable theorem — every stage-boundary cut yields two
+runnable pieces with `run(prefix) ; run(suffix) = run(whole)`, atom
+slices within a stage are runnable sub-tensors, and any slice boxes.
 
 ## 13. Open arity and exponents (summary)
 

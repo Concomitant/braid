@@ -599,6 +599,13 @@ evalTests =
   , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\n1 2 3 4 5 6 >> dot >> print", ["32"], "")
     -- firstTrue: guard lanes as a bare product, first true wins
   , ("def sign = x -> (x >> negative) [\"neg\"] (x >> zero) [\"zero\"] [x >> toStr] >> firstTrue\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
+    -- cut soundness: at stage boundaries, run(prefix) ; run(suffix) =
+    -- run(whole) — the concatenative property at spine granularity
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2 >> + >> dup >> *] >> getCode\ndef cutAt =\n    k ->\n    (k c >> take) >> evalCode\n    ((k c >> skip) ... >> evalCode >> (print | forget) >> merge | forget) >> merge\n0 >> cutAt\n1 >> cutAt\n3 >> cutAt", ["9", "9", "9"], "")
+    -- vertical cuts: atom slices within a stage are runnable sub-tensors
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef s0 = ([1 2 >> +] >> getCode) >> uncons >> (nil | (s r -> s)) >> merge\n(1 s0 >> take >> single) >> evalCode >> (print | forget) >> merge\n(1 s0 >> skip >> single) >> evalCode >> (print | forget) >> merge", ["1", "2"], "")
+    -- box: Code -> Fn without running; the check fires at apply
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge", ["3"], "")
   ]
 
 -- (module source, substring expected in the error)

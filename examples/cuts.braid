@@ -1,0 +1,44 @@
+# Diagram cuts. Braid is not token-concatenative — everything-exact
+# means an arbitrary text substring is not a program. What replaces it
+# is better: reflected code is in SPINE NORMAL FORM (Code = a list of
+# stages = the diagram's horizontal slices), and at that granularity
+# the concatenative property is a theorem you can run:
+#
+#   HORIZONTAL: every stage-boundary cut of a well-typed program
+#   yields two runnable pieces, and run(prefix) ; run(suffix) = run(whole).
+#   VERTICAL:   atom slices WITHIN a stage are sub-tensors — runnable.
+#   BOXING:     a Code slice becomes an Fn value without running
+#               (deferred through a closure; the dynamic check rides
+#               the railway at apply time).
+
+def getCode = reflect ; ((c -> c) | drop ; nil) ; merge
+def c = [1 2 >> + >> dup >> *] ; getCode          # 4 stages: [1 2] [+] [dup] [*]
+
+# ---- horizontal cut soundness, at EVERY boundary k = 0..4 ------------
+# run the prefix, feed its output to the suffix: always 9 = run(whole)
+def cutAt =
+    k ->
+    (k c ; take) ; evalCode
+    ((k c ; skip) ... ; evalCode ; (print | forget) ; merge | forget) ; merge
+
+0 ; cutAt      # 9
+1 ; cutAt      # 9   (cut mid-arithmetic: prefix leaves 1 2, suffix consumes)
+2 ; cutAt      # 9
+3 ; cutAt      # 9
+4 ; cutAt      # 9
+
+# ---- vertical cuts: slice atoms inside one stage ---------------------
+def stage0 = c ; uncons ; (nil | (s r -> s)) ; merge      # the stage [1, 2]
+(1 stage0 ; take ; single) ; evalCode ; (print | forget) ; merge    # 1
+(1 stage0 ; skip ; single) ; evalCode ; (print | forget) ; merge    # 2
+
+# a consuming stage cuts too: [dup drop] : a b ⇒ a a — take just [dup],
+# now a program of its own (: a ⇒ a a), cut free of its stage-mate
+def s2 = ([dup drop] ; getCode) ; uncons ; (nil | (s r -> s)) ; merge
+7 ; (1 s2 ; take ; single) ... ; evalCode
+    (_ print ; print | forget) ; merge                    # 7 7
+
+# ---- boxing: cut a slice, box it, use it LATER as a value ------------
+def box = (cd -> [(cd) ... ; evalCode])
+(2 c ; take) ; box                                 # Fn⟨ρ ⇒ (ρ' | Str ρ)⟩ — unopened
+apply ; (print | forget) ; merge                   # 3 — the boxed prefix, run at last
