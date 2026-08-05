@@ -102,6 +102,56 @@ monad at runtime).
   ordering problem (bundles are unordered products; state×exception
   interaction chosen per wiring site, not per stack order).
 
+## Formal grounding (references, checked 2026-08)
+
+The two intuitions this note leans on are theorems, not analogies, and
+the design is the *combination* of two established lineages:
+
+- **"Effects are an invisible wire" = Jeffrey's runtime object.** To
+  make a premonoidal/Freyd category's string diagrams well-defined you
+  thread ONE extra wire — the "runtime" — through every effectful box;
+  a wire can't pass two boxes in parallel, so it forbids the interchange
+  (sliding) that would reorder effects. It is a generic *control/order*
+  token, not necessarily a data value (state/log carry data; IO's wire
+  is an abstract sequencing token). Now known to be a *faithful*
+  internal language, not merely sound.
+    - A. Jeffrey, *Premonoidal categories and a graphical view of
+      programs*, 1997 (the original diagrams).
+    - M. Román, *Promonads and String Diagrams for Effectful
+      Categories*, arXiv:2205.07664 (2022).
+    - Earnshaw, Hefford, Román, *String Diagrams for Premonoidal
+      Categories*, arXiv:2305.06075 (2023) — faithfulness.
+- **"Arrows are the interface" = arrows ≅ Freyd categories.** An arrow
+  is an identity-on-objects functor from a cartesian category (pure
+  maps) into a premonoidal one (effectful maps) — NOT "arrow = monad"
+  and NOT "arrow = state".  This is why Braid, already cartesian, is
+  already an arrow (examples/arrows.braid).
+    - R. Atkey, *What is a categorical model of arrows?*, ENTCS 2011
+      (the precise correspondence).
+    - Power, Thielecke, *Closed Freyd- and κ-categories*, ICALP 1999.
+    - Power, Robinson, *Premonoidal categories and notions of
+      computation*, MSCS 1997 (premonoidal, the central/pure subcat).
+- **The `=IO Log GameState>` grade = a graded (parametric) effect
+  monad.** Hom-sets indexed by an ordered effect monoid; composition
+  multiplies grades, `⊗` joins, grade 1 = pure = the central subcat.
+    - S. Katsumata, *Parametric effect monads and semantics of effect
+      systems*, POPL 2014.
+- **The fusion actually built** (graded + premonoidal/Freyd), the
+  closest single anchor for "graded premonoidal category" as a
+  constructed object — it is otherwise the natural product of the two
+  lineages above, not a single canonical named gadget:
+    - Earnshaw, Hefford, Román (et al.), *Effectful Semantics in
+      2-Dimensional Categories: Premonoidal and Freyd Bicategories*,
+      ACT 2023, arXiv:2312.14964 (Freyd bicategory from a bistrong
+      graded monad).
+
+Framing: Braid's `>>` is the premonoidal composition, its `_`/`...`
+framing is Jeffrey's wire made explicit (the three zoom levels =
+invisible → named → drawn runtime wire), and the effect row is
+Katsumata's grade.  The one genuinely new-ish move is presenting this
+graded-Freyd structure as a *concatenative surface syntax* with the
+grade inferred.
+
 ## Honest gaps
 
 - Tail-resumptive fragment only: wire-discharge covers Reader/Writer/
