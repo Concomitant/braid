@@ -118,6 +118,8 @@ passTests =
   , ("(x ... -> x x ... >> + + >> +)", "Int Int Int ⇒ Int")
   , ("(x _ -> x x _ >> + _ >> +)",     "Int Int ⇒ Int")
   , ("(a b ... -> a b ... >> + +)",    "Int Int Int Int ⇒ Int Int")
+  , ("(x _ z -> z _ x)",         "a0 a1 a2 ⇒ a2 a1 a0")   -- slots are positional
+  , ("(_ x -> x _)",             "a0 a1 ⇒ a1 a0")
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
@@ -178,7 +180,7 @@ failTests =
     -- open binders: parameter-list ordering, and everything-exact still
     -- applies to the wires `_` hands to the body
   , ("(x ... y -> x)", "must be the last parameter")
-  , ("(_ x -> x)",     "must come before")
+  , ("(_ x -> x)",     "Cannot unify stacks")   -- the `_` wire is unaccounted for
   , ("(x _ -> x)",     "Cannot unify stacks")   -- the `_` wire is unaccounted for
   ]
 
@@ -659,9 +661,14 @@ evalTests =
   , ("1 2 3 >> (x ... -> x x ... >> + + >> +) >> print", ["7"], "")
   , ("1 2 >> (x _ -> x x _ >> + _ >> +) >> print", ["4"], "")
   , ("1 2 3 4 >> (a b ... -> a b ... >> + +) >> print print", ["3", "7"], "")
-    -- reflection: a `_` binder compiles to wiring (fixed width); a `...`
-    -- binder honestly refuses, since the passthrough width is erased
-  , ("[x _ -> x x _ >> + _ >> +] >> reflect >> (drop >> \"ok\" | id) >> merge >> print", ["ok"], "")
+  , ("1 2 3 >> (x _ z -> z _ x) >> print print print", ["3", "2", "1"], "")
+    -- reflection: a binder with `_` slots compiles to pure wiring; check
+    -- the ROUND-TRIP VALUE, not merely that reflection succeeded (a
+    -- success-only test let a wrong permutation ship once)
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x _] >> getCode\n7 8 >> (c) ... >> evalCode >> (print print | forget) >> merge", ["7", "8"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x x _ >> + _ >> +] >> getCode\n1 2 >> (c) ... >> evalCode >> (print | forget) >> merge", ["4"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ z -> z _ x] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print print print | forget) >> merge", ["3", "2", "1"], "")
+    -- a `...` binder honestly refuses: its passthrough width is erased
   , ("[x ... -> x ...] >> reflect >> (drop >> \"ok\" | id) >> merge >> print", ["cannot reflect a binder whose parameters end in '...'"], "")
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive

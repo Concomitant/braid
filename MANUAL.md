@@ -152,30 +152,35 @@ a tensor stage, and are in scope as constants — including inside quotes
 (closure capture). Bound names shadow prims/defs; duplicate parameters
 are rejected.
 
-**A parameter list uses the stage vocabulary.** A name consumes one
-wire and binds it; `_` consumes one wire and hands it to the *body*;
-`...` hands the body the whole rest. Whatever the list does not name
-becomes the body's input:
+**A parameter list uses the stage vocabulary**, one slot per wire, in
+any order (slots align with wires exactly as atoms do — leftmost =
+deepest). A name consumes one wire and binds it; `_` consumes one wire
+and hands it to the *body*; `...` hands the body the whole rest.
+Whatever the list does not name becomes the body's input:
 
 ```braid
-(x   -> body)   : A ⇒ Δ       body : • ⇒ Δ    # input-closed (the default)
-(x _ -> body)   : A B ⇒ Δ     body : B ⇒ Δ
-(x ...-> body)  : A ρ ⇒ Δ     body : ρ ⇒ Δ    # open binder
+(x     -> body)  : A ⇒ Δ       body : • ⇒ Δ   # input-closed (the default)
+(x _   -> body)  : A B ⇒ Δ     body : B ⇒ Δ
+(x _ z -> body)  : A B C ⇒ Δ   body : B ⇒ Δ   # `_` may sit anywhere
+(x ... -> body)  : A ρ ⇒ Δ     body : ρ ⇒ Δ   # open binder
 
 1 2 3 >> (x ... -> x x ... >> + + >> +)       # 1 1 2 3 → 2 5 → 7
+1 2 3 >> (x _ z -> z _ x)                     # → 3 2 1
 ```
 
 An **open binder** hands the remainder *to* the body, so the body can
 position it with `...` — unlike `(x -> body) ...`, which routes the
 remainder *around* the binder and leaves the body unable to touch it.
-Same wires, different power.
+Same wires, different power. (`_` slots, by contrast, are pure
+convenience: for a fixed arity you can always name the wire instead —
+`(x _ z -> z _ x)` ≡ `(x y z -> z y x)`.)
 
-Rules: names come first (they sit deepest), then any `_`, then at most
-one `...`, last. An open binder is an open-arity word, so it must be
-the final atom of its stage. Everything-exact still applies inside —
-the body must account for the wires `_`/`...` give it (`(x _ -> x)` is
-an error: the `_` wire goes unused). A `...` binder cannot be
-`reflect`ed (its passthrough width is erased); a `_` binder can.
+Rules: `...` must be last, and only one. An open binder is an
+open-arity word, so it must be the final atom of its stage.
+Everything-exact still applies inside — the body must account for the
+wires `_`/`...` give it (`(x _ -> x)` is an error: the `_` wire goes
+unused). A `...` binder cannot be `reflect`ed (its passthrough width is
+erased); `_` binders reflect fine, compiling to ordinary wiring.
 
 ### Rows `(p₁ | p₂ | …)`
 The sum functor's action: one wire in carrying `(Δ₁|Δ₂|…)`, component

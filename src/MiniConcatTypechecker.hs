@@ -705,18 +705,18 @@ data Term
   | Seq Term Term         -- t >> u
   | Quote Term            -- [p]: push the reified program p
                           -- must be a pure push (• ⇒ A)
-  | OpenAbs [String] Int Bool Term
-                          -- (x y [_ …] [...] -> body): named input wires,
-                          -- then a count of ANONYMOUS passthrough wires
-                          -- (`_`), then whether the params end in `...`.
-                          -- A parameter list uses a tensor stage's own
-                          -- vocabulary: a name consumes one wire and binds
-                          -- it, `_` consumes one wire and hands it to the
-                          -- BODY, `...` hands the whole rest to the body.
-                          -- Named params sit deepest (leftmost = deepest,
-                          -- as in a stage); the body's input is the
-                          -- passthrough wires.  With no `_`/`...` the body
-                          -- is input-closed — the original behaviour.
+  | OpenAbs [Maybe String] Bool Term
+                          -- (x _ z [...] -> body): ONE SLOT PER CONSUMED
+                          -- WIRE, aligned with wires exactly as atoms are
+                          -- in a tensor stage (leftmost = deepest).  A
+                          -- parameter list uses the stage vocabulary:
+                          -- `Just n` (a name) consumes one wire and binds
+                          -- it; `Nothing` (`_`) consumes one wire and
+                          -- hands it to the BODY; the flag says the params
+                          -- end in `...` (hand the body the whole rest).
+                          -- The body's input is the unnamed slots, in
+                          -- order, then the rest.  All-named and no `...`
+                          -- = input-closed: the original behaviour.
   | Alts [Term] Bool      -- (p₁ | … | pₙ [| ...]): code row — the sum
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
@@ -913,26 +913,25 @@ parseProgramToks toks =
       -- trailing `...`.  The stage vocabulary applies, with one
       -- ordering rule: names come first (they sit deepest), then any
       -- `_`, then at most one `...` last.
-      (ps, anons, hasRest) <- classifyParams toks0
-      case [ p | (p, n) <- zip ps [0 :: Int ..], p `elem` take n ps ] of
+      (slots, hasRest) <- classifyParams toks0
+      let ns = [ n | Just n <- slots ]
+      case [ p | (p, n) <- zip ns [0 :: Int ..], p `elem` take n ns ] of
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
       (body, rest') <- parseProgramToks rest
-      Right (OpenAbs ps anons hasRest body, rest')
+      Right (OpenAbs slots hasRest body, rest')
 
-    classifyParams = go [] 0
+    -- slots in written order; `_` is an unnamed slot, `...` (last only)
+    -- opens the body's input
+    classifyParams = go []
       where
-        go ns k []                     = Right (reverse ns, k, False)
-        go ns k [TokEllipsis]          = Right (reverse ns, k, True)
-        go _  _ (TokEllipsis : _)      =
+        go acc []                 = Right (reverse acc, False)
+        go acc [TokEllipsis]      = Right (reverse acc, True)
+        go _   (TokEllipsis : _)  =
           Left "'...' must be the last parameter of a binder"
-        go ns k (TokIdent "_" : r)     = go ns (k + 1) r
-        go ns k (TokIdent n : r)
-          | k > 0     = Left $ "Parameter " ++ n ++ " must come before '_' "
-                            ++ "and '...' (named parameters bind the "
-                            ++ "deepest wires)"
-          | otherwise = go (n : ns) k r
-        go _ _ _                       = Left "Malformed parameter list"
+        go acc (TokIdent "_" : r) = go (Nothing : acc) r
+        go acc (TokIdent n : r)   = go (Just n : acc) r
+        go _   _                  = Left "Malformed parameter list"
 
     -- a maximal run of identifiers (and `_`/`...`) immediately followed
     -- by `->`; the newline(s) after the arrow are absorbed so the body
@@ -1735,29 +1734,30 @@ inferOperand env _ (Alts comps residual) = do
       outRow = foldr RCons end [ o | Arrow _ o <- arrows ]
   pure ( Arrow (SCons (TSum inRow) SEnd) (SCons (TSum outRow) SEnd)
        , cs )
-inferOperand env _ (OpenAbs ps anons hasRest body) = do
+inferOperand env _ (OpenAbs slots hasRest body) = do
   -- Named open abstraction (x₁ … xₙ [_ …] [...] -> body).  Each name
   -- enters scope as a monomorphic terminal-source producer xᵢ : • ⇒ Aᵢ —
   -- the free metavariable is shared across occurrences, so repeated use
   -- is forced to one consistent type (λ-binding, HM-style).
   --
-  -- The names sit DEEPEST (leftmost = deepest, exactly as atoms align in
-  -- a tensor stage).  Whatever the parameter list does NOT name becomes
-  -- the body's input: `_` contributes one wire, `...` an open tail.  So
-  --    (x    -> body) : A ⇒ Δ           body :  •  ⇒ Δ   (input-closed)
-  --    (x _  -> body) : A B ⇒ Δ         body :  B  ⇒ Δ
-  --    (x ...-> body) : A ρ ⇒ Δ         body :  ρ  ⇒ Δ
+  -- Slots align with wires positionally (leftmost = deepest, exactly as
+  -- atoms align in a tensor stage).  Whatever a slot does NOT name goes
+  -- to the body: `_` contributes one wire, `...` an open tail.  So
+  --    (x     -> body) : A ⇒ Δ        body :  •  ⇒ Δ   (input-closed)
+  --    (x _   -> body) : A B ⇒ Δ      body :  B  ⇒ Δ
+  --    (x _ z -> body) : A B C ⇒ Δ    body :  B  ⇒ Δ   (interleaved)
+  --    (x ... -> body) : A ρ ⇒ Δ      body :  ρ  ⇒ Δ   (open)
   -- The remainder is handed TO the body (so it can place it with `...`),
   -- unlike `(x -> body) ...`, which routes it around the binder.
-  ptys <- mapM (const freshTyVarName) ps
-  atys <- mapM (const freshTyVarName) [1 .. anons]
+  stys <- mapM (const freshTyVarName) slots
   let paramScheme av = Forall [] [] [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
-      env' = foldr (\(p, av) -> M.insert p (paramScheme av))
-                   env (zip ps ptys)
+      env' = foldr (\(p, av) -> M.insert p (paramScheme av)) env
+                   [ (n, av) | (Just n, av) <- zip slots stys ]
   (Arrow bi bo, cs) <- infer env' body
   restS <- if hasRest then STail <$> freshSVarName else pure SEnd
-  let bodyIn = foldr (SCons . TVarTy) restS atys
-      inS    = foldr (SCons . TVarTy) bodyIn ptys
+  let bodyIn = foldr (SCons . TVarTy) restS
+                     [ av | (Nothing, av) <- zip slots stys ]
+      inS    = foldr (SCons . TVarTy) restS stys
   pure (Arrow inS bo, CEqStack bi bodyIn : cs)
 inferOperand env final t
   | final     = infer env t
@@ -2030,7 +2030,8 @@ primsIn (Prim n)        = [n]
 primsIn (Tensor ts)     = concatMap primsIn ts
 primsIn (Seq t u)       = primsIn t ++ primsIn u
 primsIn (Quote t)       = primsIn t
-primsIn (OpenAbs ps _ _ t) = [ n | n <- primsIn t, n `notElem` ps ]
+primsIn (OpenAbs slots _ t) =
+  [ n | n <- primsIn t, n `notElem` [ x | Just x <- slots ] ]
 primsIn (Alts comps _)  = concatMap primsIn comps
 
 -- Replace the def-local keyword `recurse` with the def's own name
@@ -2044,9 +2045,9 @@ substRecurse nm = go
     go (Seq a b)        = Seq (go a) (go b)
     go (Quote t)        = Quote (go t)
     go (Alts cs r)      = Alts (map go cs) r
-    go t@(OpenAbs ps anons hasRest b)
-      | "recurse" `elem` ps = t
-      | otherwise           = OpenAbs ps anons hasRest (go b)
+    go t@(OpenAbs slots hasRest b)
+      | Just "recurse" `elem` slots = t
+      | otherwise                   = OpenAbs slots hasRest (go b)
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
@@ -2878,10 +2879,11 @@ evalTerm env defs vars term st =
     -- whole remaining segment when the params end in `...` (an open
     -- binder is segment-consuming, like any open-arity word, so it must
     -- be the final atom of its stage).
-    applyAtom isFinal (OpenAbs ps anons hasRest body) stk = do
-      (args, stk') <- takeWires "abstraction" (length ps + anons) stk
-      let (bound, anonVals) = splitAt (length ps) args
-          vars' = M.fromList (zip ps bound) `M.union` vars
+    applyAtom isFinal (OpenAbs slots hasRest body) stk = do
+      (args, stk') <- takeWires "abstraction" (length slots) stk
+      let vars' = M.fromList [ (n, v) | (Just n, v) <- zip slots args ]
+                    `M.union` vars
+          anonVals = [ v | (Nothing, v) <- zip slots args ]
           open  = hasRest && isFinal
           seg   = if open then stk' else []
       (out, logs) <- evalTerm env defs vars' body (anonVals ++ seg)
@@ -3023,8 +3025,8 @@ renderTerm t =
     rAtom (Alts cs res) =
       "(" ++ intercalate " | " (map renderTerm cs)
           ++ (if res then " | ..." else "") ++ ")"
-    rAtom (OpenAbs ps anons hasRest b) =
-      "(" ++ unwords (ps ++ replicate anons "_" ++ ["..." | hasRest])
+    rAtom (OpenAbs slots hasRest b) =
+      "(" ++ unwords (map (maybe "_" id) slots ++ ["..." | hasRest])
           ++ " -> " ++ renderTerm b ++ ")"
     rAtom g = "(" ++ renderTerm g ++ ")"
     esc '"'  = "\\\""
@@ -3112,8 +3114,9 @@ groundTerm env cv = go cv
     go vars (Tensor ts)  = Tensor <$> mapM (go vars) ts
     go vars (Quote t)    = Quote <$> go vars t
     go vars (Alts cs r)  = Alts <$> mapM (go vars) cs <*> pure r
-    go vars (OpenAbs ps anons hasRest b) =
-      OpenAbs ps anons hasRest <$> go (foldr M.delete vars ps) b
+    go vars (OpenAbs slots hasRest b) =
+      OpenAbs slots hasRest
+        <$> go (foldr M.delete vars [ n | Just n <- slots ]) b
 
 --------------------------------------------------------------------------------
 -- 11.6 Abstraction elimination (grinding the non-concatenative edges)
@@ -3126,14 +3129,43 @@ elimAbsTerm env = go
     go (Tensor ts)    = Tensor <$> mapM go ts
     go (Quote t)      = Quote <$> go t
     go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
-    go (OpenAbs ps anons hasRest b) = do
+    go (OpenAbs slots hasRest b) = do
       b' <- go b
       if hasRest
         -- the passthrough width is erased, so there is no static wire
         -- count to compile the parameter block against
         then Left "cannot reflect a binder whose parameters end in '...'"
-        else compileAbsOpen env ps anons b'
+        else do
+          -- compileAbsOpen wants the layout [body inputs (deepest)]
+          -- [param block] — the params sit ABOVE the wires the body
+          -- consumes (its finalStage passes k0 wires and then drops the
+          -- params).  Braid binders bind the DEEPEST wires, so every
+          -- slot list with a `_` needs a permutation prefix that sinks
+          -- the unnamed wires below the named ones.
+          let names = [ n | Just n <- slots ]
+              anons = length [ () | Nothing <- slots ]
+          inner <- compileAbsOpen env names anons b'
+          pure (foldr Seq inner (paramsAboveStages slots))
     go t = Right t
+
+-- Adjacent-transposition stages that stably sink the UNNAMED slots
+-- below the named ones, rearranging a positional parameter list into
+-- the [body inputs][params] layout compileAbsOpen compiles against.
+-- Stable (a bubble pass on the unnamed/named key), so each group keeps
+-- its written order — in particular the first-written name stays the
+-- deepest param.  Empty when there is nothing to move.
+paramsAboveStages :: [Maybe String] -> [Term]
+paramsAboveStages slots0 = go (map key slots0) []
+  where
+    key = maybe (0 :: Int) (const 1)
+    go keys acc =
+      case [ d | (d, (a, b)) <- zip [0 :: Int ..] (zip keys (drop 1 keys))
+               , a > b ] of
+        []      -> reverse acc
+        (d : _) -> go (swapIdx d keys) (Tensor (swapAt d) : acc)
+    swapAt d = replicate d (Prim "_") ++ [Prim "swap", Prim "pass"]
+    swapIdx d xs =
+      take d xs ++ [xs !! (d + 1), xs !! d] ++ drop (d + 2) xs
 
 freeNamesIn :: Term -> [String]
 freeNamesIn = go
@@ -3143,7 +3175,8 @@ freeNamesIn = go
     go (Tensor ts)    = concatMap go ts
     go (Quote t)      = go t
     go (Alts cs _)    = concatMap go cs
-    go (OpenAbs ps _ _ b) = filter (`notElem` ps) (go b)
+    go (OpenAbs slots _ b) =
+      filter (`notElem` [ n | Just n <- slots ]) (go b)
 
 -- (input arity, output arity, param copies to insert at relative input
 -- offsets, replacement atom)
