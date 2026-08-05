@@ -93,6 +93,7 @@ pile bottom-up — the `decide` ladder exploits this (§11).
 **Placement rules** (one family, one logic — the open thing must come
 last so the runtime segment can be its witness):
 - an open-arity word must be the final atom of its stage (§13);
+- an open binder (`x ... -> …`) must be the final atom of its stage;
 - a recursive call must be the final atom of its stage;
 - `...` must be the final atom of its stage.
 
@@ -141,16 +142,40 @@ tensor position are typed closed (their outer tails become `•`).
 ### Binders
 ```braid
 (x y -> body)      # inline: an atom consuming two wires
+[x y -> body]      # quoted: an Fn value (a closure)
 def w =
     x y ->         # postfix: names the top wires; the REST of the
     body           # scope is the body
 ```
-Parameters bind top-of-stack wires (leftmost name = deepest of those
-taken) and are in scope as constants — including inside quotes
-(closure capture). **The body is input-closed**: all input arrives
-through the parameters; a binder cannot take some wires and leave
-others flowing underneath. Bound names shadow prims/defs. Duplicate
-parameters are rejected.
+Parameters bind wires **leftmost = deepest**, exactly as atoms align in
+a tensor stage, and are in scope as constants — including inside quotes
+(closure capture). Bound names shadow prims/defs; duplicate parameters
+are rejected.
+
+**A parameter list uses the stage vocabulary.** A name consumes one
+wire and binds it; `_` consumes one wire and hands it to the *body*;
+`...` hands the body the whole rest. Whatever the list does not name
+becomes the body's input:
+
+```braid
+(x   -> body)   : A ⇒ Δ       body : • ⇒ Δ    # input-closed (the default)
+(x _ -> body)   : A B ⇒ Δ     body : B ⇒ Δ
+(x ...-> body)  : A ρ ⇒ Δ     body : ρ ⇒ Δ    # open binder
+
+1 2 3 >> (x ... -> x x ... >> + + >> +)       # 1 1 2 3 → 2 5 → 7
+```
+
+An **open binder** hands the remainder *to* the body, so the body can
+position it with `...` — unlike `(x -> body) ...`, which routes the
+remainder *around* the binder and leaves the body unable to touch it.
+Same wires, different power.
+
+Rules: names come first (they sit deepest), then any `_`, then at most
+one `...`, last. An open binder is an open-arity word, so it must be
+the final atom of its stage. Everything-exact still applies inside —
+the body must account for the wires `_`/`...` give it (`(x _ -> x)` is
+an error: the `_` wire goes unused). A `...` binder cannot be
+`reflect`ed (its passthrough width is erased); a `_` binder can.
 
 ### Rows `(p₁ | p₂ | …)`
 The sum functor's action: one wire in carrying `(Δ₁|Δ₂|…)`, component
@@ -486,6 +511,9 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - `||` lanes are juxtapositions — a `;`/`>>` inside a lane needs a group.
 - `def name = x -> …` ends at the line; use the block form (`def name =`
   newline `x ->`) for multi-line bodies.
+- A binder's body only sees what the parameter list gives it. Need the
+  remainder inside the body? Use an open binder (`x ... -> …`), not
+  `(x -> …) ...` — the latter routes the rest *around* the binder.
 - Sums never flatten; use `assocL`/`assocR`/`case(…)` to manage
   nesting, and one `merge` per level to collapse.
 - Recursive calls and open-arity words: final atom of their stage.

@@ -705,9 +705,18 @@ data Term
   | Seq Term Term         -- t >> u
   | Quote Term            -- [p]: push the reified program p
                           -- must be a pure push (• ⇒ A)
-  | OpenAbs [String] Term -- (x y -> body): open program with named input
-                          -- wires; the body is input-closed (all input
-                          -- arrives through the parameters)
+  | OpenAbs [String] Int Bool Term
+                          -- (x y [_ …] [...] -> body): named input wires,
+                          -- then a count of ANONYMOUS passthrough wires
+                          -- (`_`), then whether the params end in `...`.
+                          -- A parameter list uses a tensor stage's own
+                          -- vocabulary: a name consumes one wire and binds
+                          -- it, `_` consumes one wire and hands it to the
+                          -- BODY, `...` hands the whole rest to the body.
+                          -- Named params sit deepest (leftmost = deepest,
+                          -- as in a stage); the body's input is the
+                          -- passthrough wires.  With no `_`/`...` the body
+                          -- is input-closed — the original behaviour.
   | Alts [Term] Bool      -- (p₁ | … | pₙ [| ...]): code row — the sum
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
@@ -899,23 +908,43 @@ parseProgramToks toks =
           loop (Seq acc t) rest'
     loop acc rest = Right (acc, rest)
 
-    mkAbs ps rest = do
+    mkAbs toks0 rest = do
+      -- split the parameter list into names, `_` passthroughs and a
+      -- trailing `...`.  The stage vocabulary applies, with one
+      -- ordering rule: names come first (they sit deepest), then any
+      -- `_`, then at most one `...` last.
+      (ps, anons, hasRest) <- classifyParams toks0
       case [ p | (p, n) <- zip ps [0 :: Int ..], p `elem` take n ps ] of
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
       (body, rest') <- parseProgramToks rest
-      Right (OpenAbs ps body, rest')
+      Right (OpenAbs ps anons hasRest body, rest')
 
-    -- a maximal run of identifiers immediately followed by `->`; the
-    -- newline(s) after the arrow are absorbed so the body may start on
-    -- the next line (`x y ->` on its own pipeline stage)
+    classifyParams = go [] 0
+      where
+        go ns k []                     = Right (reverse ns, k, False)
+        go ns k [TokEllipsis]          = Right (reverse ns, k, True)
+        go _  _ (TokEllipsis : _)      =
+          Left "'...' must be the last parameter of a binder"
+        go ns k (TokIdent "_" : r)     = go ns (k + 1) r
+        go ns k (TokIdent n : r)
+          | k > 0     = Left $ "Parameter " ++ n ++ " must come before '_' "
+                            ++ "and '...' (named parameters bind the "
+                            ++ "deepest wires)"
+          | otherwise = go (n : ns) k r
+        go _ _ _                       = Left "Malformed parameter list"
+
+    -- a maximal run of identifiers (and `_`/`...`) immediately followed
+    -- by `->`; the newline(s) after the arrow are absorbed so the body
+    -- may start on the next line (`x y ->` on its own pipeline stage)
     binderPrefix ts =
-      case span isIdentTok ts of
+      case span isParamTok ts of
         (ids@(_ : _), TokArrow : r) ->
-          Just ([n | TokIdent n <- ids], dropWhile (== TokNewline) r)
+          Just (ids, dropWhile (== TokNewline) r)
         _                           -> Nothing
-    isIdentTok (TokIdent _) = True
-    isIdentTok _            = False
+    isParamTok (TokIdent _) = True
+    isParamTok TokEllipsis  = True
+    isParamTok _            = False
 
 -- row level: sequences joined by |, optional trailing `| ...` residual
 parseRow :: [Token] -> Either String (Term, [Token])
@@ -1706,20 +1735,30 @@ inferOperand env _ (Alts comps residual) = do
       outRow = foldr RCons end [ o | Arrow _ o <- arrows ]
   pure ( Arrow (SCons (TSum inRow) SEnd) (SCons (TSum outRow) SEnd)
        , cs )
-inferOperand env _ (OpenAbs ps body) = do
-  -- Named open abstraction (x₁ … xₙ -> body).  Each parameter enters
-  -- scope as a monomorphic terminal-source producer xᵢ : • ⇒ Aᵢ — the
-  -- free metavariable is shared across occurrences, so repeated use is
-  -- forced to one consistent type (λ-binding, HM-style).  The body must
-  -- be input-closed: all input arrives through the parameters.  The
-  -- abstraction is exact in every position: A₁ … Aₙ ⇒ Δ.
+inferOperand env _ (OpenAbs ps anons hasRest body) = do
+  -- Named open abstraction (x₁ … xₙ [_ …] [...] -> body).  Each name
+  -- enters scope as a monomorphic terminal-source producer xᵢ : • ⇒ Aᵢ —
+  -- the free metavariable is shared across occurrences, so repeated use
+  -- is forced to one consistent type (λ-binding, HM-style).
+  --
+  -- The names sit DEEPEST (leftmost = deepest, exactly as atoms align in
+  -- a tensor stage).  Whatever the parameter list does NOT name becomes
+  -- the body's input: `_` contributes one wire, `...` an open tail.  So
+  --    (x    -> body) : A ⇒ Δ           body :  •  ⇒ Δ   (input-closed)
+  --    (x _  -> body) : A B ⇒ Δ         body :  B  ⇒ Δ
+  --    (x ...-> body) : A ρ ⇒ Δ         body :  ρ  ⇒ Δ
+  -- The remainder is handed TO the body (so it can place it with `...`),
+  -- unlike `(x -> body) ...`, which routes it around the binder.
   ptys <- mapM (const freshTyVarName) ps
+  atys <- mapM (const freshTyVarName) [1 .. anons]
   let paramScheme av = Forall [] [] [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
       env' = foldr (\(p, av) -> M.insert p (paramScheme av))
                    env (zip ps ptys)
   (Arrow bi bo, cs) <- infer env' body
-  let inS = foldr (SCons . TVarTy) SEnd ptys
-  pure (Arrow inS bo, CEqStack bi SEnd : cs)
+  restS <- if hasRest then STail <$> freshSVarName else pure SEnd
+  let bodyIn = foldr (SCons . TVarTy) restS atys
+      inS    = foldr (SCons . TVarTy) bodyIn ptys
+  pure (Arrow inS bo, CEqStack bi bodyIn : cs)
 inferOperand env final t
   | final     = infer env t
   | otherwise = do
@@ -1991,7 +2030,7 @@ primsIn (Prim n)        = [n]
 primsIn (Tensor ts)     = concatMap primsIn ts
 primsIn (Seq t u)       = primsIn t ++ primsIn u
 primsIn (Quote t)       = primsIn t
-primsIn (OpenAbs ps t)  = [ n | n <- primsIn t, n `notElem` ps ]
+primsIn (OpenAbs ps _ _ t) = [ n | n <- primsIn t, n `notElem` ps ]
 primsIn (Alts comps _)  = concatMap primsIn comps
 
 -- Replace the def-local keyword `recurse` with the def's own name
@@ -2005,9 +2044,9 @@ substRecurse nm = go
     go (Seq a b)        = Seq (go a) (go b)
     go (Quote t)        = Quote (go t)
     go (Alts cs r)      = Alts (map go cs) r
-    go t@(OpenAbs ps b)
+    go t@(OpenAbs ps anons hasRest b)
       | "recurse" `elem` ps = t
-      | otherwise           = OpenAbs ps (go b)
+      | otherwise           = OpenAbs ps anons hasRest (go b)
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
@@ -2834,13 +2873,19 @@ evalTerm env defs vars term st =
           | otherwise ->
               throwError "Runtime error in code row: tag out of range"
         _ -> throwError "Runtime type error in code row: expected a sum value"
-    -- Named abstraction: bind the parameter wires (left to right), run
-    -- the body on the empty stack in the extended scope.
-    applyAtom _ (OpenAbs ps body) stk = do
-      (args, stk') <- takeWires "abstraction" (length ps) stk
-      let vars' = M.fromList (zip ps args) `M.union` vars
-      (out, logs) <- evalTerm env defs vars' body []
-      pure (out, stk', logs)
+    -- Named abstraction: bind the named wires (left to right, deepest
+    -- first), then run the body on ITS input — the `_` wires, plus the
+    -- whole remaining segment when the params end in `...` (an open
+    -- binder is segment-consuming, like any open-arity word, so it must
+    -- be the final atom of its stage).
+    applyAtom isFinal (OpenAbs ps anons hasRest body) stk = do
+      (args, stk') <- takeWires "abstraction" (length ps + anons) stk
+      let (bound, anonVals) = splitAt (length ps) args
+          vars' = M.fromList (zip ps bound) `M.union` vars
+          open  = hasRest && isFinal
+          seg   = if open then stk' else []
+      (out, logs) <- evalTerm env defs vars' body (anonVals ++ seg)
+      pure (out, if open then [] else stk', logs)
     -- Grouped compound operand (Seq/Tensor as an atom).  Final: evaluate
     -- on the whole remaining stack (its open tail carries the remainder).
     -- Non-final: it was typed closed, so take exactly its inferred arity.
@@ -2978,8 +3023,9 @@ renderTerm t =
     rAtom (Alts cs res) =
       "(" ++ intercalate " | " (map renderTerm cs)
           ++ (if res then " | ..." else "") ++ ")"
-    rAtom (OpenAbs ps b) =
-      "(" ++ unwords ps ++ " -> " ++ renderTerm b ++ ")"
+    rAtom (OpenAbs ps anons hasRest b) =
+      "(" ++ unwords (ps ++ replicate anons "_" ++ ["..." | hasRest])
+          ++ " -> " ++ renderTerm b ++ ")"
     rAtom g = "(" ++ renderTerm g ++ ")"
     esc '"'  = "\\\""
     esc '\\' = "\\\\"
@@ -3013,7 +3059,7 @@ termToCodeV env t = do
     atomVal (Alts comps residual) = do
       cs <- mapM (termToCodeV env) comps
       pure (VSum 5 [encodeListV cs, encodeBoolV residual])
-    atomVal (OpenAbs _ _) =
+    atomVal (OpenAbs {}) =
       Left "internal: abstraction survived elimination"
     atomVal g = do
       c <- termToCodeV env g
@@ -3066,8 +3112,8 @@ groundTerm env cv = go cv
     go vars (Tensor ts)  = Tensor <$> mapM (go vars) ts
     go vars (Quote t)    = Quote <$> go vars t
     go vars (Alts cs r)  = Alts <$> mapM (go vars) cs <*> pure r
-    go vars (OpenAbs ps b) =
-      OpenAbs ps <$> go (foldr M.delete vars ps) b
+    go vars (OpenAbs ps anons hasRest b) =
+      OpenAbs ps anons hasRest <$> go (foldr M.delete vars ps) b
 
 --------------------------------------------------------------------------------
 -- 11.6 Abstraction elimination (grinding the non-concatenative edges)
@@ -3080,9 +3126,13 @@ elimAbsTerm env = go
     go (Tensor ts)    = Tensor <$> mapM go ts
     go (Quote t)      = Quote <$> go t
     go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
-    go (OpenAbs ps b) = do
+    go (OpenAbs ps anons hasRest b) = do
       b' <- go b
-      compileAbs env ps b'
+      if hasRest
+        -- the passthrough width is erased, so there is no static wire
+        -- count to compile the parameter block against
+        then Left "cannot reflect a binder whose parameters end in '...'"
+        else compileAbsOpen env ps anons b'
     go t = Right t
 
 freeNamesIn :: Term -> [String]
@@ -3093,7 +3143,7 @@ freeNamesIn = go
     go (Tensor ts)    = concatMap go ts
     go (Quote t)      = go t
     go (Alts cs _)    = concatMap go cs
-    go (OpenAbs ps b) = filter (`notElem` ps) (go b)
+    go (OpenAbs ps _ _ b) = filter (`notElem` ps) (go b)
 
 -- (input arity, output arity, param copies to insert at relative input
 -- offsets, replacement atom)
@@ -3172,7 +3222,7 @@ compileAbsOpen env ps k0 body = do
       | any (any (`elem` ps) . freeNamesIn) cs =
           Left "reflect: parameter used inside a row component — not reflectable yet"
       | otherwise = Right (AtomInfo 1 1 [] t)
-    classify (OpenAbs _ _) =
+    classify (OpenAbs {}) =
       Left "internal: nested abstraction not yet eliminated"
     classify g = groupInfo g
 

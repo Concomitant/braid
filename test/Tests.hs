@@ -110,6 +110,14 @@ passTests =
   , ("case(dup >> +, drop >> 3)",               "(Int | a0) ⇒ Int")
     -- bare rows: each LINE is a code row (>> binds tighter than |,
     -- | tighter than newline)
+    -- open binders: a parameter list uses the stage vocabulary — a name
+    -- binds one wire (deepest first), `_` hands one wire to the BODY,
+    -- `...` hands it the whole rest.  No `_`/`...` = input-closed (the
+    -- original behaviour, unchanged).
+  , ("(x ... -> x ...)",         "a0 ρ0 ⇒ a0 ρ0")
+  , ("(x ... -> x x ... >> + + >> +)", "Int Int Int ⇒ Int")
+  , ("(x _ -> x x _ >> + _ >> +)",     "Int Int ⇒ Int")
+  , ("(a b ... -> a b ... >> + +)",    "Int Int Int Int ⇒ Int Int")
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
@@ -167,6 +175,11 @@ failTests =
   , ("[x 1 >> +]",    "Unknown primitive: x")   -- no inferred-parameter quotation
   , ("(x -> +)",      "Cannot unify stacks")    -- body must be input-closed
   , ("(x x -> x)",    "Duplicate parameter")
+    -- open binders: parameter-list ordering, and everything-exact still
+    -- applies to the wires `_` hands to the body
+  , ("(x ... y -> x)", "must be the last parameter")
+  , ("(_ x -> x)",     "must come before")
+  , ("(x _ -> x)",     "Cannot unify stacks")   -- the `_` wire is unaccounted for
   ]
 
 -- (module source, expected alpha-normalized type of main)
@@ -640,6 +653,16 @@ evalTests =
     -- so when a prelude combinator (map) applies it, the user def dbl
     -- resolves — even though map's own scope never saw dbl.
   , ("def dbl = 2 _ >> *\n(1 2 3 >> pack) >> [dbl] ... >> map >> print", ["list(2, 4, 6)"], "")
+    -- open binders at runtime: the remainder is handed TO the body, so
+    -- the body positions it (unlike `(x -> body) ...`, which routes it
+    -- around).  1 1 2 3 -> 2 5 -> 7.
+  , ("1 2 3 >> (x ... -> x x ... >> + + >> +) >> print", ["7"], "")
+  , ("1 2 >> (x _ -> x x _ >> + _ >> +) >> print", ["4"], "")
+  , ("1 2 3 4 >> (a b ... -> a b ... >> + +) >> print print", ["3", "7"], "")
+    -- reflection: a `_` binder compiles to wiring (fixed width); a `...`
+    -- binder honestly refuses, since the passthrough width is erased
+  , ("[x _ -> x x _ >> + _ >> +] >> reflect >> (drop >> \"ok\" | id) >> merge >> print", ["ok"], "")
+  , ("[x ... -> x ...] >> reflect >> (drop >> \"ok\" | id) >> merge >> print", ["cannot reflect a binder whose parameters end in '...'"], "")
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
