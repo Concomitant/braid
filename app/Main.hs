@@ -231,7 +231,9 @@ handleLine st line =
               let (scs, runs) = dataDeclArtifacts dd
                   envCtors = foldr (uncurry M.insert) envClean scs
                   st1 = st { rsEnv     = envCtors
-                           , rsRun     = M.fromList runs `M.union` rsRun st
+                           , rsRun     = extendRunDefs (rsRun st)
+                                           [ (nm, ar, op, t)
+                                           | (nm, (ar, op, t)) <- runs ]
                            , rsDatas   = dd : filter ((/= n) . dName)
                                                      (rsDatas st)
                            , rsAliases = filter ((/= n) . aName)
@@ -253,7 +255,7 @@ handleLine st line =
                                ++ maybe "?" (showSchemeA (rsAliases st1))
                                     (M.lookup fn (modEnv m))
                       pure st1 { rsEnv = modEnv m
-                               , rsRun = moduleRunDefs m `M.union` rsRun st1 }
+                               , rsRun = buildRunDefs (rsRun st1) m }
 
     -- def name = program : extend (or replace) a user definition;
     -- prelude names may always be shadowed
@@ -269,7 +271,7 @@ handleLine st line =
               putStrLn $ "def " ++ n ++ " : " ++ showSchemeA (rsAliases st) sc
               pure st
                 { rsEnv      = modEnv m
-                , rsRun      = moduleRunDefs m `M.union` rsRun st
+                , rsRun      = buildRunDefs (rsRun st) m
                 , rsDocs     = modDocs m `M.union` rsDocs st
                 , rsUserDefs =
                     rsUserDefs st ++ [n | n `notElem` rsUserDefs st]

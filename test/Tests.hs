@@ -618,6 +618,16 @@ evalTests =
   , ("(1 2 3 >> pack) >> sum >> print\n(pack) >> len >> print", ["6", "0"], "")
   , ("(1 10 2 20 >> pack2) >> [0] [(acc a b -> (a b >> *) acc >> +)] ... >> foldList >> print", ["50"], "")
   , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> apply >> print", ["list(7, 70)"], "")
+    -- EARLY BINDING: shadowing a prelude ingredient (equals, here forced
+    -- always-true) must NOT leak into the derived prelude word odd? that
+    -- was typechecked against the original.  odd? classifies 4 as even
+    -- via the REAL equals; the direct call sees the shadow.  (Late
+    -- binding would print "odd" then "eq".)
+  , ("def equals = drop drop >> true\n4 >> odd? >> (drop >> \"odd\" | drop >> \"even\") >> merge >> print\n2 3 >> equals >> (\"eq\" | \"neq\") >> merge >> print", ["even", "eq"], "")
+    -- CLOSURE CAPTURE: a quote written in user scope carries that scope,
+    -- so when a prelude combinator (map) applies it, the user def dbl
+    -- resolves — even though map's own scope never saw dbl.
+  , ("def dbl = 2 _ >> *\n(1 2 3 >> pack) >> [dbl] ... >> map >> print", ["list(2, 4, 6)"], "")
   ]
 
 -- (module source, substring expected in the error)

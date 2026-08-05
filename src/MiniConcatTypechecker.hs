@@ -2467,9 +2467,23 @@ data Value
   = VInt Int
   | VStr String
   | VSym String
-  | VFn VarEnv Term
+  | VFn RunDefs VarEnv Term   -- a quote closes over BOTH its binder values
+                              -- (VarEnv) and the def-scope it was written in
+                              -- (RunDefs), so free def-names resolve where the
+                              -- quote was DEFINED, not where it is applied —
+                              -- the closure discipline early binding requires
   | VSum Int [Value]   -- tag (0-based) + the alternative's wire bundle
-  deriving (Eq)
+
+-- Equality ignores a quote's captured scope: two quotes are equal when
+-- their binder values and bodies match.  (Comparing scopes would be
+-- meaningless for `eq?` and would loop on the recursive self-knot.)
+instance Eq Value where
+  VInt a     == VInt b     = a == b
+  VStr a     == VStr b     = a == b
+  VSym a     == VSym b     = a == b
+  VFn _ va a == VFn _ vb b = va == vb && a == b
+  VSum i vs  == VSum j ws  = i == j && vs == ws
+  _          == _          = False
 
 -- Cons-shaped sum spines (in2(x, in2(y, … in1()))) display as
 -- list(x, y, …); a bare in1() stays in1().
@@ -2488,7 +2502,7 @@ instance Show Value where
   show (VInt n)      = show n
   show (VStr t)      = t
   show (VSym t)      = t
-  show (VFn _ _)     = "[fn]"
+  show (VFn _ _ _)   = "[fn]"
   show (VSum i vs)   =
     "in" ++ show (i + 1) ++ "(" ++ intercalate ", " (map show vs) ++ ")"
 
@@ -2497,17 +2511,49 @@ closedArity :: SType -> Int
 closedArity (SCons _ rest) = 1 + closedArity rest
 closedArity _              = 0
 
--- name -> (closed input arity, input has an open tail, body).  A def
--- whose input ends in a stack variable is segment-consuming: as the
--- final atom it takes the whole remaining stack (like apply/loop);
--- non-final the typechecker closed the tail, so exact arity is right.
-type RunDefs = Map String (Int, Bool, Term)
+-- A runtime definition: closed input arity, whether the input has an
+-- open tail (segment-consuming as a final atom, like apply/loop), the
+-- body term, and — crucially — the SCOPE the body resolves names
+-- against.  The scope is a SNAPSHOT taken when the def was introduced:
+-- the environment as it stood then, plus the def itself (a lazy knot
+-- for recursion).  This makes name resolution EARLY-bound — later
+-- shadowing cannot reach into an existing body — matching how the
+-- typechecker checks each def against the env as it stood at that
+-- point.  (Dynamically spliced code via `evalCode` still resolves
+-- against the live environment; see its clause.)
+data DefEntry = DefEntry
+  { deArity :: !Int
+  , deOpen  :: !Bool
+  , deBody  :: Term
+  , deScope :: RunDefs
+  }
+
+type RunDefs = Map String DefEntry
+
+-- Extend `base` with defs in definition order; each body snapshots
+-- base + all-earlier-defs + itself.  Braid has no forward references
+-- (the typechecker's left fold rejects them), so "earlier defs" is the
+-- exact set a body may legally mention besides itself.
+extendRunDefs :: RunDefs -> [(String, Int, Bool, Term)] -> RunDefs
+extendRunDefs = foldl step
+  where
+    step acc (name, ar, op, body) =
+      let scope = M.insert name entry acc   -- self-knot: recursion sees `entry`
+          entry = DefEntry ar op body scope
+      in scope
 
 moduleRunDefs :: Module -> RunDefs
-moduleRunDefs m =
-  M.fromList
-    (  concat [ snd (dataDeclArtifacts d) | d <- modDatas m ]
-    ++ [ (name, (arityOf sc, openOf sc, term))
+moduleRunDefs = buildRunDefs M.empty
+
+-- Fold a module's data artifacts and defs onto a base environment.
+-- Data-artifact bodies are prim-only (constructors, unrollers, merge),
+-- so their scope is inert; defs follow, in order, and capture it.
+buildRunDefs :: RunDefs -> Module -> RunDefs
+buildRunDefs base m =
+  extendRunDefs base
+    (  [ (name, ar, op, term)
+       | d <- modDatas m, (name, (ar, op, term)) <- snd (dataDeclArtifacts d) ]
+    ++ [ (name, arityOf sc, openOf sc, term)
        | (name, sc, term) <- modDefs m ] )
   where
     arityOf (Forall _ _ _ _ (Arrow i _)) = closedArity i
@@ -2551,9 +2597,9 @@ evalTerm env defs vars term st =
       | not (M.member "apply" vars) = do
           (args, stk') <- takeWires "apply" 1 stk
           case args of
-            [VFn cvars body] -> do
+            [VFn scope cvars body] -> do
               let seg = if isFinal then stk' else []
-              (out, logs) <- evalTerm env defs cvars body seg
+              (out, logs) <- evalTerm env scope cvars body seg
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               throwError "Runtime type error in apply: expected a quotation"
@@ -2628,10 +2674,10 @@ evalTerm env defs vars term st =
       | not (M.member "loop" vars), not (M.member "loop" defs) = do
           (args, stk') <- takeWires "loop" 1 stk
           case args of
-            [VFn cv body] -> do
+            [VFn scope cv body] -> do
               let seg0 = if isFinal then stk' else []
                   go seg logs = do
-                    (out, lg) <- evalTerm env defs cv body seg
+                    (out, lg) <- evalTerm env scope cv body seg
                     case out of
                       [VSum 0 bundle] -> go bundle (logs ++ lg)
                       [VSum 1 bundle] -> pure (bundle, logs ++ lg)
@@ -2646,11 +2692,11 @@ evalTerm env defs vars term st =
       | not (M.member "foldExp" vars), not (M.member "foldExp" defs) = do
           (args, stk') <- takeWires "foldExp" 2 stk
           case args of
-            [VFn cv body, b0] -> do
+            [VFn scope cv body, b0] -> do
               let bundle = if isFinal then stk' else []
                   go acc [] logs = pure (acc, logs)
                   go acc (x : xs) logs = do
-                    (out, lg) <- evalTerm env defs cv body [acc, x]
+                    (out, lg) <- evalTerm env scope cv body [acc, x]
                     case out of
                       [acc'] -> go acc' xs (logs ++ lg)
                       _ -> throwError "Runtime type error in foldExp: the step must return exactly the accumulator"
@@ -2662,10 +2708,10 @@ evalTerm env defs vars term st =
       | not (M.member "foldExp2" vars), not (M.member "foldExp2" defs) = do
           (args, stk') <- takeWires "foldExp2" 2 stk
           case args of
-            [VFn cv body, b0] -> do
+            [VFn scope cv body, b0] -> do
               let bundle = if isFinal then stk' else []
                   go acc (x : y : xs) logs = do
-                    (out, lg) <- evalTerm env defs cv body [acc, x, y]
+                    (out, lg) <- evalTerm env scope cv body [acc, x, y]
                     case out of
                       [acc'] -> go acc' xs (logs ++ lg)
                       _ -> throwError "Runtime type error in foldExp2: the step must return exactly the accumulator"
@@ -2720,21 +2766,27 @@ evalTerm env defs vars term st =
       | isIntLiteral name = pure ([VInt (read name)], stk, [])
       | isStrLiteral name = pure ([VStr (drop 1 name)], stk, [])
       | isSymLiteral name = pure ([VSym name], stk, [])
-      | Just (k, open, body) <- M.lookup name defs =
-          if open && isFinal
+      | Just entry <- M.lookup name defs =
+          -- jump into the def's body under ITS captured scope, not the
+          -- caller's — early binding (see DefEntry)
+          let k     = deArity entry
+              open  = deOpen  entry
+              body  = deBody  entry
+              scope = deScope entry
+          in if open && isFinal
             then do
-              (out, logs) <- evalTerm env defs M.empty body stk
+              (out, logs) <- evalTerm env scope M.empty body stk
               pure (out, [], logs)
             else do
               (args, stk') <- takeWires name k stk
-              (out, logs) <- evalTerm env defs M.empty body args
+              (out, logs) <- evalTerm env scope M.empty body args
               pure (out, stk', logs)
       | otherwise = do
           k <- liftEither (builtinArity name)
           (args, stk') <- takeWires name k stk
           (out, logs) <- liftEither (runBuiltin env defs name args)
           pure (out, stk', logs)
-    applyAtom _ (Quote body) stk = pure ([VFn vars body], stk, [])
+    applyAtom _ (Quote body) stk = pure ([VFn defs vars body], stk, [])
     -- Code row: consume the sum wire, dispatch on the tag, run the
     -- matching component on the bundle, re-tag the result.  Tags past
     -- the components fall to the residual (identity).
@@ -2824,7 +2876,7 @@ runBuiltin env _ "parse" [VStr src]     =
   case parseProgram src >>= reflectPure env of
     Right c -> Right ([VSum 0 [c]], [])
     Left e  -> Right ([VSum 1 [VStr e]], [])
-runBuiltin env _ "reflect" [VFn cv t]   =
+runBuiltin env _ "reflect" [VFn _ cv t] =
   case reflectFn env cv t of
     Right c -> Right ([VSum 0 [c]], [])
     Left e  -> Right ([VSum 1 [VStr e]], [])
@@ -2962,7 +3014,7 @@ valueToCode :: Env -> Value -> Either String Term
 valueToCode _   (VInt n)  = Right (Prim (show n))
 valueToCode _   (VStr t)  = Right (Prim ('"' : t))
 valueToCode _   (VSym t)  = Right (Prim t)
-valueToCode env (VFn cv t) = do
+valueToCode env (VFn _ cv t) = do
   t1 <- groundTerm env cv t
   t2 <- elimAbsTerm env t1
   pure (Quote t2)

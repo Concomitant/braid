@@ -469,10 +469,13 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - Recursive calls and open-arity words: final atom of their stage.
 - Short names are yours: `f`, `g`, `x`, `succ`, `double` are all free
   (there are no placeholder prims — every primitive earns its name).
-- Shadowing a prelude word rebinds it INSIDE other prelude definitions
-  too — runtime def-resolution is late-bound. Shadow `equals` and the
-  derived `odd?` (which calls it) changes behaviour. Shadow whole
-  words, not their ingredients.
+- Shadowing is lexical and safe: name resolution is EARLY-bound. A def
+  (and a quote) resolves its free names against the environment as it
+  stood where it was written, so shadowing `equals` later cannot change
+  the behaviour of the prelude's `odd?` — nor of a quote you already
+  built. The checker and the runtime agree on which definition a name
+  means. (The one dynamic exception is `evalCode`, which resolves
+  spliced code against the live environment — priced by its railway.)
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
 
