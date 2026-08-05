@@ -1,0 +1,27 @@
+# Codata. A Stream is defined by how it is OBSERVED, not how it is
+# built — an infinite object, forced one cell at a time. The tail is a
+# THUNK (Fn⟨• ⇒ Stream(a)⟩), so the recursion is guarded and
+# productive. Fn inside a `data` declaration is exactly what makes this
+# expressible; the generated fold is (correctly) withheld — a structural
+# fold through the thunk would never terminate.
+
+data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)
+
+def headS = unStream >> (h t -> h)               # observe the first cell
+def tailS = unStream >> (h t -> t) >> apply       # force one step
+
+# the integers upward from n — recursion lives UNDER the quote, so the
+# stream is produced lazily, one cell per force
+def from = (n -> n [n 1 >> + >> from] >> Stream)
+
+# a constant stream — same shape, different generator
+def repeat = (x -> x [x >> repeat] >> Stream)
+
+def nats = 0 >> from                             # 0, 1, 2, 3, …  (infinite)
+
+# observe to finite depth; the stream never bottoms out
+nats >> headS >> print                                          # 0
+nats >> tailS >> tailS >> headS >> print                        # 2
+(nats >> headS) (nats >> tailS >> headS) (nats >> tailS >> tailS >> headS) >> pack >> print   # list(0, 1, 2)
+
+7 >> repeat >> tailS >> tailS >> tailS >> headS >> print         # 7 (forever)

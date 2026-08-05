@@ -190,6 +190,18 @@ moduleTypeTests =
   , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
   , ("type YN = Bool\ntrue",                    "• ⇒ YN")
+    -- Fn in type declarations: alias naming + display folding, both
+    -- the Unicode (Fn⟨…⟩) and ASCII (Fn(… -> …)) spellings
+  , ("type Endo(a) = Fn⟨a ⇒ a⟩\n[dup >> *]",     "• ⇒ Endo(Int)")
+  , ("type Endo(a) = Fn(a -> a)\n[dup >> *]",     "• ⇒ Endo(Int)")
+  , ("type Pred(a) = Fn⟨a ⇒ (a | a)⟩\n[odd?]",    "• ⇒ Pred(Int)")
+    -- a param substituted INSIDE the Fn (substStackVars into TFn), and
+    -- folded back on display
+  , ("type Thunk(a) = Fn⟨• ⇒ a⟩\n[5]",            "• ⇒ Thunk(Int)")
+    -- codata: recursion THROUGH a Fn makes the type nominal; the
+    -- constructor carries the thunked tail
+  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\nStream",
+        "ρ0 Fn⟨• ⇒ Stream(ρ0)⟩ ⇒ Stream(ρ0)")
     -- pack: list introduction from a bundle — (elements ; pack) replaces
     -- the list(…) special form; elements are full programs, groups delimit
   , ("(1 2 3 >> pack)",          "• ⇒ List(Int)")
@@ -628,6 +640,10 @@ evalTests =
     -- so when a prelude combinator (map) applies it, the user def dbl
     -- resolves — even though map's own scope never saw dbl.
   , ("def dbl = 2 _ >> *\n(1 2 3 >> pack) >> [dbl] ... >> map >> print", ["list(2, 4, 6)"], "")
+    -- CODATA: an infinite stream, forced one cell at a time. Fn in the
+    -- data declaration makes the thunked tail expressible; productive
+    -- corecursion (from) is guarded by the quote.
+  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = (n -> n [n 1 >> + >> from] >> Stream)\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
   ]
 
 -- (module source, substring expected in the error)
@@ -642,6 +658,11 @@ moduleFailTests =
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
   , ("data Bad(a, b) = (• | a b)\n1",            "ambiguous product split")
+    -- Fn type declarations: missing arrow, unclosed, reserved name
+  , ("type Bad(a) = Fn⟨a a⟩\n1",                 "Expected '⇒'")
+  , ("type Bad(a) = Fn⟨a ⇒ a\n1",                "close the Fn type")
+  , ("type Fn(a) = (• | a)\n1",                  "Malformed type declaration")
+  , ("type Bad = Fn\n1",                         "Fn must be written")
     -- a non-final recursive call must report the placement rule, not
     -- panic in appendStack (regression: was a Haskell error)
   , ("def x = x x ... >> +\n1",                  "final atom of its tensor stage")

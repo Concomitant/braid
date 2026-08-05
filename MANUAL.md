@@ -44,6 +44,7 @@ the current stack is rejected with a message naming the stack.
 | `->` | binder arrow |
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
+| `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
 
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
@@ -241,8 +242,11 @@ def name =                    # block body — `=` ends the line,
 ```braid
 type YN = Bool                        # alias (display folds to it)
 type Result(a, e) = (a | e)           # parameterized; params are stacks
+type Endo(a) = Fn⟨a ⇒ a⟩              # a reified program as a type…
+type Pred(a) = Fn(a -> (a | a))       # …Unicode Fn⟨Σ ⇒ Θ⟩ or ASCII Fn(Σ -> Θ)
 data List(a) = (• | a List(a))        # recursive nominal type
 data Tree(a) = (a | Tree(a) Tree(a))
+data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # codata: recursion THROUGH a Fn
 ```
 
 A `data Name(...)` declaration generates:
@@ -256,9 +260,27 @@ Roll/unroll are free at runtime. Type parameters must occur in the
 body; a product of two bare parameters (`a b`) is rejected as an
 ambiguous split. Literal exponents are allowed in declarations
 (`type T3 = (Int^3 | Str)`); exponent *variables* are not yet.
-**Known limit**: `Fn⟨…⟩` cannot appear in type declarations — so
-function-carrier types (State, streams/codata) are usable structurally
-but not nameable (see `design-exponents.md` notes / open questions).
+
+**`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
+(Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
+like any type stack (params splice, `•` is empty, `Fn` nests). This
+names function-carrier types — `Endo`, `Pred`, State-style monad
+carriers — and, when the recursion runs *through* the `Fn`, gives
+**codata**:
+
+```braid
+data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # head + a THUNKED tail
+```
+
+A codata type gets constructor/unroll as usual but **no `foldName`** —
+a structural fold through the thunk would diverge, so it is withheld by
+construction; you observe instead (`unStream`, then `apply` to force
+one cell). Productive corecursion guards its self-call under a quote
+(`def from = (n -> n [n 1 >> + >> from] >> Stream)`). See
+`examples/stream.braid`. Caveat: a `Fn` type whose stacks carry two
+open stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands, but won't
+display-fold back (the leading-splice match is ambiguous — pin one
+arity if you need the fold).
 
 ## 9. Primitive reference
 

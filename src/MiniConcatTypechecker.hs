@@ -740,6 +740,9 @@ data Token
   | TokOrClose    -- >!> (close a >?> chain with a total default)
   | TokCaret      -- ^ (exponent in type expressions: Int^3, (A B)^n)
   | TokBarBar     -- || (vertical list literal: || e1 || e2 || … )
+  | TokLAngle     -- ⟨ (open a Fn type: Fn⟨Σ ⇒ Θ⟩)
+  | TokRAngle     -- ⟩ (close a Fn type)
+  | TokFatArrow   -- ⇒ (the arrow inside a Fn type)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -778,6 +781,9 @@ tokenize = go
     go ('|':cs)         = (TokBar :) <$> go cs
     go ('^':cs)         = (TokCaret :) <$> go cs
     go (';':cs)         = (TokSeq :) <$> go cs   -- ; is a synonym for >>
+    go ('⟨':cs)         = (TokLAngle :) <$> go cs     -- Fn⟨…⟩ type brackets
+    go ('⟩':cs)         = (TokRAngle :) <$> go cs
+    go ('⇒':cs)         = (TokFatArrow :) <$> go cs
 
     go (c:cs)
       | isSpace c = go cs
@@ -801,7 +807,7 @@ tokenize = go
 
     isIdentChar ch =
       not (isSpace ch) && isNothing (unSup ch)
-        && ch `notElem` (">.[](),-|#\"^;\8230" :: String)
+        && ch `notElem` (">.[](),-|#\"^;\8230\10216\10217\8658" :: String)
 
     -- string literal body: minimal escapes \" \\ \n
     lexStr ('\\':'"':cs)  = first ('"' :)  <$> lexStr cs
@@ -1248,9 +1254,10 @@ dataFoldSrc d =
 occursData :: String -> Ty -> Bool
 occursData n = goT
   where
-    goT (TData m as) = m == n || any goS as
-    goT (TSum r)     = goR r
-    goT _            = False
+    goT (TData m as)        = m == n || any goS as
+    goT (TSum r)            = goR r
+    goT (TFn (Arrow i o))   = goS i || goS o  -- recursion THROUGH a Fn is codata
+    goT _                   = False
     goR (RCons st r) = goS st || goR r
     goR _            = False
     goS (SCons t st)   = goT t || goS st
@@ -1307,7 +1314,7 @@ parseTypeLine aliases dataSigs line =
     paramList (TokIdent p : TokComma : rest) = (SV p :) <$> paramList rest
     paramList [TokIdent p, TokRParen]        = Right [SV p]
     paramList _ = Left "Malformed type parameter list"
-    validName n = n `notElem` ["Int", "Str", "Sym", "type", "data", "•"]
+    validName n = n `notElem` ["Int", "Str", "Sym", "Fn", "type", "data", "•"]
     tyParams t = let (_, ss, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
@@ -1334,6 +1341,13 @@ parseTyBody aliases dataSigs params src = do
 parseTyElem :: [Alias] -> [(String, Int)] -> [SVar] -> [Token]
             -> Either String (Ty, [Token])
 parseTyElem aliases dataSigs params toks = case toks of
+  -- Fn⟨Σ ⇒ Θ⟩ (Unicode, mirrors :t output) or Fn(Σ -> Θ) (ASCII): a
+  -- reified program as an element type.  The inner stacks parse like
+  -- any type stack (params splice, • is empty, Fn nests).
+  (TokIdent "Fn" : TokLAngle : rest) -> parseFn TokRAngle rest
+  (TokIdent "Fn" : TokLParen : rest) -> parseFn TokRParen rest
+  (TokIdent "Fn" : _) ->
+    Left "Fn must be written Fn⟨Σ ⇒ Θ⟩ (or Fn(Σ -> Θ))"
   (TokLParen : rest) -> do
     (alts, rest') <- goAlts rest
     pure (TSum (foldr RCons RNil alts), rest')
@@ -1408,11 +1422,27 @@ parseTyElem aliases dataSigs params toks = case toks of
            ++ "type declarations — only literal exponents (Int^3)"
     expLit _ = Left "Expected an exponent (a number) after '^'"
     goStackEnd rest = case rest of
-      (TokBar : _)    -> pure (SEnd, rest)
-      (TokRParen : _) -> pure (SEnd, rest)
-      (TokComma : _)  -> pure (SEnd, rest)
-      []              -> pure (SEnd, [])
-      _               -> goStack rest
+      (TokBar : _)      -> pure (SEnd, rest)
+      (TokRParen : _)   -> pure (SEnd, rest)
+      (TokComma : _)    -> pure (SEnd, rest)
+      (TokFatArrow : _) -> pure (SEnd, rest)   -- Fn⟨Σ ⇒ …⟩ boundary
+      (TokArrow : _)    -> pure (SEnd, rest)   -- Fn(Σ -> …) boundary
+      (TokRAngle : _)   -> pure (SEnd, rest)   -- Fn⟨… ⇒ Θ⟩ close
+      []                -> pure (SEnd, [])
+      _                 -> goStack rest
+    -- Fn⟨Σ ⇒ Θ⟩ / Fn(Σ -> Θ): two stacks around an arrow, then `close`
+    parseFn close ts = do
+      (inSt, rest1) <- goStack ts
+      rest2 <- case rest1 of
+                 (TokFatArrow : r) -> Right r
+                 (TokArrow : r)    -> Right r
+                 _ -> Left "Expected '⇒' (or '->') inside a Fn type"
+      (outSt, rest3) <- goStack rest2
+      case rest3 of
+        (t : r) | t == close -> Right (TFn (Arrow inSt outSt), r)
+        _ -> Left $ "Expected '"
+                 ++ (if close == TokRAngle then "⟩" else ")")
+                 ++ "' to close the Fn type"
     -- constructor/alias arguments: each argument is a STACK
     goArgs ts = do
       (st, rest) <- goStack ts
@@ -1438,7 +1468,7 @@ substStackVars m = goT
     goT TInt         = TInt
     goT TStr         = TStr
     goT TSym         = TSym
-    goT (TFn arr)    = TFn arr
+    goT (TFn (Arrow i o)) = TFn (Arrow (goS i) (goS o))  -- substitute inside Fn
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goS as)
     goR RNil         = RNil
@@ -1465,6 +1495,8 @@ matchAlias al t = do
     goT (TData nb bs) (TData nx xs) m
       | nb == nx && length bs == length xs =
           foldM (\acc (b, x) -> goS b x acc) m (zip bs xs)
+    goT (TFn (Arrow ib ob)) (TFn (Arrow ix ox)) m =
+      goS ib ix m >>= goS ob ox
     goT _ _ _ = Nothing
     goR RNil RNil m = Just m
     goR (RCons sb rb) (RCons sx rx) m = goS sb sx m >>= goR rb rx
