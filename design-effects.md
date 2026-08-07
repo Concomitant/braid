@@ -122,6 +122,26 @@ machinery also carries quantitative grades — cost, differential
 privacy (Gaboardi, Katsumata, Orchard, Sato, arXiv:2007.11235) — so
 the ε sort is not forever effects-only.
 
+**Implementation stance (08-07): keep the degenerate case; the PCM is
+the spec.** The total idempotent join plus the placement check is
+extensionally equal to the PCM: the partial product's only job is to
+be undefined on illegal pairs, and the check forbids exactly those
+pairs, so the join is never consulted where it would lie. Factoring
+the partial operation into total-join + domain-predicate buys three
+things: no partiality plumbed through unification (effJoin never
+fails; the solver stays total on grades); better errors ("two
+effectful atoms in one stage — no canonical order; separate lines"
+instead of a grade-mismatch deep in the solver); and ladder upgrades
+that touch only the domain predicate, never the grade algebra. THE
+INVARIANT that keeps this honest: **the placement check must remain at
+least as strict as the intended PCM's definedness — the check IS the
+definedness predicate**, and every ladder step must re-verify that
+equation; relax the check without its license and the join silently
+grades meaningless tensors. Caveat for later: label-SET grades are
+rightly idempotent, but quantitative grades (cost, privacy) need
+non-idempotent SEQUENTIAL composition — idempotency is a property of
+the effects instance, not the framework.
+
 **Linearity is cheap in a concatenative language.** Contraction and
 weakening are WORDS (`dup`, `drop`, `forget`, ignored binder params) —
 a closed set of sites. Linearity = an internal "must be copyable" mark
