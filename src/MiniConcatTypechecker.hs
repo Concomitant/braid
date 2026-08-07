@@ -2583,6 +2583,34 @@ closedArity :: SType -> Int
 closedArity (SCons _ rest) = 1 + closedArity rest
 closedArity _              = 0
 
+-- Determinate wire count of a stack: Just n for a fully-closed stack,
+-- Nothing when an open tail / splice / exponent leaves the width
+-- unknown at compile time (in which case a runtime width check would
+-- false-positive and is skipped).  Used as the top-level desync
+-- backstop: a result whose actual value count disagrees with its
+-- determinate type width means a spliced program's real output stack
+-- did not match the type its context assumed — the evalCode arity gap
+-- (see spec-code.md / design-metaprogramming.md).  Delivers the
+-- "caught by defensive checks, clean runtime errors, never crashes"
+-- guarantee spec-code.md claims, which was silently violated.
+staticWidth :: SType -> Maybe Int
+staticWidth = go 0
+  where
+    go n (SCons _ rest) = go (n + 1) rest
+    go n SEnd           = Just n
+    go _ _              = Nothing  -- STail / SSplice / SExp: indeterminate
+
+-- Backstop check shared by the file runner and the REPL.
+desyncError :: SType -> [Value] -> Maybe String
+desyncError o out =
+  case staticWidth o of
+    Just n | n /= length out ->
+      Just $ "result desync: the type says " ++ show n ++ " wire(s) but "
+          ++ show (length out) ++ " were produced.  A spliced program's "
+          ++ "actual output stack disagreed with the type its context "
+          ++ "assumed (the evalCode arity gap; see design-metaprogramming.md)."
+    _ -> Nothing
+
 -- A runtime definition: closed input arity, whether the input has an
 -- open tail (segment-consuming as a final atom, like apply/loop), the
 -- body term, and — crucially — the SCOPE the body resolves names
@@ -3302,7 +3330,11 @@ runModule src = runExceptT $ do
   m <- liftEither (checkModule src)
   case modMain m of
     Nothing -> pure ([], [])
-    Just (term, arr@(Arrow i _))
+    Just (term, arr@(Arrow i o))
       | closedArity i > 0 ->
           throwError $ "main requires a nonempty input stack: " ++ show arr
-      | otherwise -> evalTerm (modEnv m) (moduleRunDefs m) M.empty term []
+      | otherwise -> do
+          (out, logs) <- evalTerm (modEnv m) (moduleRunDefs m) M.empty term []
+          case desyncError o out of
+            Just e  -> throwError e
+            Nothing -> pure (out, logs)

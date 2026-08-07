@@ -37,12 +37,18 @@ reflect — the GLA fragment in particular.
 The dynamically-checked splice: rebuild the term, infer its principal
 type in-process, run it on the segment. Any failure (malformed code,
 type error, runtime error) rides the miss track with the message AND
-the untouched segment. Documented hole: ρ2 is free, so a lying
-context is caught downstream by the interpreter's defensive value
-checks (clean runtime errors, never crashes). Typed splice is future
-work — see design-metaprogramming.md, which takes the position that the
-fix is a type-aligned `Path(Γ,Δ)` (the free category on the quiver),
-where the free variable becomes unwritable rather than checked.
+the untouched segment. Documented hole: ρ2 is free, so a lying context
+(one that types the hit track at a different arity than the code
+actually produces) is not caught at compile time. It USED to desync
+silently — a value left on a stack typed empty. A top-level width
+backstop now closes that manifestation: after a program runs, its
+result stack width must match its determinate output type, or it fails
+with a `result desync` error (`staticWidth`/`desyncError`). That
+delivers the "clean runtime errors, never crashes" guarantee this
+line previously only claimed. It is a backstop, not a type-level fix —
+the real fix is a type-aligned `Path(Γ,Δ)` (the free category on the
+quiver) where the free variable becomes unwritable rather than
+checked; see design-metaprogramming.md.
 
 ## First transforms (examples/transpose.braid)
 

@@ -2,8 +2,20 @@
 module Main (main) where
 
 import MiniConcatTypechecker
-import Data.List (isInfixOf)
+import Data.List (isInfixOf, isSuffixOf, sort)
 import System.Exit (exitFailure, exitSuccess)
+import System.Directory (listDirectory)
+
+-- Every examples/*.braid must run without error (catches rot: an
+-- unknown prim, a type error, a desync).  Output-regression checking
+-- is a future enhancement; "runs clean" is the high-value signal.
+runExample :: String -> IO (Maybe String)
+runExample name = do
+  src <- readFile ("examples/" ++ name)
+  r   <- runModule src
+  pure $ case r of
+    Right _  -> Nothing
+    Left err -> Just ("examples/" ++ name ++ ": " ++ err)
 
 -- (source, expected alpha-normalized type)
 passTests :: [(String, String)]
@@ -679,7 +691,13 @@ evalTests =
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
 moduleFailTests =
-  [ ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
+    -- the evalCode arity gap: spliced code produces 2 wires but the
+    -- context typed the hit track as 0 (Δ is existential, chosen by the
+    -- caller). Used to leak silently (a value on a stack typed empty);
+    -- the top-level width backstop now catches it as a clean error,
+    -- delivering the guarantee spec-code.md already claimed.
+  [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
+  , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
   , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
@@ -814,6 +832,8 @@ main :: IO ()
 main = do
   evalFs <- mapM runEval evalTests
   mfailFs <- mapM runModuleFail moduleFailTests
+  exNames <- sort . filter (".braid" `isSuffixOf`) <$> listDirectory "examples"
+  exFs <- mapM runExample exNames
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
         ++ map runFail failTests
@@ -821,10 +841,11 @@ main = do
         ++ evalFs
         ++ mfailFs
         ++ map runUnif unifTests
+        ++ exFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
-            + length unifTests
+            + length unifTests + length exNames
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

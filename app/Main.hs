@@ -286,12 +286,15 @@ handleLine st line =
           r <- evalLine
           case r of
             Left err -> report ("runtime error: " ++ err)
-            Right (stack', logs) -> do
-              mapM_ putStrLn logs
-              let st' = st { rsStackTy = freshenStackTy newTy
-                           , rsStack   = stack' }
-              putStrLn (renderStack st')
-              pure st'
+            Right (stack', logs)
+              | Just e <- desyncError newTy stack' ->
+                  mapM_ putStrLn logs >> report ("runtime error: " ++ e)
+              | otherwise -> do
+                  mapM_ putStrLn logs
+                  let st' = st { rsStackTy = freshenStackTy newTy
+                               , rsStack   = stack' }
+                  putStrLn (renderStack st')
+                  pure st'
 
     checkLine = do
       term <- parseProgram line
