@@ -56,6 +56,50 @@ compatible to relax to decreed left-to-right, which the evaluator
 already implements); at the explicit level the rule dissolves —
 mis-ordered effects are unwritable, not illegal.
 
+**Refinement (08-06): the placement ladder.** "≤1 effectful" is the
+conservative floor of a three-step ladder, each step a strictly larger
+legal fragment, each licensed by something checkable:
+
+1. **≤1 effectful atom per stage** (the launch rule above).
+2. **n atoms of one shared *commutative* grade.** When the effect
+   commutes, order is unobservable, so juxtaposition is an honest
+   (bifunctorial) tensor again — this is the old expanded-spec note
+   "effectful tensor only for commutative effects with a lawful
+   `zipM`", now with grading machinery to express it. Commutativity is
+   a LAW: per-theory, runnable, instances are audited models — passing
+   the check is the license to tensor. The killer instance is
+   probability: two Dist atoms side by side ARE independent draws —
+   the ambient product literally means statistical independence, which
+   is the defining structure of Markov categories (Fritz, *A synthetic
+   approach to Markov kernels…*, Adv. Math. 2020). A commutative-grade
+   stage is also a parallelism license (any execution order is
+   correct), the same way parallel.braid treats associativity as the
+   split license.
+3. **Pairwise-disjoint-or-commutative resources** — the wire-true
+   rule, available once wires are explicit (split level). Same-grade
+   is neither necessary nor sufficient for step 3: two `tell`s share
+   the Log WIRE, so they commute only if the carrier monoid does
+   (set/counter yes, list no) — same grade is the *worst* case; while
+   a Log atom beside a GameState atom touch DISJOINT wires and commute
+   by geometry — mixed grades are the *safe* case. Step 2 is the cheap
+   syntactic gate that happens to coincide with the deep rule exactly
+   where it matters most. IO stays ≤1 forever at the ambient level:
+   everything IO touches the one world wire, and world-order is
+   observable.
+
+**The left-to-right alternative.** Instead of forbidding, decree
+left-to-right order for effectful atoms in a stage (the evaluator
+already does this; it is the left-biased premonoidal tensor). Under
+the decree everything is *legal* and the ladder changes job: it stops
+being a legality boundary and becomes the **license structure** — only
+stages at step 2/3 may be reordered, parallelized, or fused; step-1
+stages execute in textual order and are rigid. Trade-off, stated
+honestly: forbid makes a mis-ordered effect a type error;
+left-to-right makes it a silent behaviour. Everything-exact
+temperament says forbid; every strict language's pragmatics says
+decree. Either way the ladder is the part that carries the theory —
+the choice only decides whether its floor is an error or a default.
+
 **Linearity is cheap in a concatenative language.** Contraction and
 weakening are WORDS (`dup`, `drop`, `forget`, ignored binder params) —
 a closed set of sites. Linearity = an internal "must be copyable" mark
