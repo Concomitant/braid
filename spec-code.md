@@ -40,7 +40,9 @@ type error, runtime error) rides the miss track with the message AND
 the untouched segment. Documented hole: ρ2 is free, so a lying
 context is caught downstream by the interpreter's defensive value
 checks (clean runtime errors, never crashes). Typed splice is future
-work.
+work — see design-metaprogramming.md, which takes the position that the
+fix is a type-aligned `Path(Γ,Δ)` (the free category on the quiver),
+where the free variable becomes unwritable rather than checked.
 
 ## First transforms (examples/transpose.braid)
 
