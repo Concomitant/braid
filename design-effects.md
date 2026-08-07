@@ -100,6 +100,28 @@ temperament says forbid; every strict language's pragmatics says
 decree. Either way the ladder is the part that carries the theory —
 the choice only decides whether its floor is an error or a default.
 
+**Formal home for the ladder (08-07): grading by a partial commutative
+monoid.** The literature separates what our first sketch conflated:
+sequential and parallel composition act on grades by DIFFERENT
+structures (duoidally enriched Freyd categories — Heunen & Sigal,
+RAMiCS 2023, arXiv:2301.05162, whose worked examples include "basic
+separation semantics for resources"); our join-for-both is the
+degenerate idempotent case. The parallel operation is honestly a
+PARTIAL commutative monoid: grading a monoidal category by a PCM,
+where side-by-side grades combine iff the PCM product is defined
+(Sarkis & Zanasi, arXiv:2501.18404). Their hierarchy lands the punch:
+trivial PCM = monoidal, and the TWO-ELEMENT PCM (eff ⊗ eff undefined)
+= premonoidal/effectful — so ladder step 1 is not a conservative hack
+but the canonical minimal choice, step 2 is the PCM with e⊗e = e for
+law-certified commutative e, and step 3 is the resource-separation
+PCM. Slogan, same shape as the compile-fold one: **the placement rule
+is the partiality of the grade product.** The left-to-right decree =
+totalizing that product by left bias (partial can relax to total, not
+vice versa — the reversibility argument, now formal). Graded Freyd
+machinery also carries quantitative grades — cost, differential
+privacy (Gaboardi, Katsumata, Orchard, Sato, arXiv:2007.11235) — so
+the ε sort is not forever effects-only.
+
 **Linearity is cheap in a concatenative language.** Contraction and
 weakening are WORDS (`dup`, `drop`, `forget`, ignored binder params) —
 a closed set of sites. Linearity = an internal "must be copyable" mark
