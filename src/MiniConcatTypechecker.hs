@@ -748,7 +748,6 @@ data Token
   | TokOrElse     -- >?> (the dual: chain along the miss track)
   | TokOrClose    -- >!> (close a >?> chain with a total default)
   | TokCaret      -- ^ (exponent in type expressions: Int^3, (A B)^n)
-  | TokBarBar     -- || (vertical list literal: || e1 || e2 || … )
   | TokLAngle     -- ⟨ (open a Fn type: Fn⟨Σ ⇒ Θ⟩)
   | TokRAngle     -- ⟩ (close a Fn type)
   | TokFatArrow   -- ⇒ (the arrow inside a Fn type)
@@ -786,7 +785,6 @@ tokenize = go
       | (ds@(_:_), rest) <- span isDigit cs =
           (TokIdent ('-' : ds) :) <$> go rest          -- negative literal
       | otherwise = (TokIdent "-" :) <$> go cs         -- subtraction
-    go ('|':'|':cs)     = (TokBarBar :) <$> go cs
     go ('|':cs)         = (TokBar :) <$> go cs
     go ('^':cs)         = (TokCaret :) <$> go cs
     go (';':cs)         = (TokSeq :) <$> go cs   -- ; is a synonym for >>
@@ -833,8 +831,7 @@ normalizeToks = trim . collapse
   where
     -- A newline is a strict `>>`.  It is absorbed only next to an
     -- operator a newline cannot itself express: the railway operators
-    -- (`>=>`, `>?>`, `>!>`) and the `||` list-literal continuation.
-    -- `>>` and `|` never absorb — a newline
+    -- (`>=>`, `>?>`, `>!>`).  `>>` and `|` never absorb — a newline
     -- already *is* `>>`, and the row separator `|` must stay put so
     -- aligned track-columns work (`f |` ⏎ `| g` is two rows, not one
     -- collided `| |`).
@@ -852,7 +849,6 @@ normalizeToks = trim . collapse
 
     absorbs t =
       t == TokKleisli || t == TokOrElse || t == TokOrClose
-        || t == TokBarBar
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -1019,35 +1015,9 @@ parseSeqStmt toks = do
       (stage, rest'') <- parseStage rest'
       go ((op, stage) : acc) rest''
 
--- || e1 || e2 || … : a vertical list literal (a product of lanes).
--- Each lane is a single juxtaposition stage (the user writes [P] [F]
--- for guards); the whole thing is ONE list value, built by nil/cons.
--- Keeps `|` (TokBar) entirely for sums.  This is the ONLY list
--- literal — the flat form is (e1 e2 … ; pack).
-parseBarBarList :: [Token] -> Either String (Term, [Token])
-parseBarBarList (TokBarBar : rest) = do
-  (lane, rest') <- parseStage rest
-  go [stageAtoms lane] rest'
-  where
-    go acc (TokBarBar : r) = do
-      (lane, r') <- parseStage r
-      go (stageAtoms lane : acc) r'
-    go acc r = Right (desugarList (reverse acc), r)
-parseBarBarList ts = Left $ "Expected '||' to start a list, got: " ++ show ts
-
--- build a list value from lanes with nil/cons (the || desugaring)
-desugarList :: [[Term]] -> Term
-desugarList es = foldl step (Prim "nil") (reverse es)
-  where
-    step acc atoms = Seq acc (Seq (Tensor (atoms ++ [Prim "pass"]))
-                                  (Prim "cons"))
-
 parseStage :: [Token] -> Either String (Stage, [Token])
 parseStage = go []
   where
-    go [] ts@(TokBarBar : _) = do
-      (lst, rest') <- parseBarBarList ts
-      go [lst] rest'
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
@@ -2375,12 +2345,17 @@ preludeSrc = unlines
   , "## single-wire words, so order is kept Church-style: fold up a"
   , "## FUNCTION, then apply it to nil"
   , "def pack2 = [(f x y -> [(l -> f (x y l >> cons) >> apply)])] [pass] ... >> foldExp2 >> _ nil >> apply"
+  , "## top-first packs: head = TOP of the segment.  With a `...` ladder"
+  , "## (each line pushes UNDER), list order = TEXT order — the vertical"
+  , "## list idiom:   line1 / line2 ... / line3 ... / packR"
+  , "def packR = [(l x -> x l >> cons)] nil ... >> foldExp"
+  , "def pack2R = [(l x y -> x y l >> cons)] nil ... >> foldExp2"
   , "## first-match over a clause list: each clause is [router] [action];"
   , "## the first router that hits runs its action on x, else the default."
   , "def matchWith = (x default clauses -> clauses >> [x >> default ... >> apply] [(rest p f -> x >> p ... >> apply >> (f ... >> apply | drop >> rest) >> merge)] ... >> foldList)"
-  , "## the always-hit router: the last lane of a || guard list"
+  , "## the always-hit router: the last lane of a guard clause list"
   , "def else? = in1"
-  , "## probe a clause list (|| lanes or pack2): run the first hit;"
+  , "## probe a clause list (pack2 / pack2R lanes): run the first hit;"
   , "## in1(result) on a hit, in2(input) if none hit"
   , "def choose = (x clauses -> clauses >> [x >> in2] [(rest p f -> x >> p ... >> apply >> (f ... >> apply >> in1 | drop >> rest) >> merge)] ... >> foldList)"
   , "## commute List over the sum monad: all hits, or the first miss"

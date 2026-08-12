@@ -85,7 +85,7 @@ the prelude; every REPL line runs against a persistent typed stack.
    (x >> toStr)           ...
    decide
    ```
-   Guards-as-data variants (`firstTrue`, `||` + `choose`,
+   Guards-as-data variants (`firstTrue`, clause ladders + `choose`,
    `if`/`elif`/`else` fold-as-you-go) are all prelude defs. No guard
    syntax exists in the parser.
 6. **Loops are values.** `loop` is Elgot iteration; `while` and

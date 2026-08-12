@@ -171,7 +171,7 @@ failTests =
   , ("1 >",           "Unexpected '>'")
     -- a newline is a strict >>, so a trailing >> before one is >> >>:
     -- the continuation-absorption rule was ditched for >> and | (it
-    -- survives only for >=>, >?>, >!>, ||, which a newline can't express)
+    -- survives only for >=>, >?>, >!>, which a newline can't express)
   , ("1 2 >>\n+",     "Expected a tensor stage")
   , ("nonsense42x",   "Unknown primitive")
   , ("",              "Expected a tensor stage")
@@ -456,17 +456,18 @@ evalTests =
   , ("def ts =\n dup >> +\n d ->\n d d >> +\n7 >> ts >> print", ["28"], "")
     -- the parenthesized form still works (one code path)
   , ("3 4 >> (x y -> y x >> -) >> print", ["1"], "")
-    -- || vertical list literal (a product of lanes) + choose guard fold
-  , ("|| [1] || [2] || [3] >> len >> print", ["3"], "")
+    -- clause products + choose guard fold (|| is GONE; pack2R ladders
+    -- give text-order vertical lists)
+  , ("([1] [2] [3] >> pack) >> len >> print", ["3"], "")
   , ("([1] [2] [3] >> pack) >> [pass] ... >> map >> len >> print", ["3"], "")
-  , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n7 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["49"], "")
+  , ("def sign =\n    [odd?] [dup >> *]\n    [negative?] [drop >> 0] ...\n    pack2R\n7 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["49"], "")
   , ("def sign = ([odd?] [dup >> *] [negative?] [drop >> 0] >> pack2)\n8 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["9"], "")
-  , ("def sign = || [odd?] [dup >> *] || [negative?] [drop >> 0]\n-4 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["0"], "")
+  , ("def sign =\n    [odd?] [dup >> *]\n    [negative?] [drop >> 0] ...\n    pack2R\n-4 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["0"], "")
     -- no else lane: none hit -> in2(input)
   , ("5 ([odd?] [dup >> *] >> pack2) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["hit"], "")
   , ("6 ([odd?] [dup >> *] >> pack2) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["miss"], "")
-    -- a bound || value reused; and | sum rows still work
-  , ("def og = || [odd?] [drop >> \"odd\"]\n3 og >> choose >> (id | drop >> \"even\") >> merge >> print\n4 og >> choose >> (id | drop >> \"even\") >> merge >> print", ["odd", "even"], "")
+    -- a bound clause value reused; and | sum rows still work
+  , ("def og = ([odd?] [drop >> \"odd\"] >> pack2)\n3 og >> choose >> (id | drop >> \"even\") >> merge >> print\n4 og >> choose >> (id | drop >> \"even\") >> merge >> print", ["odd", "even"], "")
   , ("5 >> odd? >> (drop >> \"o\" | drop >> \"e\") >> merge >> print", ["o"], "")
     -- branchless tier: swapIf (Fredkin) and select (mux) route
     -- already-computed values; no quotation runs
@@ -697,6 +698,9 @@ moduleFailTests =
   [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
     -- the case(…) special form is gone: `case` is an ordinary unknown name
   , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
+    -- the || literal is gone: two bars are a parse error, never a
+    -- silent reinterpretation
+  , ("def g = || [odd?] [dup]\n1", "Expected a tensor stage")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")

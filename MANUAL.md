@@ -39,7 +39,7 @@ the current stack is rejected with a message naming the stack.
 | `...` (or `…`) | the explicit remainder (§4); must be the final atom of its stage |
 | `[` `]` | quotation |
 | `(` `)` | grouping / rows / type arguments / binders |
-| `\|` , `\|\|` | row separator; vertical list literal |
+| `\|` | row separator (rows / sum types) |
 | `,` | separator in type arguments |
 | `->` | binder arrow |
 | `>=>` `>?>` `>!>` | railway operators (§7) |
@@ -49,7 +49,7 @@ the current stack is rejected with a message naming the stack.
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
 **A newline is a strict `>>`** — there is no line-continuation for `>>`
-or `|`; only `>=>`/`>?>`/`>!>`/`||` may absorb a line break.
+or `|`; only `>=>`/`>?>`/`>!>` may absorb a line break.
 
 ## 3. The model
 
@@ -223,9 +223,19 @@ One-way by design: there is no `unpack : List(a) ⇒ aⁿ` — a list's
 length is runtime data, and the exponent is erased (elimination is
 `foldList`/`uncons`).
 
-The **vertical** form is `|| e1 || e2 || …` — one lane per `||`, may
-span lines (each lane a juxtaposition; `[router] [action]` lanes make
-`choose`-able guard lists). It builds the same `List` value as `pack`.
+The **vertical** form is a `...` ladder closed by a top-first pack
+(`packR`, `pack2R` for two-wire lanes): each line pushes *under*, and
+reading the segment top-first makes list order = text order:
+
+```braid
+def fbCases =
+    [by15?] [drop >> "FizzBuzz"]      # first lane = first priority
+    [by3?]  [drop >> "Fizz"] ...
+    [by5?]  [drop >> "Buzz"] ...
+    pack2R
+```
+
+(The old `|| e1 || e2` literal is REMOVED — `|` belongs to sums alone.)
 
 (The old flat literal `list(e1, e2, …)` is REMOVED — `list` is now an
 ordinary identifier. `(… ; pack)` is the flat form.)
@@ -257,7 +267,7 @@ t1 >!> t2   ≡  t1 >> (pass | t2)  >> merge     -- close with a total default
 ```
 
 They bind looser than `>>` (each side is a whole `>>`-chain) and may
-span line breaks (the only operators besides `||` that do). They are
+span line breaks (the only operators that do). They are
 deliberately thin: the row form on the right is always available.
 
 ## 8. Definitions, types, modules
@@ -466,7 +476,7 @@ odd? >> (dup ; * | 1 ... ; +) >> merge
 negative? >> (drop ; "neg" | pass) >> (pass | zero?)
     >> [pass] [drop ; "zero"] [toStr] ... >> case3
 
-# guards as data: || clause lists, probed by choose / matchWith
+# guards as data: pack2/pack2R clause lists, probed by choose / matchWith
 x [default] ([p?] [action] … >> pack2) >> matchWith
 
 # loops
@@ -528,7 +538,7 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - Quotes are points (`• ⇒ Fn`): pushing one beside live wires needs
   `_` or `...` — the same frame discipline as every constant.
 - Row arms must fit on one line; arms must agree in type to `merge`.
-- `||` lanes are juxtapositions — a `;`/`>>` inside a lane needs a group.
+- Ladder lanes are juxtapositions — a `;`/`>>` inside a lane needs a group.
 - `def name = x -> …` ends at the line; use the block form (`def name =`
   newline `x ->`) for multi-line bodies.
 - A binder's body only sees what the parameter list gives it. Need the
