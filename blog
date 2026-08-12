@@ -1,0 +1,104 @@
+#!/usr/bin/env python3
+"""blog — capture stray blog lines, reorder them with a cheap model, never
+let it rewrite you.
+
+    blog add "the compile fold's partiality IS the typechecker"
+    echo "a line" | blog add
+    blog show
+    blog order        # the only model call (haiku); permutation-CHECKED
+
+The ordering model may only PERMUTE and GROUP (insert blank lines).
+That is not a request — it is an invariant this script verifies: the
+multiset of non-blank lines out must equal the multiset in, byte for
+byte. Verified good output is written (with a .bak); anything else is
+rejected with a diff. The model does the one judgment task (thematic
+clustering, narrative order); code does the bookkeeping and the check.
+"""
+
+import os, shutil, subprocess, sys
+
+HERE  = os.path.dirname(os.path.abspath(__file__))
+FILE  = os.path.join(HERE, "blog-lines.md")
+MODEL_CMD = os.environ.get("BLOG_MODEL_CMD", "claude -p --model haiku")
+
+PROMPT = """Below, between the BEGIN and END markers, are fragments for a blog
+post about a programming language, one fragment per line, in the order they
+were jotted down. Reorder them into the most natural narrative flow, putting
+thematically related fragments next to each other. You may insert blank lines
+between groups. You MUST NOT add, drop, merge, split, or reword any fragment:
+every non-blank output line must be byte-for-byte one of the input lines, each
+appearing exactly once. Output ONLY the reordered lines — no commentary, no
+markdown fences, no headers.
+
+BEGIN
+{lines}
+END"""
+
+
+def fragments(text):
+    """Non-blank lines, stripped of trailing whitespace only."""
+    return [ln.rstrip() for ln in text.splitlines() if ln.strip()]
+
+
+def cmd_add(args):
+    line = " ".join(args).strip() if args else sys.stdin.readline().strip()
+    if not line:
+        sys.exit("blog add: empty line")
+    with open(FILE, "a") as f:
+        f.write(line + "\n")
+    n = len(fragments(open(FILE).read()))
+    print(f"added ({n} line{'s' if n != 1 else ''})")
+
+
+def cmd_show(_args):
+    if not os.path.exists(FILE):
+        sys.exit(f"no {os.path.basename(FILE)} yet — `blog add` something")
+    sys.stdout.write(open(FILE).read())
+
+
+def run_model(text):
+    r = subprocess.run(MODEL_CMD.split() + [PROMPT.format(lines=text)],
+                       capture_output=True, text=True, timeout=300)
+    if r.returncode != 0:
+        sys.exit(f"model call failed: {r.stderr.strip()}")
+    out = r.stdout
+    # tolerate a wrapping code fence; anything else must survive the check
+    lines = out.splitlines()
+    lines = [ln for ln in lines if not ln.strip().startswith("```")]
+    return "\n".join(lines).strip() + "\n"
+
+
+def cmd_order(_args):
+    if not os.path.exists(FILE):
+        sys.exit(f"no {os.path.basename(FILE)} yet — `blog add` something")
+    original = open(FILE).read()
+    want = sorted(fragments(original))
+    if len(want) < 2:
+        sys.exit("nothing to order")
+    for attempt in (1, 2):
+        candidate = run_model(original)
+        got = sorted(fragments(candidate))
+        if got == want:
+            shutil.copyfile(FILE, FILE + ".bak")
+            open(FILE, "w").write(candidate)
+            print(f"ordered {len(want)} lines "
+                  f"(verified permutation; previous in {os.path.basename(FILE)}.bak)")
+            return
+        sys.stderr.write(f"attempt {attempt}: NOT a permutation — rejected\n")
+    # show what the model invented/lost, then refuse
+    lost    = [l for l in want if l not in got]
+    made_up = [l for l in got if l not in want]
+    for l in lost:    sys.stderr.write(f"  dropped/reworded: {l}\n")
+    for l in made_up: sys.stderr.write(f"  invented:         {l}\n")
+    sys.exit("blog order: model would not stop generating; file untouched")
+
+
+def main():
+    cmds = {"add": cmd_add, "show": cmd_show, "order": cmd_order}
+    if len(sys.argv) < 2 or sys.argv[1] not in cmds:
+        sys.exit(__doc__.strip())
+    cmds[sys.argv[1]](sys.argv[2:])
+
+
+if __name__ == "__main__":
+    main()
