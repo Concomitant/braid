@@ -1048,13 +1048,6 @@ parseStage = go []
     go [] ts@(TokBarBar : _) = do
       (lst, rest') <- parseBarBarList ts
       go [lst] rest'
-    -- case(b1, …, bn): eliminate a right-nested sum (X1 | (X2 | … | Xn))
-    -- by one handler per track, all landing on a common result.  Each
-    -- branch is a full program spliced BARE onto its arm (no quoting,
-    -- like the >=> desugar); the desugaring is the nested rows + merge.
-    go acc (TokIdent "case" : TokLParen : rest) = do
-      (branches, rest') <- parseCaseBranches rest
-      go (desugarCase branches : acc) rest'
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
@@ -1099,30 +1092,6 @@ parseStage = go []
 -- handled there (a leading binder in the delimited scope).
 parseDelimited :: [Token] -> Either String (Term, [Token])
 parseDelimited = parseProgramToks
-
--- case(b1, …, bn): the coproduct eliminator for a right-nested sum.
---   case(a)          = a
---   case(a, b, …)    = (a | case(b, …)) >> merge
--- so case(a, b, c) is (a | (b | c) >> merge) >> merge, mapping the
--- nested sum (A | (B | (C))) onto the arms' common result.
-desugarCase :: [Term] -> Term
-desugarCase []       = Prim "pass"
-desugarCase [b]      = b
-desugarCase (b : bs) = Seq (Alts [b, desugarCase bs] False) (Prim "merge")
-
--- Branches of case(…): comma-separated FULL programs (unlike list(…)
--- elements, which are bare juxtapositions).  parseProgramToks stops at
--- the comma / close paren, so a branch may use >>, rows, binders, etc.
-parseCaseBranches :: [Token] -> Either String ([Term], [Token])
-parseCaseBranches (TokRParen : rest) = Right ([], rest)
-parseCaseBranches toks = do
-  (b, rest) <- parseProgramToks toks
-  case rest of
-    (TokComma : rest')  -> do
-      (bs, rest'') <- parseCaseBranches rest'
-      Right (b : bs, rest'')
-    (TokRParen : rest') -> Right ([b], rest')
-    _ -> Left "Expected ',' or ')' in case(…)"
 
 --------------------------------------------------------------------------------
 -- 6.5 Type aliases (stage 1: transparent, display-only)
@@ -2419,6 +2388,13 @@ preludeSrc = unlines
   , "## keep the elements a quoted router hits"
   , "def filter = (p -> [p ... >> apply >> (single | drop >> nil) >> merge]) ... >> flatMap"
   , "## a Bool selects one of two quotations"
+  , "## flat coproduct eliminators: one quoted handler per track of a"
+  , "## right-nested sum, all landing on a common result — to sums what"
+  , "## foldList is to lists.  Sum on top, handlers below:"
+  , "##   tag >> [h1] [h2] [h3] ... >> case3"
+  , "def case2 = (f g s -> s >> (f ... >> apply | g ... >> apply) >> merge)"
+  , "def case3 = (f g h s -> s >> (f ... >> apply | (g ... >> apply | h ... >> apply) >> merge) >> merge)"
+  , "def case4 = (f g h i s -> s >> (f ... >> apply | (g ... >> apply | (h ... >> apply | i ... >> apply) >> merge) >> merge) >> merge)"
   , "def condFn = (b t e -> b >> (t | e) >> merge)"
   , "## a Bool selects a quotation; apply runs it on the rest of the stack"
   , "def cond = condFn ... >> apply"

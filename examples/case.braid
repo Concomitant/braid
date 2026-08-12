@@ -1,7 +1,8 @@
-# case(…): the coproduct eliminator. A right-nested sum (A | (B | C)) is
-# a decision tree written in the type; case(hA, hB, hC) folds the whole
-# spine in one shot — one handler per track, each a bare program, all
-# landing on a common result. It is to sums what foldList is to lists.
+# caseN: the flat coproduct eliminators. A right-nested sum (A | (B | C))
+# is a decision tree written in the type; [hA] [hB] [hC] ... >> case3
+# folds the whole spine in one shot — one quoted handler per track, all
+# landing on a common result. It is to sums what foldList is to lists,
+# and it is an ordinary prelude word (the old case(…) syntax is gone).
 #
 # Deferred routers build the nest: each one answers its track and passes
 # the rest down, so the leftover sum grows to the right.
@@ -10,7 +11,7 @@ def classify =
     negative?                          # (Int | Int)
     (drop >> "neg" | pass)             # (Str | Int)          answer track 1, defer track 2
     (pass | zero?)                     # (Str | (Int | Int))  route the leftover — the sum NESTS
-    case(pass, drop >> "zero", toStr)  # (Str | (Str | Str)) -> Str, in one shot
+    [pass] [drop >> "zero"] [toStr] ... >> case3   # (Str | (Str | Str)) ⇒ Str, in one shot
 
 -4 >> classify >> print   # neg
 0  >> classify >> print   # zero
@@ -21,4 +22,4 @@ def classify =
 # Round-trip is identity on the routed value.
 def tag = negative? >> (drop >> "neg" | pass) >> (pass | zero?)
 
-5 >> tag >> assocL >> assocR >> case(pass, drop >> "zero", toStr) >> print   # 5
+5 >> tag >> assocL >> assocR >> [pass] [drop >> "zero"] [toStr] ... >> case3 >> print   # 5

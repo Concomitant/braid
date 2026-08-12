@@ -38,9 +38,9 @@ the current stack is rejected with a message naming the stack.
 | `>>>` | compose, opening the previous stage's remainder (`a >>> b ≡ a pass >> b`) |
 | `...` (or `…`) | the explicit remainder (§4); must be the final atom of its stage |
 | `[` `]` | quotation |
-| `(` `)` | grouping / rows / list & case arguments / binders |
+| `(` `)` | grouping / rows / type arguments / binders |
 | `\|` , `\|\|` | row separator; vertical list literal |
-| `,` | separator in `case(…)` and type arguments |
+| `,` | separator in type arguments |
 | `->` | binder arrow |
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
@@ -230,11 +230,20 @@ span lines (each lane a juxtaposition; `[router] [action]` lanes make
 (The old flat literal `list(e1, e2, …)` is REMOVED — `list` is now an
 ordinary identifier. `(… ; pack)` is the flat form.)
 
-### `case(b1, …, bn)`
-The coproduct eliminator for a right-nested sum:
-`case(a, b, c) ≡ (a | (b | c) >> merge) >> merge`, eliminating
-`(A | (B | C)) ⇒ R`. Branches are full programs, spliced bare;
-heterogeneous domains, one shared result.
+### Eliminating nested sums: `case2` / `case3` / `case4`
+The flat coproduct eliminators are prelude **words** (the old
+`case(…)` special form is REMOVED — `case` is an ordinary identifier):
+one quoted handler per track, sum on top, handlers below:
+
+```braid
+tag >> [h1] [h2] [h3] ... >> case3     # (Δ1 | (Δ2 | Δ3)) ⇒ R
+```
+
+`case3 ≡ (f g h s -> s >> (f ... >> apply | (g ... >> apply |
+h ... >> apply) >> merge) >> merge)` — heterogeneous handler domains,
+one shared result; to sums what `foldList` is to lists. Handlers are
+quoted (the `[]` tax), unlike bare row arms — write the nested rows by
+hand when bareness matters.
 
 ## 7. Railway operators
 
@@ -453,9 +462,9 @@ def grade2 =
 # routers when branches need the routed value
 odd? >> (dup ; * | 1 ... ; +) >> merge
 
-# deferred peel: the sum deepens; case() folds the tree
+# deferred peel: the sum deepens; case3 folds the tree
 negative? >> (drop ; "neg" | pass) >> (pass | zero?)
-    >> case(pass, drop ; "zero", toStr)
+    >> [pass] [drop ; "zero"] [toStr] ... >> case3
 
 # guards as data: || clause lists, probed by choose / matchWith
 x [default] ([p?] [action] … >> pack2) >> matchWith
@@ -525,7 +534,7 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - A binder's body only sees what the parameter list gives it. Need the
   remainder inside the body? Use an open binder (`x ... -> …`), not
   `(x -> …) ...` — the latter routes the rest *around* the binder.
-- Sums never flatten; use `assocL`/`assocR`/`case(…)` to manage
+- Sums never flatten; use `assocL`/`assocR`/`caseN` to manage
   nesting, and one `merge` per level to collapse.
 - Recursive calls and open-arity words: final atom of their stage.
 - Short names are yours: `f`, `g`, `x`, `succ`, `double` are all free

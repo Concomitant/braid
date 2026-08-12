@@ -114,12 +114,6 @@ passTests =
   , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
   , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
   , ("[dup >> * | drop]", "• ⇒ Fn⟨(Int | a0) ⇒ (Int | •)⟩")
-    -- case(…): the coproduct eliminator — one handler per nested track,
-    -- all landing on a common result.  Branches are full programs, bare.
-    -- (associators, which need the prelude, are in moduleTypeTests.)
-  , ("case(dup >> +)",                          "Int ⇒ Int")
-  , ("case(drop >> \"neg\", drop >> \"zero\", toStr)", "(a0 | (a1 | a2)) ⇒ Str")
-  , ("case(dup >> +, drop >> 3)",               "(Int | a0) ⇒ Int")
     -- bare rows: each LINE is a code row (>> binds tighter than |,
     -- | tighter than newline)
     -- open binders: a parameter list uses the stage vocabulary — a name
@@ -225,6 +219,10 @@ moduleTypeTests =
     -- a param substituted INSIDE the Fn (substStackVars into TFn), and
     -- folded back on display
   , ("type Thunk(a) = Fn⟨• ⇒ a⟩\n[5]",            "• ⇒ Thunk(Int)")
+    -- caseN: the flat coproduct eliminators, now prelude words (the
+    -- case(…) special form is REMOVED — quoted handlers, sum on top)
+  , ("[drop >> \"neg\"] [drop >> \"zero\"] [toStr] ... >> case3", "(a0 | (a1 | a2)) ⇒ Str")
+  , ("[dup >> +] [drop >> 3] ... >> case2",       "(Int | a0) ⇒ Int")
     -- codata: recursion THROUGH a Fn makes the type nominal; the
     -- constructor carries the thunked tail
   , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\nStream",
@@ -598,9 +596,9 @@ evalTests =
   , ("(1 2 >> pack) >> uncons",               [],     "list(1, 2)")
   , ("nil >> uncons",                   [],     "in1()")
     -- deferred peel builds a nested sum; case(…) folds the whole spine
-  , ("def classify = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?) >> case(pass, drop >> \"zero\", toStr)\n-4 >> classify >> print\n0 >> classify >> print\n7 >> classify >> print", ["neg", "zero", "7"], "")
+  , ("def classify = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?) >> [pass] [drop >> \"zero\"] [toStr] ... >> case3\n-4 >> classify >> print\n0 >> classify >> print\n7 >> classify >> print", ["neg", "zero", "7"], "")
     -- associator round-trip is identity on the routed value
-  , ("def tag = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?)\n5 >> tag >> assocL >> assocR >> case(pass, drop >> \"zero\", toStr) >> print", ["5"], "")
+  , ("def tag = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?)\n5 >> tag >> assocL >> assocR >> [pass] [drop >> \"zero\"] [toStr] ... >> case3 >> print", ["5"], "")
     -- guard ladder words: bound subject, bare Bool conditions, answers
     -- as plain values; if opens, elif probes while undecided, else /
     -- otherwise (lazy, quoted) close.  One guard per line, constant _.
@@ -697,6 +695,8 @@ moduleFailTests =
     -- the top-level width backstop now catches it as a clean error,
     -- delivering the guarantee spec-code.md already claimed.
   [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
+    -- the case(…) special form is gone: `case` is an ordinary unknown name
+  , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
