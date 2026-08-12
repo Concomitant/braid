@@ -359,7 +359,7 @@ now, via `mod`/`equals`/`less` and the `(n | n)` re-routing pattern):
 | word | type |
 |---|---|
 | `eq?` | `a0 a0 ⇒ (a0 a0 \| a0 a0)` — structural equality, any value |
-| `lt?` | `Int Int ⇒ (Int Int \| Int Int)` |
+| `lt?` `lte?` `gt?` `gte?` | `Int Int ⇒ (Int Int \| Int Int)` |
 
 Sums & control:
 
@@ -477,7 +477,13 @@ elimination); true closures are gated onto the miss track with an
 explanation. Code is an ordinary list — slice with `take`, transform
 with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
 `code.braid`). `evalCode` re-checks dynamically and runs; failures
-ride the miss track *with the untouched segment as evidence*.
+ride the miss track *with the untouched segment as evidence*. Its
+hit-track type `ρ1` is chosen by the *context*, not the code — the one
+place checker and value can disagree. A top-level **width backstop**
+catches the mismatch: a program whose result stack width differs from
+its (determinate) output type fails with a clean `result desync` error
+instead of silently desyncing. Backstop, not a type-level fix — the
+typed design is `design-metaprogramming.md`.
 `unparse`/`parse` + `readFile`/`writeFile` round-trip code through
 disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ ⇒ (r | Str ρ)⟩` defers
 instead of running — the other half of `reflect`'s round trip.
@@ -539,10 +545,16 @@ at every width. Rules (full version: `guide-open-arity.md`):
 - `design-control-flow.md` — the control-flow design record (idiom
   inventory, deferral theorem, the guard-syntax history).
 - `design-exponents.md` — exponents: theory, unification, erasure,
-  the mapN / Fn-in-declarations open questions.
+  the mapN open question (Fn-in-declarations has since shipped, §8).
+- `design-effects.md` — the effects position (effects are wires, IO is
+  a linear wire, the placement ladder as a PCM); converged, not
+  scheduled.
+- `design-metaprogramming.md` — typed code as the free category
+  (`Path`), Forth's compiler lifted from a monoid; position taken.
 - `guide-open-arity.md` — practical rules for open words.
 - `spec-sums.md`, `expanded-spec.md`, `spec-code.md` — the deeper
   design records.
-- `examples/` — every feature running; start with `registrar.braid`
-  (most of the language in forty lines), then `ladder.braid`,
-  `arrows.braid`, `functors.braid`, `gla.braid`.
+- `examples/` — every feature running, and CI-guarded; start with
+  `registrar.braid` (most of the language in forty lines), then
+  `ladder.braid`, `cuts.braid`, `stream.braid`, `arrows.braid`,
+  `functors.braid`, `gla.braid`.
