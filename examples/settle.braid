@@ -1,0 +1,50 @@
+# The two ladders — vertical programs built from ONE polymorphic word
+# each (no numbered families). Newlines are the spine; `;` appears only
+# inside arms; `>>` not at all.
+#
+#   settle  = assocL ; (merge |)  :  (ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)
+#   settleR = assocR ; (| merge)  :  ((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)
+#
+# settle is the GUARD ladder: the state is (answered | working); each
+# level routes the working track, answers the hit, and settle folds the
+# agreeing answer into the pile. One bar per level, forever.
+#
+# settleR is its mirror, the VALIDATION ladder: (working | errors) —
+# each check must pass to keep working; failures settle behind you.
+
+def settle  = assocL ; (merge |)
+def settleR = assocR ; (| merge)
+
+def classify =
+    negative?
+    (drop ; "neg" |)
+    | zero?
+    | (drop ; "zero" |)
+    settle
+    | odd?
+    | (drop ; "odd" |)
+    settle
+    | toStr
+    merge
+
+-4 ; classify ; print    # neg
+0  ; classify ; print    # zero
+7  ; classify ; print    # odd
+8  ; classify ; print    # 8
+
+# validators, hit = valid (the Bool tier + the (n | n) re-routing pattern)
+def nonneg? = (n -> n 0 ; less ; not ; (n | n))
+def small?  = (n -> n 10 ; less ; (n | n))
+
+def validate =
+    nonneg?
+    (| drop ; "negative")
+    (small? |)
+    ((| drop ; "too big") |)
+    settleR
+    (toStr |)
+    merge
+
+-3 ; validate ; print    # negative
+12 ; validate ; print    # too big
+7  ; validate ; print    # 7
