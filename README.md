@@ -31,14 +31,23 @@ def letter =
                                          # was inferred, not written
 ```
 
-## Build and run
+## Install and run
 
-No local GHC needed — a Docker one-liner:
+**Prebuilt binary** (Linux x86_64, macOS arm64/x86_64) from
+[Releases](https://github.com/Concomitant/braid/releases):
+
+```sh
+tar xzf braid-*.tar.gz && ./braid examples/registrar.braid && ./braid
+```
+
+**No install at all** — a Docker one-liner:
 
 ```sh
 docker run --rm -it -v "$PWD":/w -w /w haskell:9.4-slim \
   sh -c "cabal build exe:braid && cabal run -v0 braid -- examples/registrar.braid"
 ```
+
+**From source**: `cabal build exe:braid` with GHC ≥ 9.4.
 
 `braid <file>` runs a file; `braid` alone opens the REPL:
 

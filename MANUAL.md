@@ -10,13 +10,13 @@ each feature is the way it is), `examples/` (everything running).
 ## 1. Running Braid
 
 ```sh
-# run a file (no local GHC needed)
+# prebuilt binary (GitHub Releases): a file runs it, no file = the REPL
+./braid examples/registrar.braid
+./braid
+
+# or via Docker, no install (add -it and drop the file for the REPL)
 docker run --rm -v "$PWD":/w -w /w haskell:9.4-slim \
   sh -c "cabal run -v0 braid -- examples/registrar.braid"
-
-# REPL: add -it, drop the file
-docker run --rm -it -v "$PWD":/w -w /w haskell:9.4-slim \
-  sh -c "cabal run -v0 braid"
 ```
 
 REPL commands: `:t <prog>` type · `:t! <prog>` raw (no alias folding) ·
@@ -417,6 +417,7 @@ Metaprogramming & IO (railway-typed edges):
 | `evalCode` | `Code ρ0 ⇒ (ρ1 \| Str ρ0)` — dynamically checked |
 | `unparse` | `Code ⇒ Str` |
 | `parse` | `Str ⇒ (Code \| Str)` |
+| `readLine` | `• ⇒ (Str \| Str)` — one line from stdin; EOF misses |
 | `readFile` | `Str ⇒ (Str \| Str)` |
 | `writeFile` | `Str Str ⇒ Maybe(Str)` |
 

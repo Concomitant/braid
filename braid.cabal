@@ -29,6 +29,7 @@ executable braid
                     , braid
                     , containers
                     , mtl
+                    , haskeline
     hs-source-dirs:   app
     default-language: GHC2021
 

@@ -1941,6 +1941,10 @@ primEnv =
            (Arrow (one TStr)
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
+       , ("readLine",  Forall [] [] [] []
+           (Arrow SEnd
+                  (one (TSum (RCons (one TStr)
+                        (RCons (one TStr) RNil))))))
        , ("readFile",  Forall [] [] [] []
            (Arrow (one TStr)
                   (one (TSum (RCons (one TStr) (RCons (one TStr) RNil))))))
@@ -2686,6 +2690,14 @@ evalTerm env defs vars term st =
                           pure ([VSum 0 out], keep, logs)
             _ -> throwError "evalCode: expected a Code value"
     -- IO edges, in print's mold: effects with honest railway types
+    -- readLine: one line from stdin; EOF (or a closed stream) rides
+    -- the miss track like any other IO failure
+    applyAtom _ (Prim "readLine") stk
+      | not (M.member "readLine" vars), not (M.member "readLine" defs) = do
+          r <- liftIO (try getLine)
+          case r of
+            Left e  -> pure ([VSum 1 [VStr (show (e :: IOException))]], stk, [])
+            Right t -> pure ([VSum 0 [VStr t]], stk, [])
     applyAtom _ (Prim "readFile") stk
       | not (M.member "readFile" vars), not (M.member "readFile" defs) = do
           (args, stk') <- takeWires "readFile" 1 stk

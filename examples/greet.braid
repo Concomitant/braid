@@ -1,0 +1,8 @@
+# Interactive IO. readLine takes one line from stdin; EOF rides the
+# miss track like any other IO failure — so this example works at a
+# terminal AND degrades gracefully in CI, where stdin is closed.
+
+"What is your name?" >> print
+readLine
+("Hello, " ... >> cat >> print | drop >> "(no stdin — hello anyway)" >> print)
+forget

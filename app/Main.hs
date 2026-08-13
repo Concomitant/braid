@@ -8,6 +8,8 @@ import Data.List (isPrefixOf, intercalate)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO
+import System.Console.Haskeline
+import Control.Monad.IO.Class (liftIO)
 
 main :: IO ()
 main = do
@@ -66,46 +68,47 @@ repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
   putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :s stack, :defs, :clear, :q quit"
-  loop initialState
+  runInputT defaultSettings (loop initialState)
 
-loop :: ReplState -> IO ()
+-- haskeline supplies line editing, history (up-arrow), and ctrl-d;
+-- everything the branches DO stays in IO, lifted per line
+loop :: ReplState -> InputT IO ()
 loop st = do
-  putStr "braid> "
-  eof <- isEOF
-  if eof
-    then putStrLn ""
-    else do
-      line <- getLine
+  mline <- getInputLine "braid> "
+  case mline of
+    Nothing   -> pure ()          -- EOF / ctrl-d
+    Just line ->
       case trim line of
         ""      -> loop st
         ":q"    -> pure ()
         ":quit" -> pure ()
         ":clear" -> do
-          putStrLn "stack cleared"
+          liftIO (putStrLn "stack cleared")
           loop st { rsStackTy = SEnd, rsStack = [] }
         ":s" -> do
-          putStrLn (renderStack st)
+          liftIO (putStrLn (renderStack st))
           loop st
         ":defs" -> do
-          mapM_ (putStrLn . renderData st) (reverse (rsDatas st))
-          mapM_ (putStrLn . renderAlias st) (reverse (rsAliases st))
-          let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
-          mapM_ (putStrLn . renderDef st) preludeOnly
-          mapM_ (putStrLn . renderDef st) (rsUserDefs st)
+          liftIO $ do
+            mapM_ (putStrLn . renderData st) (reverse (rsDatas st))
+            mapM_ (putStrLn . renderAlias st) (reverse (rsAliases st))
+            let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
+            mapM_ (putStrLn . renderDef st) preludeOnly
+            mapM_ (putStrLn . renderDef st) (rsUserDefs st)
           loop st
         l | ":t! " `isPrefixOf` l -> do
-              typeOfWith show st (drop 4 l)
+              liftIO (typeOfWith show st (drop 4 l))
               loop st
           | ":t " `isPrefixOf` l -> do
-              typeOfWith (showArrowA (rsAliases st)) st (drop 3 l)
+              liftIO (typeOfWith (showArrowA (rsAliases st)) st (drop 3 l))
               loop st
           | ":doc " `isPrefixOf` l -> do
-              docOf st (trim (drop 5 l))
+              liftIO (docOf st (trim (drop 5 l)))
               loop st
           | ":" `isPrefixOf` l -> do
-              putStrLn $ "unknown command: " ++ l
+              liftIO (putStrLn ("unknown command: " ++ l))
               loop st
-          | otherwise -> handleLine st l >>= loop
+          | otherwise -> liftIO (handleLine st l) >>= loop
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse

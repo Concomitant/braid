@@ -1,0 +1,20 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.4'
+          cabal-version: 'latest'
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cabal
+          key: cabal-${{ runner.os }}-${{ hashFiles('braid.cabal') }}
+      - run: cabal build all
+      - run: cabal run -v0 braid-tests   # 512 tests incl. every example

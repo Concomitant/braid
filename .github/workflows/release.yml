@@ -1,0 +1,35 @@
+name: release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            name: braid-linux-x86_64
+          - os: macos-latest
+            name: braid-macos-arm64
+          - os: macos-13
+            name: braid-macos-x86_64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: haskell-actions/setup@v2
+        with:
+          ghc-version: '9.4'
+          cabal-version: 'latest'
+      - run: cabal build exe:braid --enable-optimization=2
+      - run: cabal run -v0 braid-tests
+      - name: package
+        run: |
+          BIN=$(cabal list-bin exe:braid)
+          strip "$BIN" || true
+          cp "$BIN" braid
+          tar czf ${{ matrix.name }}.tar.gz braid
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ matrix.name }}.tar.gz
