@@ -161,6 +161,47 @@ code path. A named abstraction compiles to pure dup/swap/drop wiring
 (reflect it to see), so binders are string-diagram sugar, not a
 separate mechanism.
 
+## Surface: the naming binder
+
+`(-> x y z)` is the other half of the same idea, and the descendant of
+the `7 -> x;` sketch in `spec-update-exponentials.md`: it introduces a
+name for a wire **in passing** rather than consuming it. Identity at
+runtime; the wires flow on and the names are in scope for the rest of
+the enclosing scope, exactly as with the postfix form.
+
+It is sugar over the open binder that puts back what it took —
+
+```
+(-> x y z)  ≡  x y z ... -> x y z ...
+```
+
+— so there is no new `Term`, no new inference rule, no new runtime case.
+The parser builds the re-push stage from the same tokens a user would
+have written and hands it to `parseProgramToks`, so the desugaring is
+literally the program.
+
+Why pass-through and not a second spelling of the consuming binder:
+a consuming `(-> x y z)` would duplicate `x y z ->` exactly, and a form
+that means nothing new should not exist. The labelling reading is also
+the more diagrammatic one — in a drawn diagram a label sits beside a
+wire without cutting it — and it keeps the atom denoting an honest
+morphism (`id`), which is what lets it compose like any other word.
+
+Deepest-first (leftmost = deepest), as every other binder. Kitten's
+`-> x, y;` names the *top* of the stack; that convention would need its
+own `inS` construction instead of falling out of the existing open
+binder, so the mechanical argument agrees with the consistency one.
+
+Names only: `_` names nothing (the re-push could not restore it) and
+`...` is meaningless (passing the rest along is what the form *is*).
+Placement follows `x y ->`: it opens a stage, because its body is the
+rest of the scope.
+
+Cost worth stating: the value is now on the stack *and* behind a name,
+so every later mention of the name is a `dup` in diagram terms. Not new
+power — postfix binder names are already copyable points — but it is
+aliasing while the wire is still live, and the manual says so.
+
 ## Surface: comments, docs, prelude
 
 * `#` starts a comment running to end of line (lexer trivia).
@@ -571,7 +612,10 @@ Reconciliation with the remainder discipline:
   capture at reification), and `7 -> x;` needs the two-zone judgment
   `Γ ⊢ p : Σ ⇒ Δ`. Both slot in after the named-abstraction elaborator;
   they supersede "restrict quotations to closed programs" above when they
-  land.
+  land. **Both landed.** Closures capture the variable environment at
+  `Quote`; the local binding shipped as `(-> x)` (see "Surface: the
+  naming binder"), which needs no two-zone judgment — as an atom it
+  desugars into the open binder already in the language.
 * **Grouped programs obey the instantiation rule** like any other atom: a
   non-final `(…)` in a tensor chain is closed (`ρ := •`); only the final
   atom keeps its remainder.

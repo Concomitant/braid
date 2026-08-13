@@ -65,7 +65,7 @@ braid> :doc decide
 `:t` shows a type (`:t!` raw, un-folded); `:doc` and `:defs` browse
 the prelude; every REPL line runs against a persistent typed stack.
 
-## A tour, in eleven ideas
+## A tour, in twelve ideas
 
 1. **Everything exact.** Constants are maps from nothing (`1 : • ⇒
    Int`), operations consume exactly their inputs (`+ : Int Int ⇒
@@ -84,7 +84,13 @@ the prelude; every REPL line runs against a persistent typed stack.
    fall through; `>?>` chains along the miss track (it *is* elif);
    `readFile` and `parse` are railway stages too. None of them are
    primitive: each is `>> (stage | injector) >> merge`, bundled.
-5. **Guard ladders are ordinary words.** Bind the subject and a guard
+5. **Names label wires; they don't cut them.** `x y ->` consumes the
+   wires it names, so the body re-pushes them. `(-> x y)` instead tags
+   them as they go by — identity at runtime, wires flowing on, names in
+   scope for the rest of the block, the way a label sits beside a wire
+   in a drawn diagram. It is sugar, not machinery: `(-> x y z)` *is*
+   `x y z ... -> x y z ...`.
+6. **Guard ladders are ordinary words.** Bind the subject and a guard
    is a bare Bool beside its answer; `...` accumulates one lane per
    line and `decide` folds the product — first true lane wins:
    ```text
@@ -97,28 +103,28 @@ the prelude; every REPL line runs against a persistent typed stack.
    Guards-as-data variants (`firstTrue`, clause ladders + `choose`,
    `if`/`elif`/`else` fold-as-you-go) are all prelude defs. No guard
    syntax exists in the parser.
-6. **Loops are values.** `loop` is Elgot iteration; `while` and
+7. **Loops are values.** `loop` is Elgot iteration; `while` and
    `until` are three-line prelude defs; general recursion uses
    `recurse` with a placement discipline.
-7. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
+8. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
    Tree(a))` — the name rolls, `unTree` unrolls (both free at
    runtime), and `foldTree` is *generated*: elimination by points.
-8. **The list defines itself.** `type List(a) = (• | a List(a))` in
+9. **The list defines itself.** `type List(a) = (• | a List(a))` in
    the prelude; literals, `map`, `fold`, `filter` are all derived.
-9. **Widths are exponents.** `Intⁿ` (typed `Int^n`) is n wires — a
-   vector with no box, an exponential object with finite base. One
-   fold word is variadic over bare stack products (`sumN : Intⁿ ⇒
-   Int`); the GLA generators are width-polymorphic (`addN : Intⁿ Intⁿ
-   ⇒ Intⁿ`, `zipN : aⁿ bⁿ ⇒ (a b)ⁿ`); a matrix is a value `Fn⟨Intⁿ ⇒
-   Intᵐ⟩`; and a 3-weight syllabus cannot meet a 4-score transcript —
-   dimension errors are type errors. `n` is erased: the running
-   stack's width is its own witness.
-10. **Laws are programs.** Associativity, De Morgan, dot-product
+10. **Widths are exponents.** `Intⁿ` (typed `Int^n`) is n wires — a
+    vector with no box, an exponential object with finite base. One
+    fold word is variadic over bare stack products (`sumN : Intⁿ ⇒
+    Int`); the GLA generators are width-polymorphic (`addN : Intⁿ Intⁿ
+    ⇒ Intⁿ`, `zipN : aⁿ bⁿ ⇒ (a b)ⁿ`); a matrix is a value `Fn⟨Intⁿ ⇒
+    Intᵐ⟩`; and a 3-weight syllabus cannot meet a 4-score transcript —
+    dimension errors are type errors. `n` is erased: the running
+    stack's width is its own witness.
+11. **Laws are programs.** Associativity, De Morgan, dot-product
     symmetry, the copy/add bialgebra — they run as code
     (`examples/laws.braid`, `gla.braid`, `registrar.braid`), and
     they're operational: a checked law is a license to rewrite
     (contrapose a chain, parallelize a fold, flip a weighting).
-11. **Code is data.** `reflect` turns a quotation into its spine — a
+12. **Code is data.** `reflect` turns a quotation into its spine — a
     list of stages of atoms — so `take`/`map`/`reverse` slice and
     transform *programs*; `evalCode` runs them (dynamically checked,
     failures on the miss track); `unparse`/`parse` and
@@ -130,16 +136,16 @@ the prelude; every REPL line runs against a persistent typed stack.
 `examples/` is the guided tour: start with `fizzbuzz`, `validate`
 (railway), `ladder` (every guard idiom), `iterate` (while), then `nat`
 and `tree` (data types and folds), `lists`, `conditionals` and `case`
-(rows, deferred sums, `case(…)`), `sniff` (typed CSV-cell refinement),
-`sac` (split-apply-combine), `laws`, `parallel`, `matrices`, `gla`
-(bundles and the bialgebra), `code`, `transpose`, `io` — and finish
-with `registrar`, which uses most of the language in forty lines about
-grade school.
+(rows, deferred sums, `case(…)`), `tag` (naming wires in passing),
+`sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
+`laws`, `parallel`, `matrices`, `gla` (bundles and the bialgebra),
+`code`, `transpose`, `io` — and finish with `registrar`, which uses
+most of the language in forty lines about grade school.
 
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 420+ case test suite, a full
+(typechecker, interpreter, REPL), a 540+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

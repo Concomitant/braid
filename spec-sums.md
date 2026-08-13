@@ -101,6 +101,16 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
   start are two rows, not a collided `| |`. Continuation-absorption
   survives only for operators a newline cannot express: the railway ops
   `>=>`/`>?>`/`>!>` and the `||` list-literal, which may span lines.
+  * Later addition: a newline is also absorbed against a **bracket
+    delimiter's inner edge** — just after `(`/`[`, just before `)`/`]`.
+    The argument above is about *bare* rows and track columns, and it
+    never applied inside an explicit bracket: a bracket already declares
+    its own scope, so a break against its edge cannot be a stage
+    boundary. Only the edges absorb — a newline *between* stages inside
+    a bracket is still `>>` (`(1 ⏎ 2)` is `(1 >> 2)`, which is an arity
+    error, and pinned as one). This is what lets a wide atom wrap;
+    without it, formatting was load-bearing in a way no editor,
+    formatter, or feed renderer respects.
   * The fish is *not* a separate composition — it is `>>` plus a lift:
     `t1 >=> t2 ≡ t1 >> (t2 | in2) >> merge` (dually `>?>` uses `(in1 |
     t2)`, `>!>` uses `(pass | t2)`), all the shape `t1 >> (a|b) >>

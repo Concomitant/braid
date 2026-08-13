@@ -54,6 +54,14 @@ passTests =
     -- newline is strict >>
   , ("1 2\n(1 ... >> +) (2 _ >> *)\n+\nprint", "• ⇒ •")
   , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
+
+    -- a bracket may span lines: a newline against a delimiter's inner
+    -- edge is layout, absorbed.  A newline BETWEEN stages inside the
+    -- bracket is still a strict >> (see the failTest for `(1\n2)`).
+  , ("(\n1 2\n)",                "• ⇒ Int Int")  -- one stage, two wires
+  , ("(1\n1 ... >> +)",          "• ⇒ Int")      -- two stages: 1 >> (1 ... >> +)
+  , ("[\ndup >> *\n]",           "• ⇒ Fn⟨Int ⇒ Int⟩")
+  , ("(\n(\n1\n)\n)",            "• ⇒ Int")      -- nests
     -- ; is a synonym for >>
   , ("1 2 ; +",                  "• ⇒ Int")
   , ("dup ; * ; toStr",          "Int ⇒ Str")
@@ -126,6 +134,17 @@ passTests =
   , ("(a b ... -> a b ... >> + +)",    "Int Int Int Int ⇒ Int Int")
   , ("(x _ z -> z _ x)",         "a0 a1 a2 ⇒ a2 a1 a0")   -- slots are positional
   , ("(_ x -> x _)",             "a0 a1 ⇒ a1 a0")
+
+    -- the NAMING binder `(-> x y z)`: identity on the wires it names —
+    -- they stay on the stack and pick up names for the rest of the
+    -- scope.  Sugar for `x y z ... -> x y z ...`, so the types match
+    -- exactly (compare the line above).
+  , ("(-> x)",                   "a0 ρ0 ⇒ a0 ρ0")
+  , ("(-> a b)",                 "a0 a1 ρ0 ⇒ a0 a1 ρ0")
+  , ("5\n(-> x)\nx ... >> +",    "• ⇒ Int")   -- live wire AND name
+  , ("3 4\n(-> a b)\n* >> drop\na b >> *", "• ⇒ Int")  -- names outlive the wires
+  , ("1\n(-> x)\ndrop\nx",       "• ⇒ Int")   -- a name survives its wire
+  , ("2\n(-> x)\ndup >> *",      "• ⇒ Int")   -- naming nothing is still id
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
@@ -195,6 +214,20 @@ failTests =
   , ("(x ... y -> x)", "must be the last parameter")
   , ("(_ x -> x)",     "Cannot unify stacks")   -- the `_` wire is unaccounted for
   , ("(x _ -> x)",     "Cannot unify stacks")   -- the `_` wire is unaccounted for
+    -- the naming binder takes names only, and like `x y ->` it opens a
+    -- stage (its body is the rest of the scope)
+  , ("(-> x x)",       "Duplicate parameter")
+  , ("(-> x ...)",     "'...' is implicit")
+  , ("(-> _)",         "'_' names nothing")
+  , ("(-> )",          "needs at least one name")
+  , ("(-> x",          "Unclosed naming binder")
+  , ("(-> x) 1",       "must be the sole atom of its stage")
+  , ("1 (-> x)",       "must start a line or open a scope")
+  , ("[-> x]",         "must start a line or open a scope")
+  , ("5 >> (-> x)",    "must start a line or open a scope")
+    -- a newline inside a bracket is NOT deleted, only absorbed at the
+    -- delimiters: `(1 ⏎ 2)` is `(1 >> 2)`, which is exact-arity nonsense
+  , ("(1\n2)",         "Cannot unify stacks")
   ]
 
 -- (module source, expected alpha-normalized type of main)
@@ -294,6 +327,16 @@ moduleTypeTests =
   , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
     -- recursive defs (monomorphic self-reference)
   , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge\nfib", "Int ⇒ Int")
+    -- a def body may leave a bracket open: the lines that close it
+    -- belong to the body, so a blank line does not end the block and a
+    -- `def`-looking line inside the bracket is code, not a declaration
+  , ("def spanning = (1\n\n2 ... >> +\n)\nspanning",   "• ⇒ Int")
+  , ("def blk =\n    (1\n\n     2 ... >> +\n     )\nblk",  "• ⇒ Int")
+    -- the naming binder inside a def: names reach the rest of the body,
+    -- and the binder does not close the stack — the open-arity `sumN`
+    -- still sees whatever else was passing through
+  , ("def tagged =\n    (-> h m f)\n    sumN\n    h ... >> +\ntagged",
+     "Int Int Int Intⁿ⁰ ⇒ Int")
   ]
 
 -- (module source, expected print log, expected final stack rendering)
@@ -308,6 +351,14 @@ evalTests =
   , ("1 2\nswap\nprint ...\nprint",        ["2", "1"], "")
   , ("1\n2 id",                            [],     "2 1")
   , ("1\n2 ...",                           [],     "2 1")
+
+    -- the naming binder is identity at runtime: the wires it names go
+    -- straight back out, and each later mention of a name is a copy
+  , ("1 2 3\n(-> a b c)",                  [],     "1 2 3")   -- pure id
+  , ("5\n(-> x)\nx ... >> + >> print",     ["10"], "")
+  , ("10 20 30\n(-> h m f)\nsumN >> print\nh m f >> sumN >> print",
+                                           ["60", "60"], "")
+  , ("7\n(-> x)\ndrop\nx x >> *",          [],     "49")   -- name outlives wire
 
     -- quotations and apply
   , ("[dup >> *] 7 >> apply >> print",     ["49"], "")   -- from the spec

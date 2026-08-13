@@ -74,10 +74,11 @@ repl = do
 -- everything the branches DO stays in IO, lifted per line
 loop :: ReplState -> InputT IO ()
 loop st = do
-  mline <- getInputLine "braid> "
+  mline <- getInputLine "braid> " >>= traverse continueOpen
   case mline of
-    Nothing   -> pure ()          -- EOF / ctrl-d
-    Just line ->
+    Nothing        -> pure ()          -- EOF / ctrl-d
+    Just Nothing   -> loop st          -- ctrl-d abandoned a continuation
+    Just (Just line) ->
       case trim line of
         ""      -> loop st
         ":q"    -> pure ()
@@ -109,6 +110,19 @@ loop st = do
               liftIO (putStrLn ("unknown command: " ++ l))
               loop st
           | otherwise -> liftIO (handleLine st l) >>= loop
+
+-- A bracket may span line breaks, so keep reading while one is open.
+-- Ctrl-d during a continuation abandons the buffer (Nothing).
+continueOpen :: String -> InputT IO (Maybe String)
+continueOpen line = go (lineDepth line) line
+  where
+    go d acc
+      | d <= 0 = pure (Just acc)
+      | otherwise = do
+          mnext <- getInputLine "braid| "
+          case mnext of
+            Nothing   -> pure Nothing
+            Just next -> go (d + lineDepth next) (acc ++ "\n" ++ next)
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse

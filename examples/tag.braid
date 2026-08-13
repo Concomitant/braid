@@ -1,0 +1,48 @@
+# Naming a wire without cutting it.
+#
+# `x y ->` CONSUMES the wires it names: the body starts from an empty
+# stack and puts everything back by name. `(-> x y)` instead LABELS them
+# as they go by — identity at runtime, so the wires flow straight on and
+# the names are there too, for the rest of the scope. In a drawn diagram
+# you write a label beside a wire without breaking it; this is that.
+#
+# It is sugar, not machinery: (-> x y z) ≡ x y z ... -> x y z ...
+
+# ---- the two binders, same answer ---------------------------------------
+def consumed =
+    h m f ->                       # wires gone; the body re-pushes them
+    h m f ; sumN
+
+def tagged =
+    (-> h m f)                     # wires still flowing, names as well
+    sumN
+
+10 20 30 ; consumed ; print        # 60
+10 20 30 ; tagged   ; print        # 60
+
+# ---- what the label buys ------------------------------------------------
+# Keep the pipeline moving AND keep a handle on what went past: the
+# running total is computed from the live wires, the report from the
+# names. Nothing had to be re-pushed to stay in the flow.
+def audited =
+    (-> h m f)
+    sumN ; print                   # the wires themselves, summed
+    h ; print                      # and the label, still in scope
+
+10 20 30 ; audited                 # 60, then 10
+
+# ---- a label is a copy --------------------------------------------------
+# The wire is still on the stack, so mentioning the name is a `dup` in
+# diagram terms. Here the live wire is squared by its own name.
+7
+(-> x)
+drop                               # the wire goes...
+x x ; * ; print                    # ...the name remains: 49
+
+# ---- brackets may span lines --------------------------------------------
+# A newline against a bracket's inner edge is layout, not a stage
+# boundary, so a wide atom can wrap. (Between stages it is still `>>`.)
+def dot = zipN ; [(acc a b ->
+                     (a b ; *) acc ; +)] 0 ... ; foldExp2
+
+2 3 5 95 90 95 ; dot ; print       # 935

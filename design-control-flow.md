@@ -102,6 +102,16 @@ terseness (decision: thin sugar stays). The bound-x railway leans on
 `>?>` absorbing; going to zero would force `ok |`/`merge` spelling.
 Revisit only with a concrete win.
 
+**Concrete win found (bracket edges).** Absorption now also covers a
+newline against the inner edge of `(`/`[`/`)`/`]`. This is not the
+operator-continuation rule coming back: no operator absorbs anything
+new, and `>>`/`|` still absorb nothing. The claim is narrower — a
+bracket is an explicit scope, so a break at its edge was never a stage
+boundary to begin with; it was only ever a parse error ("Expected a
+tensor stage"). The win is that a wide tensor stage can wrap, which it
+could not before at any width: the only recourse was to hoist into a
+`def`. Since `|` is untouched, track columns are unaffected.
+
 ### 6. Naming
 
 `ok`/`miss` (= `in1`/`in2`) read well in flow position. `then/elif/

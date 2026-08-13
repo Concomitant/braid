@@ -825,30 +825,64 @@ tokenize = go
     lexStr []             = Left "Unterminated string literal"
 
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
--- newlines adjacent to an explicit >> / >>> (the operator wins).
+-- newlines adjacent to an operator or a bracket delimiter.
 normalizeToks :: [Token] -> [Token]
 normalizeToks = trim . collapse
   where
-    -- A newline is a strict `>>`.  It is absorbed only next to an
-    -- operator a newline cannot itself express: the railway operators
-    -- (`>=>`, `>?>`, `>!>`).  `>>` and `|` never absorb — a newline
-    -- already *is* `>>`, and the row separator `|` must stay put so
-    -- aligned track-columns work (`f |` ⏎ `| g` is two rows, not one
-    -- collided `| |`).
+    -- A newline is a strict `>>`.  Two things absorb one:
+    --
+    --   * the railway operators (`>=>`, `>?>`, `>!>`) — composition a
+    --     newline cannot itself express, so the operator wins;
+    --   * a bracket delimiter, on its inner side: newlines just after
+    --     `(`/`[` and just before `)`/`]`.  A bracket is an explicit
+    --     scope, so a break against its edge is layout, not a stage
+    --     boundary — that is what lets a wide atom wrap.
+    --
+    -- A newline BETWEEN stages inside a bracket is still `>>`: `(1 ⏎ 2)`
+    -- is `(1 >> 2)`, exactly as at top level.  `>>` and `|` never absorb
+    -- — a newline already *is* `>>`, and the row separator `|` must stay
+    -- put so aligned track-columns work (`f |` ⏎ `| g` is two rows, not
+    -- one collided `| |`).
     collapse [] = []
     collapse (TokNewline : ts) =
       case dropWhile (== TokNewline) ts of
-        rest@(t : _) | absorbs t -> collapse rest
-        rest                     -> TokNewline : collapse rest
+        rest@(t : _) | absorbsBefore t -> collapse rest
+        rest                           -> TokNewline : collapse rest
     collapse (t : ts)
-      | absorbs t = t : collapse (dropWhile (== TokNewline) ts)
-      | otherwise = t : collapse ts
+      | absorbsAfter t = t : collapse (dropWhile (== TokNewline) ts)
+      | otherwise      = t : collapse ts
 
     trim = dropWhile (== TokNewline) . dropTrailing
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
-    absorbs t =
+    -- newlines FOLLOWING this token are absorbed
+    absorbsAfter t = railway t || t == TokLParen || t == TokLBrack
+    -- newlines PRECEDING this token are absorbed
+    absorbsBefore t = railway t || t == TokRParen || t == TokRBrack
+
+    railway t =
       t == TokKleisli || t == TokOrElse || t == TokOrClose
+
+-- Net bracket depth a source line contributes: `(`/`[` open, `)`/`]`
+-- close, with `#` comments and string literals skipped (same escapes as
+-- the tokenizer).  The line-based layers above the parser — def-body
+-- blocks in `splitDefs`, the REPL's one-line read — consult this so a
+-- bracket may span line breaks.
+lineDepth :: String -> Int
+lineDepth = go 0
+  where
+    go d []       = d
+    go d ('#':_)  = d                    -- comment runs to end of line
+    go d ('"':cs) = go d (skipStr cs)
+    go d (c:cs)
+      | c `elem` ("([" :: String) = go (d + 1) cs
+      | c `elem` (")]" :: String) = go (d - 1) cs
+      | otherwise                 = go d cs
+
+    skipStr ('\\':_:cs) = skipStr cs
+    skipStr ('"':cs)    = cs
+    skipStr (_:cs)      = skipStr cs
+    skipStr []          = []
 
 --------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
@@ -887,15 +921,25 @@ parseProgram input = do
 -- may open a scope (`def f = x y -> …`) or appear as a pipeline stage
 -- after a newline (`… \n x y -> …` ≡ `… >> (x y -> …)`).  A run of
 -- identifiers immediately followed by `->` is a binder.
+-- `(-> x y z)` is the naming binder — the same construct, but it hands
+-- the wires straight back (see `mkName`).  Both are recognized here and
+-- only here, because both take the rest of the scope as their body.
 parseProgramToks :: [Token] -> Either String (Term, [Token])
 parseProgramToks toks =
-  case binderPrefix toks of
-    Just (ps, rest) -> mkAbs ps rest
-    Nothing -> do
-      (t0, rest) <- parseRow toks
-      loop t0 rest
+  case toks of
+    (TokLParen : TokArrow : ts) -> mkName ts
+    (TokArrow : _)              -> Left arrowMisplaced
+    _ ->
+      case binderPrefix toks of
+        Just (ps, rest) -> mkAbs ps rest
+        Nothing -> do
+          (t0, rest) <- parseRow toks
+          loop t0 rest
   where
     loop acc (TokNewline : rest)
+      | (TokLParen : TokArrow : ts) <- rest = do
+          (nm, r') <- mkName ts
+          Right (Seq acc nm, r')
       | Just (ps, r) <- binderPrefix rest = do
           (abs', r') <- mkAbs ps r
           Right (Seq acc abs', r')
@@ -903,6 +947,59 @@ parseProgramToks toks =
           (t, rest') <- parseRow rest
           loop (Seq acc t) rest'
     loop acc rest = Right (acc, rest)
+
+    -- `(-> x y z)` is the NAMING binder: identity on the wires it names.
+    -- They stay on the stack and pick up names for the rest of the
+    -- enclosing scope — a wire label, not a cut.  It is sugar for the
+    -- open binder that immediately puts back what it took:
+    --
+    --   (-> x y z)  ≡  x y z ... -> x y z ...
+    --
+    -- so it needs no machinery of its own: consume the deepest wires
+    -- (leftmost = deepest, as everywhere), re-push them under the
+    -- remainder, bind the names.  Like `x y z ->` it opens a stage — at
+    -- the start of a scope or after a newline — because its body is the
+    -- rest of that scope.
+    mkName ts = do
+      (params, rest) <-
+        case span isParamTok ts of
+          (ps, TokRParen : r) -> Right (ps, r)
+          _                   -> Left "Unclosed naming binder (expected ')')"
+      names <- mapM slotOf params
+      case names of
+        [] -> Left "'(-> …)' needs at least one name"
+        _  -> Right ()
+      case [ p | (p, n) <- zip names [0 :: Int ..], p `elem` take n names ] of
+        (p : _) -> Left $ "Duplicate parameter: " ++ p
+        []      -> Right ()
+      -- the wires go straight back out, so the body starts by re-pushing
+      -- them; reuse the parser so the desugaring is exactly the stage a
+      -- user would have written
+      let repush = [ TokIdent n | n <- names ] ++ [TokEllipsis]
+      case rest of
+        (sep : more) | sep == TokNewline || sep == TokSeq -> do
+          (body, rest') <- parseProgramToks (repush ++ TokNewline : more)
+          Right (OpenAbs (map Just names) True body, rest')
+        _ | endsScope rest -> do
+          (body, _) <- parseProgramToks repush
+          Right (OpenAbs (map Just names) True body, rest)
+        _ -> Left "'(-> …)' must be the sole atom of its stage"
+
+    slotOf (TokIdent "_") =
+      Left "'_' names nothing — '(-> …)' takes names only"
+    slotOf (TokIdent n)   = Right n
+    slotOf TokEllipsis    =
+      Left "'...' is implicit in '(-> …)' — it always passes the rest along"
+    slotOf _              = Left "Malformed parameter list"
+
+    endsScope []              = True
+    endsScope (TokRParen : _) = True
+    endsScope (TokRBrack : _) = True
+    endsScope _               = False
+
+    arrowMisplaced =
+      "'(-> …)' must start a line or open a scope — like `x y ->`, "
+        ++ "a binder takes the rest of its scope as the body"
 
     mkAbs toks0 rest = do
       -- split the parameter list into names, `_` passthroughs and a
@@ -2147,20 +2244,45 @@ splitDefs src = do
           -- comment-only body as blank so the block-body form triggers
           if all isSpace (takeWhile (/= '#') body)
             then do
-              -- block body: the following indented lines (blank ends it)
-              let indented ln = not (all isSpace ln) && isSpace (head ln)
-                  (block, rest') = span indented rest
+              -- block body: the following indented lines.  A blank line
+              -- ends it — unless a bracket is still open, in which case
+              -- the body is mid-atom and keeps going.
+              let (block, rest') = spanBlock 0 rest
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
                   (ds, ts, ps) <- go Nothing rest'
                   pure ((name, intercalate "\n" block, doc) : ds, ts, ps)
             else do
-              (ds, ts, ps) <- go Nothing rest
-              pure ((name, body, doc) : ds, ts, ps)
+              -- inline body: it may leave a bracket open, in which case
+              -- the following lines belong to it, not to the module
+              let (cont, rest') = spanOpen l rest
+              (ds, ts, ps) <- go Nothing rest'
+              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, ps)
       | otherwise = do
-          (ds, ts, ps) <- go Nothing rest
-          pure (ds, ts, l : ps)
+          -- a program line may leave a bracket open; the lines that
+          -- close it are part of it, so `def`/`type`/`##` inside an open
+          -- bracket is code, not a declaration
+          let (cont, rest') = spanOpen l rest
+          (ds, ts, ps) <- go Nothing rest'
+          pure (ds, ts, l : cont ++ ps)
+
+    indented ln = not (all isSpace ln) && isSpace (head ln)
+
+    -- an indented block body, continuing across blank/dedented lines
+    -- while a bracket opened inside it is still unclosed
+    spanBlock d (ln : ls)
+      | d > 0 || indented ln =
+          let (b, r) = spanBlock (d + lineDepth ln) ls in (ln : b, r)
+    spanBlock _ ls = ([], ls)
+
+    -- the lines AFTER `l` needed to close a bracket `l` left open
+    spanOpen l = walk (lineDepth l) []
+      where
+        walk d acc ls
+          | d <= 0    = (reverse acc, ls)
+        walk _ acc [] = (reverse acc, [])
+        walk d acc (x : xs) = walk (d + lineDepth x) (x : acc) xs
 
     docLine l =
       case dropWhile isSpace l of

@@ -48,8 +48,29 @@ the current stack is rejected with a message naming the stack.
 
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
-**A newline is a strict `>>`** — there is no line-continuation for `>>`
-or `|`; only `>=>`/`>?>`/`>!>` may absorb a line break.
+
+**A newline is a strict `>>`.** Two things absorb one:
+
+- the railway operators `>=>`/`>?>`/`>!>` — composition a newline cannot
+  itself express, so the operator wins;
+- a **bracket delimiter, on its inner side**: a break just after `(`/`[`
+  or just before `)`/`]`. A bracket is an explicit scope, so a break
+  against its edge is layout, not a stage boundary — this is what lets a
+  wide atom wrap.
+
+There is no line-continuation for `>>` or `|`, and a newline *between*
+stages inside a bracket is still `>>`:
+
+```braid
+(               # break at the edge: layout
+1 2             # ⇒ Int Int — ONE tensor stage
+)
+(1              # break between stages: composition
+1 ... >> +)     # ⇒ Int — this is 1 >> (1 ... >> +)
+```
+
+Rows stay line-scoped everywhere (§6): `f |` ⏎ `| g` is two rows, not
+one collided `| |`, which is what makes aligned track-columns work.
 
 ## 3. The model
 
@@ -95,7 +116,9 @@ last so the runtime segment can be its witness):
 - an open-arity word must be the final atom of its stage (§13);
 - an open binder (`x ... -> …`) must be the final atom of its stage;
 - a recursive call must be the final atom of its stage;
-- `...` must be the final atom of its stage.
+- `...` must be the final atom of its stage;
+- the naming binder `(-> x y z)` is an open binder, so it must be the
+  *sole* atom of its stage — and, like `x y ->`, it opens that stage.
 
 ## 5. Types
 
@@ -146,6 +169,7 @@ tensor position are typed closed (their outer tails become `•`).
 def w =
     x y ->         # postfix: names the top wires; the REST of the
     body           # scope is the body
+(-> x y)           # naming: LABELS two wires without consuming them
 ```
 Parameters bind wires **leftmost = deepest**, exactly as atoms align in
 a tensor stage, and are in scope as constants — including inside quotes
@@ -181,6 +205,46 @@ Everything-exact still applies inside — the body must account for the
 wires `_`/`...` give it (`(x _ -> x)` is an error: the `_` wire goes
 unused). A `...` binder cannot be `reflect`ed (its passthrough width is
 erased); `_` binders reflect fine, compiling to ordinary wiring.
+
+#### The naming binder `(-> x y z)`
+
+The forms above *consume* the wires they name. `(-> x y z)` **labels**
+them instead: identity at runtime, so the wires flow straight on and the
+names are also in scope for the rest of the enclosing scope. In a drawn
+diagram you write a label beside a wire without cutting it; this is that
+(`examples/tag.braid`).
+
+It is sugar for the open binder that puts back what it took —
+
+```braid
+(-> x y z)  ≡  x y z ... -> x y z ...
+```
+
+— so it needs no machinery of its own, and its type is the identity:
+
+```text
+braid> :t (-> x)
+(-> x) : a0 ρ0 ⇒ a0 ρ0
+braid> :t (-> a b)
+(-> a b) : a0 a1 ρ0 ⇒ a0 a1 ρ0
+```
+
+Wires bind **leftmost = deepest**, as everywhere. Because the wire is
+still on the stack, each later mention of a name is a `dup` in diagram
+terms — and a name outlives its wire:
+
+```braid
+7
+(-> x)
+drop                  # the wire goes...
+x x >> *              # ...the name remains: 49
+```
+
+Placement: names only (no `_`, and `...` is meaningless — passing the
+rest along is what the form *is*), and like `x y ->` it **opens a
+stage** — at the start of a scope or after a newline — because its body
+is the rest of that scope. So `5 >> (-> x)` is not a naming binder, for
+the same reason `f >> x y -> …` is not a postfix one.
 
 ### Rows `(p₁ | p₂ | …)`
 The sum functor's action: one wire in carrying `(Δ₁|Δ₂|…)`, component
@@ -564,8 +628,13 @@ at every width. Rules (full version: `guide-open-arity.md`):
   `_` or `...` — the same frame discipline as every constant.
 - Row arms must fit on one line; arms must agree in type to `merge`.
 - Ladder lanes are juxtapositions — a `;`/`>>` inside a lane needs a group.
-- `def name = x -> …` ends at the line; use the block form (`def name =`
-  newline `x ->`) for multi-line bodies.
+- `def name = x -> …` ends at the line — unless it leaves a bracket
+  open, in which case the lines that close it belong to the body. For
+  multi-line bodies generally, use the block form (`def name =` newline
+  `x ->`).
+- Binders open a stage: `5 >> (-> x)` and `f >> x y -> …` are not
+  binders — put them after a newline (their body is the rest of the
+  scope, which a mid-line position cannot mean).
 - A binder's body only sees what the parameter list gives it. Need the
   remainder inside the body? Use an open binder (`x ... -> …`), not
   `(x -> …) ...` — the latter routes the rest *around* the binder.
