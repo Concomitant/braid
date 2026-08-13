@@ -959,6 +959,13 @@ parseRow toks =
     -- `(f |)` ≡ `(f | pass)`
     loop acc (TokBar : rest)
       | endsRow rest = Right (Alts (reverse (Prim "pass" : acc)) False, rest)
+    -- EVERY empty arm defaults to identity, not just the first and
+    -- last: `(a | |)` ≡ `(a | pass | pass)`, `(| | c)` ≡
+    -- `(pass | pass | c)`.  This is what makes track-column layout
+    -- work: each line of a vertical pipeline touches one track and
+    -- draws the others straight through as aligned `|` wires.
+    loop acc (TokBar : rest@(TokBar : _)) =
+      loop (Prim "pass" : acc) rest
     loop acc (TokBar : rest) = do
       (t, rest') <- parseKleisli rest
       loop (t : acc) rest'

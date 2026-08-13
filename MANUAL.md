@@ -192,11 +192,30 @@ conditional). Sugar:
 |---|---|
 | `(f \|)` | `(f \| pass)` — trailing bar passes the last track |
 | `(\| f)` | `(pass \| f)` — leading bar passes the first track |
+| `(\| f \|)`, `(f \| \|)`, … | **every** empty arm is `pass` — any track, any count |
 | `(f \| ...)` | open row: identity on all remaining alternatives (row residual σ) |
 
 Rows are **line-scoped**: bare rows work without parens (`ok | guard`
 on its own line), and a row cannot span a line break. Each arm lives
 on one line.
+
+**Track-column layout**: over a *flat* sum, successive bare-row lines
+each touch one track and draw the others straight through — aligned
+`|`s are literally the wires, and the text reads as the string diagram
+(`examples/vertical.braid`):
+
+```braid
+route3                              # Int ⇒ (Int | Int | Int), flat
+drop >> "negative" |                |
+|                    drop >> "zero" |
+|                    |                toStr
+(print | print | print)
+forget
+```
+
+Flat sums come from the inject-and-collapse idiom — each router arm
+injects into the *same* flat sum, `merge` collapses:
+`negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge`.
 
 `merge : (ρ0 | ρ0) ⇒ ρ0` rejoins agreeing tracks (the codiagonal).
 Arms must agree on the result type to merge.

@@ -1,0 +1,39 @@
+# Vertical programming: the text IS the string diagram, read top to
+# bottom. A flat sum is a ribbon of parallel tracks; a bare row on each
+# line touches ONE track and draws the others straight through as
+# aligned `|` wires (every empty arm is `pass`). Columns are tracks.
+#
+# route3 builds a flat 3-track sum with the inject-and-collapse idiom:
+# each router arm injects into the SAME flat sum, merge collapses.
+
+def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge
+## route3 : Int ⇒ (Int | Int | Int)   — negative / zero / positive
+
+def describe =
+    route3
+    drop >> "negative" |                |
+    |                    drop >> "zero" |
+    |                    |                toStr
+    print              | print          | print
+    forget
+
+-4 >> describe    # negative
+0  >> describe    # zero
+7  >> describe    # 7
+
+# any track can be worked on across several lines while the others
+# flow by — here the positive track is squared then rendered, in two
+# steps, without the neighbors ever being mentioned:
+
+def enrich =
+    route3
+    drop >> "neg" |       |
+    |               toStr |
+    |               |       dup >> *
+    |               |       toStr
+    print         | print | print
+    forget
+
+-5 >> enrich      # neg
+0  >> enrich      # 0
+6  >> enrich      # 36

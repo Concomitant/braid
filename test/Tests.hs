@@ -129,6 +129,13 @@ passTests =
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
+    -- EVERY empty arm is pass, not just first/last — track-column layout
+  , ("(drop | |)",               "(a0 | ρ0 | ρ1) ⇒ (• | ρ0 | ρ1)")
+  , ("(| | drop)",               "(ρ0 | ρ1 | a0) ⇒ (ρ0 | ρ1 | •)")
+  , ("(| drop | | drop |)",      "(ρ0 | a0 | ρ1 | a1 | ρ2) ⇒ (ρ0 | • | ρ1 | • | ρ2)")
+    -- consecutive bars are consecutive empty arms (the old || literal
+    -- is gone; this is its successor meaning, pinned)
+  , ("(|| drop)",                "(ρ0 | ρ1 | a0) ⇒ (ρ0 | ρ1 | •)")
 
     -- routers: the primitive comparators (predicates are now DERIVED —
     -- their tests live in moduleTypeTests)
@@ -685,6 +692,9 @@ evalTests =
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
   , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = (n -> n [n 1 >> + >> from] >> Stream)\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
+    -- vertical track-columns: flat 3-sum via inject-and-collapse, then
+    -- bare rows each touching one track (empty arms pass)
+  , ("def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
   ]
 
 -- (module source, substring expected in the error)
@@ -698,9 +708,6 @@ moduleFailTests =
   [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
     -- the case(…) special form is gone: `case` is an ordinary unknown name
   , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
-    -- the || literal is gone: two bars are a parse error, never a
-    -- silent reinterpretation
-  , ("def g = || [odd?] [dup]\n1", "Expected a tensor stage")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
