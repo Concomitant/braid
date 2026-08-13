@@ -11,9 +11,7 @@
 #
 # settleR is its mirror, the VALIDATION ladder: (working | errors) —
 # each check must pass to keep working; failures settle behind you.
-
-def settle  = assocL ; (merge |)
-def settleR = assocR ; (| merge)
+# Both are prelude words (with `splice`, their routing cousin).
 
 def classify =
     negative?

@@ -226,6 +226,12 @@ moduleTypeTests =
     -- a param substituted INSIDE the Fn (substStackVars into TFn), and
     -- folded back on display
   , ("type Thunk(a) = Fn⟨• ⇒ a⟩\n[5]",            "• ⇒ Thunk(Int)")
+    -- the polymorphic sum-ladder words: splice (routing), settle /
+    -- settleR (the dual ladder steps) — row variables, no arity families
+  , ("splice",   "(ρ0 | (σ0)) ⇒ (ρ0 | σ0)")
+  , ("settle",   "(ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)")
+  , ("settleR",  "((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)")
+  , ("negative? >> (| zero?) >> splice", "Int ⇒ (Int | Int | Int)")
     -- caseN: the flat coproduct eliminators, now prelude words (the
     -- case(…) special form is REMOVED — quoted handlers, sum on top)
   , ("[drop >> \"neg\"] [drop >> \"zero\"] [toStr] ... >> case3", "(a0 | (a1 | a2)) ⇒ Str")

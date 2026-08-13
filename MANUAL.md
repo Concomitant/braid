@@ -442,7 +442,12 @@ Exponent tier (widths erased; see §13):
 
 **Router algebra** (quoted predicates as values): `not` (track swap)
 `negate` `both` `either` `equals?` `less?` `equalsTo` `lessThan`
-`else?` (always-hit) `assocL`/`assocR` (re-nest a sum).
+`else?` (always-hit) `assocL`/`assocR` (re-nest a sum);
+`splice : (ρ0 | (σ0)) ⇒ (ρ0 | σ0)` (flatten one level of nesting into
+the parent row, any inner arity); the ladder steps `settle :
+(ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)` (guard ladder — fold an agreeing answer
+into the pile) and `settleR : ((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)` (its
+validation mirror). See `examples/settle.braid`.
 
 **Verdict tier** (forget the data, keep the decision): `verdict :
 (ρ0|ρ1) ⇒ Bool`, and long forms `equals` `less` `odd` `even` `zero`
