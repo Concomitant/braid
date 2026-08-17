@@ -626,10 +626,10 @@ reify those open diagrams as exponential values.
 
 ## Variables and generalized elements outside abstractions
 
-**Shipped**, spelled `(-> x)` rather than `7 -> x;` — the parenthesized
-form keeps the binder an atom, so it needs no statement-level `;` and no
-new judgment. See `expanded-spec.md` ("Surface: the naming binder") for
-the desugaring: `(-> x y z) ≡ x y z ... -> x y z ...`, which is why the
+**Shipped**, spelled `7 -> x` — no statement terminator, because the
+arrow ends the stage it follows and the body is the rest of the scope.
+See `expanded-spec.md` ("Surface: the naming binder") for the
+desugaring: `-> x y z ≡ x y z ... -> x y z ...`, which is why the
 two-zone judgment turned out not to be needed — the existing open binder
 already carries the context, and the atom is honestly `id`.
 

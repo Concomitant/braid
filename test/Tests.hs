@@ -135,16 +135,27 @@ passTests =
   , ("(x _ z -> z _ x)",         "a0 a1 a2 ⇒ a2 a1 a0")   -- slots are positional
   , ("(_ x -> x _)",             "a0 a1 ⇒ a1 a0")
 
-    -- the NAMING binder `(-> x y z)`: identity on the wires it names —
+    -- the NAMING binder `-> x y z`: identity on the wires it names —
     -- they stay on the stack and pick up names for the rest of the
     -- scope.  Sugar for `x y z ... -> x y z ...`, so the types match
-    -- exactly (compare the line above).
-  , ("(-> x)",                   "a0 ρ0 ⇒ a0 ρ0")
-  , ("(-> a b)",                 "a0 a1 ρ0 ⇒ a0 a1 ρ0")
-  , ("5\n(-> x)\nx ... >> +",    "• ⇒ Int")   -- live wire AND name
-  , ("3 4\n(-> a b)\n* >> drop\na b >> *", "• ⇒ Int")  -- names outlive the wires
-  , ("1\n(-> x)\ndrop\nx",       "• ⇒ Int")   -- a name survives its wire
-  , ("2\n(-> x)\ndup >> *",      "• ⇒ Int")   -- naming nothing is still id
+    -- exactly (compare the line above).  The arrow's SIDE says which
+    -- binder it is: names before it are cut, names after it label.
+  , ("-> x -> pass",             "a0 ρ0 ⇒ a0 ρ0")
+  , ("-> a b -> pass",           "a0 a1 ρ0 ⇒ a0 a1 ρ0")
+  , ("5\n-> x\nx ... >> +",      "• ⇒ Int")   -- live wire AND name
+  , ("3 4\n-> a b\n* >> drop\na b >> *", "• ⇒ Int")  -- names outlive the wires
+  , ("1\n-> x\ndrop\nx",         "• ⇒ Int")   -- a name survives its wire
+  , ("2\n-> x\ndup >> *",        "• ⇒ Int")   -- naming nothing is still id
+    -- slots use the stage vocabulary: `_` skips a wire, exactly as it
+    -- does in `print print _`.  Without it you could only ever name a
+    -- prefix, since slots are positional from the deepest wire.
+  , ("1 2 3 -> _ _ z -> drop drop drop >> z", "• ⇒ Int")
+  , ("1 2 -> a _ -> drop drop >> a",          "• ⇒ Int")
+    -- bare and mid-line: the arrow ends the stage it follows
+  , ("1 \"a\" .foo -> x _ y -> print print _ >> x ...", "• ⇒ Int Sym")
+  , ("5 ; -> x -> x ... >> +",   "• ⇒ Int")   -- after a separator
+  , ("5 -> n -> n ... >> *",     "• ⇒ Int")   -- explicit body marker
+  , ("5\n-> n\nn ... >> *",      "• ⇒ Int")   -- ...or an ordinary stage break
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
@@ -216,15 +227,15 @@ failTests =
   , ("(x _ -> x)",     "Cannot unify stacks")   -- the `_` wire is unaccounted for
     -- the naming binder takes names only, and like `x y ->` it opens a
     -- stage (its body is the rest of the scope)
-  , ("(-> x x)",       "Duplicate parameter")
-  , ("(-> x ...)",     "'...' is implicit")
-  , ("(-> _)",         "'_' names nothing")
-  , ("(-> )",          "needs at least one name")
-  , ("(-> x",          "Unclosed naming binder")
-  , ("(-> x) 1",       "must be the sole atom of its stage")
-  , ("1 (-> x)",       "must start a line or open a scope")
-  , ("[-> x]",         "must start a line or open a scope")
-  , ("5 >> (-> x)",    "must start a line or open a scope")
+  , ("-> x x -> pass", "Duplicate parameter")
+  , ("-> x ... -> pass", "'...' is implicit")
+  , ("-> -> pass",     "needs at least one name")
+    -- a binder whose body is empty binds names nothing can reach; the
+    -- cutting form fails the same way (`def f = x ->` has no body)
+  , ("5 -> x",         "ends its scope")
+  , ("[5 -> x]",       "ends its scope")
+  , ("(-> x)",         "ends its scope")   -- the parenthesized form is gone
+  , ("1 -> x 2",       "must be followed by its body")
     -- a newline inside a bracket is NOT deleted, only absorbed at the
     -- delimiters: `(1 ⏎ 2)` is `(1 >> 2)`, which is exact-arity nonsense
   , ("(1\n2)",         "Cannot unify stacks")
@@ -335,7 +346,7 @@ moduleTypeTests =
     -- the naming binder inside a def: names reach the rest of the body,
     -- and the binder does not close the stack — the open-arity `sumN`
     -- still sees whatever else was passing through
-  , ("def tagged =\n    (-> h m f)\n    sumN\n    h ... >> +\ntagged",
+  , ("def tagged =\n    -> h m f\n    sumN\n    h ... >> +\ntagged",
      "Int Int Int Intⁿ⁰ ⇒ Int")
   ]
 
@@ -354,11 +365,11 @@ evalTests =
 
     -- the naming binder is identity at runtime: the wires it names go
     -- straight back out, and each later mention of a name is a copy
-  , ("1 2 3\n(-> a b c)",                  [],     "1 2 3")   -- pure id
-  , ("5\n(-> x)\nx ... >> + >> print",     ["10"], "")
-  , ("10 20 30\n(-> h m f)\nsumN >> print\nh m f >> sumN >> print",
+  , ("1 2 3\n-> a b c\npass",             [],     "1 2 3")   -- pure id
+  , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
+  , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
                                            ["60", "60"], "")
-  , ("7\n(-> x)\ndrop\nx x >> *",          [],     "49")   -- name outlives wire
+  , ("7\n-> x\ndrop\nx x >> *",            [],     "49")   -- name outlives wire
 
     -- quotations and apply
   , ("[dup >> *] 7 >> apply >> print",     ["49"], "")   -- from the spec
@@ -743,8 +754,21 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x _] >> getCode\n7 8 >> (c) ... >> evalCode >> (print print | forget) >> merge", ["7", "8"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x x _ >> + _ >> +] >> getCode\n1 2 >> (c) ... >> evalCode >> (print | forget) >> merge", ["4"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ z -> z _ x] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print print print | forget) >> merge", ["3", "2", "1"], "")
-    -- a `...` binder honestly refuses: its passthrough width is erased
-  , ("[x ... -> x ...] >> reflect >> (drop >> \"ok\" | id) >> merge >> print", ["cannot reflect a binder whose parameters end in '...'"], "")
+    -- OPEN binders eliminate too.  The erased passthrough is the
+    -- stack's TAIL, so it rides above the param block inside each
+    -- stage's `pass`; params are reached by depth from the DEEPEST
+    -- wire, so every fetch is static and never crosses it.  Round-trip
+    -- the VALUE — a success-only test would miss a wrong permutation.
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ...] >> getCode\n7 >> (c) ... >> evalCode >> (print | forget) >> merge", ["7"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ y ... -> y _ x ...] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print print print | forget) >> merge", ["3", "2", "1"], "")
+    -- ...and when the body consumes OUT of the passthrough, inference
+    -- has already pinned it to a concrete width, so it is counted in
+    -- and the param block is lifted above it (this one returned 9
+    -- instead of 7 until that lift was added)
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x x ... >> + + >> +] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print | forget) >> merge", ["7"], "")
+    -- the naming binder is an open binder, so it reflects as wiring too
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> x ... >> * ...] >> getCode\n7 >> (c) ... >> evalCode >> (print | forget) >> merge", ["49"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> drop >> x ...] >> getCode\n9 >> (c) ... >> evalCode >> (print | forget) >> merge", ["9"], "")
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.

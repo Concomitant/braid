@@ -921,14 +921,16 @@ parseProgram input = do
 -- may open a scope (`def f = x y -> …`) or appear as a pipeline stage
 -- after a newline (`… \n x y -> …` ≡ `… >> (x y -> …)`).  A run of
 -- identifiers immediately followed by `->` is a binder.
--- `(-> x y z)` is the naming binder — the same construct, but it hands
--- the wires straight back (see `mkName`).  Both are recognized here and
--- only here, because both take the rest of the scope as their body.
+-- `-> x y z` is the NAMING binder — the same construct written the
+-- other way round, handing the wires straight back (see `mkName`).  The
+-- arrow's side says which: names BEFORE it are cut from the stack,
+-- names AFTER it label wires that keep flowing.  Both take the rest of
+-- the scope as their body, which is why both are recognized here.
 parseProgramToks :: [Token] -> Either String (Term, [Token])
 parseProgramToks toks =
   case toks of
-    (TokLParen : TokArrow : ts) -> mkName ts
-    (TokArrow : _)              -> Left arrowMisplaced
+    -- a leading arrow names the wires this scope was handed
+    (TokArrow : ts) -> mkName ts
     _ ->
       case binderPrefix toks of
         Just (ps, rest) -> mkAbs ps rest
@@ -936,8 +938,13 @@ parseProgramToks toks =
           (t0, rest) <- parseRow toks
           loop t0 rest
   where
+    -- `stage -> names`: the stage ends at the arrow (parseStage leaves
+    -- it), and the names label the wires the stage just produced
+    loop acc (TokArrow : rest) = do
+      (nm, r') <- mkName rest
+      Right (Seq acc nm, r')
     loop acc (TokNewline : rest)
-      | (TokLParen : TokArrow : ts) <- rest = do
+      | (TokArrow : ts) <- rest = do
           (nm, r') <- mkName ts
           Right (Seq acc nm, r')
       | Just (ps, r) <- binderPrefix rest = do
@@ -948,58 +955,60 @@ parseProgramToks toks =
           loop (Seq acc t) rest'
     loop acc rest = Right (acc, rest)
 
-    -- `(-> x y z)` is the NAMING binder: identity on the wires it names.
+    -- `-> x _ y` is the NAMING binder: identity on the wires it names.
     -- They stay on the stack and pick up names for the rest of the
     -- enclosing scope — a wire label, not a cut.  It is sugar for the
     -- open binder that immediately puts back what it took:
     --
-    --   (-> x y z)  ≡  x y z ... -> x y z ...
+    --   -> x _ y   ≡   x _ y ... -> x _ y ...
     --
     -- so it needs no machinery of its own: consume the deepest wires
     -- (leftmost = deepest, as everywhere), re-push them under the
-    -- remainder, bind the names.  Like `x y z ->` it opens a stage — at
-    -- the start of a scope or after a newline — because its body is the
-    -- rest of that scope.
+    -- remainder, bind the names.  Slots use the stage vocabulary, same
+    -- as any binder: a name takes one wire, `_` skips one.  `...` is
+    -- rejected — passing the rest along is what the form already IS.
+    --
+    -- The body is the rest of the scope, introduced by an explicit `->`
+    -- or by an ordinary stage break (`;`, `>>`, or a newline).
     mkName ts = do
-      (params, rest) <-
-        case span isParamTok ts of
-          (ps, TokRParen : r) -> Right (ps, r)
-          _                   -> Left "Unclosed naming binder (expected ')')"
-      names <- mapM slotOf params
-      case names of
-        [] -> Left "'(-> …)' needs at least one name"
+      let (params, rest0) = span isParamTok ts
+      slots <- mapM slotOf params
+      case slots of
+        [] -> Left "'-> …' needs at least one name"
         _  -> Right ()
-      case [ p | (p, n) <- zip names [0 :: Int ..], p `elem` take n names ] of
+      let ns = [ n | Just n <- slots ]
+      case [ p | (p, n) <- zip ns [0 :: Int ..], p `elem` take n ns ] of
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
+      bodyToks <- case rest0 of
+        (TokArrow : more)   -> Right more     -- `-> names -> body`
+        (TokSeq : more)     -> Right more
+        (TokNewline : more) -> Right more
+        r | endsScope r ->
+              Left "'-> …' ends its scope: nothing is left to use the names"
+        (t : _) -> Left $
+          "'-> …' must be followed by its body (a newline, ';' or '->')"
+            ++ ", got: " ++ show t
+      case bodyToks of
+        [] -> Left "'-> …' ends its scope: nothing is left to use the names"
+        _  -> Right ()
       -- the wires go straight back out, so the body starts by re-pushing
       -- them; reuse the parser so the desugaring is exactly the stage a
       -- user would have written
-      let repush = [ TokIdent n | n <- names ] ++ [TokEllipsis]
-      case rest of
-        (sep : more) | sep == TokNewline || sep == TokSeq -> do
-          (body, rest') <- parseProgramToks (repush ++ TokNewline : more)
-          Right (OpenAbs (map Just names) True body, rest')
-        _ | endsScope rest -> do
-          (body, _) <- parseProgramToks repush
-          Right (OpenAbs (map Just names) True body, rest)
-        _ -> Left "'(-> …)' must be the sole atom of its stage"
+      let repush = [ TokIdent (fromMaybe "_" s) | s <- slots ] ++ [TokEllipsis]
+      (body, rest') <- parseProgramToks (repush ++ TokNewline : bodyToks)
+      Right (OpenAbs slots True body, rest')
 
-    slotOf (TokIdent "_") =
-      Left "'_' names nothing — '(-> …)' takes names only"
-    slotOf (TokIdent n)   = Right n
+    slotOf (TokIdent "_") = Right Nothing
+    slotOf (TokIdent n)   = Right (Just n)
     slotOf TokEllipsis    =
-      Left "'...' is implicit in '(-> …)' — it always passes the rest along"
+      Left "'...' is implicit in '-> …' — it always passes the rest along"
     slotOf _              = Left "Malformed parameter list"
 
     endsScope []              = True
     endsScope (TokRParen : _) = True
     endsScope (TokRBrack : _) = True
     endsScope _               = False
-
-    arrowMisplaced =
-      "'(-> …)' must start a line or open a scope — like `x y ->`, "
-        ++ "a binder takes the rest of its scope as the body"
 
     mkAbs toks0 rest = do
       -- split the parameter list into names, `_` passthroughs and a
@@ -1142,6 +1151,13 @@ parseStage = go []
         (t : _) | isStageTok t ->
           Left "'...' must be the final atom of a tensor stage"
         _ -> Right (Stage (reverse acc) True, rest)
+    -- `-> names` closes the stage it follows and is left for
+    -- parseProgramToks (the body is the rest of the SCOPE, which only
+    -- that level can build).  With no stage to its left — an arrow
+    -- straight after `;`/`>>` — the stage is just `pass`.
+    go acc rest@(TokArrow : _)
+      | null acc  = Right (Stage [Prim "pass"] False, rest)
+      | otherwise = Right (Stage (reverse acc) False, rest)
     go acc rest
       | null acc  = Left $ "Expected a tensor stage" ++ context rest
       | otherwise = Right (Stage (reverse acc) False, rest)
@@ -3265,22 +3281,51 @@ elimAbsTerm env = go
     go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
     go (OpenAbs slots hasRest b) = do
       b' <- go b
-      if hasRest
-        -- the passthrough width is erased, so there is no static wire
-        -- count to compile the parameter block against
-        then Left "cannot reflect a binder whose parameters end in '...'"
-        else do
-          -- compileAbsOpen wants the layout [body inputs (deepest)]
-          -- [param block] — the params sit ABOVE the wires the body
-          -- consumes (its finalStage passes k0 wires and then drops the
-          -- params).  Braid binders bind the DEEPEST wires, so every
-          -- slot list with a `_` needs a permutation prefix that sinks
-          -- the unnamed wires below the named ones.
-          let names = [ n | Just n <- slots ]
-              anons = length [ () | Nothing <- slots ]
-          inner <- compileAbsOpen env names anons b'
-          pure (foldr Seq inner (paramsAboveStages slots))
+      -- compileAbsOpen wants the layout [body inputs (deepest)]
+      -- [param block] — the params sit ABOVE the wires the body
+      -- consumes (its finalStage passes k0 wires and then drops the
+      -- params).  Braid binders bind the DEEPEST wires, so every
+      -- slot list with a `_` needs a permutation prefix that sinks
+      -- the unnamed wires below the named ones.
+      --
+      -- An open binder (`x ... ->`) works too, even though the
+      -- passthrough width is erased: the remainder is the stack's TAIL,
+      -- so it sits ABOVE the param block, and every emitted stage ends
+      -- in `pass` — one atom, no width.  Params are reached by depth
+      -- from the DEEPEST wire, so every fetch is static and none of
+      -- them ever crosses the erased segment.
+      --
+      -- The one thing that DOES need a width is a body that consumes
+      -- out of the remainder.  Inference has already solved that case
+      -- (the passthrough is pinned to a concrete stack), so ask it:
+      -- a determinate remainder is counted into the body's wires and
+      -- the binder compiles closed; an indeterminate one is genuinely
+      -- passed through and rides in the `pass`.
+      let names = [ n | Just n <- slots ]
+          anons = length [ () | Nothing <- slots ]
+          extra
+            | not hasRest = Nothing
+            | otherwise   = restWidth slots hasRest b'
+          e = fromMaybe 0 extra
+      inner <- compileAbsOpen' env names (anons + e)
+                               (hasRest && isNothing extra) b'
+      pure (foldr Seq inner
+              (paramsAboveStages slots
+                 ++ restAboveStages anons (length names) e))
     go t = Right t
+
+    -- wires the passthrough was pinned to, when inference determined it
+    restWidth slots hasRest b =
+      case inferTermIn env (OpenAbs slots hasRest b) of
+        Right (Arrow i _)
+          | let r = dropS (length slots) i
+          , not (openTailedS r) -> Just (closedArity r)
+        _ -> Nothing
+
+    dropS :: Int -> SType -> SType
+    dropS 0 s              = s
+    dropS k (SCons _ rest) = dropS (k - 1) rest
+    dropS _ s              = s
 
 -- Adjacent-transposition stages that stably sink the UNNAMED slots
 -- below the named ones, rearranging a positional parameter list into
@@ -3301,6 +3346,20 @@ paramsAboveStages slots0 = go (map key slots0) []
     swapIdx d xs =
       take d xs ++ [xs !! (d + 1), xs !! d] ++ drop (d + 2) xs
 
+-- Lift the param block above `e` determinate remainder wires sitting on
+-- top of it: [anons][params][rest] → [anons][rest][params], which is the
+-- contiguous [body inputs][params] layout compileAbsOpen compiles
+-- against once the remainder counts as body input.  Empty when the
+-- remainder is indeterminate (e = 0): then it never moves at all — it
+-- rides above the params inside each stage's `pass`.
+restAboveStages :: Int -> Int -> Int -> [Term]
+restAboveStages a n e =
+  [ Tensor (swapAt d)
+  | j <- [0 .. e - 1]
+  , d <- [a + j + n - 1, a + j + n - 2 .. a + j] ]
+  where
+    swapAt d = replicate d (Prim "_") ++ [Prim "swap", Prim "pass"]
+
 freeNamesIn :: Term -> [String]
 freeNamesIn = go
   where
@@ -3319,11 +3378,15 @@ data AtomInfo = AtomInfo Int Int [(Int, Int)] Term
 compileAbs :: Env -> [String] -> Term -> Either String Term
 compileAbs env ps body = compileAbsOpen env ps 0 body
 
+compileAbsOpen :: Env -> [String] -> Int -> Term -> Either String Term
+compileAbsOpen env ps k0 = compileAbsOpen' env ps k0 False
+
 -- Rewrite `body` (consuming k0 underlying wires) so the parameters
 -- arrive as a block of wires BELOW those inputs; the block is dropped
--- at the end.
-compileAbsOpen :: Env -> [String] -> Int -> Term -> Either String Term
-compileAbsOpen env ps k0 body = do
+-- at the end.  `open` says an erased remainder rides above the params,
+-- so the final stage must let it through instead of ending exactly.
+compileAbsOpen' :: Env -> [String] -> Int -> Bool -> Term -> Either String Term
+compileAbsOpen' env ps k0 open body = do
   stages <- rewriteChain k0 (spineOf body)
   pure (chainTerm stages)
   where
@@ -3341,6 +3404,7 @@ compileAbsOpen env ps k0 body = do
       ((pres ++ [stage']) ++) <$> rewriteChain k' rest
 
     finalStage k = replicate k (Prim "_") ++ replicate n (Prim "drop")
+                     ++ [ Prim "pass" | open ]
 
     rewriteStage k atoms0 = do
       let (atoms, _) = case reverse atoms0 of

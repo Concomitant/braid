@@ -117,8 +117,8 @@ last so the runtime segment can be its witness):
 - an open binder (`x ... -> …`) must be the final atom of its stage;
 - a recursive call must be the final atom of its stage;
 - `...` must be the final atom of its stage;
-- the naming binder `(-> x y z)` is an open binder, so it must be the
-  *sole* atom of its stage — and, like `x y ->`, it opens that stage.
+- the naming binder `-> x y z` ends the stage it follows, and its body
+  is the rest of the scope.
 
 ## 5. Types
 
@@ -169,7 +169,7 @@ tensor position are typed closed (their outer tails become `•`).
 def w =
     x y ->         # postfix: names the top wires; the REST of the
     body           # scope is the body
-(-> x y)           # naming: LABELS two wires without consuming them
+-> x y             # naming: LABELS two wires without consuming them
 ```
 Parameters bind wires **leftmost = deepest**, exactly as atoms align in
 a tensor stage, and are in scope as constants — including inside quotes
@@ -203,48 +203,64 @@ Rules: `...` must be last, and only one. An open binder is an
 open-arity word, so it must be the final atom of its stage.
 Everything-exact still applies inside — the body must account for the
 wires `_`/`...` give it (`(x _ -> x)` is an error: the `_` wire goes
-unused). A `...` binder cannot be `reflect`ed (its passthrough width is
-erased); `_` binders reflect fine, compiling to ordinary wiring.
+unused). Every binder `reflect`s, compiling to ordinary wiring (§12).
 
-#### The naming binder `(-> x y z)`
+#### The naming binder `-> x y z`
 
-The forms above *consume* the wires they name. `(-> x y z)` **labels**
-them instead: identity at runtime, so the wires flow straight on and the
-names are also in scope for the rest of the enclosing scope. In a drawn
-diagram you write a label beside a wire without cutting it; this is that
+**The arrow's side says what happens to the wires.** Names *before* it
+are cut from the stack; names *after* it are labels — identity at
+runtime, so the wires flow straight on and the names are also in scope
+for the rest of the enclosing scope. In a drawn diagram you write a
+label beside a wire without cutting it; this is that
 (`examples/tag.braid`).
 
 It is sugar for the open binder that puts back what it took —
 
 ```braid
-(-> x y z)  ≡  x y z ... -> x y z ...
+-> x y z   ≡   x y z ... -> x y z ...
 ```
 
 — so it needs no machinery of its own, and its type is the identity:
 
 ```text
-braid> :t (-> x)
-(-> x) : a0 ρ0 ⇒ a0 ρ0
-braid> :t (-> a b)
-(-> a b) : a0 a1 ρ0 ⇒ a0 a1 ρ0
+braid> :t -> x -> pass
+-> x -> pass : a0 ρ0 ⇒ a0 ρ0
+braid> :t -> a b -> pass
+-> a b -> pass : a0 a1 ρ0 ⇒ a0 a1 ρ0
 ```
 
-Wires bind **leftmost = deepest**, as everywhere. Because the wire is
-still on the stack, each later mention of a name is a `dup` in diagram
-terms — and a name outlives its wire:
+**Slots use the stage vocabulary**, exactly as the cutting form does: a
+name takes one wire, `_` skips one. Slots are positional from the
+deepest wire — the same alignment as atoms in `print print _` — so `_`
+is how you name the third wire without naming the first two:
 
 ```braid
-7
-(-> x)
-drop                  # the wire goes...
+1 "a" .foo -> _ _ tag -> print print drop
+tag >> print          # .foo
+```
+
+`...` is rejected: passing the rest along is what the form already *is*.
+
+Because the wire is still on the stack, each later mention of a name is
+a `dup` in diagram terms — and a name outlives its wire:
+
+```braid
+7 -> x -> drop        # the wire goes...
 x x >> *              # ...the name remains: 49
 ```
 
-Placement: names only (no `_`, and `...` is meaningless — passing the
-rest along is what the form *is*), and like `x y ->` it **opens a
-stage** — at the start of a scope or after a newline — because its body
-is the rest of that scope. So `5 >> (-> x)` is not a naming binder, for
-the same reason `f >> x y -> …` is not a postfix one.
+**Placement.** The arrow ends the stage it follows, so a naming binder
+can sit mid-line (`1 "a" .foo -> x _ y`), after a separator
+(`5 ; -> x`), or lead a scope (`def f =` ⏎ `-> h m f`). Its body is the
+rest of the scope, introduced by an explicit `->` or by an ordinary
+stage break (`;`, `>>`, or a newline). A binder with nothing after it
+is an error — the names would have nothing to reach.
+
+One collision to know about: when the stage before the arrow is a run
+of bare identifiers, `a b -> c d` is claimed by the *cutting* binder at
+the start of a scope or after a newline (its documented position), and
+read as *naming* anywhere else. Anything with a literal, group, or
+quote in it — like `1 "a" .foo -> x _ y` — is unambiguous either way.
 
 ### Rows `(p₁ | p₂ | …)`
 The sum functor's action: one wire in carrying `(Δ₁|Δ₂|…)`, component
@@ -581,8 +597,12 @@ prelude defs plus core forms. See `examples/ladder.braid` and
 `reflect` turns a quotation into its **spine**: `Code = List(Stage)`,
 `Stage = List(Atom)`, `data Atom = (prim | int | str | sym | quote |
 row | group)`. Lambdas reflect as pure wiring (abstraction
-elimination); true closures are gated onto the miss track with an
-explanation. Code is an ordinary list — slice with `take`, transform
+elimination) — **every** binder, open ones and the naming form
+included, since the erased passthrough is the stack's *tail* and so
+rides above the parameter block inside each stage's `pass`, while
+parameters are fetched by depth from the deepest wire and never cross
+it. True closures, and parameters used inside a quotation or a row
+component, are still gated onto the miss track with an explanation. Code is an ordinary list — slice with `take`, transform
 with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
 `code.braid`). `evalCode` re-checks dynamically and runs; failures
 ride the miss track *with the untouched segment as evidence*. Its
@@ -632,9 +652,11 @@ at every width. Rules (full version: `guide-open-arity.md`):
   open, in which case the lines that close it belong to the body. For
   multi-line bodies generally, use the block form (`def name =` newline
   `x ->`).
-- Binders open a stage: `5 >> (-> x)` and `f >> x y -> …` are not
-  binders — put them after a newline (their body is the rest of the
-  scope, which a mid-line position cannot mean).
+- `f >> x y -> …` is not a cutting binder — that form is recognized at
+  the start of a scope or after a newline. The naming form `-> x` has no
+  such restriction; it ends whatever stage it follows.
+- A binder with nothing after it is an error: its body is the rest of
+  the scope, so there has to be a rest.
 - A binder's body only sees what the parameter list gives it. Need the
   remainder inside the body? Use an open binder (`x ... -> …`), not
   `(x -> …) ...` — the latter routes the rest *around* the binder.

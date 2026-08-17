@@ -161,18 +161,50 @@ code path. A named abstraction compiles to pure dup/swap/drop wiring
 (reflect it to see), so binders are string-diagram sugar, not a
 separate mechanism.
 
+**Open binders eliminate too** (this was wrongly believed impossible;
+`elimAbsTerm` refused them, on the grounds that "the passthrough width
+is erased, so there is no static wire count to compile the parameter
+block against"). The reasoning imported stack-machine intuition — that
+a copy must travel to the top, and so must cross whatever lies between.
+It does not, for two structural reasons that are the whole point of the
+representation:
+
+* the remainder is the stack's **tail**, and the tail-only discipline
+  puts it above everything, while a name occurrence pushes to the
+  **bottom** of its stage. Params and the erased segment sit at opposite
+  ends and never need to pass each other;
+* fetches are `_`×d ++ `[dup|swap, pass]`, counting depth from the
+  deepest wire, and every emitted stage already ends in `pass` — one
+  atom, no width. So each fetch depth is static regardless of how wide
+  the passthrough is.
+
+The one case that genuinely needs a count is a body that *consumes out
+of* the remainder. There inference has already pinned the passthrough to
+a concrete stack, so the width is known — just not to `elimAbsTerm`,
+which counted wires syntactically. Asking the typechecker (as
+`groupInfo` already does for grouped compounds) supplies it; the param
+block is then lifted above those wires so the body's inputs stay
+contiguous, which is the layout `compileAbsOpen` compiles against.
+
+Consequence: every binder, the naming form included, is demonstrably
+wiring — `reflect` is the proof and the user can run it. The claim above
+no longer carries an exception.
+
 ## Surface: the naming binder
 
-`(-> x y z)` is the other half of the same idea, and the descendant of
+`-> x y z` is the other half of the same idea, and the descendant of
 the `7 -> x;` sketch in `spec-update-exponentials.md`: it introduces a
 name for a wire **in passing** rather than consuming it. Identity at
 runtime; the wires flow on and the names are in scope for the rest of
 the enclosing scope, exactly as with the postfix form.
 
+**The arrow's side is the whole rule.** Names before it are cut; names
+after it are labels. One token, one construct, two directions.
+
 It is sugar over the open binder that puts back what it took —
 
 ```
-(-> x y z)  ≡  x y z ... -> x y z ...
+-> x y z   ≡   x y z ... -> x y z ...
 ```
 
 — so there is no new `Term`, no new inference rule, no new runtime case.
@@ -181,21 +213,32 @@ have written and hands it to `parseProgramToks`, so the desugaring is
 literally the program.
 
 Why pass-through and not a second spelling of the consuming binder:
-a consuming `(-> x y z)` would duplicate `x y z ->` exactly, and a form
+a consuming `-> x y z` would duplicate `x y z ->` exactly, and a form
 that means nothing new should not exist. The labelling reading is also
 the more diagrammatic one — in a drawn diagram a label sits beside a
 wire without cutting it — and it keeps the atom denoting an honest
 morphism (`id`), which is what lets it compose like any other word.
 
 Deepest-first (leftmost = deepest), as every other binder. Kitten's
-`-> x, y;` names the *top* of the stack; that convention would need its
-own `inS` construction instead of falling out of the existing open
-binder, so the mechanical argument agrees with the consistency one.
+`-> x, y;` is the CONSUMING form written arrow-first (it binds stack
+values into locals), so arrow-first does not mean pass-through there;
+and naming the *top* of the stack would need its own `inS` construction
+instead of falling out of the existing open binder. Both arguments
+point the same way.
 
-Names only: `_` names nothing (the re-push could not restore it) and
-`...` is meaningless (passing the rest along is what the form *is*).
-Placement follows `x y ->`: it opens a stage, because its body is the
-rest of the scope.
+Slots use the stage vocabulary, `_` included. An earlier revision
+rejected `_` on the grounds that the re-push could not restore an
+unnamed wire — that was simply false: the body's own `_` puts it back
+in place, and `(x _ y ... -> x _ y ...)` typechecks as exact identity.
+`_` is not a nicety either. Slots are positional from the deepest wire,
+so without it you could only ever name a prefix of the stack. `...` is
+still rejected: passing the rest along is what the form already *is*.
+
+Placement: the arrow ends the stage it follows, so the naming form has
+no positional restriction — mid-line, after a separator, or leading a
+scope. The cutting form keeps its documented positions (scope start or
+after a newline), which is what resolves the one ambiguous shape,
+`a b -> c d`, where the stage before the arrow is a bare identifier run.
 
 Cost worth stating: the value is now on the stack *and* behind a name,
 so every later mention of the name is a `dup` in diagram terms. Not new
@@ -613,7 +656,7 @@ Reconciliation with the remainder discipline:
   `Γ ⊢ p : Σ ⇒ Δ`. Both slot in after the named-abstraction elaborator;
   they supersede "restrict quotations to closed programs" above when they
   land. **Both landed.** Closures capture the variable environment at
-  `Quote`; the local binding shipped as `(-> x)` (see "Surface: the
+  `Quote`; the local binding shipped as `-> x` (see "Surface: the
   naming binder"), which needs no two-zone judgment — as an atom it
   desugars into the open binder already in the language.
 * **Grouped programs obey the instantiation rule** like any other atom: a

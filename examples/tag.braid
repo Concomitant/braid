@@ -1,12 +1,19 @@
 # Naming a wire without cutting it.
 #
-# `x y ->` CONSUMES the wires it names: the body starts from an empty
-# stack and puts everything back by name. `(-> x y)` instead LABELS them
-# as they go by — identity at runtime, so the wires flow straight on and
-# the names are there too, for the rest of the scope. In a drawn diagram
-# you write a label beside a wire without breaking it; this is that.
+# The arrow's SIDE says what happens to the wires it names.
 #
-# It is sugar, not machinery: (-> x y z) ≡ x y z ... -> x y z ...
+#   x y ->     names BEFORE the arrow are CUT: the body starts from an
+#              empty stack and puts everything back by name.
+#   -> x y     names AFTER the arrow are LABELS: identity at runtime, so
+#              the wires flow straight on and the names are there too.
+#
+# In a drawn diagram you write a label beside a wire without breaking
+# it; the second form is that. It is sugar, not machinery:
+#
+#   -> x _ y   ≡   x _ y ... -> x _ y ...
+#
+# Slots use the ordinary stage vocabulary — a name takes one wire, `_`
+# skips one — exactly as atoms do in `print print _`.
 
 # ---- the two binders, same answer ---------------------------------------
 def consumed =
@@ -14,7 +21,7 @@ def consumed =
     h m f ; sumN
 
 def tagged =
-    (-> h m f)                     # wires still flowing, names as well
+    -> h m f                       # wires still flowing, names as well
     sumN
 
 10 20 30 ; consumed ; print        # 60
@@ -22,22 +29,31 @@ def tagged =
 
 # ---- what the label buys ------------------------------------------------
 # Keep the pipeline moving AND keep a handle on what went past: the
-# running total is computed from the live wires, the report from the
-# names. Nothing had to be re-pushed to stay in the flow.
+# running total comes from the live wires, the report from the names.
+# Nothing had to be re-pushed to stay in the flow.
 def audited =
-    (-> h m f)
+    -> h m f
     sumN ; print                   # the wires themselves, summed
     h ; print                      # and the label, still in scope
 
 10 20 30 ; audited                 # 60, then 10
 
-# ---- a label is a copy --------------------------------------------------
+# ---- a label outlives its wire ------------------------------------------
 # The wire is still on the stack, so mentioning the name is a `dup` in
-# diagram terms. Here the live wire is squared by its own name.
-7
-(-> x)
-drop                               # the wire goes...
+# diagram terms — and the name survives the wire being consumed.
+7 -> x -> drop                     # the wire goes...
 x x ; * ; print                    # ...the name remains: 49
+
+# ---- `_` reaches past a wire you don't want to name ---------------------
+# Slots are positional from the deepest wire, so `_` is how you name the
+# third thing without naming the first two.
+1 "a" .foo -> _ _ tag -> print print drop
+tag ; print                        # .foo — named without naming 1 or "a"
+
+# ---- it is wiring, and you can see it -----------------------------------
+# reflect compiles the names away into dup/swap/drop — no environment,
+# no special form. The label above is a `dup` placed early.
+[-> x -> drop ; x ...] ; reflect ; (unparse ; print | print) ; forget
 
 # ---- brackets may span lines --------------------------------------------
 # A newline against a bracket's inner edge is layout, not a stage

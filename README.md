@@ -85,11 +85,12 @@ the prelude; every REPL line runs against a persistent typed stack.
    `readFile` and `parse` are railway stages too. None of them are
    primitive: each is `>> (stage | injector) >> merge`, bundled.
 5. **Names label wires; they don't cut them.** `x y ->` consumes the
-   wires it names, so the body re-pushes them. `(-> x y)` instead tags
+   wires it names, so the body re-pushes them. `-> x y` instead tags
    them as they go by — identity at runtime, wires flowing on, names in
    scope for the rest of the block, the way a label sits beside a wire
-   in a drawn diagram. It is sugar, not machinery: `(-> x y z)` *is*
-   `x y z ... -> x y z ...`.
+   in a drawn diagram. The arrow's side is the whole rule. It is sugar,
+   not machinery: `-> x y z` *is* `x y z ... -> x y z ...`, and
+   `reflect` compiles it back to dup/swap/drop to prove it.
 6. **Guard ladders are ordinary words.** Bind the subject and a guard
    is a bare Bool beside its answer; `...` accumulates one lane per
    line and `decide` folds the product — first true lane wins:
