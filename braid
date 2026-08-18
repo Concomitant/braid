@@ -1,0 +1,51 @@
+#!/usr/bin/env sh
+# Run Braid without installing GHC — the toolchain lives in a container,
+# the sources stay here.
+#
+#   ./braid file.braid     run a file
+#   ./braid                open the REPL
+#   ./braid -              run a program read from stdin
+#
+# Works from any directory. Build artifacts persist in ./dist-newstyle,
+# so only the first run pays for compiling.
+#
+# A release binary unpacked over this script keeps the same interface,
+# so `./braid file.braid` means the same thing either way.
+set -eu
+
+root=$(cd "$(dirname "$0")" && pwd)
+image=haskell:9.4-slim
+
+# -t only when there is a terminal: keeps pipes, heredocs and CI clean
+tty=''
+if [ -t 0 ]; then tty='-t'; fi
+
+mounts="-v $root:/w"
+target=''
+
+case "${1-}" in
+  '') ;;                                   # no file: the REPL
+  -)  target=/dev/stdin ;;                 # a program on stdin
+  *)
+    file=$1
+    # a relative path is resolved against the current directory first,
+    # then against the repo — so `braid examples/tag.braid` works from
+    # anywhere without giving up the ordinary meaning of a local path
+    if [ ! -f "$file" ] && [ -f "$root/$file" ]; then
+      file=$root/$file
+    fi
+    [ -f "$file" ] || { echo "braid: no such file: $1" >&2; exit 1; }
+    dir=$(cd "$(dirname "$file")" && pwd)
+    base=$(basename "$file")
+    case "$dir" in
+      "$root")   target=$base ;;           # repo root: already mounted
+      "$root"/*) target=${dir#"$root"/}/$base ;;
+      *)                                   # elsewhere: mount it read-only
+        mounts="$mounts -v $dir:/ext:ro"
+        target=/ext/$base ;;
+    esac ;;
+esac
+
+# shellcheck disable=SC2086  # word splitting is intended for $tty/$mounts
+exec docker run --rm -i $tty $mounts -w /w "$image" \
+  sh -c "cabal run -v0 braid ${target:+-- $target}"

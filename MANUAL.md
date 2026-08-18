@@ -14,9 +14,9 @@ each feature is the way it is), `examples/` (everything running).
 ./braid examples/registrar.braid
 ./braid
 
-# or via Docker, no install (add -it and drop the file for the REPL)
-docker run --rm -v "$PWD":/w -w /w haskell:9.4-slim \
-  sh -c "cabal run -v0 braid -- examples/registrar.braid"
+# or the repo script, no install — same interface, toolchain in a
+# container (drop the file for the REPL, `-` to read stdin)
+./braid examples/registrar.braid
 ```
 
 REPL commands: `:t <prog>` type · `:t! <prog>` raw (no alias folding) ·

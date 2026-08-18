@@ -40,12 +40,20 @@ def letter =
 tar xzf braid-*.tar.gz && ./braid examples/registrar.braid && ./braid
 ```
 
-**No install at all** — a Docker one-liner:
+**No install at all** — clone and use the `./braid` script, which keeps
+the toolchain in a container and the sources here:
 
 ```sh
-docker run --rm -it -v "$PWD":/w -w /w haskell:9.4-slim \
-  sh -c "cabal build exe:braid && cabal run -v0 braid -- examples/registrar.braid"
+./braid examples/registrar.braid   # run a file
+./braid                            # open the REPL
+./braid - <<'EOF'                  # run a program on stdin
+95 90 95 ; grade ; print
+EOF
 ```
+
+Only the first run pays for compiling. A release binary unpacked over
+the script keeps the same interface, so `./braid file.braid` means the
+same thing either way.
 
 **From source**: `cabal build exe:braid` with GHC ≥ 9.4.
 
