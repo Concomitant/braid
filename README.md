@@ -128,8 +128,9 @@ the prelude; every REPL line runs against a persistent typed stack.
 10. **Widths are exponents.** `Intⁿ` (typed `Int^n`) is n wires — a
     vector with no box, an exponential object with finite base. One
     fold word is variadic over bare stack products (`sumN : Intⁿ ⇒
-    Int`); the GLA generators are width-polymorphic (`addN : Intⁿ Intⁿ
-    ⇒ Intⁿ`, `zipN : aⁿ bⁿ ⇒ (a b)ⁿ`); a matrix is a value `Fn⟨Intⁿ ⇒
+    Int`); `mapN`/`mapN2` lift any ordinary word pointwise, so the GLA
+    generators are *derived* (`def addN = zipN ; [+] ... ; mapN2`); a
+    matrix is a value `Fn⟨Intⁿ ⇒
     Intᵐ⟩`; and a 3-weight syllabus cannot meet a 4-score transcript —
     dimension errors are type errors. `n` is erased: the running
     stack's width is its own witness.
@@ -159,7 +160,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 560+ case test suite, a full
+(typechecker, interpreter, REPL), a 570+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

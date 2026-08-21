@@ -330,6 +330,8 @@ moduleTypeTests =
   , ("cons",    "a0 List(a0) ⇒ List(a0)")
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
+  , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
+  , ("unzipN",  "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
@@ -382,8 +384,18 @@ evalTests =
   , ("data B(...) = (...)\n1 \"a\" >> B >> unB", [], "1 a")
     -- boxed cells give a pair-list the WHOLE library, not just foldList
   , ("[(bx -> bx >> unBox >> (n s -> s >> drop >> n))] (1 \"a\" 2 \"b\" >> pack2) >> map >> [0] [(a n -> a n >> +)] ... >> foldList >> print", ["3"], "")
-    -- mapN: the bundle tier can rebuild its own container now
+    -- mapN/mapN2: the bundle tier can rebuild its own container now,
+    -- so ANY one- or two-wire word lifts pointwise.  addN and scaleN
+    -- are derived from them (they used to be primitives).
   , ("[2 _ >> *] 1 2 3 4 >> mapN >> sumN >> print", ["20"], "")
+  , ("1 2 3 10 20 30 >> addN >> sumN >> print",   ["66"],  "")
+  , ("1 2 3 10 20 30 >> mulN >> sumN >> print",   ["140"], "")
+  , ("1 2 3 10 20 30 >> subN >> sumN >> print",   ["-54"], "")
+  , ("3 1 2 3 >> scaleN >> sumN >> print",        ["18"],  "")
+    -- lift a word the prelude does not ship, in one line
+  , ("def maxN = zipN >> [(x y -> (x y >> less) [y] [x] ... >> cond)] ... >> mapN2\n1 9 3 5 2 7 >> maxN >> sumN >> print", ["21"], "")
+    -- unzipN is zipN's inverse
+  , ("1 2 3 10 20 30 >> zipN >> unzipN >> addN >> sumN >> print", ["66"], "")
   , ("[dup >> *] 1 2 3 >> mapN >> sumN >> print",   ["14"], "")
   , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")

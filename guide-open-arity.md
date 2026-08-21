@@ -13,10 +13,15 @@ loop    : Fn⟨Σ ⇒ (Σ|Θ)⟩ Σ ⇒ Θ            Elgot iteration on the seg
 foldExp : Fn⟨b a ⇒ b⟩ b aⁿ ⇒ b           fold a bundle, one wire at a time
 foldExp2: Fn⟨b a c ⇒ b⟩ b (a c)ⁿ ⇒ b     fold a bundle of pairs
 dupN    : aⁿ ⇒ aⁿ aⁿ                     copy a bundle
-addN    : Intⁿ Intⁿ ⇒ Intⁿ               pointwise add
+mapN2   : Fn⟨a b ⇒ c⟩ (a b)ⁿ ⇒ cⁿ        map across a PAIR bundle
 zipN    : aⁿ bⁿ ⇒ (a b)ⁿ                 interleave two bundles
-scaleN  : Int Intⁿ ⇒ Intⁿ                scale a bundle
+unzipN  : (a b)ⁿ ⇒ aⁿ bⁿ                 de-interleave
 ```
+
+`mapN`/`mapN2` are the lifters: with `zipN` they turn any one- or
+two-wire word into its pointwise bundle version, which is why `addN`,
+`scaleN`, `mulN` and `subN` are prelude defs rather than primitives
+(`def addN = zipN >> [+] ... >> mapN2`).
 
 Derived open words (ordinary prelude defs — openness is inherited):
 `sumN : Intⁿ ⇒ Int`, `decide : a ((•|•) a)ⁿ ⇒ a`, `firstTrue`, `while`,

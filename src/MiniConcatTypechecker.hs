@@ -1926,8 +1926,10 @@ primEnv =
   let rho = SV "ρ"
       a   = TV "A"
       b   = TV "B"
+      c   = TV "C"
       ta  = TVarTy a
       tb  = TVarTy b
+      tc  = TVarTy c
       gam = SV "Γ"
       del = SV "Δ"
       one t = SCons t SEnd
@@ -1992,21 +1994,26 @@ primEnv =
       dupNTy = Forall [a] [] [] [NV "n"]
         (Arrow (SExp (one ta) nExp SEnd)
                (SExp (one ta) nExp (SExp (one ta) nExp SEnd)))
-      addNTy = Forall [] [] [] [NV "n"]
-        (Arrow (SExp (one TInt) nExp (SExp (one TInt) nExp SEnd))
-               (SExp (one TInt) nExp SEnd))
       zipNTy = Forall [a, b] [] [] [NV "n"]
         (Arrow (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
                (SExp (SCons ta (one tb)) nExp SEnd))
-      scaleNTy = Forall [] [] [] [NV "n"]
-        (Arrow (SCons TInt (SExp (one TInt) nExp SEnd))
-               (SExp (one TInt) nExp SEnd))
       -- map a one-wire function across a bundle: the tier's missing
       -- container-preserving word (folds collapse, this one rebuilds)
       mapNTy = Forall [a, b] [] [] [NV "n"]
         (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
                       (SExp (one ta) nExp SEnd))
                (SExp (one tb) nExp SEnd))
+      -- the pair twin, mirroring foldExp/foldExp2.  With zipN this
+      -- lifts ANY two-wire word pointwise, so addN and the rest stop
+      -- needing to be primitive.
+      mapN2Ty = Forall [a, b, c] [] [] [NV "n"]
+        (Arrow (SCons (TFn (Arrow (SCons ta (one tb)) (one tc)))
+                      (SExp (SCons ta (one tb)) nExp SEnd))
+               (SExp (one tc) nExp SEnd))
+      -- zipN's inverse: de-interleave a pair bundle into two bundles
+      unzipNTy = Forall [a, b] [] [] [NV "n"]
+        (Arrow (SExp (SCons ta (one tb)) nExp SEnd)
+               (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
   in M.fromList
        [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
        , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
@@ -2069,10 +2076,10 @@ primEnv =
        , ("foldExp",   foldExpTy)
        , ("foldExp2",  foldExp2Ty)
        , ("mapN",      mapNTy)
+       , ("mapN2",     mapN2Ty)
+       , ("unzipN",    unzipNTy)
        , ("dupN",      dupNTy)
-       , ("addN",      addNTy)
        , ("zipN",      zipNTy)
-       , ("scaleN",    scaleNTy)
        ]
 
 --------------------------------------------------------------------------------
@@ -2602,6 +2609,17 @@ preludeSrc = unlines
   , "def box = (cd -> [(cd) ... >> evalCode])"
   , "## sum an Int bundle: the variadic +"
   , "def sumN = [+] 0 ... >> foldExp"
+    -- the GLA generators are now DERIVED: mapN/mapN2 lift any one- or
+    -- two-wire word pointwise, so `+` and `*` are the only arithmetic
+    -- the bundle tier needs to know about
+  , "## pointwise add: the bundle monoid ∇, lifted from `+`"
+  , "def addN = zipN >> [+] ... >> mapN2"
+  , "## scale a bundle by a scalar, lifted from `*`"
+  , "def scaleN = (k ... -> [k _ >> *] ... >> mapN)"
+  , "## pointwise multiply (NOT linear — outside the GLA generators)"
+  , "def mulN = zipN >> [*] ... >> mapN2"
+  , "## pointwise subtract"
+  , "def subN = zipN >> [-] ... >> mapN2"
   , "## guard lanes as a bare product: (Bool Fn)^n lanes, default Fn on"
   , "## top.  All conditions are pre-evaluated (probe every lane); the"
   , "## FIRST true lane's action runs, else the default — exactly one"
@@ -2930,17 +2948,6 @@ evalTerm env defs vars term st =
       | not (M.member "dupN" vars), not (M.member "dupN" defs) =
           if isFinal then pure (stk ++ stk, [], [])
                      else pure ([], stk, [])
-    applyAtom isFinal (Prim "addN") stk
-      | not (M.member "addN" vars), not (M.member "addN" defs) =
-          if not isFinal then pure ([], stk, [])
-          else do
-            let m = length stk
-                (xs, ys) = splitAt (m `div` 2) stk
-                add (VInt x) (VInt y) = pure (VInt (x + y))
-                add _ _ = throwError "Runtime type error in addN: expected Int wires"
-            if odd m then throwError "addN: odd segment (unreachable on typechecked programs)"
-                     else do out <- sequence (zipWith add xs ys)
-                             pure (out, [], [])
     applyAtom isFinal (Prim "zipN") stk
       | not (M.member "zipN" vars), not (M.member "zipN" defs) =
           if not isFinal then pure ([], stk, [])
@@ -2948,6 +2955,32 @@ evalTerm env defs vars term st =
             then throwError "zipN: odd segment (unreachable on typechecked programs)"
             else let (xs, ys) = splitAt (length stk `div` 2) stk
                  in pure (concat (zipWith (\x y -> [x, y]) xs ys), [], [])
+    applyAtom isFinal (Prim "unzipN") stk
+      | not (M.member "unzipN" vars), not (M.member "unzipN" defs) =
+          if not isFinal then pure ([], stk, [])
+          else if odd (length stk)
+            then throwError "unzipN: odd segment (unreachable on typechecked programs)"
+            else let pairs = chunk2 stk
+                 in pure (map fst pairs ++ map snd pairs, [], [])
+    applyAtom isFinal (Prim "mapN2") stk
+      | not (M.member "mapN2" vars), not (M.member "mapN2" defs) = do
+          (args, stk') <- takeWires "mapN2" 1 stk
+          case args of
+            [VFn scope cvars body] -> do
+              let bundle = if isFinal then stk' else []
+              if odd (length bundle)
+                then throwError "mapN2: odd segment (unreachable on typechecked programs)"
+                else do
+                  let step (x, y) = do
+                        (out, lg) <- evalTerm env scope cvars body [x, y]
+                        case out of
+                          [w] -> pure (w, lg)
+                          _   -> throwError
+                                   "mapN2: the quotation must be two wires in, one out"
+                  rs <- mapM step (chunk2 bundle)
+                  pure ( map fst rs, if isFinal then [] else stk'
+                       , concatMap snd rs )
+            _ -> throwError "Runtime type error in mapN2: expected a quotation"
     applyAtom isFinal (Prim "mapN") stk
       | not (M.member "mapN" vars), not (M.member "mapN" defs) = do
           (args, stk') <- takeWires "mapN" 1 stk
@@ -2964,17 +2997,6 @@ evalTerm env defs vars term st =
               pure ( map fst rs, if isFinal then [] else stk'
                    , concatMap snd rs )
             _ -> throwError "Runtime type error in mapN: expected a quotation"
-    applyAtom isFinal (Prim "scaleN") stk
-      | not (M.member "scaleN" vars), not (M.member "scaleN" defs) = do
-          (args, stk') <- takeWires "scaleN" 1 stk
-          case args of
-            [VInt k] -> do
-              let bundle = if isFinal then stk' else []
-                  scale (VInt x) = pure (VInt (k * x))
-                  scale _ = throwError "Runtime type error in scaleN: expected Int wires"
-              out <- mapM scale bundle
-              pure (out, if isFinal then [] else stk', [])
-            _ -> throwError "Runtime type error in scaleN: expected an Int scalar"
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
@@ -3506,3 +3528,8 @@ runModule src = runExceptT $ do
           case desyncError o out of
             Just e  -> throwError e
             Nothing -> pure (out, logs)
+
+-- adjacent pairs of a segment (bases of width 2 come interleaved)
+chunk2 :: [a] -> [(a, a)]
+chunk2 (x : y : rest) = (x, y) : chunk2 rest
+chunk2 _              = []

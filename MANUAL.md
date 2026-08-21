@@ -530,9 +530,21 @@ Exponent tier (widths erased; see §13):
 | `foldExp` | `Fn⟨a0 a1 ⇒ a0⟩ a0 a1ⁿ ⇒ a0` |
 | `foldExp2` | `Fn⟨a0 a1 a2 ⇒ a0⟩ a0 (a1 a2)ⁿ ⇒ a0` |
 | `dupN` | `a0ⁿ ⇒ a0ⁿ a0ⁿ` |
-| `addN` | `Intⁿ Intⁿ ⇒ Intⁿ` |
 | `zipN` | `a0ⁿ a1ⁿ ⇒ (a0 a1)ⁿ` |
-| `scaleN` | `Int Intⁿ ⇒ Intⁿ` |
+| `unzipN` | `(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` |
+| `mapN` | `Fn⟨a0 ⇒ a1⟩ a0ⁿ ⇒ a1ⁿ` |
+| `mapN2` | `Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ ⇒ a2ⁿ` |
+
+Folds collapse a bundle; `mapN`/`mapN2` rebuild one, which is what lets
+you **lift an ordinary word pointwise**. `addN` and `scaleN` are
+therefore prelude defs, not primitives — and so is any lift you need:
+
+```braid
+def addN  = zipN >> [+] ... >> mapN2        # the bundle monoid ∇
+def mulN  = zipN >> [*] ... >> mapN2        # NOT linear — outside the GLA set
+def maxN  = zipN >> [(x y -> (x y >> less) [y] [x] ... >> cond)] ... >> mapN2
+def negN  = [0 _ >> -] ... >> mapN
+```
 
 ## 10. Prelude reference (all derived user code — `:defs` for types)
 
