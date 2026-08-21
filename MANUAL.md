@@ -127,7 +127,7 @@ Inferred, principal, never annotated. Four variable sorts:
 | sort | display | ranges over |
 |---|---|---|
 | type | `a0, a1…` | one wire's element type |
-| stack | `ρ0…` | a stack segment (tails, splices) |
+| stack | `ρ0…` | a stack segment (always a tail) |
 | row | `σ0…` | the tail of a sum's alternative list |
 | exponent | `n0…` (shown superscript: `Intⁿ⁰`) | a width (unary natural) |
 
@@ -136,11 +136,14 @@ Type formers:
 - **Base**: `Int`, `Str`, `Sym`.
 - **`•`** — the empty stack; the terminal object. Constants are points
   `• ⇒ A`; `forget : ρ ⇒ •` is the unique map to it.
-- **Products** are juxtaposition: `Int Str` is two wires. No pair type
-  — the stack is the pair.
+- **Products** are juxtaposition: `Int Str` is two wires. There is no
+  *built-in* pair type — the stack is the pair — but you can declare
+  one (`data Pair(a, b) = (a b)`), and `Box(...)` carries a whole stack
+  as a single wire, which is how multi-wire aggregates go inside a
+  `List` (§8).
 - **Sums**: `(Δ₁ | … | Δₙ [| σ])` — one wire carrying alternative
   *stacks*. Rigid nesting: `(A | (B | C))` never flattens.
-  `Bool = (• | •)`, `Maybe(a) = (• | a)` are prelude aliases.
+  `Bool = (• | •)`, `Maybe(...) = (• | ...)` are prelude aliases.
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
   hom: `apply` is modus ponens.
 - **Named types**: `type` aliases and `data` declarations (§8).
@@ -389,13 +392,33 @@ def name =                    # block body — `=` ends the line,
 
 ```braid
 type YN = Bool                        # alias (display folds to it)
-type Result(a, e) = (a | e)           # parameterized; params are stacks
+type Result(a, e) = (a | e)           # parameterized; each param is ONE WIRE
+type Box(...) = (...)                 # `...` — a whole STACK, as one wire
+type Tagged(t, ...) = (t ...)         # mixed: a wire, then the stack
 type Endo(a) = Fn⟨a ⇒ a⟩              # a reified program as a type…
 type Pred(a) = Fn(a -> (a | a))       # …Unicode Fn⟨Σ ⇒ Θ⟩ or ASCII Fn(Σ -> Θ)
 data List(a) = (• | a List(a))        # recursive nominal type
 data Tree(a) = (a | Tree(a) Tree(a))
 data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # codata: recursion THROUGH a Fn
 ```
+
+**Parameters are kinded.** A bare name stands for exactly **one wire**;
+`...` stands for a whole **stack**, and may only be the last parameter
+(at most one). That placement rule is what keeps every stack variable in
+tail position, so no declaration can spell a stack variable with wires
+after it:
+
+```braid
+data Pair(a, b) = (a b)        # two wires — inexpressible before kinds
+data Box(...)   = (...)        # a whole stack in one wire
+data Bad(...)   = (... Int)    # rejected: '...' must be last in its stack
+type L = List(Int Str)         # rejected: List's cell takes one wire
+```
+
+Because `List`'s parameter sits *before* the recursive slot in
+`(• | a List(a))`, it is forced to be a wire — which is why a list cell
+is one wire and `Box` is how a pair-list is spelled:
+`pack2 : (a b)ⁿ ⇒ List(Box(a b))`.
 
 A `data Name(...)` declaration generates:
 - `Name` — the constructor (roll): body stack ⇒ `Name(…)`;
@@ -436,7 +459,7 @@ arity if you need the fold).
 verified): the single-wire generators `{id, dup, swap, drop}`; binders
 (`dup = (x -> x x)` …), which abstraction elimination compiles back
 into the generators; and the segment tier (`dup = (x -> x >> dupN)`,
-`drop = (x -> x >> forget)`, `swap = (x y -> x y >> rotLast)` — the
+`drop = (x -> x >> forget)` — the
 generators are the width-1 shadows of the open-width words). The
 single-wire basis stays primitive because it is the normal-form
 alphabet reflected `Code` is written in. `pass` is not merely
@@ -456,7 +479,6 @@ Wiring (cartesian structure):
 | `drop` | `a0 ⇒ •` | |
 | `pass` | `ρ0 ⇒ ρ0` | identity on the whole segment |
 | `forget` | `ρ0 ⇒ •` | terminal morphism |
-| `rotLast` | `ρ0 a ⇒ a ρ0` | move the top wire to the bottom |
 
 Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 

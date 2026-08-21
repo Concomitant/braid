@@ -7,7 +7,7 @@ Some words don't have a fixed number of inputs. Their input type has an
 ```text
 pass    : ρ ⇒ ρ                          thread everything
 forget  : ρ ⇒ •                          destroy everything (terminal)
-rotLast : ρ a ⇒ a ρ                      move the TOP wire to the bottom
+mapN    : Fn⟨a ⇒ b⟩ aⁿ ⇒ bⁿ              map across a bundle
 apply   : Fn⟨ρ₀ ⇒ ρ₁⟩ ρ₀ ⇒ ρ₁            run a quotation on the segment
 loop    : Fn⟨Σ ⇒ (Σ|Θ)⟩ Σ ⇒ Θ            Elgot iteration on the segment
 foldExp : Fn⟨b a ⇒ b⟩ b aⁿ ⇒ b           fold a bundle, one wire at a time
@@ -92,8 +92,9 @@ The width `n` exists only in types. Consequences:
 `(x -> body)` and `x ->` bodies are **input-closed**: all input arrives
 through the parameters. So a binder cannot take one wire off the top
 and leave an open bundle flowing underneath — if you need "grab the
-top, keep the bundle open," use `rotLast` (move it to the bottom, out
-of the way) or thread it through the accumulator, as `firstTrue` does.
+top, keep the bundle open," put the wire you want DEEPEST instead and
+let the fold's seed take it, as `firstTrue` does — its default is the
+first argument for exactly this reason.
 
 ## Worked micro-examples
 

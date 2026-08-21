@@ -108,14 +108,8 @@ data SType
   = SEnd             -- closed end: empty stack •
   | STail SVar       -- open end: remainder variable ρ
   | SCons Ty SType   -- τ Σ (τ is the leftmost wire)
-  | SSplice SVar SType -- a stack variable spliced before a closed suffix
   | SExp SType Exp SType -- base^e: a CLOSED segment repeated e times, then rest
   deriving (Eq, Ord)
-
--- smart constructor: a splice before nothing is just a tail
-ssplice :: SVar -> SType -> SType
-ssplice v SEnd = STail v
-ssplice v r    = SSplice v r
 
 -- smart constructor, canonical form: a concrete exponent expands away,
 -- and a concrete OFFSET (base^(n+k)) expands into k real copies before
@@ -140,8 +134,10 @@ segArity = closedArity
 appendS :: SType -> SType -> SType
 appendS SEnd r           = r
 appendS (SCons t s) r    = SCons t (appendS s r)
-appendS (STail v) r      = ssplice v r
-appendS (SSplice v s) r  = SSplice v (appendS s r)
+appendS (STail v) SEnd   = STail v
+appendS (STail v) _      =
+  error ("appendS: nothing may follow the open tail " ++ show v
+         ++ " (the tail-only invariant)")
 appendS (SExp b e s) r   = SExp b e (appendS s r)
 
 -- superscript display: Intⁿ, Int³, (A B)ⁿ; caret fallback for exotic names
@@ -166,7 +162,6 @@ instance Show SType where
       go SEnd             = []
       go (STail v)        = [show v]
       go (SCons t rest)   = show t : go rest
-      go (SSplice v rest) = show v : go rest
       go (SExp b e rest)  = showExpAt b e : go rest
 
 -- Arrows: stack transformers Σ_in ⇒ Σ_out
@@ -245,10 +240,6 @@ instance Substitutable SType where
       Nothing  -> st
       Just st' -> apply s st'
   apply s (SCons ty rest) = SCons (apply s ty) (apply s rest)
-  apply s (SSplice v rest) =
-    case M.lookup v (stSub s) of
-      Nothing  -> SSplice v (apply s rest)
-      Just st' -> appendS (apply s st') (apply s rest)
   -- sexp normalizes: a concrete exponent expands into copies
   apply s (SExp b e rest) = sexp (apply s b) (apply s e) (apply s rest)
 
@@ -308,7 +299,6 @@ varsOfStack :: SType -> Vars
 varsOfStack SEnd             = noVars
 varsOfStack (STail v)        = ([], [v], [], [])
 varsOfStack (SCons t rest)   = varsOfTy t `catVars` varsOfStack rest
-varsOfStack (SSplice v rest) = ([], [v], [], []) `catVars` varsOfStack rest
 varsOfStack (SExp b e rest)  =
   varsOfStack b `catVars` varsOfExp e `catVars` varsOfStack rest
 
@@ -412,17 +402,6 @@ unifyStack s st1 st2 =
           unifyStack s2 r1 r2
     (SExp b e r, st) -> expSplit s b e r st
     (st, SExp b e r) -> expSplit s b e r st
-    (SSplice v1 r1, SSplice v2 r2) ->
-      let m1 = closedArity r1
-          m2 = closedArity r2
-      in if m1 == m2
-           then do s' <- unifyStack s r1 r2
-                   unifyStack s' (STail v1) (STail v2)
-           else if m1 < m2
-             then spliceSplit s v2 r2 (SSplice v1 r1)
-             else spliceSplit s v1 r1 (SSplice v2 r2)
-    (SSplice v r, st) -> spliceSplit s v r st
-    (st, SSplice v r) -> spliceSplit s v r st
     (SCons t1 r1, SCons t2 r2) -> do
       s'  <- unifyTy s t1 t2
       unifyStack s' r1 r2
@@ -482,12 +461,6 @@ unifyStack s st1 st2 =
           | otherwise =
               case oth of
                 STail u -> bindStackVar s1 u (sexp base e1 rest)
-                SSplice u suffix
-                  | closedArity oth == 0 && not (openTailedS suffix)
-                  , rw >= closedArity suffix ->
-                      let (rf, rb) = splitStackAt (rw - closedArity suffix) rest
-                      in do s2 <- unifyStack s1 rb suffix
-                            bindStackVar s2 u (sexp base e1 rf)
                 _ -> err oth
         peel s1 e1 oth = do
           (e2, s2) <- peelExp s1 e1
@@ -503,37 +476,6 @@ unifyStack s st1 st2 =
         peelExp _ (Exp 0 Nothing) =
           Left $ "Cannot unify stacks (exponent split): "
                ++ show (SExp base e rest) ++ " vs " ++ show other
-
-    -- (v ⧺ suffix) ~ other: right-anchored split.  Closed other: the
-    -- last |suffix| positions unify with suffix, the prefix binds v.
-    -- Open-tailed other (P ⧺ t): bind v := P ⧺ b and t := b ⧺ suffix
-    -- with a fresh bridge b — sound (not complete in adversarial
-    -- corners where suffix could also match inside P).
-    spliceSplit s0 v suffix other
-      | openTailedS suffix =
-          Left $ "Cannot unify stacks (splice split): "
-               ++ show (SSplice v suffix) ++ " vs " ++ show other
-      | not (openTailedS other) =
-          let m = closedArity suffix
-              n = closedArity other
-          in if n < m
-               then Left $ "Cannot unify stacks (splice split): "
-                         ++ show (SSplice v suffix) ++ " vs " ++ show other
-               else do
-                 let (prefix, rest) = splitStackAt (n - m) other
-                 s1 <- unifyStack s0 suffix rest
-                 unifyStack s1 (STail v) prefix
-      | otherwise =
-          case openVarsS other of
-            [t] ->
-              let n = closedArity other
-                  (prefix, _) = splitStackAt n other
-                  b = SV (show t ++ "'")
-              in do
-                s1 <- unifyStack s0 (STail t) (ssplice b suffix)
-                unifyStack s1 (STail v) (appendS prefix (STail b))
-            _ -> Left $ "Cannot unify stacks (splice split): "
-                      ++ show (SSplice v suffix) ++ " vs " ++ show other
 
 splitStackAt :: Int -> SType -> (SType, SType)
 splitStackAt 0 st = (SEnd, st)
@@ -625,8 +567,6 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goS SEnd = SEnd
     goS st@(STail v)  = fromMaybe st (M.lookup v (stSub s))
     goS (SCons t rest) = SCons (goT t) (goS rest)
-    goS (SSplice v rest) =
-      appendS (fromMaybe (STail v) (M.lookup v (stSub s))) (goS rest)
     goS (SExp b e rest) = SExp (goS b) (goE e) (goS rest)
 
     goE e@(Exp k mv) = case mv of
@@ -692,7 +632,6 @@ spineExpVars :: SType -> [NVar]
 spineExpVars (SExp _ (Exp _ (Just n)) r) = n : spineExpVars r
 spineExpVars (SExp _ _ r)                = spineExpVars r
 spineExpVars (SCons _ r)                 = spineExpVars r
-spineExpVars (SSplice _ r)               = spineExpVars r
 spineExpVars _                           = []
 
 --------------------------------------------------------------------------------
@@ -1194,9 +1133,30 @@ parseDelimited = parseProgramToks
 -- element types; Fn⟨…⟩ is not expressible in stage-1 type syntax.
 --------------------------------------------------------------------------------
 
+-- A declaration parameter is kinded: a bare name stands for ONE WIRE,
+-- `...` stands for a whole stack.  At most one stack parameter, and it
+-- must come last — which is what makes a splice unspellable, since a
+-- stack variable then always sits in tail position (`ssplice v SEnd`
+-- is just `STail v`).
+data TyParam = PWire TVar | PStack SVar
+  deriving (Eq, Show)
+
+pName :: TyParam -> String
+pName (PWire (TV n))  = n
+pName (PStack (SV n)) = n
+
+isStackParam :: TyParam -> Bool
+isStackParam (PStack _) = True
+isStackParam _          = False
+
+-- the stack a parameter stands for when the declaration is instantiated
+paramStack :: TyParam -> SType
+paramStack (PWire tv)  = SCons (TVarTy tv) SEnd
+paramStack (PStack sv) = STail sv
+
 data Alias = Alias
   { aName   :: String
-  , aParams :: [SVar]
+  , aParams :: [TyParam]
   , aBody   :: Ty
   } deriving (Eq, Show)
 
@@ -1206,12 +1166,12 @@ data Alias = Alias
 -- doors, and both are runtime no-ops.
 data DataDecl = DataDecl
   { dName   :: String
-  , dParams :: [SVar]
+  , dParams :: [TyParam]
   , dBody   :: Ty
   } deriving (Eq, Show)
 
-dataSig :: DataDecl -> (String, Int)
-dataSig d = (dName d, length (dParams d))
+dataSig :: DataDecl -> (String, [TyParam])
+dataSig d = (dName d, dParams d)
 
 -- The schemes and runtime entries a data declaration contributes:
 --   Name   : ∀params. body ⇒ Name(params)      (roll)
@@ -1219,15 +1179,17 @@ dataSig d = (dName d, length (dParams d))
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall [] ps [] [] (Arrow bodyStack namedStack))
-    , ("un" ++ dName d,  Forall [] ps [] [] (Arrow namedStack bodyStack)) ]
+  ( [ (dName d,          Forall tvs svs [] [] (Arrow bodyStack namedStack))
+    , ("un" ++ dName d,  Forall tvs svs [] [] (Arrow namedStack bodyStack)) ]
       ++ mergeSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
       ++ mergeRuns )
   where
     ps         = dParams d
-    namedStack = SCons (TData (dName d) (map STail ps)) SEnd
+    tvs        = [ tv | PWire tv  <- ps ]
+    svs        = [ sv | PStack sv <- ps ]
+    namedStack = SCons (TData (dName d) (map paramStack ps)) SEnd
     rollOpen   = openTailedS bodyStack
     -- an n-ary uniform collapse for this declaration's arity: the
     -- runtime merge strips any tag; only the SCHEME is arity-specific,
@@ -1273,7 +1235,7 @@ dataFoldSrc d =
       alts <- rowAlts row
       let k      = length alts
           fs     = [ "f" ++ show i | i <- [1 .. k] ]
-          selfTy = TData (dName d) (map STail (dParams d))
+          selfTy = TData (dName d) (map paramStack (dParams d))
           fname  = "fold" ++ dName d
 
           -- closed alternative: recursive slots at known positions,
@@ -1286,7 +1248,15 @@ dataFoldSrc d =
                       | ty == selfTy =
                           "(" ++ unwords (fs ++ [x]) ++ " >> " ++ fname ++ ")"
                       | otherwise = "(" ++ x ++ ")"
-                    slots  = map slot (zip xs payload)
+                    -- recursive slots are pushed FIRST, so a case sees
+                    -- FOLDED-then-payload however the alternative was
+                    -- written.  (The splice generator did this with
+                    -- rotLast; doing it here makes the convention one
+                    -- rule instead of two, and keeps `foldList`'s
+                    -- accumulator-first step.)
+                    tagged = zip xs payload
+                    slots  = map slot ([ q | q <- tagged, snd q == selfTy ]
+                                       ++ [ q | q <- tagged, snd q /= selfTy ])
                     stages =
                       head slots
                         : [ unwords (replicate n "_") ++ " " ++ sl
@@ -1295,26 +1265,7 @@ dataFoldSrc d =
                              ++ " >> " ++ fi ++ " ... >> apply"
                 in Just ("(" ++ unwords xs ++ " -> " ++ body ++ ")")
 
-          -- splice alternative (v ⧺ … self): supported shape is a
-          -- single trailing recursive slot; rotLast brings it to the
-          -- front, it pre-folds, and the case sees FOLDED FIRST then
-          -- the element wires
-          -- the eta-restrictor (r2 -> r2) pins the fold result to one
-          -- wire, closing the wrapper's output so the recursive knot
-          -- assembles (splice folds have single-wire results)
-          compSplice fi st =
-            case st of
-              SSplice _ (SCons ty SEnd)
-                | ty == selfTy ->
-                    Just ("rotLast >> (t2 -> "
-                            ++ unwords (fs ++ ["t2"]) ++ " >> " ++ fname
-                            ++ " >> (r2 -> r2)) ... >> " ++ fi
-                            ++ " ... >> apply")
-              _ -> Nothing
-
-          comp (fi, st)
-            | not (hasSplice st) = compClosed fi (stackElems st)
-            | otherwise          = compSplice fi st
+          comp (fi, st) = compClosed fi (stackElems st)
 
       cs <- mapM comp (zip fs alts)
       let src = case cs of
@@ -1330,12 +1281,10 @@ dataFoldSrc d =
     rowAlts RNil          = Just []
     rowAlts (RTail _)     = Nothing
     rowAlts (RCons st r)  = (st :) <$> rowAlts r
-    hasSplice (SSplice _ _) = True
     hasSplice (SCons _ r)   = hasSplice r
     hasSplice _             = False
     stackElems SEnd          = []
     stackElems (STail _)     = []
-    stackElems (SSplice _ r) = stackElems r
     stackElems (SCons t st)  = t : stackElems st
 
 occursData :: String -> Ty -> Bool
@@ -1348,7 +1297,6 @@ occursData n = goT
     goR (RCons st r) = goS st || goR r
     goR _            = False
     goS (SCons t st)   = goT t || goS st
-    goS (SSplice _ st) = goS st
     goS _              = False
 
 lookupAlias :: String -> [Alias] -> Maybe Alias
@@ -1362,25 +1310,24 @@ lookupAlias n = go
 -- scope are needed to resolve references in the RHS; the declared name
 -- itself is in scope for self-reference, which makes the declaration a
 -- nominal data type rather than a transparent alias).
-parseTypeLine :: [Alias] -> [(String, Int)] -> String
+parseTypeLine :: [Alias] -> [(String, [TyParam])] -> String
               -> Either String (Either Alias DataDecl)
 parseTypeLine aliases dataSigs line =
   case break (== '=') line of
     (lhs, '=' : rhs) -> do
       (kw, name, params) <- parseHead lhs
-      let sigs = (name, length params) : dataSigs
+      let sigs = (name, params) : dataSigs
       body <- parseTyBody aliases sigs params rhs
-      if all (\p -> p `elem` tyParams body) params
+      let (bodyTVs, bodySVs, _, _) = varsOfTy body
+          occurs (PWire tv)  = tv `elem` bodyTVs
+          occurs (PStack sv) = sv `elem` bodySVs
+      if all occurs params
         then Right ()
         else Left $ "Type alias " ++ name
                  ++ ": every parameter must occur in the body"
-      -- one-splice discipline: a stack may mention at most one param
-      case [ st | st <- stacksOf body
-               , length (filter (`elem` params) (openVarsS st)) > 1 ] of
-        (st : _) -> Left $ "Type " ++ name
-                       ++ ": ambiguous product split — the stack '"
-                       ++ show st ++ "' mentions more than one parameter"
-        []       -> Right ()
+      -- The ambiguous-product-split check is gone: a wire parameter is
+      -- exactly one wire, so juxtaposing them is never ambiguous, and a
+      -- stack parameter is forced into tail position by the parser.
       -- `data` is always nominal; `type` is a transparent alias unless
       -- self-recursive (which forces nominality)
       pure $ if kw == "data" || occursData name body
@@ -1398,8 +1345,15 @@ parseTypeLine aliases dataSigs line =
           | kw `elem` ["type", "data"], validName name ->
               (,,) kw name <$> paramList rest
         _ -> Left $ "Malformed type declaration: " ++ line
-    paramList (TokIdent p : TokComma : rest) = (SV p :) <$> paramList rest
-    paramList [TokIdent p, TokRParen]        = Right [SV p]
+    -- a bare name is ONE WIRE; `...` is a whole stack and may only be
+    -- the last parameter (one stack parameter at most).  That placement
+    -- rule is what keeps a stack variable in tail position, so no
+    -- declaration can spell a splice.
+    paramList (TokIdent p : TokComma : rest) = (PWire (TV p) :) <$> paramList rest
+    paramList [TokIdent p, TokRParen]        = Right [PWire (TV p)]
+    paramList [TokEllipsis, TokRParen]       = Right [PStack (SV "s")]
+    paramList (TokEllipsis : _) =
+      Left "'...' must be the last type parameter"
     paramList _ = Left "Malformed type parameter list"
     validName n = n `notElem` ["Int", "Str", "Sym", "Fn", "type", "data", "•"]
     tyParams t = let (_, ss, _, _) = varsOfTy t in ss
@@ -1412,11 +1366,10 @@ parseTypeLine aliases dataSigs line =
     rowStacks (RTail _)    = []
     rowStacks (RCons st r) = st : stackInner st ++ rowStacks r
     stackInner (SCons t st)   = stacksOf t ++ stackInner st
-    stackInner (SSplice _ st) = stackInner st
     stackInner _              = []
 
 -- Parse a full RHS: one element-type expression, nothing left over.
-parseTyBody :: [Alias] -> [(String, Int)] -> [SVar] -> String
+parseTyBody :: [Alias] -> [(String, [TyParam])] -> [TyParam] -> String
             -> Either String Ty
 parseTyBody aliases dataSigs params src = do
   toks <- normalizeToks <$> tokenize src
@@ -1425,7 +1378,7 @@ parseTyBody aliases dataSigs params src = do
     [] -> Right t
     _  -> Left $ "Unexpected tokens after type expression: " ++ show rest
 
-parseTyElem :: [Alias] -> [(String, Int)] -> [SVar] -> [Token]
+parseTyElem :: [Alias] -> [(String, [TyParam])] -> [TyParam] -> [Token]
             -> Either String (Ty, [Token])
 parseTyElem aliases dataSigs params toks = case toks of
   -- Fn⟨Σ ⇒ Θ⟩ (Unicode, mirrors :t output) or Fn(Σ -> Θ) (ASCII): a
@@ -1442,21 +1395,31 @@ parseTyElem aliases dataSigs params toks = case toks of
   (TokIdent "Str" : rest) -> pure (TStr, rest)
   (TokIdent "Sym" : rest) -> pure (TSym, rest)
   (TokIdent name : TokLParen : rest)
-    | Just arity <- lookup name dataSigs -> do
+    | Just ps <- lookup name dataSigs -> do
         (args, rest') <- goArgs rest
-        if length args == arity
-          then pure (TData name args, rest')
-          else Left $ "Type " ++ name ++ " expects "
-                   ++ show arity ++ " argument(s)"
+        if length args /= length ps
+          then Left $ "Type " ++ name ++ " expects "
+                   ++ show (length ps) ++ " argument(s)"
+          else do
+            -- a wire parameter takes exactly one wire; only a `...`
+            -- parameter takes a whole stack
+            case [ (q, a) | (q, a) <- zip ps args
+                 , not (isStackParam q), closedArity a /= 1 || openTailedS a ] of
+              ((q, a) : _) -> Left $ "Type " ++ name ++ ": parameter '"
+                                 ++ pName q ++ "' takes one wire, but was "
+                                 ++ "given '" ++ show a
+                                 ++ "' (declare it '...' to take a stack)"
+              [] -> pure (TData name args, rest')
     | Just al <- lookupAlias name aliases -> do
         (args, rest') <- goArgs rest
         body <- applyAlias al args
         pure (body, rest')
   (TokIdent name : rest)
-    | SV name `elem` params ->
+    | Just (PWire tv) <- lookupParam name params -> pure (TVarTy tv, rest)
+    | Just (PStack _) <- lookupParam name params ->
         Left $ "Type parameter " ++ name
-             ++ " is a stack: it cannot sit inside another element"
-    | Just 0 <- lookup name dataSigs -> pure (TData name [], rest)
+             ++ " is a stack (`...`): it cannot sit inside another element"
+    | Just [] <- lookup name dataSigs -> pure (TData name [], rest)
     | Just _ <- lookup name dataSigs ->
         Left $ "Type " ++ name ++ " expects arguments"
     | Just al <- lookupAlias name aliases ->
@@ -1477,10 +1440,20 @@ parseTyElem aliases dataSigs params toks = case toks of
         _ -> Left "Expected '|' or ')' in sum type"
     -- a stack: • or a run of elements; a parameter occurrence splices
     goStack (TokIdent "•" : rest) = pure (SEnd, rest)
-    goStack ts@(TokIdent name : rest)
-      | SV name `elem` params = do
+    goStack (TokEllipsis : rest)
+      | Just (PStack sv) <- stackParam params = do
           (suffix, rest') <- goStackEnd rest
-          pure (ssplice (SV name) suffix, rest')
+          case suffix of
+            SEnd -> pure (STail sv, rest')
+            _ -> Left "'...' must be the last thing in its stack"
+      | otherwise = Left "'...' needs a `...` parameter on the declaration"
+    goStack ts@(TokIdent name : rest)
+      | Just (PStack sv) <- lookupParam name params = do
+          (suffix, rest') <- goStackEnd rest
+          case suffix of
+            SEnd -> pure (STail sv, rest')
+            _ -> Left $ "The stack parameter '" ++ name
+                     ++ "' must be the last thing in its stack"
       | otherwise = goStackElem ts
     goStack ts = goStackElem ts
     goStackElem ts = do
@@ -1530,6 +1503,9 @@ parseTyElem aliases dataSigs params toks = case toks of
         _ -> Left $ "Expected '"
                  ++ (if close == TokRAngle then "⟩" else ")")
                  ++ "' to close the Fn type"
+    stackParam ps = case [ q | q@(PStack _) <- ps ] of
+                      (q : _) -> Just q
+                      []      -> Nothing
     -- constructor/alias arguments: each argument is a STACK
     goArgs ts = do
       (st, rest) <- goStack ts
@@ -1540,18 +1516,36 @@ parseTyElem aliases dataSigs params toks = case toks of
         (TokRParen : rest') -> pure ([st], rest')
         _ -> Left "Expected ',' or ')' in type arguments"
 
+lookupParam :: String -> [TyParam] -> Maybe TyParam
+lookupParam n ps = case [ q | q <- ps, pName q == n ] of
+                     (q : _) -> Just q
+                     []      -> Nothing
+
 applyAlias :: Alias -> [SType] -> Either String Ty
 applyAlias al args
   | length args /= length (aParams al) =
       Left $ "Type alias " ++ aName al ++ " expects "
            ++ show (length (aParams al)) ++ " argument(s)"
-  | otherwise = Right (substStackVars (M.fromList (zip (aParams al) args))
-                                      (aBody al))
+  | otherwise = do
+      (tm, sm) <- foldM bind (M.empty, M.empty) (zip (aParams al) args)
+      pure (substParams tm sm (aBody al))
+  where
+    -- a wire parameter takes exactly one wire; a `...` parameter takes
+    -- the whole argument stack
+    bind (tm, sm) (PWire tv, SCons t SEnd) = Right (M.insert tv t tm, sm)
+    bind _ (PWire tv, st) =
+      Left $ "Type " ++ aName al ++ ": parameter '" ++ show tv
+           ++ "' takes one wire, but was given '" ++ show st
+           ++ "' (declare it '...' to take a stack)"
+    bind (tm, sm) (PStack sv, st) = Right (tm, M.insert sv st sm)
 
 substStackVars :: Map SVar SType -> Ty -> Ty
-substStackVars m = goT
+substStackVars = substParams M.empty
+
+substParams :: Map TVar Ty -> Map SVar SType -> Ty -> Ty
+substParams tmap m = goT
   where
-    goT t@(TVarTy _) = t
+    goT t@(TVarTy v) = M.findWithDefault t v tmap
     goT TInt         = TInt
     goT TStr         = TStr
     goT TSym         = TSym
@@ -1563,8 +1557,6 @@ substStackVars m = goT
     goR (RCons s r)  = RCons (goS s) (goR r)
     goS SEnd            = SEnd
     goS t@(STail v)     = M.findWithDefault t v m
-    goS (SSplice v s)   =
-      appendS (M.findWithDefault (STail v) v m) (goS s)
     goS (SCons t s)     = SCons (goT t) (goS s)
 
 -- One-way match of an alias body against a concrete element type.
@@ -1573,8 +1565,14 @@ substStackVars m = goT
 matchAlias :: Alias -> Ty -> Maybe [SType]
 matchAlias al t = do
   binds <- goT (aBody al) t M.empty
-  mapM (`M.lookup` binds) (aParams al)
+  mapM (`M.lookup` binds) (map pVar (aParams al))
   where
+    -- both kinds bind through the same map, keyed by the parameter's
+    -- name; a wire parameter's binding is its one-wire stack
+    pVar q = SV (pName q)
+    goT (TVarTy v) x m
+      | TV (show v) `elem` [ tv | PWire tv <- aParams al ] =
+          bindS (SV (show v)) (SCons x SEnd) m
     goT TInt TInt m = Just m
     goT TStr TStr m = Just m
     goT TSym TSym m = Just m
@@ -1595,14 +1593,7 @@ matchAlias al t = do
             Nothing -> Just (M.insert p x m)
             Just y  -> if x == y then Just m else Nothing
     goS (STail p) x m
-      | p `elem` aParams al = bindS p x m
-    goS (SSplice p suf) x m
-      | p `elem` aParams al =
-          let mm = closedArity suf
-              n  = closedArity x
-          in if openTailedS x || n < mm then Nothing
-             else let (pre, post) = splitStackAt (n - mm) x
-                  in goS suf post m >>= bindS p pre
+      | p `elem` map pVar (aParams al) = bindS p x m
     goS SEnd SEnd m = Just m
     goS (SCons tb sb) (SCons tx sx) m = goT tb tx m >>= goS sb sx
     goS _ _ _ = Nothing
@@ -1654,7 +1645,6 @@ showStackA as st          = unwords (go st)
     go SEnd             = []
     go (STail v)        = [show v]
     go (SCons t rest)   = showTyA as t : go rest
-    go (SSplice v rest) = show v : go rest
     go (SExp b e rest)  = showExpAt b e : go rest
 
 showArrowA :: [Alias] -> Arrow -> String
@@ -1854,7 +1844,6 @@ inferOperand env final t
 openVarsS :: SType -> [SVar]
 openVarsS (STail v)      = [v]
 openVarsS (SCons _ r)    = openVarsS r
-openVarsS (SSplice v r)  = v : openVarsS r
 openVarsS (SExp _ _ r)   = openVarsS r
 openVarsS SEnd           = []
 
@@ -2012,6 +2001,12 @@ primEnv =
       scaleNTy = Forall [] [] [] [NV "n"]
         (Arrow (SCons TInt (SExp (one TInt) nExp SEnd))
                (SExp (one TInt) nExp SEnd))
+      -- map a one-wire function across a bundle: the tier's missing
+      -- container-preserving word (folds collapse, this one rebuilds)
+      mapNTy = Forall [a, b] [] [] [NV "n"]
+        (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
+                      (SExp (one ta) nExp SEnd))
+               (SExp (one tb) nExp SEnd))
   in M.fromList
        [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
        , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
@@ -2022,11 +2017,6 @@ primEnv =
        , ("pass",  Forall []     [rho] [] [] (Arrow (STail rho) (STail rho)))
          -- the terminal morphism: forget the whole segment
        , ("forget", Forall []    [rho] [] [] (Arrow (STail rho) SEnd))
-         -- rotate the LAST wire of the segment to the front: the
-         -- reach-the-end primitive, typed via a splice
-       , ("rotLast", Forall [a]  [rho] [] []
-           (Arrow (SSplice rho (SCons ta SEnd))
-                  (SCons ta (STail rho))))
        , ("+",     binIntTy)
        , ("*",     binIntTy)
        , ("print", Forall [a]    [] [] [] (Arrow (one ta) SEnd))
@@ -2078,6 +2068,7 @@ primEnv =
        , ("loop",      loopTy)
        , ("foldExp",   foldExpTy)
        , ("foldExp2",  foldExp2Ty)
+       , ("mapN",      mapNTy)
        , ("dupN",      dupNTy)
        , ("addN",      addNTy)
        , ("zipN",      zipNTy)
@@ -2422,9 +2413,12 @@ preludeSrc = unlines
   [ "## the boolean object: a bare two-way decision"
   , "type Bool = (• | •)"
   , "## an optional value: empty or one element"
-  , "type Maybe(a) = (• | a)"
+  , "type Maybe(...) = (• | ...)"
   , "## the list: initial algebra of (• | a X); foldList is generated"
   , "type List(a) = (• | a List(a))"
+    -- a whole stack as ONE wire: what multi-wire aggregates become now
+    -- that list cells hold a single wire
+  , "data Box(...) = (...)"
   , "## the empty list"
   , "def nil = in1 >> List"
   , "## prepend an element"
@@ -2493,20 +2487,20 @@ preludeSrc = unlines
   , "## two-wire elements: (a b)ⁿ ⇒ List(a b).  reverse/append are"
   , "## single-wire words, so order is kept Church-style: fold up a"
   , "## FUNCTION, then apply it to nil"
-  , "def pack2 = [(f x y -> [(l -> f (x y l >> cons) >> apply)])] [pass] ... >> foldExp2 >> _ nil >> apply"
+  , "def pack2 = [(f x y -> [(l -> f ((x y >> Box) l >> cons) >> apply)])] [pass] ... >> foldExp2 >> _ nil >> apply"
   , "## top-first packs: head = TOP of the segment.  With a `...` ladder"
   , "## (each line pushes UNDER), list order = TEXT order — the vertical"
   , "## list idiom:   line1 / line2 ... / line3 ... / packR"
   , "def packR = [(l x -> x l >> cons)] nil ... >> foldExp"
-  , "def pack2R = [(l x y -> x y l >> cons)] nil ... >> foldExp2"
+  , "def pack2R = [(l x y -> (x y >> Box) l >> cons)] nil ... >> foldExp2"
   , "## first-match over a clause list: each clause is [router] [action];"
   , "## the first router that hits runs its action on x, else the default."
-  , "def matchWith = (x default clauses -> clauses >> [x >> default ... >> apply] [(rest p f -> x >> p ... >> apply >> (f ... >> apply | drop >> rest) >> merge)] ... >> foldList)"
   , "## the always-hit router: the last lane of a guard clause list"
   , "def else? = in1"
   , "## probe a clause list (pack2 / pack2R lanes): run the first hit;"
   , "## in1(result) on a hit, in2(input) if none hit"
-  , "def choose = (x clauses -> clauses >> [x >> in2] [(rest p f -> x >> p ... >> apply >> (f ... >> apply >> in1 | drop >> rest) >> merge)] ... >> foldList)"
+  , "def choose = (x clauses -> clauses >> [x >> in2] [(rest c -> c >> unBox >> (p f -> x >> p ... >> apply >> (f ... >> apply >> in1 | drop >> rest) >> merge))] ... >> foldList)"
+  , "def matchWith = (x default clauses -> x clauses >> choose >> (pass | default ... >> apply) >> merge)"
   , "## commute List over the sum monad: all hits, or the first miss"
   , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"
@@ -2564,7 +2558,7 @@ preludeSrc = unlines
   , "def take = (n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> take >> x ... >> cons)) >> merge)) >> merge)"
   , "def skip = (n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> skip)) >> merge)) >> merge)"
   , "## zip two lists into flat two-wire elements: List(a) List(b) => List(a b)"
-  , "def zip = (l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> zip >> x y ... >> cons)) >> merge)) >> merge)"
+  , "def zip = (l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> zip >> (x y >> Box) ... >> cons)) >> merge)) >> merge)"
   , "## conjunction / disjunction over a Bool list"
   , "def all = [true] [and] ... >> foldList"
   , "def any = [false] [or] ... >> foldList"
@@ -2614,7 +2608,7 @@ preludeSrc = unlines
   , "## action ever runs (the fold selects quotes, applies once).  The"
   , "## accumulator is (decided | default): a true lane decides once;"
   , "## later lanes leave a decision alone."
-  , "def firstTrue = rotLast >> (d -> d >> in2) ... >> [(acc b f -> acc >> (in1 | (g -> b [f >> in1] [g >> in2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> apply"
+  , "def firstTrue = (d -> d >> in2) ... >> [(acc b f -> acc >> (in1 | (g -> b [f >> in1] [g >> in2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> apply"
   , "## assemble a loop body from a quoted predicate and step"
   , "def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
@@ -2712,7 +2706,7 @@ staticWidth = go 0
   where
     go n (SCons _ rest) = go (n + 1) rest
     go n SEnd           = Just n
-    go _ _              = Nothing  -- STail / SSplice / SExp: indeterminate
+    go _ _              = Nothing  -- STail / SExp: indeterminate
 
 -- Backstop check shared by the file runner and the REPL.
 desyncError :: SType -> [Value] -> Maybe String
@@ -2774,7 +2768,6 @@ buildRunDefs base m =
     openOf  (Forall _ _ _ _ (Arrow i _)) = openTailed i
     openTailed (SCons _ rest) = openTailed rest
     openTailed (STail _)      = True
-    openTailed (SSplice _ _)  = True
     openTailed (SExp _ _ _)   = True   -- erased width: needs the whole segment
     openTailed SEnd           = False
 
@@ -2874,16 +2867,6 @@ evalTerm env defs vars term st =
                   pure ([VSum 1 [VStr (show (e :: IOException))]], stk', [])
                 Right () -> pure ([VSum 0 []], stk', [])
             _ -> throwError "writeFile: expected Str path and contents"
-    -- rotLast: whole segment; move its last value to the front
-    applyAtom isFinal (Prim "rotLast") stk
-      | not (M.member "rotLast" vars), not (M.member "rotLast" defs) =
-          if isFinal
-            then case reverse stk of
-              (lastV : rs) -> pure (lastV : reverse rs, [], [])
-              []           -> throwError "rotLast: empty segment"
-            else case stk of
-              (v : rest) -> pure ([v], rest, [])   -- closed: 1-wide segment
-              []         -> throwError "rotLast: empty stack"
     -- forget: the terminal morphism — consume the segment, emit nothing
     applyAtom isFinal (Prim "forget") stk
       | not (M.member "forget" vars), not (M.member "forget" defs) =
@@ -2909,7 +2892,7 @@ evalTerm env defs vars term st =
             _ -> throwError "Runtime type error in loop: expected a body quotation"
     -- foldExp: eliminate an exponent bundle aⁿ.  n is erased, so the
     -- bundle is the final segment and its runtime width is the witness
-    -- (the forget/rotLast convention).  Non-final was typed at n := 0.
+    -- (the forget convention).  Non-final was typed at n := 0.
     applyAtom isFinal (Prim "foldExp") stk
       | not (M.member "foldExp" vars), not (M.member "foldExp" defs) = do
           (args, stk') <- takeWires "foldExp" 2 stk
@@ -2965,6 +2948,22 @@ evalTerm env defs vars term st =
             then throwError "zipN: odd segment (unreachable on typechecked programs)"
             else let (xs, ys) = splitAt (length stk `div` 2) stk
                  in pure (concat (zipWith (\x y -> [x, y]) xs ys), [], [])
+    applyAtom isFinal (Prim "mapN") stk
+      | not (M.member "mapN" vars), not (M.member "mapN" defs) = do
+          (args, stk') <- takeWires "mapN" 1 stk
+          case args of
+            [VFn scope cvars body] -> do
+              let bundle = if isFinal then stk' else []
+                  step v = do
+                    (out, lg) <- evalTerm env scope cvars body [v]
+                    case out of
+                      [w] -> pure (w, lg)
+                      _   -> throwError
+                               "mapN: the quotation must be one wire in, one out"
+              rs <- mapM step bundle
+              pure ( map fst rs, if isFinal then [] else stk'
+                   , concatMap snd rs )
+            _ -> throwError "Runtime type error in mapN: expected a quotation"
     applyAtom isFinal (Prim "scaleN") stk
       | not (M.member "scaleN" vars), not (M.member "scaleN" defs) = do
           (args, stk') <- takeWires "scaleN" 1 stk
@@ -3490,7 +3489,6 @@ compileAbsOpen' env ps k0 open body = do
 openTailedS :: SType -> Bool
 openTailedS (SCons _ r)   = openTailedS r
 openTailedS (STail _)     = True
-openTailedS (SSplice _ _) = True
 openTailedS (SExp _ _ _)  = True   -- unknown width: not a closed stack
 openTailedS SEnd          = False
 

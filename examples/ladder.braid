@@ -63,12 +63,12 @@ def classify =
 6  >> classify >> print   # 6
 
 # The product form: lanes laid FLAT as (condition, action) pairs —
-# (Bool Fn)ⁿ, default on top — and firstTrue folds the bundle. All
+# default FIRST, then (Bool Fn)ⁿ — and firstTrue folds the bundle. All
 # conditions are probed; the first true lane's action runs; exactly one
 # action ever runs. Guard count is just stack width (the exponent).
 def sign3 =
     x ->
-    (x >> negative) ["neg"] (x >> zero) ["zero"] [x >> toStr]
+    [x >> toStr] (x >> negative) ["neg"] (x >> zero) ["zero"]
     firstTrue
 
 -4 >> sign3 >> print    # neg

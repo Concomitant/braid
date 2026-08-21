@@ -119,7 +119,12 @@ the prelude; every REPL line runs against a persistent typed stack.
    Tree(a))` — the name rolls, `unTree` unrolls (both free at
    runtime), and `foldTree` is *generated*: elimination by points.
 9. **The list defines itself.** `type List(a) = (• | a List(a))` in
-   the prelude; literals, `map`, `fold`, `filter` are all derived.
+   the prelude; literals, `map`, `fold`, `filter` are all derived. A
+   cell is one wire — declaration parameters are kinded, a bare name
+   being a wire and `...` a whole stack — so a pair-list is
+   `List(Box(a b))` and the *whole* library works on it, not just
+   `fold`. Keeping stack variables in tail position is what makes the
+   type system's tail-only invariant true rather than aspirational.
 10. **Widths are exponents.** `Intⁿ` (typed `Int^n`) is n wires — a
     vector with no box, an exponential object with finite base. One
     fold word is variadic over bare stack products (`sumN : Intⁿ ⇒
@@ -154,7 +159,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 540+ case test suite, a full
+(typechecker, interpreter, REPL), a 560+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

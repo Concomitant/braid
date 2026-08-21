@@ -283,12 +283,12 @@ moduleTypeTests =
     -- codata: recursion THROUGH a Fn makes the type nominal; the
     -- constructor carries the thunked tail
   , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\nStream",
-        "ρ0 Fn⟨• ⇒ Stream(ρ0)⟩ ⇒ Stream(ρ0)")
+        "a0 Fn⟨• ⇒ Stream(a0)⟩ ⇒ Stream(a0)")
     -- pack: list introduction from a bundle — (elements ; pack) replaces
     -- the list(…) special form; elements are full programs, groups delimit
   , ("(1 2 3 >> pack)",          "• ⇒ List(Int)")
   , ("(pack)",                   "a0ⁿ⁰ ⇒ List(a0)")   -- final position: open
-  , ("(1 \"a\" 2 \"b\" >> pack2)", "• ⇒ List(Int Str)")
+  , ("(1 \"a\" 2 \"b\" >> pack2)", "• ⇒ List(Box(Int Str))")
     -- exponent syntax in type declarations: literal ^k (and Unicode
     -- superscript input) expands to k copies; segments repeat wholesale
   , ("type T3 = (Int^3 | Str)\n1 2 3 >> in1 >> (pass | drop >> \"x\")", "• ⇒ T3")
@@ -303,7 +303,7 @@ moduleTypeTests =
   , ("addN",   "Intⁿ⁰ Intⁿ⁰ ⇒ Intⁿ⁰")
   , ("zipN",   "a0ⁿ⁰ a1ⁿ⁰ ⇒ (a0 a1)ⁿ⁰")
   , ("sumN",   "Intⁿ⁰ ⇒ Int")
-  , ("firstTrue", "((• | •) Fn⟨• ⇒ ρ0⟩)ⁿ⁰ Fn⟨• ⇒ ρ0⟩ ⇒ ρ0")
+  , ("firstTrue", "Fn⟨• ⇒ ρ0⟩ ((• | •) Fn⟨• ⇒ ρ0⟩)ⁿ⁰ ⇒ ρ0")
     -- (before the grouped-compound constraint fix this leaked fake
     -- polymorphism: a0ⁿ a1ⁿ ⇒ Int, crashing on non-Int bundles)
   , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\ndot", "Intⁿ⁰ Intⁿ⁰ ⇒ Int")
@@ -317,7 +317,7 @@ moduleTypeTests =
     -- theorem: Nat ≅ Maybe(Nat) is the successor algebra
   , ("type Nat = (• | Nat)\nunNat",              "Nat ⇒ Maybe(Nat)")
   , ("type Nat = (• | Nat)\nNat",               "Maybe(Nat) ⇒ Nat")
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(ρ0) ⇒ (ρ0 | Tree(ρ0) Tree(ρ0))")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(a0) ⇒ (a0 | Tree(a0) Tree(a0))")
     -- data keyword: nominal without recursion; single-alternative
     -- bodies get doors against the field stack
   , ("data Person = (Str Int)\nPerson",         "Str Int ⇒ Person")
@@ -326,10 +326,10 @@ moduleTypeTests =
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
     -- List is now a declared type in the prelude; the library is derived
-  , ("uncons",  "List(ρ0) ⇒ (• | ρ0 List(ρ0))")
-  , ("cons",    "ρ0 List(ρ0) ⇒ List(ρ0)")
+  , ("uncons",  "List(a0) ⇒ Maybe(a0 List(a0))")
+  , ("cons",    "a0 List(a0) ⇒ List(a0)")
     -- stack-kinded parameters: zip without Pair
-  , ("zip",     "List(a0) List(a1) ⇒ List(a0 a1)")
+  , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
@@ -341,6 +341,18 @@ moduleTypeTests =
     -- a def body may leave a bracket open: the lines that close it
     -- belong to the body, so a blank line does not end the block and a
     -- `def`-looking line inside the bracket is code, not a declaration
+    -- KINDED type parameters: a bare name is one wire, `...` is a
+    -- stack.  The polymorphic pair was inexpressible while every
+    -- parameter was stack-kinded (the split was ambiguous).
+  , ("data Pair(a, b) = (a b)\nPair",     "a0 a1 ⇒ Pair(a0, a1)")
+  , ("data Pair(a, b) = (a b)\nunPair",   "Pair(a0, a1) ⇒ a0 a1")
+    -- `...` takes a whole stack into ONE wire: how multi-wire
+    -- aggregates survive single-wire list cells
+  , ("data B(...) = (...)\nB",            "ρ0 ⇒ B(ρ0)")
+  , ("data B(...) = (...)\nunB",          "B(ρ0) ⇒ ρ0")
+  , ("data T(t, ...) = (t ...)\nT",       "a0 ρ0 ⇒ T(a0, ρ0)")
+    -- list cells are one wire, so `List` needs no splice: its parameter
+    -- is forced to a wire because it sits BEFORE the recursive slot
   , ("def spanning = (1\n\n2 ... >> +\n)\nspanning",   "• ⇒ Int")
   , ("def blk =\n    (1\n\n     2 ... >> +\n     )\nblk",  "• ⇒ Int")
     -- the naming binder inside a def: names reach the rest of the body,
@@ -366,6 +378,14 @@ evalTests =
     -- the naming binder is identity at runtime: the wires it names go
     -- straight back out, and each later mention of a name is a copy
   , ("1 2 3\n-> a b c\npass",             [],     "1 2 3")   -- pure id
+    -- a whole stack through one wire, and back
+  , ("data B(...) = (...)\n1 \"a\" >> B >> unB", [], "1 a")
+    -- boxed cells give a pair-list the WHOLE library, not just foldList
+  , ("[(bx -> bx >> unBox >> (n s -> s >> drop >> n))] (1 \"a\" 2 \"b\" >> pack2) >> map >> [0] [(a n -> a n >> +)] ... >> foldList >> print", ["3"], "")
+    -- mapN: the bundle tier can rebuild its own container now
+  , ("[2 _ >> *] 1 2 3 4 >> mapN >> sumN >> print", ["20"], "")
+  , ("[dup >> *] 1 2 3 >> mapN >> sumN >> print",   ["14"], "")
+  , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
                                            ["60", "60"], "")
@@ -568,7 +588,7 @@ evalTests =
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n9 [toStr] ([by3?] [drop >> \"fizz\"] >> pack2) >> matchWith >> print", ["fizz"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n7 [toStr] ([by3?] [drop >> \"fizz\"] >> pack2) >> matchWith >> print", ["7"], "")
     -- zip + a fold over flat two-wire elements: the dot product
-  , ("(1 2 3 >> pack) (10 20 30 >> pack) >> zip >> [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print", ["140"], "")
+  , ("(1 2 3 >> pack) (10 20 30 >> pack) >> zip >> [0] [(acc bx -> bx >> unBox >> (a b -> a b >> * >> acc ... >> +))] ... >> foldList >> print", ["140"], "")
     -- arithmetic completeness + negative literals
   , ("7 3 >> div >> print",  ["2"], "")
   , ("15 3 >> mod >> print", ["0"], "")
@@ -717,7 +737,7 @@ evalTests =
   , ("def dbl = dupN >> addN\ndef dblS = 2 ... >> scaleN\n20 30 >> dbl >> sumN >> print\n20 30 >> dblS >> sumN >> print", ["100", "100"], "")
   , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\n1 2 3 4 5 6 >> dot >> print", ["32"], "")
     -- firstTrue: guard lanes as a bare product, first true wins
-  , ("def sign = x -> (x >> negative) [\"neg\"] (x >> zero) [\"zero\"] [x >> toStr] >> firstTrue\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
+  , ("def sign = x -> [x >> toStr] (x >> negative) [\"neg\"] (x >> zero) [\"zero\"] >> firstTrue\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
     -- cut soundness: at stage boundaries, run(prefix) ; run(suffix) =
     -- run(whole) — the concatenative property at spine granularity
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2 >> + >> dup >> *] >> getCode\ndef cutAt =\n    k ->\n    (k c >> take) >> evalCode\n    ((k c >> skip) ... >> evalCode >> (print | forget) >> merge | forget) >> merge\n0 >> cutAt\n1 >> cutAt\n3 >> cutAt", ["9", "9", "9"], "")
@@ -729,7 +749,7 @@ evalTests =
     -- two-wire elements; the empty pack is nil
   , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
   , ("(1 2 3 >> pack) >> sum >> print\n(pack) >> len >> print", ["6", "0"], "")
-  , ("(1 10 2 20 >> pack2) >> [0] [(acc a b -> (a b >> *) acc >> +)] ... >> foldList >> print", ["50"], "")
+  , ("(1 10 2 20 >> pack2) >> [0] [(acc bx -> bx >> unBox >> (a b -> (a b >> *) acc >> +))] ... >> foldList >> print", ["50"], "")
   , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> apply >> print", ["list(7, 70)"], "")
     -- EARLY BINDING: shadowing a prelude ingredient (equals, here forced
     -- always-true) must NOT leak into the derived prelude word odd? that
@@ -797,7 +817,13 @@ moduleFailTests =
   , ("type Bad = (• | Int^)\n1",                 "Expected an exponent")
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
-  , ("data Bad(a, b) = (• | a b)\n1",            "ambiguous product split")
+  , ("data Bad(...) = (... Int)\n1", "must be the last thing in its stack")
+  , ("data Bad2(..., a) = (a)\n1",   "must be the last type parameter")
+    -- a wire parameter given a stack: the mistake this change makes
+    -- impossible, reported where you wrote it
+  , ("type L = List(Int Str)\n1",    "takes one wire")
+    -- rotLast is gone: the splice it was typed with is unspellable
+  , ("1 >> rotLast",                  "Unknown primitive: rotLast")
     -- Fn type declarations: missing arrow, unclosed, reserved name
   , ("type Bad(a) = Fn⟨a a⟩\n1",                 "Expected '⇒'")
   , ("type Bad(a) = Fn⟨a ⇒ a\n1",                "close the Fn type")

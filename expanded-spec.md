@@ -296,26 +296,29 @@ aliasing while the wire is still live, and the manual says so.
 * **Stack-kinded type parameters**: a constructor argument is a
   STACK — `List(Int Sym)` is a list of flat two-wire elements, and
   `zip : List(a) List(b) ⇒ List(a b)` needs no Pair box. Internally a
-  parameter before other elements is a *splice* (a stack variable in
-  non-tail position); the discipline is one splice per stack with a
-  closed suffix, unified right-anchored (unitary, principal; the
-  splice-vs-open-tail case resolves via a fresh bridge variable —
-  sound, incomplete in adversarial corners). Consequences: splice
-  constructors (`cons`) are segment-consuming (final position, like
-  injections); generated folds for splice types pass the FOLDED value
-  first and pin fold results to one wire; defs that name "one
-  element" (`map`) soundly self-constrain their element to width 1.
-* A **prelude** of derived definitions is auto-loaded into every
-  module and REPL session: `not`, `negate`, `both`, `either`,
-  `equals`, `less`, `equalsTo`, `lessThan`, `verdict`, `whileFn`,
-  `while`, `untilFn`, `until`, `reverse`, `append`, `concat`, `single`,
-  `flatMap`, `filter`, `sequence`, `take`, `skip`, `cond`/`when`/`unless`,
-  plus the Code⟨⟩ layer (`Atom`/`Stage`/`Code`, `reflect`, `evalCode`,
-  `symStr` — see spec-code.md) (see `preludeSrc` in the implementation; all are
-  user-level code over the primitive set). A user `def` of a prelude
-  name shadows it silently, once; redefining any name twice is still
-  an error. `>=>` (see spec-sums §6c) is Kleisli composition for the
-  sum monad, desugared at parse time.
+  parameter before other elements WAS a *splice* (a stack variable in
+  non-tail position), which cost an incomplete unifier and a primitive
+  (`rotLast`) whose only job was to reach past one. **Superseded**:
+  declaration parameters are now kinded — a bare name is one wire, `...`
+  is a whole stack and must come last. A stack variable therefore always
+  sits in tail position, `SSplice` is unspellable and has been deleted
+  along with `spliceSplit` and `rotLast`, and the tail-only invariant
+  the module header always claimed is now true.
+
+  What this costs and buys: a list cell is one wire, so multi-wire
+  aggregates go through `Box(...)` (`pack2 : (a b)ⁿ ⇒ List(Box(a b))`,
+  `zip : List(a) List(b) ⇒ List(Box(a b))`). In exchange the *whole*
+  list library reaches them — `map` and `filter` never worked on
+  `List(Int Str)` — and `data Pair(a, b) = (a b)` becomes expressible,
+  having been rejected as an "ambiguous product split" precisely because
+  every parameter used to be stack-kinded.
+
+  The generated fold also changed: `compClosed` now pushes recursive
+  slots FIRST, so a case sees folded-then-payload however the
+  alternative was written. That was previously true only for splice
+  alternatives (via `rotLast`), so removing the splice would have
+  silently flipped `foldList`'s argument order; making it one rule
+  instead of two keeps the accumulator-first step
 
 ## Remainder discipline and principal typing
 

@@ -1,6 +1,7 @@
-# zip without a Pair box: type parameters are stack-kinded, so the
-# list element is a flat two-wire product — List(a) List(b) ⇒ List(a b).
-# Folds over such lists take one case argument per wire, folded first.
+# zip pairs two lists. A list cell holds ONE wire, so the pair is a
+# Box — a whole stack carried as a single wire — and the fold unboxes
+# it to see both halves: List(a) List(b) ⇒ List(Box(a b)).
 
 (1 2 3 >> pack) (10 20 30 >> pack) >> zip
-    [0] [(acc a b -> a b >> * >> acc ... >> +)] ... >> foldList >> print   # dot product: 140
+    [0] [(acc bx -> bx >> unBox >> (a b -> a b >> * >> acc ... >> +))] ...
+    foldList >> print                       # dot product: 140
