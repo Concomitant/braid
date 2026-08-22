@@ -567,7 +567,13 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goS SEnd = SEnd
     goS st@(STail v)  = fromMaybe st (M.lookup v (stSub s))
     goS (SCons t rest) = SCons (goT t) (goS rest)
-    goS (SExp b e rest) = SExp (goS b) (goE e) (goS rest)
+    -- sexp, not SExp: substitution may ground an exponent (n := 0 from
+    -- instantiateClosed), and the canonical form expands concrete
+    -- copies away.  Rebuilding with the raw constructor left a literal
+    -- zero-copy node that openTailedS then mistook for an open width —
+    -- which made the recursive-call placement check reject every
+    -- non-final exponent word, unreachable-branch runtime and all.
+    goS (SExp b e rest) = sexp (goS b) (goE e) (goS rest)
 
     goE e@(Exp k mv) = case mv of
       Just n | Just (Exp k' mv') <- M.lookup n (expSub s) -> Exp (k + k') mv'

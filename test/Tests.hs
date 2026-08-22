@@ -331,6 +331,13 @@ moduleTypeTests =
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
+    -- a NON-FINAL open-width word closes to its zero-width case
+    -- (n := 0), exactly as ρ-words close to ρ := • — one policy, both
+    -- sorts.  This never worked before: substOnce rebuilt the closed
+    -- exponent with the raw constructor, and the leftover zero-copy
+    -- node tripped the recursive-call placement check.
+  , ("sumN _",  "a0 ⇒ Int a0")   -- the seed, beside the wire
+  , ("forget _", "a0 ⇒ a0")      -- the ρ analogue, for comparison
   , ("unzipN",  "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
@@ -398,6 +405,7 @@ evalTests =
   , ("1 2 3 10 20 30 >> zipN >> unzipN >> addN >> sumN >> print", ["66"], "")
   , ("[dup >> *] 1 2 3 >> mapN >> sumN >> print",   ["14"], "")
   , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
+  , ("1 >> sumN _",                                 [],     "0 1")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
                                            ["60", "60"], "")
@@ -836,6 +844,9 @@ moduleFailTests =
   , ("type L = List(Int Str)\n1",    "takes one wire")
     -- rotLast is gone: the splice it was typed with is unspellable
   , ("1 >> rotLast",                  "Unknown primitive: rotLast")
+    -- a closed non-final open word that doesn't cover its wires is an
+    -- ORDINARY width error now, not a placement violation
+  , ("1 2 >> sumN _",  "Cannot unify stacks")
     -- Fn type declarations: missing arrow, unclosed, reserved name
   , ("type Bad(a) = Fn⟨a a⟩\n1",                 "Expected '⇒'")
   , ("type Bad(a) = Fn⟨a ⇒ a\n1",                "close the Fn type")
