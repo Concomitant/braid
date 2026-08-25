@@ -74,6 +74,12 @@ data Ty
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
   | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
   | TData String [SType] -- a declared nominal type: Name(arg-stacks)
+  | TFin Exp           -- Fin(n): an index into a bundle of width n.
+                       -- The bound is a TYPE, erased like every other
+                       -- width; at runtime a Fin is a bare Int.  Every
+                       -- introduction's n is forced by a relevant
+                       -- input (a literal offset, or a live bundle) —
+                       -- see design-indices.md.
   deriving (Eq, Ord)
 
 -- A sum's alternatives: a row of stacks with an optional row-variable
@@ -102,6 +108,7 @@ instance Show Ty where
   show (TData n []) = n
   show (TData n as) =
     n ++ "(" ++ intercalate ", " (map show as) ++ ")"   -- args are stacks
+  show (TFin e)    = "Fin(" ++ show e ++ ")"
 
 -- Stack types: front (leftmost) wire first, optional tail variable at the end
 data SType
@@ -224,6 +231,7 @@ instance Substitutable Ty where
   apply s (TFn arr) = TFn (apply s arr)
   apply s (TData n as) = TData n (map (apply s) as)
   apply s (TSum row)  = TSum (apply s row)
+  apply s (TFin e)    = TFin (apply s e)
 
 instance Substitutable Exp where
   apply s e@(Exp k mv) =
@@ -294,6 +302,7 @@ varsOfTy TSym        = noVars
 varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TSum row)  = varsOfRow row
 varsOfTy (TData _ as) = foldr (catVars . varsOfStack) noVars as
+varsOfTy (TFin e)    = varsOfExp e
 
 varsOfStack :: SType -> Vars
 varsOfStack SEnd             = noVars
@@ -349,6 +358,9 @@ unifyTy s t1 t2 =
     (TData n1 as1, TData n2 as2)
       | n1 == n2 && length as1 == length as2 ->
           foldM (\acc (x, y) -> unifyStack acc x y) s (zip as1 as2)
+    -- two indices agree exactly when their bounds do: the same
+    -- `k + n = e` solving that correlates bundle widths
+    (TFin e1, TFin e2) -> unifyExp s e1 e2
     _             -> Left $ "Cannot unify types: " ++ show t1' ++ " vs " ++ show t2'
 
 bindTyVar :: Subst -> TVar -> Ty -> Either String Subst
@@ -583,6 +595,9 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
     goT (TFn arr)  = TFn (substOnce s arr)
     goT (TSum row)   = TSum (goR row)
     goT (TData n as) = TData n (map goS as)
+    -- NOT the catch-all: instantiation must freshen the bound, or
+    -- every use site of a Fin-typed word would share one global n
+    goT (TFin e)     = TFin (goE e)
     goT t            = t
 
     goR RNil = RNil
@@ -1407,7 +1422,8 @@ parseTypeLine aliases dataSigs line =
     paramList (TokEllipsis : _) =
       Left "'...' must be the last type parameter"
     paramList _ = Left "Malformed type parameter list"
-    validName n = n `notElem` ["Int", "Str", "Sym", "Fn", "type", "data", "•"]
+    validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
+                              , "type", "data", "•" ]
     tyParams t = let (_, ss, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
@@ -1458,6 +1474,14 @@ parseTyElem aliases dataSigs params toks = case toks of
   (TokIdent "Fn" : TokLParen : rest) -> parseFn TokRParen rest
   (TokIdent "Fn" : _) ->
     Left "Fn must be written Fn⟨Σ ⇒ Θ⟩ (or Fn(Σ -> Θ))"
+  -- Fin(n): an index into a width-n bundle.  Its argument is a WIDTH,
+  -- so it reuses the exponent parser rather than the stack parser.
+  (TokIdent "Fin" : TokLParen : rest) -> do
+    (e, rest1) <- expLit rest
+    case rest1 of
+      (TokRParen : rest2) -> pure (TFin e, rest2)
+      _ -> Left "Expected ')' to close Fin(…)"
+  (TokIdent "Fin" : _) -> Left "Fin must be written Fin(n)"
   (TokLParen : rest) -> do
     (alts, rest') <- goAlts rest
     pure (TSum (foldr RCons RNil alts), rest')
@@ -1656,6 +1680,7 @@ substParams tmap m nmap = goT
     goT (TFn (Arrow i o)) = TFn (Arrow (goS i) (goS o))  -- substitute inside Fn
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goS as)
+    goT (TFin e)     = TFin (goE e)
     goR RNil         = RNil
     goR t@(RTail _)  = t
     goR (RCons s r)  = RCons (goS s) (goR r)
@@ -1696,6 +1721,7 @@ matchAlias al t = do
           foldM (\acc (b, x) -> goS b x acc) m (zip bs xs)
     goT (TFn (Arrow ib ob)) (TFn (Arrow ix ox)) m =
       goS ib ix m >>= goS ob ox
+    goT (TFin eb) (TFin ex) m = bindE eb ex m
     goT _ _ _ = Nothing
     goR RNil RNil m = Just m
     goR (RCons sb rb) (RCons sx rx) m = goS sb sx m >>= goR rb rx
@@ -1756,6 +1782,7 @@ showTyA as t =
       TData n [] -> n
       TData n args ->
         n ++ "(" ++ intercalate ", " (map (showStackA as) args) ++ ")"
+      TFin e    -> "Fin(" ++ show e ++ ")"
 
 showArgA :: [Alias] -> TyArg -> String
 showArgA as (AStack st) = showStackA as st
@@ -1883,6 +1910,7 @@ inferOperand env final (Prim name)
   | isSymLiteral name =
       pick (Forall [] [] [] [] (Arrow SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
+  | Just k <- finIndex name, not (M.member name env) = pick (finScheme k)
 
   | otherwise =
       case M.lookup name env of
@@ -2007,6 +2035,20 @@ injIndex ('i':'n':ds)
   | not (null ds), all isDigit ds, n >= 1 = Just n
   where n = read ds
 injIndex _ = Nothing
+
+-- finK: the index literal family.  `finK : • ⇒ Fin(k+1+n)` — the
+-- offset IS the proof that k is in range, so `at` needs no runtime
+-- check, and `weaken` keeps it true as the bound grows.  A STATIC
+-- witness, in the design-indices.md sense.
+finIndex :: String -> Maybe Int
+finIndex ('f':'i':'n':ds)
+  | not (null ds), all isDigit ds = Just (read ds)
+finIndex _ = Nothing
+
+finScheme :: Int -> Scheme
+finScheme k =
+  Forall [] [] [] [NV "n"]
+    (Arrow SEnd (SCons (TFin (Exp (k + 1) (Just (NV "n")))) SEnd))
 
 -- inN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
 -- segment, tagged at position N; other alternatives are placeholders.
@@ -2142,6 +2184,28 @@ primEnv =
                       (SExp (SCons ta (one tb)) nExp SEnd))
                (SExp (one tc) nExp SEnd))
       -- zipN's inverse: de-interleave a pair bundle into two bundles
+      -- INDICES (design-indices.md).  Every introduction's n is forced
+      -- by a relevant input: `indicesN` and `checkedAt` read a live
+      -- bundle, and the finK literals carry their bound as an offset.
+      -- There is deliberately no `tabulate`/`asFin`: an output-only n
+      -- has no witness, exactly as for `zeroN`.
+      atTy = Forall [a] [] [] [NV "n"]
+        (Arrow (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
+               (one ta))
+      indicesNTy = Forall [a] [] [] [NV "n"]
+        (Arrow (SExp (one ta) nExp SEnd)
+               (SExp (SCons (TFin nExp) (one ta)) nExp SEnd))
+      -- the dynamic discharge: check an Int against the LIVE width;
+      -- the hit track carries the index and the untouched bundle
+      checkedAtTy = Forall [a] [] [] [NV "n"]
+        (Arrow (SCons TInt (SExp (one ta) nExp SEnd))
+               (one (TSum (RCons (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
+                          (RCons (SCons TInt (SExp (one ta) nExp SEnd))
+                                 RNil)))))
+      weakenTy = Forall [] [] [] [NV "n"]
+        (Arrow (one (TFin nExp)) (one (TFin (Exp 1 (Just (NV "n"))))))
+      finIntTy = Forall [] [] [] [NV "n"]
+        (Arrow (one (TFin nExp)) (one TInt))
       unzipNTy = Forall [a, b] [] [] [NV "n"]
         (Arrow (SExp (SCons ta (one tb)) nExp SEnd)
                (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
@@ -2206,6 +2270,11 @@ primEnv =
        , ("loop",      loopTy)
        , ("foldExp",   foldExpTy)
        , ("foldExp2",  foldExp2Ty)
+       , ("at",        atTy)
+       , ("indicesN",  indicesNTy)
+       , ("checkedAt", checkedAtTy)
+       , ("weaken",    weakenTy)
+       , ("finInt",    finIntTy)
        , ("mapN",      mapNTy)
        , ("mapN2",     mapN2Ty)
        , ("unzipN",    unzipNTy)
@@ -2249,7 +2318,8 @@ inferTermIn env term =
                , not (isStrLiteral n)
                , not (isSymLiteral n)
                , not (M.member n env)
-               , Nothing <- [injIndex n] ] of
+               , Nothing <- [injIndex n]
+               , Nothing <- [finIndex n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
@@ -2271,7 +2341,8 @@ inferDefTermIn name env term
                    , not (isStrLiteral n)
                    , not (isSymLiteral n)
                    , not (M.member n env)
-                   , Nothing <- [injIndex n] ] of
+                   , Nothing <- [injIndex n]
+                   , Nothing <- [finIndex n] ] of
         (n : _) -> Left $ "Unknown primitive: " ++ n
         [] -> do
           let (arr, cs) = runInfer0 $ do
@@ -3112,6 +3183,39 @@ evalTerm env defs vars term st =
                   pure ( map fst rs, if isFinal then [] else stk'
                        , concatMap snd rs )
             _ -> throwError "Runtime type error in mapN2: expected a quotation"
+    -- at: index into the segment.  0 is the DEEPEST wire — the same
+    -- leftmost-is-deepest alignment atoms use.  Non-final closes to
+    -- Fin(0), which is uninhabited, so that branch cannot be reached
+    -- by a typechecked program.
+    applyAtom isFinal (Prim "at") stk
+      | not (M.member "at" vars), not (M.member "at" defs) = do
+          (args, stk') <- takeWires "at" 1 stk
+          case (args, isFinal) of
+            ([VInt i], True)
+              | i >= 0, i < length stk' -> pure ([stk' !! i], [], [])
+              | otherwise -> throwError
+                  "at: index out of range (unreachable on typechecked programs)"
+            ([VInt _], False) -> throwError
+              "at: empty bundle (Fin(0) is uninhabited — is `at` non-final?)"
+            _ -> throwError "Runtime type error in at: expected an index"
+    -- indicesN: pair each wire with its position, deepest-first
+    applyAtom isFinal (Prim "indicesN") stk
+      | not (M.member "indicesN" vars), not (M.member "indicesN" defs) =
+          if not isFinal then pure ([], stk, [])
+            else pure (concat (zipWith (\i v -> [VInt i, v]) [0 ..] stk), [], [])
+    -- checkedAt: the DYNAMIC witness.  The bound is erased, so the
+    -- live segment's own width is what the index is checked against;
+    -- the hit track carries index and bundle on untouched.
+    applyAtom isFinal (Prim "checkedAt") stk
+      | not (M.member "checkedAt" vars), not (M.member "checkedAt" defs) = do
+          (args, stk') <- takeWires "checkedAt" 1 stk
+          case args of
+            [VInt i] -> do
+              let bundle = if isFinal then stk' else []
+                  tag    = if i >= 0 && i < length bundle then 0 else 1
+              pure ( [VSum tag (VInt i : bundle)]
+                   , if isFinal then [] else stk', [] )
+            _ -> throwError "Runtime type error in checkedAt: expected an Int"
     applyAtom isFinal (Prim "mapN") stk
       | not (M.member "mapN" vars), not (M.member "mapN" defs) = do
           (args, stk') <- takeWires "mapN" 1 stk
@@ -3128,6 +3232,10 @@ evalTerm env defs vars term st =
               pure ( map fst rs, if isFinal then [] else stk'
                    , concatMap snd rs )
             _ -> throwError "Runtime type error in mapN: expected a quotation"
+    applyAtom _ (Prim name) stk
+      | Just k <- finIndex name
+      , not (M.member name vars)
+      , not (M.member name defs) = pure ([VInt k], stk, [])
     applyAtom isFinal (Prim name) stk
       | Just n <- injIndex name
       , not (M.member name vars)
@@ -3231,6 +3339,11 @@ runBuiltin _ _ "_"     [v]              = Right ([v], [])
 runBuiltin _ _ "swap"  [x, y]           = Right ([y, x], [])
 runBuiltin _ _ "dup"   [v]              = Right ([v, v], [])
 runBuiltin _ _ "drop"  [_]              = Right ([], [])
+-- weaken/finInt are runtime identities: the bound is a TYPE, and an
+-- index is a bare Int.  Widening it and forgetting it are both no-ops
+-- on the value — the whole content is in the type.
+runBuiltin _ _ "weaken" [v]             = Right ([v], [])
+runBuiltin _ _ "finInt" [v]             = Right ([v], [])
 runBuiltin _ _ "pass"  []               = Right ([], [])
 runBuiltin _ _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
 runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
@@ -3589,6 +3702,9 @@ compileAbsOpen' env ps k0 open body = do
       | nm == "pass" = Left "reflect: '...' before the end of a stage in an abstraction body"
       | isIntLiteral nm || isStrLiteral nm || isSymLiteral nm =
           Right (AtomInfo 0 1 [] t)
+      -- an index literal is a closed point (• ⇒ Fin(…)), so it
+      -- reflects like any other literal — not an open-arity word
+      | Just _ <- finIndex nm = Right (AtomInfo 0 1 [] t)
       | Just _ <- injIndex nm = segErr nm
       | otherwise =
           case M.lookup nm env of

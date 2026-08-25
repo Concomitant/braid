@@ -331,6 +331,26 @@ moduleTypeTests =
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
+    -- INDICES: Fin(n) with witnessed introductions.  Every intro's n
+    -- is forced by an input — a live bundle, or a literal's offset.
+  , ("at",        "Fin(n0) a0ⁿ⁰ ⇒ a0")
+  , ("indicesN",  "a0ⁿ⁰ ⇒ (Fin(n0) a0)ⁿ⁰")
+  , ("checkedAt", "Int a0ⁿ⁰ ⇒ (Fin(n0) a0ⁿ⁰ | Int a0ⁿ⁰)")
+  , ("weaken",    "Fin(n0) ⇒ Fin(n0+1)")
+  , ("finInt",    "Fin(n0) ⇒ Int")
+    -- the literal family: finK's bound is k+1+n, so the offset IS the
+    -- proof that k is in range, and `weaken` keeps it true
+  , ("fin0",              "• ⇒ Fin(n0+1)")
+  , ("fin2",              "• ⇒ Fin(n0+3)")
+  , ("fin2 >> weaken",    "• ⇒ Fin(n0+4)")
+    -- the bound is the LIVE width, correlated by the checker
+  , ("1 2 3 >> indicesN", "• ⇒ Fin(3) Int Fin(3) Int Fin(3) Int")
+  , ("1 10 20 30 >> checkedAt", "• ⇒ (Fin(3) Int Int Int | Int Int Int Int)")
+  , ("1 10 20 30 >> checkedAt >> (at | drop drop drop drop)", "• ⇒ (Int | •)")
+    -- non-final closes the width to 0, so `at` gets Fin(0): the
+    -- uninhabited index, i.e. that branch can never run
+  , ("at _",       "Fin(0) a0 ⇒ a1 a0")
+  , ("indicesN _", "a0 ⇒ a0")
     -- a NON-FINAL open-width word closes to its zero-width case
     -- (n := 0), exactly as ρ-words close to ρ := • — one policy, both
     -- sorts.  This never worked before: substOnce rebuilt the closed
@@ -414,6 +434,20 @@ evalTests =
   , ("1 2 3 10 20 30 >> zipN >> unzipN >> addN >> sumN >> print", ["66"], "")
   , ("[dup >> *] 1 2 3 >> mapN >> sumN >> print",   ["14"], "")
   , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
+    -- INDICES at runtime.  A Fin is a bare Int: the bound is a type,
+    -- erased like every other width, so weaken/finInt are identities.
+  , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
+  , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
+  , ("fin1 10 20 30 >> at >> print",      ["20"], "")
+  , ("fin2 >> finInt >> print",           ["2"],  "")
+  , ("fin1 >> weaken >> _ 10 20 30 40 >> at >> print", ["20"], "")
+    -- the DYNAMIC witness: checked against the live segment's width
+  , ("1 10 20 30 >> checkedAt >> (at >> print | forget >> \"oob\" >> print) >> merge", ["20"], "")
+  , ("7 10 20 30 >> checkedAt >> (at >> print | forget >> \"oob\" >> print) >> merge", ["oob"], "")
+  , ("0 0 >> checkedAt >> (at >> print | forget >> \"oob\" >> print) >> merge", ["0"], "")
+    -- an index literal is a closed point, so it reflects like any
+    -- other literal (not an open-arity word)
+  , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> c >> evalCode >> print) | print) >> forget", ["in1(20)"], "")
   , ("1 >> sumN _",                                 [],     "0 1")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
@@ -857,6 +891,10 @@ moduleFailTests =
   , ("type L = List(Int Str)\n1",    "takes one wire")
     -- rotLast is gone: the splice it was typed with is unspellable
   , ("1 >> rotLast",                  "Unknown primitive: rotLast")
+    -- Fin is a built-in type former, not a user name
+  , ("type Fin = Int\n1",             "Malformed type declaration")
+    -- the bound must agree with the bundle's actual width
+  , ("fin0 >> 1 2 >> at",             "Cannot unify")
     -- a closed non-final open word that doesn't cover its wires is an
     -- ORDINARY width error now, not a placement violation
   , ("1 2 >> sumN _",  "Cannot unify stacks")
