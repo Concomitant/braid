@@ -2170,7 +2170,7 @@ inferOperand env final t
           -- reports the real error.
           pure (arrPure SEnd SEnd, cs)
         Right s ->
-          let arr'@(Arrow i o eGrp) = apply s arr
+          let arr'@(Arrow i o _) = apply s arr
               tails = nub ([ v | Just v <- [tailVar i] ]
                         ++ [ v | Just v <- [tailVar o] ])
               sm = M.fromList [ (v, SEnd) | v <- tails ]
@@ -2811,8 +2811,8 @@ preludeSrc :: String
 preludeSrc = unlines
   [ "## the boolean object: a bare two-way decision"
   , "type Bool = (• | •)"
-  , "## an optional value: empty or one element"
-  , "type Maybe(...) = (• | ...)"
+  , "## an optional value, PAYLOAD FIRST: one element, or empty.  The order matters here in a way it does not in Haskell — in1 is the track `>=>` threads and `ok` builds, so a payload-second Maybe could not ride the railway at all."
+  , "type Maybe(...) = (... | •)"
   , "## the list: initial algebra of (• | a X); foldList is generated"
   , "type List(a) = (• | a List(a))"
     -- a whole stack as ONE wire: what multi-wire aggregates become now

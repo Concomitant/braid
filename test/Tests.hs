@@ -258,7 +258,7 @@ moduleTypeTests =
     -- type aliases: display folding (Bool/Maybe from the prelude;
     -- user aliases beat prelude; fewest-params-bound wins ties)
   , ("5 >> odd? >> verdict",                    "• ⇒ Bool")
-  , ("7 >> zero? >> (forget | ...)",            "• ⇒ Maybe(Int)")
+  , ("7 >> zero? >> (forget | ...)",            "• ⇒ (• | Int)")
   , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
   , ("type YN = Bool\ntrue",                    "• ⇒ YN")
@@ -313,10 +313,11 @@ moduleTypeTests =
   , ("odd",                                     "Int ⇒ Bool")
   , ("equals?",                                 "a0 a0 ⇒ (a0 | a0)")
     -- recursive type declarations: nominal, Name rolls / Name? unrolls
-    -- the printer folds Nat's unfolding to Maybe(Nat) — which is the
-    -- theorem: Nat ≅ Maybe(Nat) is the successor algebra
-  , ("type Nat = (• | Nat)\nunNat",              "Nat ⇒ Maybe(Nat)")
-  , ("type Nat = (• | Nat)\nNat",               "Maybe(Nat) ⇒ Nat")
+    -- Nat is declared ZERO-first, and Maybe is now PAYLOAD-first,
+    -- so the printer no longer folds this — the iso Nat ≅ 1 + Nat
+    -- still holds, but Braid's sums are rigid: order is semantic.
+  , ("type Nat = (• | Nat)\nunNat",              "Nat ⇒ (• | Nat)")
+  , ("type Nat = (• | Nat)\nNat",               "(• | Nat) ⇒ Nat")
   , ("type Tree(a) = (a | Tree(a) Tree(a))\nunTree", "Tree(a0) ⇒ (a0 | Tree(a0) Tree(a0))")
     -- data keyword: nominal without recursion; single-alternative
     -- bodies get doors against the field stack
@@ -326,7 +327,7 @@ moduleTypeTests =
     -- generated folds: definition by points (recursive slots pre-folded)
   , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
     -- List is now a declared type in the prelude; the library is derived
-  , ("uncons",  "List(a0) ⇒ Maybe(a0 List(a0))")
+  , ("uncons",  "List(a0) ⇒ (• | a0 List(a0))")
   , ("cons",    "a0 List(a0) ⇒ List(a0)")
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
@@ -365,7 +366,7 @@ moduleTypeTests =
     -- the bound is the LIVE width, correlated by the checker
   , ("1 2 3 >> indicesN", "• ⇒ Fin(3) Int Fin(3) Int Fin(3) Int")
   , ("1 10 20 30 >> checkedAt", "• ⇒ (Fin(3) Int Int Int | Int Int Int Int)")
-  , ("1 10 20 30 >> checkedAt >> (at | drop drop drop drop)", "• ⇒ (Int | •)")
+  , ("1 10 20 30 >> checkedAt >> (at | drop drop drop drop)", "• ⇒ Maybe(Int)")
     -- non-final closes the width to 0, so `at` gets Fin(0): the
     -- uninhabited index, i.e. that branch can never run
   , ("at _",       "Fin(0) a0 ⇒ a1 a0")
@@ -608,7 +609,7 @@ evalTests =
   , ("(1 4 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
     -- >?> / >!> : guard chains along the miss track (dual of >=>)
     -- asymmetric guard predicates: hit carries nothing (drop-free
-    -- actions); infers as Int => Maybe(Int)
+    -- actions); the hit carries n, so this IS a Maybe now
   , ("def by3? = (n -> n 3 >> mod >> zero >> (... | n))\ndef fz = by3? >> (\"fizz\" | ...) >!> toStr\n9 >> fz >> print", ["fizz"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (... | n))\ndef fz = by3? >> (\"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n9 >> fz >> print", ["fizz"], "")

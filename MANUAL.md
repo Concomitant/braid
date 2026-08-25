@@ -168,7 +168,11 @@ Type formers:
   `List` (§8).
 - **Sums**: `(Δ₁ | … | Δₙ [| σ])` — one wire carrying alternative
   *stacks*. Rigid nesting: `(A | (B | C))` never flattens.
-  `Bool = (• | •)`, `Maybe(...) = (• | ...)` are prelude aliases.
+  `Bool = (• | •)`, `Maybe(...) = (... | •)` are prelude aliases.
+  **`Maybe` is payload-FIRST**, unlike Haskell's `Nothing | Just a`.
+  That order is arbitrary in Haskell but load-bearing here: `in1` is the
+  track `ok` builds and `>=>` threads, so a payload-second `Maybe`
+  could not ride the railway at all (§7).
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
   hom: `apply` is modus ponens. The arrow inside carries its grade, and
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
@@ -584,7 +588,7 @@ Metaprogramming & IO (railway-typed edges):
 | `parse` | `Str ⇒ (Code \| Str)` |
 | `readLine` | `• ⇒! (Str \| Str)` — io; one line from stdin, EOF misses |
 | `readFile` | `Str ⇒! (Str \| Str)` — io |
-| `writeFile` | `Str Str ⇒! Maybe(Str)` — io |
+| `writeFile` | `Str Str ⇒! (• \| Str)` — io; hit is the empty success, miss carries the error |
 
 These four and `print` are the **whole** io surface: nothing else is
 marked, every other grade is inferred (§3). `reflect` and `parse` stay
