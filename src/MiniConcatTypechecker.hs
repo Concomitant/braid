@@ -45,6 +45,30 @@ newtype RVar = RV String
 instance Show RVar where
   show (RV s) = s
 
+-- Effect variables (ε): the tail of an arrow's effect row.  Same
+-- tail-only discipline as every other sort (design-effects.md).
+newtype EVar = EV String
+  deriving (Eq, Ord)
+
+instance Show EVar where
+  show (EV s) = s
+
+-- An arrow's GRADE: the set of resource wires it touches.  Stage 1 has
+-- one label, `io` — the irreducible one (everything else in the effect
+-- zoo is already an ordinary wire) — plus an optional tail for effect
+-- polymorphism.  Composition UNIFIES two grades rather than joining
+-- them: label-absorbing row unification, Koka-style, which keeps the
+-- solver a single pass and inference principal.  Stage 2 widens the
+-- Bool to a label set; the shape survives.
+data EffRow = Eff { eIO :: Bool, eTail :: Maybe EVar }
+  deriving (Eq, Ord, Show)
+
+effPure :: EffRow
+effPure = Eff False Nothing
+
+effIO :: EffRow
+effIO = Eff True Nothing
+
 -- Exponent variables (n): type-level widths, kind Nat.  Unary naturals
 -- only — zero and successor, no arithmetic (design-exponents.md).
 newtype NVar = NV String
@@ -171,22 +195,36 @@ instance Show SType where
       go (SCons t rest)   = show t : go rest
       go (SExp b e rest)  = showExpAt b e : go rest
 
--- Arrows: stack transformers Σ_in ⇒ Σ_out
-data Arrow = Arrow SType SType
+-- Arrows: stack transformers Σ_in ⇒ Σ_out, carrying a GRADE.  A pure
+-- arrow prints exactly as it always has; the bang is the only surface
+-- the grade has, and effect tails are invisible (the same information
+-- hiding ρ already gets inside Fn⟨…⟩).
+data Arrow = Arrow SType SType EffRow
   deriving (Eq, Ord)
 
+-- the overwhelmingly common case: build a pure arrow
+arrPure :: SType -> SType -> Arrow
+arrPure i o = Arrow i o effPure
+
+arrowGlyph :: EffRow -> String
+arrowGlyph e = if eIO e then " ⇒! " else " ⇒ "
+
 instance Show Arrow where
-  show (Arrow s1 s2) = show s1 ++ " ⇒ " ++ show s2
+  show (Arrow s1 s2 e) = show s1 ++ arrowGlyph e ++ show s2
 
 --------------------------------------------------------------------------------
 -- 2. Schemes and environments (only polymorphism over stack vars & type vars)
 --------------------------------------------------------------------------------
 
-data Scheme = Forall [TVar] [SVar] [RVar] [NVar] Arrow
+data Scheme = Forall [TVar] [SVar] [RVar] [NVar] [EVar] Arrow
   deriving (Eq, Ord)
 
 instance Show Scheme where
-  show (Forall tvars svars rvars nvars arr) =
+  -- effect variables are deliberately NOT listed: at stage 1 every
+  -- arrow has a grade, so nearly every scheme would grow an `ε0` the
+  -- reader can do nothing with.  The bang carries all the information
+  -- the grade has.
+  show (Forall tvars svars rvars nvars _ arr) =
     "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
                        ++ map show nvars)
          ++ ". " ++ show arr
@@ -202,10 +240,11 @@ data Subst = Subst
   , stSub  :: Map SVar SType
   , rowSub :: Map RVar SumRow
   , expSub :: Map NVar Exp
+  , effSub :: Map EVar EffRow
   } deriving (Eq, Show)
 
 emptySubst :: Subst
-emptySubst = Subst M.empty M.empty M.empty M.empty
+emptySubst = Subst M.empty M.empty M.empty M.empty M.empty
 
 -- composeSubst s2 s1 = apply s2 after s1
 composeSubst :: Subst -> Subst -> Subst
@@ -259,18 +298,28 @@ instance Substitutable SumRow where
       Just r' -> apply s r'
   apply s (RCons st rest) = RCons (apply s st) (apply s rest)
 
+instance Substitutable EffRow where
+  apply s e@(Eff i mv) = case mv of
+    Nothing -> e
+    Just v  -> case M.lookup v (effSub s) of
+      Nothing -> e
+      -- the tail's own labels UNION in; that is what makes absorption
+      -- (⟨io|ε⟩ ~ ⟨|ω⟩ ⟹ ω := ⟨io|υ⟩) come out right on both sides
+      Just r  -> let Eff i' mv' = apply s r in Eff (i || i') mv'
+
 instance Substitutable Arrow where
-  apply s (Arrow i o) = Arrow (apply s i) (apply s o)
+  apply s (Arrow i o e) = Arrow (apply s i) (apply s o) (apply s e)
 
 instance Substitutable Scheme where
   -- Bound variables are removed from the substitution before it touches
   -- the arrow, so quantified names are never captured.
-  apply s (Forall tv sv rv nv arr) =
+  apply s (Forall tv sv rv nv ev arr) =
     let s' = Subst (foldr M.delete (tySub s) tv)
                    (foldr M.delete (stSub s) sv)
                    (foldr M.delete (rowSub s) rv)
                    (foldr M.delete (expSub s) nv)
-    in Forall tv sv rv nv (apply s' arr)
+                   (foldr M.delete (effSub s) ev)
+    in Forall tv sv rv nv ev (apply s' arr)
 
 instance Substitutable Env where
   apply s = M.map (apply s)
@@ -282,6 +331,7 @@ instance Substitutable Env where
 data Constraint
   = CEqTy Ty Ty
   | CEqStack SType SType
+  | CEqEff EffRow EffRow
   | CFail String   -- carry a deferred inference error to the solver
   deriving (Eq, Show)
 
@@ -289,13 +339,17 @@ data Constraint
 -- appearance, recursing through Fn⟨Γ ⇒ Δ⟩ and (… | …) element types.
 -- The single traversal backing occurs checks, generalization, and
 -- normalization.
-type Vars = ([TVar], [SVar], [RVar], [NVar])
+type Vars = ([TVar], [SVar], [RVar], [NVar], [EVar])
 
 noVars :: Vars
-noVars = ([], [], [], [])
+noVars = ([], [], [], [], [])
+
+varsOfEff :: EffRow -> Vars
+varsOfEff (Eff _ (Just v)) = ([], [], [], [], [v])
+varsOfEff _                = noVars
 
 varsOfTy :: Ty -> Vars
-varsOfTy (TVarTy v)  = ([v], [], [], [])
+varsOfTy (TVarTy v)  = ([v], [], [], [], [])
 varsOfTy TInt        = noVars
 varsOfTy TStr        = noVars
 varsOfTy TSym        = noVars
@@ -306,39 +360,40 @@ varsOfTy (TFin e)    = varsOfExp e
 
 varsOfStack :: SType -> Vars
 varsOfStack SEnd             = noVars
-varsOfStack (STail v)        = ([], [v], [], [])
+varsOfStack (STail v)        = ([], [v], [], [], [])
 varsOfStack (SCons t rest)   = varsOfTy t `catVars` varsOfStack rest
 varsOfStack (SExp b e rest)  =
   varsOfStack b `catVars` varsOfExp e `catVars` varsOfStack rest
 
 varsOfExp :: Exp -> Vars
-varsOfExp (Exp _ (Just n)) = ([], [], [], [n])
+varsOfExp (Exp _ (Just n)) = ([], [], [], [n], [])
 varsOfExp _                = noVars
 
 varsOfRow :: SumRow -> Vars
 varsOfRow RNil            = noVars
-varsOfRow (RTail v)       = ([], [], [v], [])
+varsOfRow (RTail v)       = ([], [], [v], [], [])
 varsOfRow (RCons st rest) = varsOfStack st `catVars` varsOfRow rest
 
 catVars :: Vars -> Vars -> Vars
-catVars (t1, s1, r1, n1) (t2, s2, r2, n2) =
-  (t1 ++ t2, s1 ++ s2, r1 ++ r2, n1 ++ n2)
+catVars (t1, s1, r1, n1, e1) (t2, s2, r2, n2, e2) =
+  (t1 ++ t2, s1 ++ s2, r1 ++ r2, n1 ++ n2, e1 ++ e2)
 
 varsOfArrow :: Arrow -> Vars
-varsOfArrow (Arrow i o) =
-  let (ts, ss, rs, ns) = varsOfStack i `catVars` varsOfStack o
-  in (nub ts, nub ss, nub rs, nub ns)
+varsOfArrow (Arrow i o e) =
+  let (ts, ss, rs, ns, es) =
+        varsOfStack i `catVars` varsOfStack o `catVars` varsOfEff e
+  in (nub ts, nub ss, nub rs, nub ns, nub es)
 
 -- Occurs checks.  Callers (bind*Var) only ever check against
 -- fully-applied targets, so a pure structural traversal is sufficient.
 occursTy :: TVar -> Ty -> Bool
-occursTy a t = let (ts, _, _, _) = varsOfTy t in a `elem` ts
+occursTy a t = let (ts, _, _, _, _) = varsOfTy t in a `elem` ts
 
 occursStack :: SVar -> SType -> Bool
-occursStack v st = let (_, ss, _, _) = varsOfStack st in v `elem` ss
+occursStack v st = let (_, ss, _, _, _) = varsOfStack st in v `elem` ss
 
 occursRow :: RVar -> SumRow -> Bool
-occursRow v row = let (_, _, rs, _) = varsOfRow row in v `elem` rs
+occursRow v row = let (_, _, rs, _, _) = varsOfRow row in v `elem` rs
 
 -- Unify simple element types
 unifyTy :: Subst -> Ty -> Ty -> Either String Subst
@@ -351,9 +406,10 @@ unifyTy s t1 t2 =
     (TInt, TInt)  -> Right s
     (TStr, TStr)  -> Right s
     (TSym, TSym)  -> Right s
-    (TFn (Arrow i1 o1), TFn (Arrow i2 o2)) -> do
+    (TFn (Arrow i1 o1 g1), TFn (Arrow i2 o2 g2)) -> do
       s' <- unifyStack s i1 i2
-      unifyStack s' o1 o2
+      s'' <- unifyStack s' o1 o2
+      unifyEff s'' g1 g2
     (TSum r1, TSum r2)   -> unifyRow s r1 r2
     (TData n1 as1, TData n2 as2)
       | n1 == n2 && length as1 == length as2 ->
@@ -519,6 +575,51 @@ unifyRow s r1 r2 =
     _ -> Left $ "Cannot unify sum alternatives: (" ++ show r1'
               ++ ") vs (" ++ show r2' ++ ")"
 
+-- Grades unify; they do not join.  Composition therefore FORCES two
+-- arrows' effect rows equal, and the "join" people expect falls out of
+-- label absorption into an open tail: ⟨io|ε⟩ ~ ⟨|ω⟩ binds ω := ⟨io|υ⟩.
+-- Tail-only, one label, so this is the whole algebra (design-effects.md;
+-- the same discipline that keeps stacks, sums and widths principal).
+unifyEff :: Subst -> EffRow -> EffRow -> Either String Subst
+unifyEff s e1 e2 =
+  case (apply s e1, apply s e2) of
+    (a, b) | a == b -> Right s
+    -- both closed: the label sets must already agree
+    (a@(Eff i1 Nothing), b@(Eff i2 Nothing))
+      | i1 == i2  -> Right s
+      | otherwise -> clash a b
+    -- one open, one closed: the tail supplies the missing labels.  It
+    -- can only ADD them, so an io on the open side with none on the
+    -- closed side is unsatisfiable.
+    (a@(Eff i1 (Just v)), b@(Eff i2 Nothing))
+      | i1 && not i2 -> clash a b
+      | otherwise    -> bindEffVar s v (Eff (i2 && not i1) Nothing)
+    (a@(Eff i1 Nothing), b@(Eff i2 (Just w)))
+      | i2 && not i1 -> clash a b
+      | otherwise    -> bindEffVar s w (Eff (i1 && not i2) Nothing)
+    -- both open: bridge the tails.  Equal labels ⇒ share one tail;
+    -- otherwise the label-poorer side's tail takes on the difference
+    -- AND the other tail, which is what makes `1 >> print` io without
+    -- needing a fresh variable here (solve is a pure fold).
+    (Eff i1 (Just v), Eff i2 (Just w))
+      | i1 == i2  -> bindEffVar s v (Eff False (Just w))
+      | i1        -> bindEffVar s w (Eff True (Just v))
+      | otherwise -> bindEffVar s v (Eff True (Just w))
+  where
+    clash x y = Left $ "Cannot unify effects: " ++ showEff x
+                    ++ " vs " ++ showEff y
+
+showEff :: EffRow -> String
+showEff e = if eIO e then "io" else "pure"
+
+bindEffVar :: Subst -> EVar -> EffRow -> Either String Subst
+bindEffVar s v row
+  | eTail row == Just v, not (eIO row) = Right s
+  | eTail row == Just v =
+      Left $ "Occurs check failed on effect: " ++ show v
+  | otherwise =
+      Right s { effSub = M.insert v row (effSub s) }
+
 bindRowVar :: Subst -> RVar -> SumRow -> Either String Subst
 bindRowVar s v row
   | row == RTail v = Right s
@@ -532,6 +633,7 @@ solve = foldM step emptySubst
   where
     step s (CEqTy t1 t2)      = unifyTy s t1 t2
     step s (CEqStack st1 st2) = unifyStack s st1 st2
+    step s (CEqEff e1 e2)     = unifyEff s e1 e2
     step _ (CFail msg)        = Left msg
 
 --------------------------------------------------------------------------------
@@ -568,13 +670,19 @@ freshNVarName = Infer $ do
   put (n + 1)
   pure (NV ("n" ++ show n))
 
+freshEVarName :: Infer EVar
+freshEVarName = Infer $ do
+  n <- get
+  put (n + 1)
+  pure (EV ("ε" ++ show n))
+
 -- One-shot simultaneous substitution, NO chasing.  Instantiation is a
 -- rename: a scheme generalized in one inference run may bind names (a0,
 -- ρ1, …) that textually coincide with this run's fresh names, so using
 -- the solver's chasing `apply` here can chain (a0 → a1 → a2, collapsing
 -- distinct binders) or even cycle (a0 → a0, diverging).
 substOnce :: Subst -> Arrow -> Arrow
-substOnce s (Arrow i o) = Arrow (goS i) (goS o)
+substOnce s (Arrow i o e) = Arrow (goS i) (goS o) (goE' e)
   where
     goS SEnd = SEnd
     goS st@(STail v)  = fromMaybe st (M.lookup v (stSub s))
@@ -589,6 +697,10 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
 
     goE e@(Exp k mv) = case mv of
       Just n | Just (Exp k' mv') <- M.lookup n (expSub s) -> Exp (k + k') mv'
+      _ -> e
+
+    goE' e@(Eff i mv) = case mv of
+      Just v | Just (Eff i' mv') <- M.lookup v (effSub s) -> Eff (i || i') mv'
       _ -> e
 
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
@@ -608,16 +720,30 @@ substOnce s (Arrow i o) = Arrow (goS i) (goS o)
 -- variables (used for the final atom of a tensor chain, which may stay
 -- open).
 instantiate :: Scheme -> Infer Arrow
-instantiate (Forall tvars svars rvars nvars arr) = do
+instantiate (Forall tvars svars rvars nvars evars arr) = do
   newTVs <- mapM (const freshTyVarName) tvars
   newSVs <- mapM (const freshSVarName) svars
   newRVs <- mapM (const freshRVarName) rvars
   newNVs <- mapM (const freshNVarName) nvars
+  newEVs <- mapM (const freshEVarName) evars
   let tSub = M.fromList (zip tvars (map TVarTy newTVs))
       sSub = M.fromList (zip svars (map STail newSVs))
       rSub = M.fromList (zip rvars (map RTail newRVs))
       nSub = M.fromList (zip nvars (map (Exp 0 . Just) newNVs))
-  pure (substOnce (Subst tSub sSub rSub nSub) arr)
+      eSub = M.fromList (zip evars [ Eff False (Just v) | v <- newEVs ])
+  openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
+
+-- Every use of a scheme whose grade is CLOSED gets a fresh tail, so
+-- composition can absorb labels into it: `1 >> print` works because the
+-- literal's ⟨⟩ opens to ⟨|ε⟩ and unifies with print's ⟨io|ε'⟩.  Without
+-- this, every pure word would refuse to sit next to an effectful one.
+-- Schemes that already carry an explicit ε (apply, loop, the folds) are
+-- left alone — their tail is their polymorphism.
+openEff :: Arrow -> Infer Arrow
+openEff (Arrow i o e@(Eff _ Nothing)) = do
+  v <- freshEVarName
+  pure (Arrow i o e { eTail = Just v })
+openEff arr = pure arr
 
 -- Instantiate a scheme *closed* for a non-final tensor atom: only the
 -- OUTER TAILS of the arrow are closed (ρ := •) — that is all appendStack
@@ -626,13 +752,14 @@ instantiate (Forall tvars svars rvars nvars arr) = do
 -- polymorphism, not a remainder.  (Matches the grouped-compound closing
 -- policy.)
 instantiateClosed :: Scheme -> Infer Arrow
-instantiateClosed (Forall tvars svars rvars nvars arr@(Arrow i o)) = do
+instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
   newTVs <- mapM (const freshTyVarName) tvars
   let tailVs = openVarsS i ++ openVarsS o
   newSVs <- mapM (\v -> if v `elem` tailVs
                           then pure Nothing
                           else Just <$> freshSVarName) svars
   newRVs <- mapM (const freshRVarName) rvars
+  newEVs <- mapM (const freshEVarName) evars
   -- exponents in SPINE position are widths of the atom's own segment:
   -- close them (n := 0), like ρ := •.  Exponents living inside element
   -- types are the atom's polymorphism: freshen.
@@ -646,7 +773,10 @@ instantiateClosed (Forall tvars svars rvars nvars arr@(Arrow i o)) = do
       rSub = M.fromList (zip rvars (map RTail newRVs))
       nSub = M.fromList [ (v, maybe (Exp 0 Nothing) (Exp 0 . Just) mn)
                         | (v, mn) <- zip nvars newNVs ]
-  pure (substOnce (Subst tSub sSub rSub nSub) arr)
+      eSub = M.fromList (zip evars [ Eff False (Just v) | v <- newEVs ])
+  -- effect variables are FRESHENED, never closed: closing ε for a
+  -- non-final atom would let `1 print` typecheck as pure.
+  openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
 
 -- exponent variables on a stack's spine (not inside element types)
 spineExpVars :: SType -> [NVar]
@@ -1223,8 +1353,8 @@ dataSig d = (dName d, dParams d)
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall tvs svs [] nvs (Arrow bodyStack namedStack))
-    , ("un" ++ dName d,  Forall tvs svs [] nvs (Arrow namedStack bodyStack)) ]
+  ( [ (dName d,          Forall tvs svs [] nvs [] (Arrow bodyStack namedStack effPure))
+    , ("un" ++ dName d,  Forall tvs svs [] nvs [] (Arrow namedStack bodyStack effPure)) ]
       ++ mergeSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
@@ -1243,8 +1373,8 @@ dataDeclArtifacts d =
       case dBody d of
         TSum row | k >= 2 ->
           ( [ ("merge" ++ dName d
-            , Forall [] [SV "ρ"] [] []
-                (Arrow (SCons (TSum uniformRow) SEnd) (STail (SV "ρ")))) ]
+            , Forall [] [SV "ρ"] [] [] []
+                (arrPure (SCons (TSum uniformRow) SEnd) (STail (SV "ρ")))) ]
           , [ ("merge" ++ dName d, (1, False, Prim "merge")) ] )
           where
             k = rowLen row
@@ -1337,7 +1467,7 @@ occursData n = goT
   where
     goT (TData m as)        = m == n || any goS as
     goT (TSum r)            = goR r
-    goT (TFn (Arrow i o))   = goS i || goS o  -- recursion THROUGH a Fn is codata
+    goT (TFn (Arrow i o _))   = goS i || goS o  -- recursion THROUGH a Fn is codata
     goT _                   = False
     goR (RCons st r) = goS st || goR r
     goR _            = False
@@ -1366,7 +1496,7 @@ parseTypeLine aliases dataSigs line =
       -- KINDS BY USE: every named parameter parses as a wire, and an
       -- occurrence under `^` makes it an exponent variable in the body.
       -- So the body's own free-variable sets settle the kinds.
-      let (bodyTVs, bodySVs, _, bodyNVs) = varsOfTy body
+      let (bodyTVs, bodySVs, _, bodyNVs, _) = varsOfTy body
           reclass q@(PWire (TV nm))
             | NV nm `elem` bodyNVs, TV nm `elem` bodyTVs =
                 Left $ "Type " ++ name ++ ": parameter '" ++ nm
@@ -1424,7 +1554,7 @@ parseTypeLine aliases dataSigs line =
     paramList _ = Left "Malformed type parameter list"
     validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
                               , "type", "data", "•" ]
-    tyParams t = let (_, ss, _, _) = varsOfTy t in ss
+    tyParams t = let (_, ss, _, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
     stacksOf (TSum r)     = rowStacks r
@@ -1602,7 +1732,7 @@ parseTyElem aliases dataSigs params toks = case toks of
                  _ -> Left "Expected '⇒' (or '->') inside a Fn type"
       (outSt, rest3) <- goStack rest2
       case rest3 of
-        (t : r) | t == close -> Right (TFn (Arrow inSt outSt), r)
+        (t : r) | t == close -> Right (TFn (Arrow inSt outSt effPure), r)
         _ -> Left $ "Expected '"
                  ++ (if close == TokRAngle then "⟩" else ")")
                  ++ "' to close the Fn type"
@@ -1677,7 +1807,7 @@ substParams tmap m nmap = goT
     goT TInt         = TInt
     goT TStr         = TStr
     goT TSym         = TSym
-    goT (TFn (Arrow i o)) = TFn (Arrow (goS i) (goS o))  -- substitute inside Fn
+    goT (TFn (Arrow i o _)) = TFn (arrPure (goS i) (goS o))  -- substitute inside Fn
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goS as)
     goT (TFin e)     = TFin (goE e)
@@ -1719,7 +1849,7 @@ matchAlias al t = do
     goT (TData nb bs) (TData nx xs) m
       | nb == nx && length bs == length xs =
           foldM (\acc (b, x) -> goS b x acc) m (zip bs xs)
-    goT (TFn (Arrow ib ob)) (TFn (Arrow ix ox)) m =
+    goT (TFn (Arrow ib ob _)) (TFn (Arrow ix ox _)) m =
       goS ib ix m >>= goS ob ox
     goT (TFin eb) (TFin ex) m = bindE eb ex m
     goT _ _ _ = Nothing
@@ -1806,10 +1936,10 @@ showStackA as st          = unwords (go st)
     go (SExp b e rest)  = showExpAt b e : go rest
 
 showArrowA :: [Alias] -> Arrow -> String
-showArrowA as (Arrow s1 s2) = showStackA as s1 ++ " ⇒ " ++ showStackA as s2
+showArrowA as (Arrow s1 s2 _) = showStackA as s1 ++ " ⇒ " ++ showStackA as s2
 
 showSchemeA :: [Alias] -> Scheme -> String
-showSchemeA as (Forall tvars svars rvars nvars arr) =
+showSchemeA as (Forall tvars svars rvars nvars evars arr) =
   "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
                      ++ map show nvars)
        ++ ". " ++ showArrowA as arr
@@ -1861,7 +1991,7 @@ appendStack (STail v) _ =
   error $ "appendStack: open stack " ++ show v
        ++ " in non-final tensor position (remainder discipline violation)"
 
--- Inference: given an Env and a Term, produce an Arrow and constraints
+-- Inference: given an Env and a Term, produce an arrPure and constraints
 infer :: Env -> Term -> Infer (Arrow, [Constraint])
 infer env p@(Prim _)     = inferOperand env True p
 infer env q@(Quote _)    = inferOperand env True q
@@ -1879,26 +2009,44 @@ infer env (Tensor ts) = do
   let arrows0 = map fst results
       cs0     = concatMap snd results
       openNonFinal =
-        [ () | (Arrow i o, ix) <- zip arrows0 [0 :: Int ..]
+        [ () | (Arrow i o _, ix) <- zip arrows0 [0 :: Int ..]
              , ix /= n - 1
              , openTailedS i || openTailedS o ]
       (arrows, cs) =
         if null openNonFinal
           then (arrows0, cs0)
           else ( [ if ix == n - 1 || not (openTailedS i || openTailedS o)
-                     then a else Arrow SEnd SEnd
-                 | (a@(Arrow i o), ix) <- zip arrows0 [0 :: Int ..] ]
+                     then a else arrPure SEnd SEnd
+                 | (a@(Arrow i o _), ix) <- zip arrows0 [0 :: Int ..] ]
                , CFail ("A recursive call (or other open-arity atom) must \
                         \be the final atom of its tensor stage") : cs0 )
-      inS    = foldr1 appendStack [ i | Arrow i _ <- arrows ]
-      outS   = foldr1 appendStack [ o | Arrow _ o <- arrows ]
-  pure (Arrow inS outS, cs)
+      inS    = foldr1 appendStack [ i | Arrow i _ _ <- arrows ]
+      outS   = foldr1 appendStack [ o | Arrow _ o _ <- arrows ]
+      -- One stage, one grade: every atom's row unifies with the
+      -- stage's.  A pure atom's row is open (see openEff), so it simply
+      -- absorbs whatever the effectful one carries.
+      grades = [ g | Arrow _ _ g <- arrows ]
+      stageG = head grades
+      gcs    = [ CEqEff stageG g | g <- drop 1 grades ]
+      -- THE PLACEMENT RULE.  Two effectful atoms in one stage have no
+      -- canonical order — juxtaposition is a tensor, and the one
+      -- control wire cannot thread two boxes in parallel.  Semantic,
+      -- not a name check: a def wrapping `print` is effectful, and a
+      -- def shadowing `readFile` with pure code is not.
+      effAtoms = length [ () | Arrow _ _ g <- arrows0, eIO g ]
+      pcs | effAtoms >= 2 =
+              [ CFail "two effectful atoms in one tensor stage — no \
+                      \canonical order; separate lines" ]
+          | otherwise = []
+  pure (Arrow inS outS stageG, cs ++ gcs ++ pcs)
 
 infer env (Seq t u) = do
-  (Arrow i1 o1, c1) <- infer env t
-  (Arrow i2 o2, c2) <- infer env u
+  (Arrow i1 o1 e1, c1) <- infer env t
+  (Arrow i2 o2 e2, c2) <- infer env u
   let c = CEqStack o1 i2
-  pure (Arrow i1 o2, c1 ++ c2 ++ [c])
+  -- Grades unify rather than join: the absorption case of unifyEff is
+  -- what makes `1 >> print` come out io while `1 >> 2` stays pure.
+  pure (Arrow i1 o2 e1, c1 ++ c2 ++ [c, CEqEff e1 e2])
 
 -- Infer one operand of a tensor chain.  Only the final operand may keep
 -- its remainder variable open; all earlier operands are closed (ρ := •).
@@ -1906,9 +2054,9 @@ inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
   | isStrLiteral name =
-      pick (Forall [] [] [] [] (Arrow SEnd (SCons TStr SEnd)))
+      pick (Forall [] [] [] [] [] (arrPure SEnd (SCons TStr SEnd)))
   | isSymLiteral name =
-      pick (Forall [] [] [] [] (Arrow SEnd (SCons TSym SEnd)))
+      pick (Forall [] [] [] [] [] (arrPure SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
   | Just k <- finIndex name, not (M.member name env) = pick (finScheme k)
 
@@ -1928,7 +2076,7 @@ inferOperand env _ (Quote p) = do
   -- as a whole; its remainder variables stay as metavariables inside
   -- Fn⟨…⟩, solved (monomorphically) at the use site.
   (arrP, cs) <- infer env p
-  pure (Arrow SEnd (SCons (TFn arrP) SEnd), cs)
+  pure (arrPure SEnd (SCons (TFn arrP) SEnd), cs)
 inferOperand env _ (Alts comps residual) = do
   -- Code row (p₁ | … | pₙ [| ...]): the sum functor action.  A one-wire
   -- atom (Δ-in-sum ⇒ Δ-out-sum); component i maps alternative i,
@@ -1938,9 +2086,9 @@ inferOperand env _ (Alts comps residual) = do
   end <- if residual then RTail <$> freshRVarName else pure RNil
   let arrows = map fst results
       cs     = concatMap snd results
-      inRow  = foldr RCons end [ i | Arrow i _ <- arrows ]
-      outRow = foldr RCons end [ o | Arrow _ o <- arrows ]
-  pure ( Arrow (SCons (TSum inRow) SEnd) (SCons (TSum outRow) SEnd)
+      inRow  = foldr RCons end [ i | Arrow i _ _ <- arrows ]
+      outRow = foldr RCons end [ o | Arrow _ o _ <- arrows ]
+  pure ( arrPure (SCons (TSum inRow) SEnd) (SCons (TSum outRow) SEnd)
        , cs )
 inferOperand env _ (OpenAbs slots hasRest body) = do
   -- Named open abstraction (x₁ … xₙ [_ …] [...] -> body).  Each name
@@ -1958,15 +2106,15 @@ inferOperand env _ (OpenAbs slots hasRest body) = do
   -- The remainder is handed TO the body (so it can place it with `...`),
   -- unlike `(x -> body) ...`, which routes it around the binder.
   stys <- mapM (const freshTyVarName) slots
-  let paramScheme av = Forall [] [] [] [] (Arrow SEnd (SCons (TVarTy av) SEnd))
+  let paramScheme av = Forall [] [] [] [] [] (arrPure SEnd (SCons (TVarTy av) SEnd))
       env' = foldr (\(p, av) -> M.insert p (paramScheme av)) env
                    [ (n, av) | (Just n, av) <- zip slots stys ]
-  (Arrow bi bo, cs) <- infer env' body
+  (Arrow bi bo bg, cs) <- infer env' body
   restS <- if hasRest then STail <$> freshSVarName else pure SEnd
   let bodyIn = foldr (SCons . TVarTy) restS
                      [ av | (Nothing, av) <- zip slots stys ]
       inS    = foldr (SCons . TVarTy) restS stys
-  pure (Arrow inS bo, CEqStack bi bodyIn : cs)
+  pure (Arrow inS bo bg, CEqStack bi bodyIn : cs)
 inferOperand env final t
   | final     = infer env t
   | otherwise = do
@@ -1991,13 +2139,13 @@ inferOperand env final t
           -- Ill-typed subprogram: emit a dummy closed arrow so appendStack
           -- stays total; the constraints flow up and the global solve
           -- reports the real error.
-          pure (Arrow SEnd SEnd, cs)
+          pure (arrPure SEnd SEnd, cs)
         Right s ->
-          let arr'@(Arrow i o) = apply s arr
+          let arr'@(Arrow i o eGrp) = apply s arr
               tails = nub ([ v | Just v <- [tailVar i] ]
                         ++ [ v | Just v <- [tailVar o] ])
               sm = M.fromList [ (v, SEnd) | v <- tails ]
-          in pure (substOnce (Subst M.empty sm M.empty M.empty) arr', cs)
+          in pure (substOnce (Subst M.empty sm M.empty M.empty M.empty) arr', cs)
 
 -- The open stack variables of a stack: the tail, plus any splices.
 openVarsS :: SType -> [SVar]
@@ -2047,8 +2195,8 @@ finIndex _ = Nothing
 
 finScheme :: Int -> Scheme
 finScheme k =
-  Forall [] [] [] [NV "n"]
-    (Arrow SEnd (SCons (TFin (Exp (k + 1) (Just (NV "n")))) SEnd))
+  Forall [] [] [] [NV "n"] []
+    (arrPure SEnd (SCons (TFin (Exp (k + 1) (Just (NV "n")))) SEnd))
 
 -- inN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
 -- segment, tagged at position N; other alternatives are placeholders.
@@ -2058,14 +2206,14 @@ injScheme n =
       ps  = [ SV ("Δ" ++ show i) | i <- [1 .. n - 1] ]
       rv  = RV "σ"
       row = foldr (RCons . STail) (RCons (STail d) (RTail rv)) ps
-  in Forall [] (ps ++ [d]) [rv] []
-       (Arrow (STail d) (SCons (TSum row) SEnd))
+  in Forall [] (ps ++ [d]) [rv] [] []
+       (arrPure (STail d) (SCons (TSum row) SEnd))
 
 -- Integer literals are terminal-source: • ⇒ Int.  Constants have NO
 -- implicit remainder — pushing onto a nonempty stack requires explicit
 -- `...` (e.g. `1 ...` : ρ ⇒ Int ρ).  See spec-update-exponentials.md.
 intLitScheme :: Scheme
-intLitScheme = Forall [] [] [] [] (Arrow SEnd (SCons TInt SEnd))
+intLitScheme = Forall [] [] [] [] [] (arrPure SEnd (SCons TInt SEnd))
 
 --------------------------------------------------------------------------------
 -- 7. The primitive environment
@@ -2106,51 +2254,51 @@ primEnv =
       gam = SV "Γ"
       del = SV "Δ"
       one t = SCons t SEnd
-      fnGD = TFn (Arrow (STail gam) (STail del))
-      applyTy = Forall [] [gam, del] [] []
-        (Arrow (SCons fnGD (STail gam)) (STail del))
+      fnGD = TFn (arrPure (STail gam) (STail del))
+      applyTy = Forall [] [gam, del] [] [] []
+        (arrPure (SCons fnGD (STail gam)) (STail del))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
-      mergeTy = Forall [] [SV "Θ"] [] []
-        (Arrow (SCons (TSum (RCons (STail (SV "Θ"))
+      mergeTy = Forall [] [SV "Θ"] [] [] []
+        (arrPure (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
       -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
-      thereTy = Forall [] [SV "Δ"] [RV "σ"] []
-        (Arrow (SCons (TSum (RTail (RV "σ"))) SEnd)
+      thereTy = Forall [] [SV "Δ"] [RV "σ"] [] []
+        (arrPure (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
       -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ ⇒ Θ — Elgot iteration: the body routes
       -- to continue (re-enter) or done (exit)
       loopTy =
         let sg = SV "Σ"; th = SV "Θ"
-            body = TFn (Arrow (STail sg)
+            body = TFn (arrPure (STail sg)
                      (one (TSum (RCons (STail sg)
                            (RCons (STail th) RNil)))))
-        in Forall [] [sg, th] [] []
-             (Arrow (SCons body (STail sg)) (STail th))
+        in Forall [] [sg, th] [] [] []
+             (arrPure (SCons body (STail sg)) (STail th))
       int2 = SCons TInt (one TInt)
       codeStructTy =
         TData "List"
           [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
-      int2Router = Forall [] [] [] []
-        (Arrow int2
+      int2Router = Forall [] [] [] [] []
+        (arrPure int2
                (one (TSum (RCons int2 (RCons int2 RNil)))))
-      eqTy = Forall [a] [] [] []
+      eqTy = Forall [a] [] [] [] []
         (let aa = SCons ta (one ta)
-         in Arrow aa (one (TSum (RCons aa (RCons aa RNil)))))
-      binIntTy = Forall [] [] [] []
-        (Arrow (SCons TInt (one TInt)) (one TInt))
+         in arrPure aa (one (TSum (RCons aa (RCons aa RNil)))))
+      binIntTy = Forall [] [] [] [] []
+        (arrPure (SCons TInt (one TInt)) (one TInt))
       -- Bool ≡ (• | •): two payload-free tracks; true = in1, false = in2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
-      boolLit  = Forall [] [] [] [] (Arrow SEnd (one tBool))
+      boolLit  = Forall [] [] [] [] [] (arrPure SEnd (one tBool))
       -- foldExp: the eliminator of an exponent bundle aⁿ (the stack-level
       -- foldList).  n is erased; at runtime the bundle is the final
       -- segment and its width is the witness.
       nExp = Exp 0 (Just (NV "n"))
       foldExpTy =
-        let stepArr = Arrow (SCons tb (one ta)) (one tb)
-        in Forall [a, b] [] [] [NV "n"]
-             (Arrow (SCons (TFn stepArr)
+        let stepArr = arrPure (SCons tb (one ta)) (one tb)
+        in Forall [a, b] [] [] [NV "n"] []
+             (arrPure (SCons (TFn stepArr)
                       (SCons tb (SExp (one ta) nExp SEnd)))
                     (one tb))
       -- foldExp2: the two-wide twin — eliminate a bundle of PAIRS
@@ -2158,29 +2306,29 @@ primEnv =
       foldExp2Ty =
         let c  = TV "c"
             tc = TVarTy c
-            stepArr = Arrow (SCons tb (SCons ta (one tc))) (one tb)
-        in Forall [a, b, c] [] [] [NV "n"]
-             (Arrow (SCons (TFn stepArr)
+            stepArr = arrPure (SCons tb (SCons ta (one tc))) (one tb)
+        in Forall [a, b, c] [] [] [NV "n"] []
+             (arrPure (SCons (TFn stepArr)
                       (SCons tb (SExp (SCons ta (one tc)) nExp SEnd)))
                     (one tb))
       -- GLA generators, width-polymorphic in n (design-exponents.md)
-      dupNTy = Forall [a] [] [] [NV "n"]
-        (Arrow (SExp (one ta) nExp SEnd)
+      dupNTy = Forall [a] [] [] [NV "n"] []
+        (arrPure (SExp (one ta) nExp SEnd)
                (SExp (one ta) nExp (SExp (one ta) nExp SEnd)))
-      zipNTy = Forall [a, b] [] [] [NV "n"]
-        (Arrow (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
+      zipNTy = Forall [a, b] [] [] [NV "n"] []
+        (arrPure (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
                (SExp (SCons ta (one tb)) nExp SEnd))
       -- map a one-wire function across a bundle: the tier's missing
       -- container-preserving word (folds collapse, this one rebuilds)
-      mapNTy = Forall [a, b] [] [] [NV "n"]
-        (Arrow (SCons (TFn (Arrow (one ta) (one tb)))
+      mapNTy = Forall [a, b] [] [] [NV "n"] []
+        (arrPure (SCons (TFn (arrPure (one ta) (one tb)))
                       (SExp (one ta) nExp SEnd))
                (SExp (one tb) nExp SEnd))
       -- the pair twin, mirroring foldExp/foldExp2.  With zipN this
       -- lifts ANY two-wire word pointwise, so addN and the rest stop
       -- needing to be primitive.
-      mapN2Ty = Forall [a, b, c] [] [] [NV "n"]
-        (Arrow (SCons (TFn (Arrow (SCons ta (one tb)) (one tc)))
+      mapN2Ty = Forall [a, b, c] [] [] [NV "n"] []
+        (arrPure (SCons (TFn (arrPure (SCons ta (one tb)) (one tc)))
                       (SExp (SCons ta (one tb)) nExp SEnd))
                (SExp (one tc) nExp SEnd))
       -- zipN's inverse: de-interleave a pair bundle into two bundles
@@ -2189,39 +2337,39 @@ primEnv =
       -- bundle, and the finK literals carry their bound as an offset.
       -- There is deliberately no `tabulate`/`asFin`: an output-only n
       -- has no witness, exactly as for `zeroN`.
-      atTy = Forall [a] [] [] [NV "n"]
-        (Arrow (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
+      atTy = Forall [a] [] [] [NV "n"] []
+        (arrPure (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
                (one ta))
-      indicesNTy = Forall [a] [] [] [NV "n"]
-        (Arrow (SExp (one ta) nExp SEnd)
+      indicesNTy = Forall [a] [] [] [NV "n"] []
+        (arrPure (SExp (one ta) nExp SEnd)
                (SExp (SCons (TFin nExp) (one ta)) nExp SEnd))
       -- the dynamic discharge: check an Int against the LIVE width;
       -- the hit track carries the index and the untouched bundle
-      checkedAtTy = Forall [a] [] [] [NV "n"]
-        (Arrow (SCons TInt (SExp (one ta) nExp SEnd))
+      checkedAtTy = Forall [a] [] [] [NV "n"] []
+        (arrPure (SCons TInt (SExp (one ta) nExp SEnd))
                (one (TSum (RCons (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
                           (RCons (SCons TInt (SExp (one ta) nExp SEnd))
                                  RNil)))))
-      weakenTy = Forall [] [] [] [NV "n"]
-        (Arrow (one (TFin nExp)) (one (TFin (Exp 1 (Just (NV "n"))))))
-      finIntTy = Forall [] [] [] [NV "n"]
-        (Arrow (one (TFin nExp)) (one TInt))
-      unzipNTy = Forall [a, b] [] [] [NV "n"]
-        (Arrow (SExp (SCons ta (one tb)) nExp SEnd)
+      weakenTy = Forall [] [] [] [NV "n"] []
+        (arrPure (one (TFin nExp)) (one (TFin (Exp 1 (Just (NV "n"))))))
+      finIntTy = Forall [] [] [] [NV "n"] []
+        (arrPure (one (TFin nExp)) (one TInt))
+      unzipNTy = Forall [a, b] [] [] [NV "n"] []
+        (arrPure (SExp (SCons ta (one tb)) nExp SEnd)
                (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
   in M.fromList
-       [ ("id",    Forall [a]    [] [] [] (Arrow (one ta) (one ta)))
-       , ("_",     Forall [a]    [] [] [] (Arrow (one ta) (one ta)))  -- hole: id
-       , ("swap",  Forall [a, b] [] [] []
-           (Arrow (SCons ta (one tb)) (SCons tb (one ta))))
-       , ("dup",   Forall [a]    [] [] [] (Arrow (one ta) (SCons ta (one ta))))
-       , ("drop",  Forall [a]    [] [] [] (Arrow (one ta) SEnd))
-       , ("pass",  Forall []     [rho] [] [] (Arrow (STail rho) (STail rho)))
+       [ ("id",    Forall [a]    [] [] [] [] (arrPure (one ta) (one ta)))
+       , ("_",     Forall [a]    [] [] [] [] (arrPure (one ta) (one ta)))  -- hole: id
+       , ("swap",  Forall [a, b] [] [] [] []
+           (arrPure (SCons ta (one tb)) (SCons tb (one ta))))
+       , ("dup",   Forall [a]    [] [] [] [] (arrPure (one ta) (SCons ta (one ta))))
+       , ("drop",  Forall [a]    [] [] [] [] (arrPure (one ta) SEnd))
+       , ("pass",  Forall []     [rho] [] [] [] (arrPure (STail rho) (STail rho)))
          -- the terminal morphism: forget the whole segment
-       , ("forget", Forall []    [rho] [] [] (Arrow (STail rho) SEnd))
+       , ("forget", Forall []    [rho] [] [] [] (arrPure (STail rho) SEnd))
        , ("+",     binIntTy)
        , ("*",     binIntTy)
-       , ("print", Forall [a]    [] [] [] (Arrow (one ta) SEnd))
+       , ("print", Forall [a]    [] [] [] [] (arrPure (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
        , ("eq?",       eqTy)
@@ -2232,36 +2380,36 @@ primEnv =
        , ("gt?",       int2Router)
        , ("gte?",      int2Router)
        , ("lte?",      int2Router)
-       , ("cat",       Forall [] [] [] []
-           (Arrow (SCons TStr (one TStr)) (one TStr)))
-       , ("toStr",     Forall [a] [] [] [] (Arrow (one ta) (one TStr)))
-       , ("asInt?",    Forall [] [] [] []
-           (Arrow (one TStr)
+       , ("cat",       Forall [] [] [] [] []
+           (arrPure (SCons TStr (one TStr)) (one TStr)))
+       , ("toStr",     Forall [a] [] [] [] [] (arrPure (one ta) (one TStr)))
+       , ("asInt?",    Forall [] [] [] [] []
+           (arrPure (one TStr)
                   (one (TSum (RCons (one TInt)
                         (RCons (one TStr) RNil))))))
-       , ("symStr",    Forall [] [] [] [] (Arrow (one TSym) (one TStr)))
-       , ("unparse",   Forall [] [] [] []
-           (Arrow (SCons codeStructTy SEnd) (one TStr)))
-       , ("parse",     Forall [] [] [] []
-           (Arrow (one TStr)
+       , ("symStr",    Forall [] [] [] [] [] (arrPure (one TSym) (one TStr)))
+       , ("unparse",   Forall [] [] [] [] []
+           (arrPure (SCons codeStructTy SEnd) (one TStr)))
+       , ("parse",     Forall [] [] [] [] []
+           (arrPure (one TStr)
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
-       , ("readLine",  Forall [] [] [] []
-           (Arrow SEnd
+       , ("readLine",  Forall [] [] [] [] []
+           (arrPure SEnd
                   (one (TSum (RCons (one TStr)
                         (RCons (one TStr) RNil))))))
-       , ("readFile",  Forall [] [] [] []
-           (Arrow (one TStr)
+       , ("readFile",  Forall [] [] [] [] []
+           (arrPure (one TStr)
                   (one (TSum (RCons (one TStr) (RCons (one TStr) RNil))))))
-       , ("writeFile", Forall [] [] [] []
-           (Arrow (SCons TStr (one TStr))
+       , ("writeFile", Forall [] [] [] [] []
+           (arrPure (SCons TStr (one TStr))
                   (one (TSum (RCons SEnd (RCons (one TStr) RNil))))))
-       , ("evalCode",  Forall [] [gam, del] [] []
-           (Arrow (SCons codeStructTy (STail gam))
+       , ("evalCode",  Forall [] [gam, del] [] [] []
+           (arrPure (SCons codeStructTy (STail gam))
                   (one (TSum (RCons (STail del)
                         (RCons (SCons TStr (STail gam)) RNil))))))
-       , ("reflect",   Forall [] [gam, del] [] []
-           (Arrow (one (TFn (Arrow (STail gam) (STail del))))
+       , ("reflect",   Forall [] [gam, del] [] [] []
+           (arrPure (one (TFn (arrPure (STail gam) (STail del))))
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
        , ("apply",     applyTy)
@@ -2348,9 +2496,9 @@ inferDefTermIn name env term
           let (arr, cs) = runInfer0 $ do
                 fi <- freshSVarName
                 fo <- freshSVarName
-                let mono = Forall [] [] [] []
-                             (Arrow (STail fi) (STail fo))
-                (a@(Arrow bi bo), cs') <-
+                let mono = Forall [] [] [] [] []
+                             (arrPure (STail fi) (STail fo))
+                (a@(Arrow bi bo _), cs') <-
                   infer (M.insert name mono env) term
                 pure (a, cs' ++ [ CEqStack bi (STail fi)
                                 , CEqStack bo (STail fo) ])
@@ -2384,7 +2532,7 @@ prettyInferExample =
 -- (a simultaneous rename, so substOnce is exactly the right applicator).
 normalizeArrow :: Arrow -> Arrow
 normalizeArrow arr =
-  let (tvs, svs, rvs, nvs) = varsOfArrow arr
+  let (tvs, svs, rvs, nvs, evs) = varsOfArrow arr
       tm = M.fromList
              (zip tvs [ TVarTy (TV ("a" ++ show n)) | n <- [0 :: Int ..] ])
       sm = M.fromList
@@ -2393,7 +2541,12 @@ normalizeArrow arr =
              (zip rvs [ RTail (RV ("σ" ++ show n)) | n <- [0 :: Int ..] ])
       nm = M.fromList
              (zip nvs [ Exp 0 (Just (NV ("n" ++ show n))) | n <- [0 :: Int ..] ])
-  in substOnce (Subst tm sm rm nm) arr
+      -- effect tails are invisible in display, but normalizing them
+      -- keeps `:t!` deterministic
+      em = M.fromList
+             (zip evs [ Eff False (Just (EV ("ε" ++ show n)))
+                      | n <- [0 :: Int ..] ])
+  in substOnce (Subst tm sm rm nm em) arr
 
 -- Infer and alpha-normalize; the workhorse for tests.
 inferNormalized :: String -> Either String Arrow
@@ -2408,9 +2561,9 @@ freeVarsArrow :: Arrow -> Vars
 freeVarsArrow = varsOfArrow
 
 freeVarsScheme :: Scheme -> Vars
-freeVarsScheme (Forall tv sv rv nv arr) =
-  let (ft, fs, fr, fn) = freeVarsArrow arr
-  in (ft \\ tv, fs \\ sv, fr \\ rv, fn \\ nv)
+freeVarsScheme (Forall tv sv rv nv ev arr) =
+  let (ft, fs, fr, fn, fe) = freeVarsArrow arr
+  in (ft \\ tv, fs \\ sv, fr \\ rv, fn \\ nv, fe \\ ev)
 
 freeVarsEnv :: Env -> Vars
 freeVarsEnv env =
@@ -2420,9 +2573,10 @@ freeVarsEnv env =
 -- fixed by the environment.
 generalize :: Env -> Arrow -> Scheme
 generalize env arr =
-  let (ftv, fsv, frv, fnv) = freeVarsArrow arr
-      (etv, esv, erv, env') = freeVarsEnv env
-  in Forall (ftv \\ etv) (fsv \\ esv) (frv \\ erv) (fnv \\ env') arr
+  let (ftv, fsv, frv, fnv, fev) = freeVarsArrow arr
+      (etv, esv, erv, env', eev) = freeVarsEnv env
+  in Forall (ftv \\ etv) (fsv \\ esv) (frv \\ erv) (fnv \\ env')
+            (fev \\ eev) arr
 
 -- A checked module: definitions in order, plus an optional main program.
 data Module = Module
@@ -2984,8 +3138,8 @@ buildRunDefs base m =
     ++ [ (name, arityOf sc, openOf sc, term)
        | (name, sc, term) <- modDefs m ] )
   where
-    arityOf (Forall _ _ _ _ (Arrow i _)) = closedArity i
-    openOf  (Forall _ _ _ _ (Arrow i _)) = openTailed i
+    arityOf (Forall _ _ _ _ _ (Arrow i _ _)) = closedArity i
+    openOf  (Forall _ _ _ _ _ (Arrow i _ _)) = openTailed i
     openTailed (SCons _ rest) = openTailed rest
     openTailed (STail _)      = True
     openTailed (SExp _ _ _)   = True   -- erased width: needs the whole segment
@@ -3311,10 +3465,10 @@ evalTerm env defs vars term st =
           -- dummies suffice.
           let dummy = TV "_param"
               dummyScheme =
-                Forall [dummy] [] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+                Forall [dummy] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
               arityEnv = foldr (\n -> M.insert n dummyScheme)
                                env (M.keys vars)
-          Arrow i _ <- liftEither (inferTermIn arityEnv t')
+          Arrow i _ _ <- liftEither (inferTermIn arityEnv t')
           let k = closedArity i
           (args, stk') <- takeWires "grouped program" k stk
           (out, logs) <- evalTerm env defs vars t' args
@@ -3329,7 +3483,7 @@ evalTerm env defs vars term st =
 builtinArity :: String -> Either String Int
 builtinArity name =
   case M.lookup name primEnv of
-    Just (Forall _ _ _ _ (Arrow i _)) -> Right (closedArity i)
+    Just (Forall _ _ _ _ _ (Arrow i _ _)) -> Right (closedArity i)
     Nothing -> Left $ "Unknown primitive at runtime: " ++ name
 
 runBuiltin :: Env -> RunDefs -> String -> [Value]
@@ -3582,7 +3736,7 @@ elimAbsTerm env = go
     -- wires the passthrough was pinned to, when inference determined it
     restWidth slots hasRest b =
       case inferTermIn env (OpenAbs slots hasRest b) of
-        Right (Arrow i _)
+        Right (Arrow i _ _)
           | let r = dropS (length slots) i
           , not (openTailedS r) -> Just (closedArity r)
         _ -> Nothing
@@ -3709,7 +3863,7 @@ compileAbsOpen' env ps k0 open body = do
       | otherwise =
           case M.lookup nm env of
             Nothing -> Left $ "reflect: unknown name in abstraction body: " ++ nm
-            Just (Forall _ _ _ _ (Arrow i o))
+            Just (Forall _ _ _ _ _ (Arrow i o _))
               | openTailedS i || openTailedS o -> segErr nm
               | otherwise ->
                   Right (AtomInfo (closedArity i) (closedArity o) [] t)
@@ -3729,7 +3883,7 @@ compileAbsOpen' env ps k0 open body = do
     groupInfo g = do
       let used = nub [ nm | nm <- freeNamesIn g, nm `elem` ps ]
           usedIdx = [ i | Just i <- map (`elemIndex` ps) used ]
-      Arrow gi go <- inferGroupArrow g
+      Arrow gi go _ <- inferGroupArrow g
       if openTailedS gi || openTailedS go
         then segErr "grouped program"
         else do
@@ -3747,7 +3901,7 @@ compileAbsOpen' env ps k0 open body = do
     inferGroupArrow g = do
       let dummy = TV "_p"
           dummyScheme =
-            Forall [dummy] [] [] [] (Arrow SEnd (SCons (TVarTy dummy) SEnd))
+            Forall [dummy] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
           arityEnv = foldr (\nm -> M.insert nm dummyScheme) env ps
       inferTermIn arityEnv g
 
@@ -3767,7 +3921,7 @@ runModule src = runExceptT $ do
   m <- liftEither (checkModule src)
   case modMain m of
     Nothing -> pure ([], [])
-    Just (term, arr@(Arrow i o))
+    Just (term, arr@(Arrow i o _))
       | closedArity i > 0 ->
           throwError $ "main requires a nonempty input stack: " ++ show arr
       | otherwise -> do

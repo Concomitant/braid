@@ -195,7 +195,7 @@ docOf st name
 
 renderStackTy :: ReplState -> String
 renderStackTy st =
-  let Arrow _ o = normalizeArrow (Arrow SEnd (rsStackTy st))
+  let Arrow _ o _ = normalizeArrow (arrPure SEnd (rsStackTy st))
   in showStackA (rsAliases st) o
 
 renderStack :: ReplState -> String
@@ -206,7 +206,7 @@ renderStack st =
   where
     -- pretty display names (a0/ρ0) without touching internal state
     displayTy =
-      let Arrow _ o = normalizeArrow (Arrow SEnd (rsStackTy st))
+      let Arrow _ o _ = normalizeArrow (arrPure SEnd (rsStackTy st))
       in showStackA (rsAliases st) o
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -321,14 +321,14 @@ handleLine st line =
 
     checkLine = do
       term <- parseProgram line
-      Arrow i o <- inferTermIn (rsEnv st) term
+      Arrow i o _ <- inferTermIn (rsEnv st) term
       case solve [CEqStack i (rsStackTy st)] of
         Right s -> pure (apply s o)
         Left _ ->
           -- the mismatch is against the persistent REPL stack: say so
           Left $ "this line needs input stack '"
                ++ showStackA (rsAliases st)
-                    (let Arrow i' _ = normalizeArrow (Arrow i SEnd) in i')
+                    (let Arrow i' _ _ = normalizeArrow (arrPure i SEnd) in i')
                ++ "' but the current stack is '"
                ++ renderStackTy st
                ++ "'  (:s to inspect, :clear to reset, or pass it along with ...)"
@@ -343,7 +343,7 @@ handleLine st line =
 -- next line's fresh vars.
 freshenStackTy :: SType -> SType
 freshenStackTy sty =
-  let (tvs, svs, rvs, nvs) = varsOfStack sty
+  let (tvs, svs, rvs, nvs, evs) = varsOfStack sty
       tm = M.fromList
              (zip tvs [ TVarTy (TV ("_a" ++ show n)) | n <- [0 :: Int ..] ])
       sm = M.fromList
@@ -352,5 +352,8 @@ freshenStackTy sty =
              (zip rvs [ RTail (RV ("_s" ++ show n)) | n <- [0 :: Int ..] ])
       nm = M.fromList
              (zip nvs [ Exp 0 (Just (NV ("_n" ++ show n))) | n <- [0 :: Int ..] ])
-      Arrow sty' _ = substOnce (Subst tm sm rm nm) (Arrow sty SEnd)
+      em = M.fromList
+             (zip evs [ Eff False (Just (EV ("_e" ++ show n)))
+                      | n <- [0 :: Int ..] ])
+      Arrow sty' _ _ = substOnce (Subst tm sm rm nm em) (arrPure sty SEnd)
   in sty'
