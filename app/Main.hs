@@ -127,6 +127,12 @@ continueOpen line = go (lineDepth line) line
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
 
+-- a parameter as the user wrote it: a name, or `...` for the stack
+-- parameter (its kind shows in the body, not the list)
+renderParam :: TyParam -> String
+renderParam (PStack _) = "..."
+renderParam q          = pName q
+
 renderData :: ReplState -> DataDecl -> String
 renderData st d =
   "type " ++ dName d ++ params ++ " = " ++ showTyA [] (dBody d) ++ docSuffix
@@ -134,7 +140,7 @@ renderData st d =
     params
       | null (dParams d) = ""
       | otherwise =
-          "(" ++ intercalate ", " (map show (dParams d)) ++ ")"
+          "(" ++ intercalate ", " (map renderParam (dParams d)) ++ ")"
     docSuffix =
       case M.lookup (dName d) (rsDocs st) of
         Just doc -> "\n  ## " ++ doc
@@ -147,7 +153,7 @@ renderAlias st al =
     params
       | null (aParams al) = ""
       | otherwise =
-          "(" ++ intercalate ", " (map show (aParams al)) ++ ")"
+          "(" ++ intercalate ", " (map renderParam (aParams al)) ++ ")"
     docSuffix =
       case M.lookup (aName al) (rsDocs st) of
         Just d  -> "\n  ## " ++ d

@@ -83,6 +83,12 @@ three; that is the whole theorem.
    intensional half of Aⁿ ≅ Fin(n)→A that erasure forecloses. Needs
    the index type as data — DML/ATS territory. Same qualified-type
    price as (1); do together or not at all.
+   **Amended 2026-08-25** (`design-indices.md`): only the half that
+   needs n as runtime DATA carries that price. `Fin(n)` with witnessed
+   introductions — the index is always forced by a literal offset or a
+   bundle on the stack — is cheap and shipped. Route (2) also gains a
+   forcing function: dataframes want column names, and names are the
+   only principled route to positional freedom.
 
 ## Recommendation
 

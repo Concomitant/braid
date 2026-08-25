@@ -1144,21 +1144,44 @@ parseDelimited = parseProgramToks
 -- must come last — which is what makes a splice unspellable, since a
 -- stack variable then always sits in tail position (`ssplice v SEnd`
 -- is just `STail v`).
-data TyParam = PWire TVar | PStack SVar
+-- A third kind joins them: `PWidth`, a WIDTH (an exponent variable).
+-- It is declared by USE — a parameter mentioned under `^` in the body
+-- is a width — because the two roles are syntactically disjoint, so
+-- position can decide without an annotation.  Width parameters are
+-- supported on `type` aliases only for now (a `data` type would need
+-- TData to carry width arguments).
+data TyParam = PWire TVar | PStack SVar | PWidth NVar
   deriving (Eq, Show)
 
 pName :: TyParam -> String
 pName (PWire (TV n))  = n
 pName (PStack (SV n)) = n
+pName (PWidth (NV n)) = n
 
 isStackParam :: TyParam -> Bool
 isStackParam (PStack _) = True
 isStackParam _          = False
 
+isWidthParam :: TyParam -> Bool
+isWidthParam (PWidth _) = True
+isWidthParam _          = False
+
 -- the stack a parameter stands for when the declaration is instantiated
 paramStack :: TyParam -> SType
 paramStack (PWire tv)  = SCons (TVarTy tv) SEnd
 paramStack (PStack sv) = STail sv
+paramStack (PWidth nv) =
+  -- unreachable: `data` declarations reject width parameters at
+  -- declaration time, and only they build a TData spine from params
+  error ("paramStack: width parameter " ++ show nv
+         ++ " (data declarations reject these)")
+
+-- An argument at a use site: a stack for wire/`...` parameters, a
+-- width for `^`-parameters.  TData still carries only stacks (data
+-- types cannot take width parameters yet), so this widening is
+-- confined to aliases and to display.
+data TyArg = AStack SType | AWidth Exp
+  deriving (Eq, Show)
 
 data Alias = Alias
   { aName   :: String
@@ -1185,8 +1208,8 @@ dataSig d = (dName d, dParams d)
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall tvs svs [] [] (Arrow bodyStack namedStack))
-    , ("un" ++ dName d,  Forall tvs svs [] [] (Arrow namedStack bodyStack)) ]
+  ( [ (dName d,          Forall tvs svs [] nvs (Arrow bodyStack namedStack))
+    , ("un" ++ dName d,  Forall tvs svs [] nvs (Arrow namedStack bodyStack)) ]
       ++ mergeSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
@@ -1195,6 +1218,7 @@ dataDeclArtifacts d =
     ps         = dParams d
     tvs        = [ tv | PWire tv  <- ps ]
     svs        = [ sv | PStack sv <- ps ]
+    nvs        = [ nv | PWidth nv <- ps ]   -- always [] today (see below)
     namedStack = SCons (TData (dName d) (map paramStack ps)) SEnd
     rollOpen   = openTailedS bodyStack
     -- an n-ary uniform collapse for this declaration's arity: the
@@ -1324,13 +1348,35 @@ parseTypeLine aliases dataSigs line =
       (kw, name, params) <- parseHead lhs
       let sigs = (name, params) : dataSigs
       body <- parseTyBody aliases sigs params rhs
-      let (bodyTVs, bodySVs, _, _) = varsOfTy body
-          occurs (PWire tv)  = tv `elem` bodyTVs
+      -- KINDS BY USE: every named parameter parses as a wire, and an
+      -- occurrence under `^` makes it an exponent variable in the body.
+      -- So the body's own free-variable sets settle the kinds.
+      let (bodyTVs, bodySVs, _, bodyNVs) = varsOfTy body
+          reclass q@(PWire (TV nm))
+            | NV nm `elem` bodyNVs, TV nm `elem` bodyTVs =
+                Left $ "Type " ++ name ++ ": parameter '" ++ nm
+                    ++ "' is used both as a wire and as a width (^"
+                    ++ nm ++ ")"
+            | NV nm `elem` bodyNVs = Right (PWidth (NV nm))
+            | otherwise            = Right q
+          reclass q = Right q
+      params <- mapM reclass params
+      let occurs (PWire tv)  = tv `elem` bodyTVs
           occurs (PStack sv) = sv `elem` bodySVs
+          occurs (PWidth nv) = nv `elem` bodyNVs
       if all occurs params
         then Right ()
         else Left $ "Type alias " ++ name
                  ++ ": every parameter must occur in the body"
+      -- a width parameter would have to ride in TData's argument list,
+      -- which carries stacks only; aliases are transparent, so they are
+      -- fine.  Reject the nominal case with direction.
+      case [ q | q <- params, isWidthParam q ] of
+        (q : _) | kw == "data" || occursData name body ->
+          Left $ "Type " ++ name ++ ": width parameter '" ++ pName q
+              ++ "' is supported on `type` aliases only, not on "
+              ++ "recursive/`data` declarations"
+        _ -> Right ()
       -- The ambiguous-product-split check is gone: a wire parameter is
       -- exactly one wire, so juxtaposing them is never ambiguous, and a
       -- stack parameter is forced into tail position by the parser.
@@ -1374,15 +1420,33 @@ parseTypeLine aliases dataSigs line =
     stackInner (SCons t st)   = stacksOf t ++ stackInner st
     stackInner _              = []
 
--- Parse a full RHS: one element-type expression, nothing left over.
+-- Parse a full RHS.  The body is a STACK, not just an element: that is
+-- what makes `type T = Int^3` work (the `^` handling lives in the stack
+-- parser).  A one-wire stack is that wire; anything wider becomes the
+-- 1-ary-sum-as-segment form the exponent parser already round-trips.
 parseTyBody :: [Alias] -> [(String, [TyParam])] -> [TyParam] -> String
             -> Either String Ty
 parseTyBody aliases dataSigs params src = do
   toks <- normalizeToks <$> tokenize src
-  (t, rest) <- parseTyElem aliases dataSigs params toks
+  (st, rest) <- parseTyStack aliases dataSigs params toks
   case rest of
-    [] -> Right t
+    [] -> case st of
+            SCons t SEnd -> Right t
+            _            -> Right (TSum (RCons st RNil))
     _  -> Left $ "Unexpected tokens after type expression: " ++ show rest
+
+-- A declaration's RHS is a STACK.  `goStack` lives inside parseTyElem's
+-- where-block; rather than hoist that whole family, parse the body as a
+-- 1-ary parenthesized row and unwrap — the same "a 1-ary sum IS a
+-- segment" convention the exponent parser already uses for `(A B)^n`.
+parseTyStack :: [Alias] -> [(String, [TyParam])] -> [TyParam] -> [Token]
+             -> Either String (SType, [Token])
+parseTyStack aliases dataSigs params toks = do
+  (t, rest) <- parseTyElem aliases dataSigs params
+                 (TokLParen : toks ++ [TokRParen])
+  case t of
+    TSum (RCons st RNil) -> Right (st, rest)
+    _                    -> Left "Expected a type expression"
 
 parseTyElem :: [Alias] -> [(String, [TyParam])] -> [TyParam] -> [Token]
             -> Either String (Ty, [Token])
@@ -1402,22 +1466,23 @@ parseTyElem aliases dataSigs params toks = case toks of
   (TokIdent "Sym" : rest) -> pure (TSym, rest)
   (TokIdent name : TokLParen : rest)
     | Just ps <- lookup name dataSigs -> do
-        (args, rest') <- goArgs rest
+        (args, rest') <- goArgs ps rest
         if length args /= length ps
           then Left $ "Type " ++ name ++ " expects "
                    ++ show (length ps) ++ " argument(s)"
           else do
-            -- a wire parameter takes exactly one wire; only a `...`
-            -- parameter takes a whole stack
-            case [ (q, a) | (q, a) <- zip ps args
+            -- data types carry stacks only (no width parameters yet),
+            -- and a wire parameter takes exactly one wire
+            sts <- mapM (stackArg name) args
+            case [ (q, a) | (q, a) <- zip ps sts
                  , not (isStackParam q), closedArity a /= 1 || openTailedS a ] of
               ((q, a) : _) -> Left $ "Type " ++ name ++ ": parameter '"
                                  ++ pName q ++ "' takes one wire, but was "
                                  ++ "given '" ++ show a
                                  ++ "' (declare it '...' to take a stack)"
-              [] -> pure (TData name args, rest')
+              [] -> pure (TData name sts, rest')
     | Just al <- lookupAlias name aliases -> do
-        (args, rest') <- goArgs rest
+        (args, rest') <- goArgs (aParams al) rest
         body <- applyAlias al args
         pure (body, rest')
   (TokIdent name : rest)
@@ -1425,6 +1490,9 @@ parseTyElem aliases dataSigs params toks = case toks of
     | Just (PStack _) <- lookupParam name params ->
         Left $ "Type parameter " ++ name
              ++ " is a stack (`...`): it cannot sit inside another element"
+    | Just (PWidth _) <- lookupParam name params ->
+        Left $ "Type parameter " ++ name
+             ++ " is a width: write it as an exponent (T^" ++ name ++ ")"
     | Just [] <- lookup name dataSigs -> pure (TData name [], rest)
     | Just _ <- lookup name dataSigs ->
         Left $ "Type " ++ name ++ " expects arguments"
@@ -1480,13 +1548,18 @@ parseTyElem aliases dataSigs params toks = case toks of
         _ -> do
           (suffix, rest') <- goStackEnd rest
           pure (SCons t suffix, rest')
-    -- stage 3: literal exponents only.  Exponent VARIABLES arrive with
-    -- exponent parameters (design-exponents.md); reject with direction.
+    -- a width: a literal, or a declared parameter.  A parameter used
+    -- here IS a width — `parseTypeLine` reclassifies afterwards from
+    -- the body's free variables, so no annotation is needed.
     expLit (TokInt k : rest) | k >= 0 = Right (Exp k Nothing, rest)
-    expLit (TokIdent nm : _) =
-      Left $ "Exponent variables (^" ++ nm ++ ") are not yet supported in "
-           ++ "type declarations — only literal exponents (Int^3)"
-    expLit _ = Left "Expected an exponent (a number) after '^'"
+    expLit (TokIdent nm : rest)
+      | Just q <- lookupParam nm params =
+          Right (Exp 0 (Just (NV (pName q))), rest)
+      | otherwise =
+          Left $ "Exponent variable ^" ++ nm ++ " is not a parameter of "
+              ++ "this declaration — add it to the parameter list"
+    expLit _ =
+      Left "Expected an exponent (a number or a width parameter) after '^'"
     goStackEnd rest = case rest of
       (TokBar : _)      -> pure (SEnd, rest)
       (TokRParen : _)   -> pure (SEnd, rest)
@@ -1509,47 +1582,72 @@ parseTyElem aliases dataSigs params toks = case toks of
         _ -> Left $ "Expected '"
                  ++ (if close == TokRAngle then "⟩" else ")")
                  ++ "' to close the Fn type"
+    stackArg _ (AStack st) = Right st
+    stackArg n (AWidth e)  =
+      Left $ "Type " ++ n ++ ": a width argument (" ++ show e
+          ++ ") is not allowed here — width parameters are supported on "
+          ++ "`type` aliases only"
     stackParam ps = case [ q | q@(PStack _) <- ps ] of
                       (q : _) -> Just q
                       []      -> Nothing
-    -- constructor/alias arguments: each argument is a STACK
-    goArgs ts = do
-      (st, rest) <- goStack ts
+    -- constructor/alias arguments, parsed against the DECLARED kinds:
+    -- a width position takes a number (or a width parameter in scope),
+    -- everything else takes a stack.
+    goArgs ks ts = do
+      let (k, ks') = case ks of
+                       (q : more) -> (Just q, more)
+                       []         -> (Nothing, [])
+      (a, rest) <- goArg k ts
       case rest of
         (TokComma : rest')  -> do
-          (args, rest'') <- goArgs rest'
-          pure (st : args, rest'')
-        (TokRParen : rest') -> pure ([st], rest')
+          (args, rest'') <- goArgs ks' rest'
+          pure (a : args, rest'')
+        (TokRParen : rest') -> pure ([a], rest')
         _ -> Left "Expected ',' or ')' in type arguments"
+
+    goArg (Just (PWidth _)) ts = do
+      (e, rest) <- expLit ts
+      pure (AWidth e, rest)
+    goArg _ ts = do
+      (st, rest) <- goStack ts
+      pure (AStack st, rest)
 
 lookupParam :: String -> [TyParam] -> Maybe TyParam
 lookupParam n ps = case [ q | q <- ps, pName q == n ] of
                      (q : _) -> Just q
                      []      -> Nothing
 
-applyAlias :: Alias -> [SType] -> Either String Ty
+applyAlias :: Alias -> [TyArg] -> Either String Ty
 applyAlias al args
   | length args /= length (aParams al) =
       Left $ "Type alias " ++ aName al ++ " expects "
            ++ show (length (aParams al)) ++ " argument(s)"
   | otherwise = do
-      (tm, sm) <- foldM bind (M.empty, M.empty) (zip (aParams al) args)
-      pure (substParams tm sm (aBody al))
+      (tm, sm, nm) <- foldM bind (M.empty, M.empty, M.empty)
+                            (zip (aParams al) args)
+      pure (substParams tm sm nm (aBody al))
   where
     -- a wire parameter takes exactly one wire; a `...` parameter takes
-    -- the whole argument stack
-    bind (tm, sm) (PWire tv, SCons t SEnd) = Right (M.insert tv t tm, sm)
-    bind _ (PWire tv, st) =
+    -- the whole argument stack; a `^` parameter takes a width
+    bind (tm, sm, nm) (PWire tv, AStack (SCons t SEnd)) =
+      Right (M.insert tv t tm, sm, nm)
+    bind _ (PWire tv, AStack st) =
       Left $ "Type " ++ aName al ++ ": parameter '" ++ show tv
            ++ "' takes one wire, but was given '" ++ show st
            ++ "' (declare it '...' to take a stack)"
-    bind (tm, sm) (PStack sv, st) = Right (tm, M.insert sv st sm)
+    bind (tm, sm, nm) (PStack sv, AStack st) = Right (tm, M.insert sv st sm, nm)
+    bind (tm, sm, nm) (PWidth nv, AWidth e)  = Right (tm, sm, M.insert nv e nm)
+    bind _ (q, a) =
+      Left $ "Type " ++ aName al ++ ": parameter '" ++ pName q
+           ++ "' was given the wrong kind of argument ("
+           ++ (case a of AWidth e -> "width " ++ show e
+                         AStack st -> "stack " ++ show st) ++ ")"
 
 substStackVars :: Map SVar SType -> Ty -> Ty
-substStackVars = substParams M.empty
+substStackVars m = substParams M.empty m M.empty
 
-substParams :: Map TVar Ty -> Map SVar SType -> Ty -> Ty
-substParams tmap m = goT
+substParams :: Map TVar Ty -> Map SVar SType -> Map NVar Exp -> Ty -> Ty
+substParams tmap m nmap = goT
   where
     goT t@(TVarTy v) = M.findWithDefault t v tmap
     goT TInt         = TInt
@@ -1564,15 +1662,25 @@ substParams tmap m = goT
     goS SEnd            = SEnd
     goS t@(STail v)     = M.findWithDefault t v m
     goS (SCons t s)     = SCons (goT t) (goS s)
+    -- `sexp`, not `SExp`: grounding a width to a literal must expand
+    -- into copies, or the canonical form is broken (the substOnce
+    -- lesson).  This clause was MISSING — a latent pattern-match
+    -- failure that width parameters make immediately reachable.
+    goS (SExp b e r)    = sexp (goS b) (goE e) (goS r)
+    goE e@(Exp k mv) = case mv of
+      Just n | Just (Exp k' mv') <- M.lookup n nmap -> Exp (k + k') mv'
+      _ -> e
 
 -- One-way match of an alias body against a concrete element type.
 -- Parameters bind single element types (nonlinear occurrences must
 -- agree); closed rows/stacks only match same-shape closed structure.
-matchAlias :: Alias -> Ty -> Maybe [SType]
+matchAlias :: Alias -> Ty -> Maybe [TyArg]
 matchAlias al t = do
-  binds <- goT (aBody al) t M.empty
-  mapM (`M.lookup` binds) (map pVar (aParams al))
+  (sb, nb) <- goT (aBody al) t (M.empty, M.empty)
+  mapM (lookupArg sb nb) (aParams al)
   where
+    lookupArg _  nb (PWidth nv) = AWidth <$> M.lookup nv nb
+    lookupArg sb _  q           = AStack <$> M.lookup (SV (pName q)) sb
     -- both kinds bind through the same map, keyed by the parameter's
     -- name; a wire parameter's binding is its one-wire stack
     pVar q = SV (pName q)
@@ -1592,22 +1700,35 @@ matchAlias al t = do
     goR RNil RNil m = Just m
     goR (RCons sb rb) (RCons sx rx) m = goS sb sx m >>= goR rb rx
     goR _ _ _ = Nothing
-    bindS p x m
+    bindS p x (sb, nb)
       | openTailedS x = Nothing
       | otherwise =
-          case M.lookup p m of
-            Nothing -> Just (M.insert p x m)
-            Just y  -> if x == y then Just m else Nothing
+          case M.lookup p sb of
+            Nothing -> Just (M.insert p x sb, nb)
+            Just y  -> if x == y then Just (sb, nb) else Nothing
+    -- a width parameter binds against the concrete exponent
+    bindE (Exp 0 (Just nv)) ex (sb, nb)
+      | nv `elem` [ v | PWidth v <- aParams al ] =
+          case M.lookup nv nb of
+            Nothing -> Just (sb, M.insert nv ex nb)
+            Just y  -> if y == ex then Just (sb, nb) else Nothing
+    bindE eb ex m = if eb == ex then Just m else Nothing
     goS (STail p) x m
       | p `elem` map pVar (aParams al) = bindS p x m
     goS SEnd SEnd m = Just m
     goS (SCons tb sb) (SCons tx sx) m = goT tb tx m >>= goS sb sx
+    -- exponents: same-shape bases, then the width, then the rest.
+    -- (Missing before, so any alias with an exponent silently never
+    -- folded for display.)
+    goS (SExp bb eb rb) (SExp bx ex rx) m
+      | closedArity bb == closedArity bx =
+          goS bb bx m >>= bindE eb ex >>= goS rb rx
     goS _ _ _ = Nothing
 
 -- Folded display: try to rewrite structure back into declared names.
 -- Fewest parameters wins; ties go to the earliest alias in the list
 -- (callers order user-latest-first, then prelude).
-bestAlias :: [Alias] -> Ty -> Maybe (Alias, [SType])
+bestAlias :: [Alias] -> Ty -> Maybe (Alias, [TyArg])
 bestAlias aliases t =
   case [ (al, args) | al <- aliases, Just args <- [matchAlias al t] ] of
     [] -> Nothing
@@ -1624,7 +1745,7 @@ showTyA as t =
     Just (al, args)
       | null args -> aName al
       | otherwise ->
-          aName al ++ "(" ++ intercalate ", " (map (showStackA as) args) ++ ")"
+          aName al ++ "(" ++ intercalate ", " (map (showArgA as) args) ++ ")"
     Nothing -> case t of
       TVarTy a  -> show a
       TInt      -> "Int"
@@ -1635,6 +1756,10 @@ showTyA as t =
       TData n [] -> n
       TData n args ->
         n ++ "(" ++ intercalate ", " (map (showStackA as) args) ++ ")"
+
+showArgA :: [Alias] -> TyArg -> String
+showArgA as (AStack st) = showStackA as st
+showArgA _  (AWidth e)  = show e
 
 showRowA :: [Alias] -> SumRow -> String
 showRowA as row = intercalate " | " (go row)

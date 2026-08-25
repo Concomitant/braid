@@ -230,6 +230,16 @@ Findings for the record:
   n at runtime). Producing bundles from nothing needs value-directed
   width — the `tabulate`/`Fin(n)` side, or literal-exponent
   monomorphic uses only. Excluded for now.
+  **Split 2026-08-25** (`design-indices.md`): the `Fin(n)` side has a
+  cheap half and an expensive half, and this note conflated them. The
+  cheap half — `Fin(n)` as a type with WITNESSED introductions only
+  (`at`, `indicesN`, `checkedAt`, `weaken`, literals) — needs no
+  singletons, no inequality solver, no branch refinement, and no
+  unerasure, so it ships. The expensive half — `tabulate`, `zeroN`,
+  `unpack`, recursion on `Fin`, width-branching — is exactly the set
+  whose n must be RUNTIME DATA, and it stays excluded as one joint
+  purchase with Level-2 arithmetic. The dividing line is the rule that
+  every index introduction's n must be forced by a relevant input.
 - ~~Observed (pre-existing, not exponent-related): grouped compounds
   close with freshened element vars, so a binder param used only
   inside groups/quotes can display unconstrained (`sign : a0 ⇒ Str`

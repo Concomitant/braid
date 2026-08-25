@@ -350,6 +350,15 @@ moduleTypeTests =
     -- a def body may leave a bracket open: the lines that close it
     -- belong to the body, so a blank line does not end the block and a
     -- `def`-looking line inside the bracket is code, not a declaration
+    -- WIDTH parameters (a third kind, declared by use under `^`) —
+    -- and they display-fold, which needed matchAlias to learn SExp
+  , ("type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩\n[dupN >> addN]",
+     "• ⇒ Mat(n0, n0)")
+  , ("type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩\ntype Sq(n) = Mat(n, n)\n[dupN >> addN]",
+     "• ⇒ Sq(n0)")
+    -- a stack-shaped RHS: `^` lives in the stack parser, so the body
+    -- must be parsed as a stack (this used to be "Unexpected tokens")
+  , ("type T = Int^3\ntype U = (T | Str)\nnil",  "• ⇒ List(a0)")
     -- KINDED type parameters: a bare name is one wire, `...` is a
     -- stack.  The polymorphic pair was inexpressible while every
     -- parameter was stack-kinded (the split was ambiguous).
@@ -833,7 +842,11 @@ moduleFailTests =
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
   , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
-  , ("type Bad = (• | Int^n)\n1",                "Exponent variables")
+    -- width parameters: declared by USE (a parameter under `^`), so a
+    -- bare ^n with no such parameter is the error now
+  , ("type Bad = (• | Int^n)\n1",                  "not a parameter of this declaration")
+  , ("type Bad(n) = (Int^n n)\n1",                 "both as a wire and as a width")
+  , ("data BadD(n) = (• | Int^n)\n1",              "`type` aliases only")
   , ("type Bad = (• | Int^)\n1",                 "Expected an exponent")
   , ("type = (• | •)\n1",                        "Malformed type declaration")
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
