@@ -152,6 +152,10 @@ Type formers:
 - **Exponents**: `A^n` (input `Int^3`, `R^n`; display `Int³`, `ℝⁿ`) — a
   segment repeated n times. `n` is erased at runtime; concrete
   exponents expand away. See §13 and `design-exponents.md`.
+- **`Fin(n)`** — an index into a bundle of width n. `Aⁿ` *is* the
+  function space `Fin(n) ⇒ A`, stored tabulated and flat. The bound is
+  a type, erased exactly as every other width: at runtime a `Fin` is a
+  bare `Int`. See §9 and `design-indices.md`.
 
 ## 6. Program forms
 
@@ -395,6 +399,9 @@ type YN = Bool                        # alias (display folds to it)
 type Result(a, e) = (a | e)           # parameterized; each param is ONE WIRE
 type Box(...) = (...)                 # `...` — a whole STACK, as one wire
 type Tagged(t, ...) = (t ...)         # mixed: a wire, then the stack
+type T = Int^3                        # an RHS is a STACK — exponents fine
+type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩    # n, m are WIDTHS: used under `^`
+type Sq(n) = Mat(n, n)                # widths pass on to another alias
 type Endo(a) = Fn⟨a ⇒ a⟩              # a reified program as a type…
 type Pred(a) = Fn(a -> (a | a))       # …Unicode Fn⟨Σ ⇒ Θ⟩ or ASCII Fn(Σ -> Θ)
 data List(a) = (• | a List(a))        # recursive nominal type
@@ -402,9 +409,10 @@ data Tree(a) = (a | Tree(a) Tree(a))
 data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # codata: recursion THROUGH a Fn
 ```
 
-**Parameters are kinded.** A bare name stands for exactly **one wire**;
-`...` stands for a whole **stack**, and may only be the last parameter
-(at most one). That placement rule is what keeps every stack variable in
+**Parameters are kinded**, three ways. A bare name stands for exactly
+**one wire**; `...` stands for a whole **stack**, and may only be the
+last parameter (at most one); a name used under `^` in the body is a
+**width**. The `...`-last rule is what keeps every stack variable in
 tail position, so no declaration can spell a stack variable with wires
 after it:
 
@@ -414,6 +422,27 @@ data Box(...)   = (...)        # a whole stack in one wire
 data Bad(...)   = (... Int)    # rejected: '...' must be last in its stack
 type L = List(Int Str)         # rejected: List's cell takes one wire
 ```
+
+Widths are declared **by use**, not by annotation: the two roles are
+syntactically disjoint (a wire stands where a type stands, a width only
+after `^`), so position decides the kind and one parameter cannot be
+both. Width parameters are **`type`-only** for now — a `data` type
+would need its argument list to carry widths — and every `^n` in a body
+must name a parameter:
+
+```braid
+type Bad(n) = (Int^n n)        # rejected: parameter 'n' is used both as a
+                               #   wire and as a width (^n)
+data BadD(n) = (• | Int^n)     # rejected: width parameter 'n' is supported
+                               #   on `type` aliases only, not on
+                               #   recursive/`data` declarations
+type Bad2 = (• | Int^n)        # rejected: Exponent variable ^n is not a
+                               #   parameter of this declaration — add it
+                               #   to the parameter list
+```
+
+Width aliases display-fold like any other: with `Sq` in scope,
+`:t [dupN >> addN]` prints `• ⇒ Sq(n0)`.
 
 Because `List`'s parameter sits *before* the recursive slot in
 `(• | a List(a))`, it is forced to be a wire — which is why a list cell
@@ -428,9 +457,9 @@ A `data Name(...)` declaration generates:
   Fn⟨• ⇒ b⟩ Fn⟨b ρ ⇒ b⟩ List(ρ) ⇒ b`).
 
 Roll/unroll are free at runtime. Type parameters must occur in the
-body; a product of two bare parameters (`a b`) is rejected as an
-ambiguous split. Literal exponents are allowed in declarations
-(`type T3 = (Int^3 | Str)`); exponent *variables* are not yet.
+body. A declaration's right-hand side is parsed as a stack,
+so both literal exponents (`type T3 = (Int^3 | Str)`) and exponent
+*variables* (`type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩`) belong there.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
@@ -534,6 +563,8 @@ Exponent tier (widths erased; see §13):
 | `unzipN` | `(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` |
 | `mapN` | `Fn⟨a0 ⇒ a1⟩ a0ⁿ ⇒ a1ⁿ` |
 | `mapN2` | `Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ ⇒ a2ⁿ` |
+| `at` | `Fin(n) a0ⁿ ⇒ a0` — index the bundle; 0 is the DEEPEST wire |
+| `indicesN` | `a0ⁿ ⇒ (Fin(n) a0)ⁿ` — tag every wire with its own index |
 
 Folds collapse a bundle; `mapN`/`mapN2` rebuild one, which is what lets
 you **lift an ordinary word pointwise**. `addN` and `scaleN` are
@@ -544,6 +575,38 @@ def addN  = zipN >> [+] ... >> mapN2        # the bundle monoid ∇
 def mulN  = zipN >> [*] ... >> mapN2        # NOT linear — outside the GLA set
 def maxN  = zipN >> [(x y -> (x y >> less) [y] [x] ... >> cond)] ... >> mapN2
 def negN  = [0 _ >> -] ... >> mapN
+```
+
+**Indices.** `Aⁿ` *is* the function space `Fin(n) ⇒ A`, stored
+tabulated and flat; `Fin(n)` is an index into a bundle of width n. The
+bound is a type and is erased like every other width — at runtime a
+`Fin` is a bare `Int`. `at` and `indicesN` (above) are the
+exponent-shaped half; the rest:
+
+| word | type |
+|---|---|
+| `checkedAt` | `Int a0ⁿ ⇒ (Fin(n) a0ⁿ \| Int a0ⁿ)` — bounds-check and route |
+| `weaken` | `Fin(n) ⇒ Fin(n+1)` — runtime identity |
+| `finInt` | `Fin(n) ⇒ Int` — runtime identity; forgets the bound |
+| `fin0`, `fin1`, `fin2`, … | `• ⇒ Fin(n+k+1)` — index literals, like `inN` |
+
+**Every index introduction's `n` must be forced by a relevant input** —
+a literal's offset, or a live bundle on the stack. Hence two modes.
+**Static**: a literal's offset *is* the proof that k is in range, and
+`weaken` maintains it, so `at` needs no runtime check. **Dynamic**:
+`checkedAt` tests an `Int` against the live segment's actual width and
+ROUTES — the hit track is the witness, the same move `odd?` makes for
+parity. There is deliberately no `tabulate` and no bare `asFin`: an
+output-only `n` has no witness, exactly as for `zeroN` (§13). The full
+argument is `design-indices.md`.
+
+```braid
+1 2 3 >> indicesN            # • ⇒ Fin(3) Int Fin(3) Int Fin(3) Int
+fin1 10 20 30 >> at          # 20
+10 20 30 >> indicesN         # stack: 0 10 1 20 2 30
+1 10 20 30 >> checkedAt      # • ⇒ (Fin(3) Int Int Int | Int Int Int Int)
+7 10 20 30 >> checkedAt >> (at >> print | forget >> "oob" >> print) >> merge
+                             # oob
 ```
 
 ## 10. Prelude reference (all derived user code — `:defs` for types)
@@ -672,6 +735,9 @@ at every width. Rules (full version: `guide-open-arity.md`):
    (`def total = [+] 0 ... >> foldExp : Intⁿ ⇒ Int` — one body, every
    width, including n = 0).
 
+The index words `at` and `indicesN` are exponent-shaped, so rule 1
+holds for them too: final atom of their stage (§9).
+
 ## 14. Sharp edges (things the checker will teach you)
 
 - `1 >> 2` — the incoming wire is uncovered (constants don't thread;
@@ -708,6 +774,9 @@ at every width. Rules (full version: `guide-open-arity.md`):
   spliced code against the live environment — priced by its railway.)
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
+- A `Fin` prints as a bare integer. Erasure is honest — a `Fin` *is* an
+  `Int` at runtime — but output does not distinguish an index from an
+  ordinary `Int`; only the type does.
 
 ## 15. Further reading
 
@@ -715,6 +784,8 @@ at every width. Rules (full version: `guide-open-arity.md`):
   inventory, deferral theorem, the guard-syntax history).
 - `design-exponents.md` — exponents: theory, unification, erasure,
   the mapN open question (Fn-in-declarations has since shipped, §8).
+- `design-indices.md` — `Fin(n)` and witnessed introductions: why
+  `Aⁿ` is `Fin(n) → A`, and why there is no `tabulate`.
 - `design-effects.md` — the effects position (effects are wires, IO is
   a linear wire, the placement ladder as a PCM); converged, not
   scheduled.

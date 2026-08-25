@@ -1,0 +1,71 @@
+# Indices: Fin(n), and a small dataframe made of them.
+#
+# A bundle Aⁿ IS the function space Fin(n) → A, stored tabulated and
+# laid flat on the stack. This file adds the other half: the index
+# itself. Every Fin is WITNESSED — its bound comes from a live bundle
+# or from a literal's own offset — so `at` never needs a runtime check
+# and the bound is erased like every other width (a Fin is an Int at
+# runtime; `finInt` and `weaken` are identities).
+
+# ---- the frame ---------------------------------------------------------
+# Equal-height columns ARE shared n: the checker correlates the widths,
+# so a 4-row price column cannot meet a 3-row quantity column.
+def prices = 300 120 450 200
+def qtys   = 2 5 1 3
+
+prices qtys ; mulN ; sumN ; print       # 600+600+450+600 = 2250, line total
+
+# ---- row numbers -------------------------------------------------------
+# indicesN pairs every wire with its position — a keyed column, and the
+# only way indices are ever born: out of a bundle that witnesses n.
+10 20 30 ; indicesN ; print print print print print print   # 0 10 1 20 2 30
+
+# index-aware map: indicesN, then lift a two-wire word with mapN2
+def withRow = indicesN ; [(i v -> (i ; finInt) v ; +)] ... ; mapN2
+100 200 300 ; withRow ; sumN ; print     # 100+0 + 200+1 + 300+2 = 603
+
+# ---- reading one row ---------------------------------------------------
+# fin0 is the DEEPEST wire — the same leftmost-is-deepest alignment
+# atoms use. The literal's bound is n+1, so `at` is checked statically.
+fin1 prices ; at ; print                 # 120
+
+# a computed index has no static bound, so it is checked DYNAMICALLY:
+# checkedAt routes, and the hit track IS the witness.
+def lookup = checkedAt ; (at ; print | forget ; "out of range" ; print) ; merge
+1 prices ; lookup                        # 120
+9 prices ; lookup                        # out of range
+
+# ---- argmax: a witnessed index, derived --------------------------------
+# The accumulator is a Maybe, because an empty bundle has no argmax —
+# and the type says so rather than a sentinel saying it.
+def argmaxN =
+    indicesN
+    [(acc i v -> acc ; (i v ; in2 | (bi bv -> (bv v ; less) [i v ; in2] [bi bv ; in2] ... ; cond)) ; merge)] in1 ...
+    foldExp2
+
+def showRow = ("none" ; print | (i v -> v ; drop ; i ; finInt ; print)) ; merge
+
+prices ; argmaxN ; showRow               # 2 — the dearest line is row 2
+argmaxN ; showRow                        # none — n = 0, same def
+
+# ---- gather: a join index applied --------------------------------------
+# A join index from an n-frame into an m-frame is Fin(m)ⁿ: pointers as
+# data, with their bounds in the type. One open frame rides the spine;
+# every other frame rides in a Box.
+def gather =
+    -> src
+    drop ...
+    [(i -> i (src ; unBox) ; at)] ... ; mapN
+
+(prices ; Box) fin2 fin0 fin1 fin0 ; gather ; sumN ; print   # 450+300+120+300 = 1170
+
+# ---- a permutation is just data ----------------------------------------
+# Fin(n)ⁿ is a permutation of an n-bundle. The identity permutation is
+# indicesN's own index column — so gathering by it is a law you can run.
+def idPerm = indicesN ; [(i v -> v ; drop ; i)] ... ; mapN2
+
+(prices ; Box) (prices ; idPerm) ; gather ; sumN ; print     # 1070 = prices summed
+prices ; sumN ; print                                        # 1070 — the same
+
+# reversal, by hand: gather is where a permutation becomes a program
+(prices ; Box) fin3 fin2 fin1 fin0 ; gather ; print print print print   # 200 450 120 300

@@ -130,10 +130,13 @@ the prelude; every REPL line runs against a persistent typed stack.
     fold word is variadic over bare stack products (`sumN : Intⁿ ⇒
     Int`); `mapN`/`mapN2` lift any ordinary word pointwise, so the GLA
     generators are *derived* (`def addN = zipN ; [+] ... ; mapN2`); a
-    matrix is a value `Fn⟨Intⁿ ⇒
-    Intᵐ⟩`; and a 3-weight syllabus cannot meet a 4-score transcript —
-    dimension errors are type errors. `n` is erased: the running
-    stack's width is its own witness.
+    matrix is a value `Fn⟨Intⁿ ⇒ Intᵐ⟩`; and a 3-weight syllabus cannot
+    meet a 4-score transcript — dimension errors are type errors. `n`
+    is erased: the running stack's width is its own witness. And `Aⁿ`
+    *is* the function space `Fin(n) → A` kept tabulated, so indices are
+    first-class and bounds-checked by the type (`at`, `indicesN`,
+    `checkedAt`) — each one witnessed by a live bundle or a literal's
+    own offset (`examples/index.braid`).
 11. **Laws are programs.** Associativity, De Morgan, dot-product
     symmetry, the copy/add bialgebra — they run as code
     (`examples/laws.braid`, `gla.braid`, `registrar.braid`), and
@@ -152,6 +155,7 @@ the prelude; every REPL line runs against a persistent typed stack.
 (railway), `ladder` (every guard idiom), `iterate` (while), then `nat`
 and `tree` (data types and folds), `lists`, `conditionals` and `case`
 (rows, deferred sums, `case(…)`), `tag` (naming wires in passing),
+`index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `parallel`, `matrices`, `gla` (bundles and the bialgebra),
 `code`, `transpose`, `io` — and finish with `registrar`, which uses
@@ -160,7 +164,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 570+ case test suite, a full
+(typechecker, interpreter, REPL), a 600+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

@@ -16,12 +16,23 @@ dupN    : aⁿ ⇒ aⁿ aⁿ                     copy a bundle
 mapN2   : Fn⟨a b ⇒ c⟩ (a b)ⁿ ⇒ cⁿ        map across a PAIR bundle
 zipN    : aⁿ bⁿ ⇒ (a b)ⁿ                 interleave two bundles
 unzipN  : (a b)ⁿ ⇒ aⁿ bⁿ                 de-interleave
+at      : Fin(n) aⁿ ⇒ a                  index a bundle (0 = deepest)
+indicesN: aⁿ ⇒ (Fin(n) a)ⁿ               tag each wire with its index
 ```
 
 `mapN`/`mapN2` are the lifters: with `zipN` they turn any one- or
 two-wire word into its pointwise bundle version, which is why `addN`,
 `scaleN`, `mulN` and `subN` are prelude defs rather than primitives
 (`def addN = zipN >> [+] ... >> mapN2`).
+
+`at` and `indicesN` are the index words: `Aⁿ` *is* the function space
+`Fin(n) ⇒ A` stored flat, and a `Fin(n)` is an index into it. Indices
+are **born of a bundle** — `indicesN` tags each wire of a live segment
+with its own index, and `checkedAt` earns one by testing an `Int`
+against the segment actually there (hit track = in range). The only
+other source is an index literal (`fin0`, `fin1`, …), whose offset is
+its own proof. Nothing conjures an index from nothing, for the same
+reason nothing conjures a bundle (Rule 4).
 
 Derived open words (ordinary prelude defs — openness is inherited):
 `sumN : Intⁿ ⇒ Int`, `decide : a ((•|•) a)ⁿ ⇒ a`, `firstTrue`, `while`,
