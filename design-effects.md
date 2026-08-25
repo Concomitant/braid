@@ -1,8 +1,69 @@
-# Design note: effects (arrows → theories → wires) — CONVERGED, NOT SCHEDULED
+# Design note: effects (arrows → theories → wires) — STAGE 1 SHIPPED
 
-Consolidates three discussions (2026-07-30 … 08-03). Status: design
-position, no implementation planned yet. Supersedes the effect-row
-sketch in the old plan file; extends design-control-flow.md §7.
+Consolidates three discussions (2026-07-30 … 08-03). Status: **stage 1
+of the staging below — the IO grade — shipped 2026-08-25**; stages 2–5
+remain design position. One decision was reversed at implementation
+(the placement rule; amendment in place, below). Supersedes the
+effect-row sketch in the old plan file; extends
+design-control-flow.md §7.
+
+## Stage 1 as shipped (2026-08-25)
+
+Every arrow carries a **grade** — the set of resource wires it
+touches. Stage 1 has exactly one label, `io`. A pure arrow prints as
+it always did (`⇒`); an effectful one prints `⇒!`. Effect tails never
+display: the same information hiding `ρ` already gets inside `Fn⟨…⟩`.
+
+**Five prims are marked; everything else is inferred.** There is no
+effect annotation anywhere — not in the prelude, the examples, or the
+tests.
+
+```text
+print     : a0 ⇒! •
+readLine  : • ⇒! (Str | Str)
+readFile  : Str ⇒! (Str | Str)
+writeFile : Str Str ⇒! Maybe(Str)
+evalCode  : Code ρ0 ⇒! (ρ1 | Str ρ0)
+```
+
+`evalCode` is unconditionally io because it runs arbitrary code: the
+dynamic escape hatch sits at the top of the lattice even when the code
+it happens to run is pure. `reflect : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)`
+stays pure — it READS code, it never runs it.
+
+**Grades unify; they do not join.** Composition forces two arrows'
+effect rows *equal*. The join everyone expects falls out of label
+absorption into an open tail — tail-only, the same discipline stacks,
+sums and widths already obey, which is what keeps inference principal.
+The corollary is the **auto-opening rule**: every instantiated closed
+grade gets a fresh tail, or a pure word could not sit beside an
+effectful one.
+
+**ε is a fifth variable sort.** The higher-order prims — `apply`,
+`loop`, `foldExp`, `foldExp2`, `mapN`, `mapN2` — share ONE ε between
+the inner `Fn` and the outer arrow, which is why a single `apply`
+serves pure and effectful quotes alike. Prelude defs (`map`, `filter`,
+`while`, `until`, `cond`) needed no changes at all; their
+ε-polymorphism is inferred.
+
+```text
+1 >> print                    : • ⇒! •               composition propagates
+def shout = toStr >> print    : a0 ⇒! •              inferred through defs
+def quiet = toStr >> drop     : a0 ⇒ •               pure stays bare
+[print]                       : • ⇒ Fn⟨a0 ⇒! •⟩      PUSHING is pure
+[print] 5 >> apply            : • ⇒! •               apply transfers it out
+[dup >> *] 5 >> apply         : • ⇒ Int              same apply, pure quote
+[dup >> print ...] ... >> map : List(a0) ⇒! List(a0) ε-polymorphic
+print print                   : a0 a1 ⇒! •           legal; left-to-right
+```
+
+**A declared `Fn` type MEANS its grade.** New surface syntax `⇒!`
+(ASCII `->!`) writes the io form: `Fn⟨Str ⇒! •⟩`. A declaration that
+says `Fn⟨Str ⇒ •⟩` refuses an io quotation — *Cannot unify effects: io
+vs pure*. That strictness is the point, and it is also the limit:
+there is no subeffecting, so a pure quote unified into an io context
+types as io. Let-generalization at `def` boundaries restores per-use
+freshness; inside one expression nothing does.
 
 ## The design, zoomed out
 
@@ -56,7 +117,8 @@ compatible to relax to decreed left-to-right, which the evaluator
 already implements); at the explicit level the rule dissolves —
 mis-ordered effects are unwritable, not illegal.
 
-**Refinement (08-06): the placement ladder.** "≤1 effectful" is the
+**Refinement (08-06): the placement ladder** — *step 1 amended 08-25
+(below): the steps are licences, not legality.* "≤1 effectful" is the
 conservative floor of a three-step ladder, each step a strictly larger
 legal fragment, each licensed by something checkable:
 
@@ -85,7 +147,9 @@ legal fragment, each licensed by something checkable:
    syntactic gate that happens to coincide with the deep rule exactly
    where it matters most. IO stays ≤1 forever at the ambient level:
    everything IO touches the one world wire, and world-order is
-   observable.
+   observable. *(Amended 08-25: several io atoms in a stage are legal
+   and run left-to-right; what IO never earns is the reordering
+   licence.)*
 
 **The left-to-right alternative.** Instead of forbidding, decree
 left-to-right order for effectful atoms in a stage (the evaluator
@@ -99,6 +163,38 @@ left-to-right makes it a silent behaviour. Everything-exact
 temperament says forbid; every strict language's pragmatics says
 decree. Either way the ladder is the part that carries the theory —
 the choice only decides whether its floor is an error or a default.
+
+**Amendment (2026-08-25, at implementation): the decree won.** Stage 1
+ships left-to-right, not ≤1. What settled it, in order:
+
+- The ≤1 rule, once implemented, broke **11 existing sites**. `print
+  print print` is the idiomatic way to print several wires; it stood
+  in 2 examples and 7 tests. A rule that outlaws the idiom the
+  language already teaches carries the burden of proof.
+- The premise fails for Braid's surface syntax. The premonoidal
+  obstruction is that a tensor has *no canonical order* — but Braid's
+  tensor is not the abstract bifunctorial ⊗. Atoms are positionally
+  aligned to wires (leftmost takes the deepest), so the text ALREADY
+  fixes the order the obstruction says is missing, and the evaluator
+  has implemented exactly that order since long before grades existed:
+  the left-biased premonoidal tensor. The error the placement check
+  wanted to print ("no canonical order — separate lines") would have
+  been false.
+
+The cost, stated plainly: **reversibility now runs the other way.** A
+decree can be relaxed further but not tightened without breaking
+programs — the reverse of the direction the 08-07 argument below banks
+on ("partial can relax to total, not vice versa"). So ladder step 1
+stops being a legality boundary and becomes the floor of a LICENCE
+structure, exactly as this paragraph anticipated: steps 2 and 3 are
+licences to reorder, parallelise and fuse, which a future grade must
+EARN; step-1 stages are legal, rigid, and execute in textual order.
+The implementation-stance invariant survives with its subject changed
+— the check that was to be the PCM's definedness predicate is now the
+licence predicate, and every ladder step must still re-verify that
+equation before it lets a rewrite run. And the trade-off named just
+above is the one now being paid: a mis-ordered effect is a silent
+behaviour, not a type error.
 
 **Formal home for the ladder (08-07): grading by a partial commutative
 monoid.** The literature separates what our first sketch conflated:
@@ -252,10 +348,12 @@ grade inferred.
   yes, closure-like); Code⟨⟩ reflection of elaborated (wire-threaded)
   code; what a `scope` is syntactically.
 
-## If implemented, the staging
+## The staging (1 shipped, 2–5 not scheduled)
 
 1. IO bit on Arrow (the old arrows-plan stage 1; display `⇒!`, pure
-   displays as today so all tests survive).
+   displays as today so all tests survive). **SHIPPED 2026-08-25** —
+   see "Stage 1 as shipped" above; the placement rule it was to carry
+   became the left-to-right decree instead.
 2. Bundle declarations + `=Name>` display sugar over wire suffixes.
 3. Theories/`use` (elaboration only).
 4. Ambient threading (elaborator frames pure stages inside `use`).

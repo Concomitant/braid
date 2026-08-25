@@ -45,6 +45,7 @@ the current stack is rejected with a message naming the stack.
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
 | `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
+| `⇒!` , `->!` | the effectful arrow — an arrow carrying the `io` grade (§3) |
 
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
@@ -96,6 +97,28 @@ Each atom in a stage covers exactly its own wires; every incoming wire
 must be covered by some atom. `1 2 >> +` works (two made, two used);
 `1 >> +` is a type error (one made, two needed).
 
+**Every arrow carries a grade** — the set of resource wires it touches.
+There is one label today, `io`: a pure arrow prints `⇒`, an effectful
+one prints `⇒!`.
+
+```braid
+1 >> print                  # • ⇒! •            composition propagates it
+def shout = toStr >> print  # a0 ⇒! •           inferred through defs
+def quiet = toStr >> drop   # a0 ⇒ •            pure stays bare
+[print]                     # • ⇒ Fn⟨a0 ⇒! •⟩   pushing an action is pure
+[print] 5 >> apply          # • ⇒! •            apply transfers it out
+[dup >> *] 5 >> apply       # • ⇒ Int           same apply, pure quote
+```
+
+Grades are **inferred, never annotated**: five prims are marked io
+(`print`, `readLine`, `readFile`, `writeFile`, `evalCode` — §9) and
+every other arrow's grade follows from composition. Higher-order words
+(`apply`, `loop`, `map`, `foldExp`, `mapN`) share the grade of the
+quotation they run, so one `apply` serves pure and effectful quotes
+alike. Effect tails are invisible in display, the same hiding a `ρ`
+tail already gets inside `Fn⟨…⟩`. Writing a grade in a type: §5 and
+§8. The two edges: §14.
+
 ## 4. The remainder discipline
 
 Three spellings of "and the rest passes through":
@@ -122,7 +145,8 @@ last so the runtime segment can be its witness):
 
 ## 5. Types
 
-Inferred, principal, never annotated. Four variable sorts:
+Inferred, principal, never annotated. Five variable sorts, four of
+them visible:
 
 | sort | display | ranges over |
 |---|---|---|
@@ -130,6 +154,7 @@ Inferred, principal, never annotated. Four variable sorts:
 | stack | `ρ0…` | a stack segment (always a tail) |
 | row | `σ0…` | the tail of a sum's alternative list |
 | exponent | `n0…` (shown superscript: `Intⁿ⁰`) | a width (unary natural) |
+| effect | never displayed | the tail of an arrow's grade (§3) |
 
 Type formers:
 
@@ -145,7 +170,10 @@ Type formers:
   *stacks*. Rigid nesting: `(A | (B | C))` never flattens.
   `Bool = (• | •)`, `Maybe(...) = (• | ...)` are prelude aliases.
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
-  hom: `apply` is modus ponens.
+  hom: `apply` is modus ponens. The arrow inside carries its grade, and
+  a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
+  (*Cannot unify effects: io vs pure*); `Fn⟨Str ⇒! •⟩` is the io form
+  (§8).
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
   match exactly (`:t!` shows raw).
@@ -161,7 +189,9 @@ Type formers:
 
 ### Quotation `[p]`
 `[p] : • ⇒ Fn⟨…⟩` — pushes the program as a value; a **pure point**
-even when `p` does real work. Run with `apply : Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1`
+even when `p` does real work, and even when that work is io
+(`[print] : • ⇒ Fn⟨a0 ⇒! •⟩` — the grade rides inside, and `apply`
+transfers it out). Run with `apply : Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1`
 (the `Fn` sits *below* its arguments). Quotes capture in-scope binder
 names (closures).
 
@@ -404,6 +434,7 @@ type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩    # n, m are WIDTHS: used under `^`
 type Sq(n) = Mat(n, n)                # widths pass on to another alias
 type Endo(a) = Fn⟨a ⇒ a⟩              # a reified program as a type…
 type Pred(a) = Fn(a -> (a | a))       # …Unicode Fn⟨Σ ⇒ Θ⟩ or ASCII Fn(Σ -> Θ)
+type Sink(a) = Fn⟨a ⇒! •⟩             # an io program: ⇒! (ASCII `->!`)
 data List(a) = (• | a List(a))        # recursive nominal type
 data Tree(a) = (a | Tree(a) Tree(a))
 data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # codata: recursion THROUGH a Fn
@@ -463,7 +494,10 @@ so both literal exponents (`type T3 = (Int^3 | Str)`) and exponent
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
-like any type stack (params splice, `•` is empty, `Fn` nests). This
+like any type stack (params splice, `•` is empty, `Fn` nests). The
+arrow's shape is part of the type: `⇒` declares a **pure** program and
+rejects an io quotation, `Fn⟨Σ ⇒! Θ⟩` (ASCII `Fn(Σ ->! Θ)`) declares an
+io one and demands it (§3, §14). This
 names function-carrier types — `Endo`, `Pred`, State-style monad
 carriers — and, when the recursion runs *through* the `Fn`, gives
 **codata**:
@@ -518,7 +552,7 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | `toStr` | `a0 ⇒ Str` |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
 | `symStr` | `Sym ⇒ Str` |
-| `print` | `a0 ⇒ •` |
+| `print` | `a0 ⇒! •` — io (§3) |
 | `true` / `false` | `• ⇒ Bool` |
 
 Routers (the primitive comparators; hit = track 1 — the predicate
@@ -545,12 +579,18 @@ Metaprogramming & IO (railway-typed edges):
 | word | type |
 |---|---|
 | `reflect` | `Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code \| Str)` |
-| `evalCode` | `Code ρ0 ⇒ (ρ1 \| Str ρ0)` — dynamically checked |
+| `evalCode` | `Code ρ0 ⇒! (ρ1 \| Str ρ0)` — io, dynamically checked |
 | `unparse` | `Code ⇒ Str` |
 | `parse` | `Str ⇒ (Code \| Str)` |
-| `readLine` | `• ⇒ (Str \| Str)` — one line from stdin; EOF misses |
-| `readFile` | `Str ⇒ (Str \| Str)` |
-| `writeFile` | `Str Str ⇒ Maybe(Str)` |
+| `readLine` | `• ⇒! (Str \| Str)` — io; one line from stdin, EOF misses |
+| `readFile` | `Str ⇒! (Str \| Str)` — io |
+| `writeFile` | `Str Str ⇒! Maybe(Str)` — io |
+
+These four and `print` are the **whole** io surface: nothing else is
+marked, every other grade is inferred (§3). `reflect` and `parse` stay
+pure — `reflect` READS a quotation, it never runs it — while
+`evalCode` is io unconditionally, because what it will run is not
+known until it runs.
 
 Exponent tier (widths erased; see §13):
 
@@ -710,7 +750,7 @@ its (determinate) output type fails with a clean `result desync` error
 instead of silently desyncing. Backstop, not a type-level fix — the
 typed design is `design-metaprogramming.md`.
 `unparse`/`parse` + `readFile`/`writeFile` round-trip code through
-disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ ⇒ (r | Str ρ)⟩` defers
+disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ ⇒! (r | Str ρ)⟩` defers
 instead of running — the other half of `reflect`'s round trip.
 
 **Cut soundness** (`examples/cuts.braid`): Braid is not
@@ -774,6 +814,15 @@ holds for them too: final atom of their stage (§9).
   spliced code against the live environment — priced by its railway.)
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
+- Effects don't sub-effect: composing forces two arrows' grades EQUAL
+  (the join you expect comes from absorption into an open tail), so a
+  pure quote unified into an io context types as io for that use.
+  Let-generalization at a `def` boundary restores per-use freshness;
+  inside one expression nothing does.
+- Several effectful atoms in one tensor stage are **legal**, and run
+  left to right — deepest wire first, the order they are written in
+  (`print print : a0 a1 ⇒! •`). That order is decreed, not checked, so
+  a mis-ordered pair is a wrong behaviour, not a type error.
 - A `Fin` prints as a bare integer. Erasure is honest — a `Fin` *is* an
   `Int` at runtime — but output does not distinguish an index from an
   ordinary `Int`; only the type does.
@@ -787,8 +836,9 @@ holds for them too: final atom of their stage (§9).
 - `design-indices.md` — `Fin(n)` and witnessed introductions: why
   `Aⁿ` is `Fin(n) → A`, and why there is no `tabulate`.
 - `design-effects.md` — the effects position (effects are wires, IO is
-  a linear wire, the placement ladder as a PCM); converged, not
-  scheduled.
+  a linear wire, the placement ladder as a PCM); **stage 1, the io
+  grade, has shipped** — stages 2–5 (bundles, theories, ambient
+  threading, the linear `World`) are position only.
 - `design-metaprogramming.md` — typed code as the free category
   (`Path`), Forth's compiler lifted from a monoid; position taken.
 - `guide-open-arity.md` — practical rules for open words.

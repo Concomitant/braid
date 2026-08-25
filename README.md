@@ -73,7 +73,7 @@ braid> :doc decide
 `:t` shows a type (`:t!` raw, un-folded); `:doc` and `:defs` browse
 the prelude; every REPL line runs against a persistent typed stack.
 
-## A tour, in twelve ideas
+## A tour, in thirteen ideas
 
 1. **Everything exact.** Constants are maps from nothing (`1 : • ⇒
    Int`), operations consume exactly their inputs (`+ : Int Int ⇒
@@ -142,7 +142,18 @@ the prelude; every REPL line runs against a persistent typed stack.
     (`examples/laws.braid`, `gla.braid`, `registrar.braid`), and
     they're operational: a checked law is a license to rewrite
     (contrapose a chain, parallelize a fold, flip a weighting).
-12. **Code is data.** `reflect` turns a quotation into its spine — a
+12. **Effects are wires.** State, logs, readers, exceptions,
+    nondeterminism — the whole effect zoo decomposes into structure
+    the language already has: a threaded wire, a captured closure, the
+    railway sum, a list. Only IO is irreducible, so IO is the one
+    thing the types track. An effectful arrow prints `⇒!`, a pure one
+    `⇒`, and which you get is **inferred, never annotated**: five
+    prims are marked (`print`, `readLine`, `readFile`, `writeFile`,
+    `evalCode`) and every other grade follows from composition — `def
+    shout = toStr >> print : a0 ⇒! •`. Quoting stays pure, since
+    pushing an action isn't doing it: `[print] : • ⇒ Fn⟨a0 ⇒! •⟩`, and
+    `apply` is what transfers the grade out.
+13. **Code is data.** `reflect` turns a quotation into its spine — a
     list of stages of atoms — so `take`/`map`/`reverse` slice and
     transform *programs*; `evalCode` runs them (dynamically checked,
     failures on the miss track); `unparse`/`parse` and
@@ -164,7 +175,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 600+ case test suite, a full
+(typechecker, interpreter, REPL), a 620+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -174,4 +185,6 @@ out, and what replaced it), `design-exponents.md` (dimension-indexed
 segments: why exponents not stars, why unary successors suffice, why
 the eliminator is a fold and not an unroll). Deliberately absent so
 far: floats, modules beyond the auto-loaded prelude, typed splicing,
-labeled record fields, effect types.
+labeled record fields, and effects beyond the inferred `io` grade (no
+bundles, no theories, no handlers — `design-effects.md` has the
+position and the staging).
