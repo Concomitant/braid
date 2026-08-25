@@ -49,10 +49,10 @@ passTests =
   , ("1 2 >> +",      "• ⇒ Int")
     -- strict tensor: `1 +` is (• ⇒ Int) ⊗ (Int Int ⇒ Int), NOT increment
   , ("1 +",           "Int Int ⇒ Int Int")
-  , ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", "• ⇒ •")
+  , ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", "• ⇒! •")
 
     -- newline is strict >>
-  , ("1 2\n(1 ... >> +) (2 _ >> *)\n+\nprint", "• ⇒ •")
+  , ("1 2\n(1 ... >> +) (2 _ >> *)\n+\nprint", "• ⇒! •")
   , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
 
     -- a bracket may span lines: a newline against a delimiter's inner
@@ -83,7 +83,7 @@ passTests =
     -- quotations and apply (quotes are terminal-source constants)
   , ("[dup >> *]",               "• ⇒ Fn⟨Int ⇒ Int⟩")
   , ("[dup >> *] 7 >> apply",    "• ⇒ Int")
-  , ("[dup >> *] 7 >> apply >> print", "• ⇒ •")   -- spec example (49)
+  , ("[dup >> *] 7 >> apply >> print", "• ⇒! •")   -- spec example (49)
   , ("apply",                    "Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
 
     -- grouping: (p) is the open program p, never reified
@@ -152,7 +152,7 @@ passTests =
   , ("1 2 3 -> _ _ z -> drop drop drop >> z", "• ⇒ Int")
   , ("1 2 -> a _ -> drop drop >> a",          "• ⇒ Int")
     -- bare and mid-line: the arrow ends the stage it follows
-  , ("1 \"a\" .foo -> x _ y -> print print _ >> x ...", "• ⇒ Int Sym")
+  , ("1 \"a\" .foo -> x _ y -> print print _ >> x ...", "• ⇒! Int Sym")
   , ("5 ; -> x -> x ... >> +",   "• ⇒ Int")   -- after a separator
   , ("5 -> n -> n ... >> *",     "• ⇒ Int")   -- explicit body marker
   , ("5\n-> n\nn ... >> *",      "• ⇒ Int")   -- ...or an ordinary stage break
@@ -333,6 +333,25 @@ moduleTypeTests =
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
     -- INDICES: Fin(n) with witnessed introductions.  Every intro's n
     -- is forced by an input — a live bundle, or a literal's offset.
+    -- EFFECTS: the io grade.  Five prims are marked; everything else
+    -- infers.  A pure arrow prints exactly as it always did.
+  , ("print",     "a0 ⇒! •")
+  , ("readLine",  "• ⇒! (Str | Str)")
+  , ("readFile",  "Str ⇒! (Str | Str)")
+  , ("evalCode",  "Code ρ0 ⇒! (ρ1 | Str ρ0)")
+    -- pushing an action is PURE; the effect lives inside the Fn, and
+    -- `apply` is where it transfers back out
+  , ("[print]",   "• ⇒ Fn⟨a0 ⇒! •⟩")
+  , ("[print] 5 >> apply", "• ⇒! •")
+  , ("[dup >> *] 5 >> apply", "• ⇒ Int")
+    -- reflect READS a program without running it: pure, any grade
+  , ("reflect",   "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)")
+    -- composition propagates
+  , ("1 >> print", "• ⇒! •")
+  , ("dup >> *",   "Int ⇒ Int")        -- and pure stays bare
+    -- several effectful atoms in one stage are legal and run
+    -- left-to-right (deepest first) — design-effects.md's decree
+  , ("print print", "a0 a1 ⇒! •")
   , ("at",        "Fin(n0) a0ⁿ⁰ ⇒ a0")
   , ("indicesN",  "a0ⁿ⁰ ⇒ (Fin(n0) a0)ⁿ⁰")
   , ("checkedAt", "Int a0ⁿ⁰ ⇒ (Fin(n0) a0ⁿ⁰ | Int a0ⁿ⁰)")
@@ -382,6 +401,13 @@ moduleTypeTests =
     -- KINDED type parameters: a bare name is one wire, `...` is a
     -- stack.  The polymorphic pair was inexpressible while every
     -- parameter was stack-kinded (the split was ambiguous).
+    -- the grade is inferred through defs, not read off a name
+  , ("def shout = toStr >> print\nshout",          "a0 ⇒! •")
+  , ("def quiet = toStr >> drop\nquiet",           "a0 ⇒ •")
+  , ("def p = print\ndef q = p\nq",               "a0 ⇒! •")
+    -- ε-polymorphism: one `map`, both readings, no annotation
+  , ("[toStr] (1 2 3 >> pack) >> map",             "• ⇒ List(Str)")
+  , ("def logAll = [dup >> print ...] ... >> map\nlogAll", "List(a0) ⇒! List(a0)")
   , ("data Pair(a, b) = (a b)\nPair",     "a0 a1 ⇒ Pair(a0, a1)")
   , ("data Pair(a, b) = (a b)\nunPair",   "Pair(a0, a1) ⇒ a0 a1")
     -- `...` takes a whole stack into ONE wire: how multi-wire
@@ -436,6 +462,9 @@ evalTests =
   , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
     -- INDICES at runtime.  A Fin is a bare Int: the bound is a type,
     -- erased like every other width, so weaken/finInt are identities.
+    -- grades are erased: several effectful atoms run left-to-right,
+    -- deepest wire first — the order they are written in
+  , ("1 2 3 >> print print print",        ["1","2","3"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
   , ("fin1 10 20 30 >> at >> print",      ["20"], "")
@@ -893,6 +922,10 @@ moduleFailTests =
   , ("1 >> rotLast",                  "Unknown primitive: rotLast")
     -- Fin is a built-in type former, not a user name
   , ("type Fin = Int\n1",             "Malformed type declaration")
+    -- a declared pure Fn type refuses an io quotation: the declaration
+    -- is not decoration
+  , ("data Quiet = (Fn⟨Str ⇒ •⟩)\n[print] >> Quiet >> drop",
+     "Cannot unify effects")
     -- the bound must agree with the bundle's actual width
   , ("fin0 >> 1 2 >> at",             "Cannot unify")
     -- a closed non-final open word that doesn't cover its wires is an

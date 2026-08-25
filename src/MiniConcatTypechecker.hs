@@ -206,6 +206,10 @@ data Arrow = Arrow SType SType EffRow
 arrPure :: SType -> SType -> Arrow
 arrPure i o = Arrow i o effPure
 
+-- ...and the five words that touch the world
+arrIO :: SType -> SType -> Arrow
+arrIO i o = Arrow i o effIO
+
 arrowGlyph :: EffRow -> String
 arrowGlyph e = if eIO e then " ⇒! " else " ⇒ "
 
@@ -841,6 +845,7 @@ data Token
   | TokLAngle     -- ⟨ (open a Fn type: Fn⟨Σ ⇒ Θ⟩)
   | TokRAngle     -- ⟩ (close a Fn type)
   | TokFatArrow   -- ⇒ (the arrow inside a Fn type)
+  | TokBangArrow  -- ⇒! / ->! (an IO arrow in a Fn type)
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -870,6 +875,7 @@ tokenize = go
     go ('(':cs)         = (TokLParen :) <$> go cs
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
+    go ('-':'>':'!':cs) = (TokBangArrow :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
     go ('-':cs)
       | (ds@(_:_), rest) <- span isDigit cs =
@@ -880,6 +886,7 @@ tokenize = go
     go (';':cs)         = (TokSeq :) <$> go cs   -- ; is a synonym for >>
     go ('⟨':cs)         = (TokLAngle :) <$> go cs     -- Fn⟨…⟩ type brackets
     go ('⟩':cs)         = (TokRAngle :) <$> go cs
+    go ('⇒':'!':cs)     = (TokBangArrow :) <$> go cs
     go ('⇒':cs)         = (TokFatArrow :) <$> go cs
 
     go (c:cs)
@@ -1719,6 +1726,7 @@ parseTyElem aliases dataSigs params toks = case toks of
       (TokRParen : _)   -> pure (SEnd, rest)
       (TokComma : _)    -> pure (SEnd, rest)
       (TokFatArrow : _) -> pure (SEnd, rest)   -- Fn⟨Σ ⇒ …⟩ boundary
+      (TokBangArrow : _) -> pure (SEnd, rest)  -- Fn⟨Σ ⇒! …⟩ boundary
       (TokArrow : _)    -> pure (SEnd, rest)   -- Fn(Σ -> …) boundary
       (TokRAngle : _)   -> pure (SEnd, rest)   -- Fn⟨… ⇒ Θ⟩ close
       []                -> pure (SEnd, [])
@@ -1726,13 +1734,17 @@ parseTyElem aliases dataSigs params toks = case toks of
     -- Fn⟨Σ ⇒ Θ⟩ / Fn(Σ -> Θ): two stacks around an arrow, then `close`
     parseFn close ts = do
       (inSt, rest1) <- goStack ts
-      rest2 <- case rest1 of
-                 (TokFatArrow : r) -> Right r
-                 (TokArrow : r)    -> Right r
-                 _ -> Left "Expected '⇒' (or '->') inside a Fn type"
+      -- the arrow's own shape carries the grade: ⇒ is pure, ⇒! is io.
+      -- A declared pure Fn type therefore MEANS pure — it refuses to
+      -- unify with an io quotation rather than quietly accepting one.
+      (rest2, grade) <- case rest1 of
+                 (TokFatArrow : r)  -> Right (r, effPure)
+                 (TokArrow : r)     -> Right (r, effPure)
+                 (TokBangArrow : r) -> Right (r, effIO)
+                 _ -> Left "Expected '⇒' (or '->', '⇒!') inside a Fn type"
       (outSt, rest3) <- goStack rest2
       case rest3 of
-        (t : r) | t == close -> Right (TFn (Arrow inSt outSt effPure), r)
+        (t : r) | t == close -> Right (TFn (Arrow inSt outSt grade), r)
         _ -> Left $ "Expected '"
                  ++ (if close == TokRAngle then "⟩" else ")")
                  ++ "' to close the Fn type"
@@ -1936,7 +1948,8 @@ showStackA as st          = unwords (go st)
     go (SExp b e rest)  = showExpAt b e : go rest
 
 showArrowA :: [Alias] -> Arrow -> String
-showArrowA as (Arrow s1 s2 _) = showStackA as s1 ++ " ⇒ " ++ showStackA as s2
+showArrowA as (Arrow s1 s2 e) =
+  showStackA as s1 ++ arrowGlyph e ++ showStackA as s2
 
 showSchemeA :: [Alias] -> Scheme -> String
 showSchemeA as (Forall tvars svars rvars nvars evars arr) =
@@ -2028,17 +2041,21 @@ infer env (Tensor ts) = do
       grades = [ g | Arrow _ _ g <- arrows ]
       stageG = head grades
       gcs    = [ CEqEff stageG g | g <- drop 1 grades ]
-      -- THE PLACEMENT RULE.  Two effectful atoms in one stage have no
-      -- canonical order — juxtaposition is a tensor, and the one
-      -- control wire cannot thread two boxes in parallel.  Semantic,
-      -- not a name check: a def wrapping `print` is effectful, and a
-      -- def shadowing `readFile` with pure code is not.
-      effAtoms = length [ () | Arrow _ _ g <- arrows0, eIO g ]
-      pcs | effAtoms >= 2 =
-              [ CFail "two effectful atoms in one tensor stage — no \
-                      \canonical order; separate lines" ]
-          | otherwise = []
-  pure (Arrow inS outS stageG, cs ++ gcs ++ pcs)
+  -- PLACEMENT: several effectful atoms in one stage are LEGAL, and
+  -- they run left to right — deepest wire first, the order the atoms
+  -- are already written in.  design-effects.md offers this as the
+  -- alternative to forbidding (its "left-to-right decree", which the
+  -- evaluator has always implemented), and the argument for taking it
+  -- here is that Braid's tensor is not the abstract bifunctorial ⊗ in
+  -- the first place: atoms are positionally aligned to wires, so the
+  -- text already fixes the order that the premonoidal obstruction says
+  -- is missing.  `print print print` keeps working.
+  --
+  -- Reversibility runs the other way now (a decree can be relaxed
+  -- further but not tightened without breaking programs), so the
+  -- ladder's step 2/3 licences — reordering, parallelising, fusing —
+  -- are what future grades must earn, not legality itself.
+  pure (Arrow inS outS stageG, cs ++ gcs)
 
 infer env (Seq t u) = do
   (Arrow i1 o1 e1, c1) <- infer env t
@@ -2076,7 +2093,11 @@ inferOperand env _ (Quote p) = do
   -- as a whole; its remainder variables stay as metavariables inside
   -- Fn⟨…⟩, solved (monomorphically) at the use site.
   (arrP, cs) <- infer env p
-  pure (arrPure SEnd (SCons (TFn arrP) SEnd), cs)
+  -- The effect lives INSIDE the Fn: pushing an io action is pure, and
+  -- `apply` is where the grade transfers back out.  The outer row is
+  -- open (openEff) so a quote may share a stage with an effectful atom.
+  q <- openEff (arrPure SEnd (SCons (TFn arrP) SEnd))
+  pure (q, cs)
 inferOperand env _ (Alts comps residual) = do
   -- Code row (p₁ | … | pₙ [| ...]): the sum functor action.  A one-wire
   -- atom (Δ-in-sum ⇒ Δ-out-sum); component i maps alternative i,
@@ -2088,8 +2109,16 @@ inferOperand env _ (Alts comps residual) = do
       cs     = concatMap snd results
       inRow  = foldr RCons end [ i | Arrow i _ _ <- arrows ]
       outRow = foldr RCons end [ o | Arrow _ o _ <- arrows ]
-  pure ( arrPure (SCons (TSum inRow) SEnd) (SCons (TSum outRow) SEnd)
-       , cs )
+      grades = [ g | Arrow _ _ g <- arrows ]
+  -- exactly one arm runs, but either might, so the row carries the
+  -- arms' common grade: an io branch grades the whole row
+  rowG <- case grades of
+            (g : _) -> pure g
+            []      -> pure effPure
+  let gcs = [ CEqEff rowG g | g <- drop 1 grades ]
+  r <- openEff (Arrow (SCons (TSum inRow) SEnd)
+                      (SCons (TSum outRow) SEnd) rowG)
+  pure (r, cs ++ gcs)
 inferOperand env _ (OpenAbs slots hasRest body) = do
   -- Named open abstraction (x₁ … xₙ [_ …] [...] -> body).  Each name
   -- enters scope as a monomorphic terminal-source producer xᵢ : • ⇒ Aᵢ —
@@ -2254,9 +2283,16 @@ primEnv =
       gam = SV "Γ"
       del = SV "Δ"
       one t = SCons t SEnd
-      fnGD = TFn (arrPure (STail gam) (STail del))
-      applyTy = Forall [] [gam, del] [] [] []
-        (arrPure (SCons fnGD (STail gam)) (STail del))
+      -- ε: the grade a higher-order word passes THROUGH.  The inner
+      -- Fn's row and the outer arrow's row are the same variable, so
+      -- running a pure quote is pure and running an io one is io — one
+      -- prim, both readings (design-effects.md's shared variable sort).
+      epsV = EV "ε"
+      epsR = Eff False (Just epsV)
+      arrEps i o = Arrow i o epsR
+      fnGD = TFn (arrEps (STail gam) (STail del))
+      applyTy = Forall [] [gam, del] [] [] [epsV]
+        (arrEps (SCons fnGD (STail gam)) (STail del))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
       mergeTy = Forall [] [SV "Θ"] [] [] []
         (arrPure (SCons (TSum (RCons (STail (SV "Θ"))
@@ -2271,11 +2307,11 @@ primEnv =
       -- to continue (re-enter) or done (exit)
       loopTy =
         let sg = SV "Σ"; th = SV "Θ"
-            body = TFn (arrPure (STail sg)
+            body = TFn (arrEps (STail sg)
                      (one (TSum (RCons (STail sg)
                            (RCons (STail th) RNil)))))
-        in Forall [] [sg, th] [] [] []
-             (arrPure (SCons body (STail sg)) (STail th))
+        in Forall [] [sg, th] [] [] [epsV]
+             (arrEps (SCons body (STail sg)) (STail th))
       int2 = SCons TInt (one TInt)
       codeStructTy =
         TData "List"
@@ -2320,15 +2356,15 @@ primEnv =
                (SExp (SCons ta (one tb)) nExp SEnd))
       -- map a one-wire function across a bundle: the tier's missing
       -- container-preserving word (folds collapse, this one rebuilds)
-      mapNTy = Forall [a, b] [] [] [NV "n"] []
-        (arrPure (SCons (TFn (arrPure (one ta) (one tb)))
+      mapNTy = Forall [a, b] [] [] [NV "n"] [epsV]
+        (arrEps (SCons (TFn (arrEps (one ta) (one tb)))
                       (SExp (one ta) nExp SEnd))
                (SExp (one tb) nExp SEnd))
       -- the pair twin, mirroring foldExp/foldExp2.  With zipN this
       -- lifts ANY two-wire word pointwise, so addN and the rest stop
       -- needing to be primitive.
-      mapN2Ty = Forall [a, b, c] [] [] [NV "n"] []
-        (arrPure (SCons (TFn (arrPure (SCons ta (one tb)) (one tc)))
+      mapN2Ty = Forall [a, b, c] [] [] [NV "n"] [epsV]
+        (arrEps (SCons (TFn (arrEps (SCons ta (one tb)) (one tc)))
                       (SExp (SCons ta (one tb)) nExp SEnd))
                (SExp (one tc) nExp SEnd))
       -- zipN's inverse: de-interleave a pair bundle into two bundles
@@ -2369,7 +2405,7 @@ primEnv =
        , ("forget", Forall []    [rho] [] [] [] (arrPure (STail rho) SEnd))
        , ("+",     binIntTy)
        , ("*",     binIntTy)
-       , ("print", Forall [a]    [] [] [] [] (arrPure (one ta) SEnd))
+       , ("print", Forall [a]    [] [] [] [] (arrIO (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
        , ("eq?",       eqTy)
@@ -2395,21 +2431,21 @@ primEnv =
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
        , ("readLine",  Forall [] [] [] [] []
-           (arrPure SEnd
+           (arrIO SEnd
                   (one (TSum (RCons (one TStr)
                         (RCons (one TStr) RNil))))))
        , ("readFile",  Forall [] [] [] [] []
-           (arrPure (one TStr)
+           (arrIO (one TStr)
                   (one (TSum (RCons (one TStr) (RCons (one TStr) RNil))))))
        , ("writeFile", Forall [] [] [] [] []
-           (arrPure (SCons TStr (one TStr))
+           (arrIO (SCons TStr (one TStr))
                   (one (TSum (RCons SEnd (RCons (one TStr) RNil))))))
        , ("evalCode",  Forall [] [gam, del] [] [] []
-           (arrPure (SCons codeStructTy (STail gam))
+           (arrIO (SCons codeStructTy (STail gam))
                   (one (TSum (RCons (STail del)
                         (RCons (SCons TStr (STail gam)) RNil))))))
-       , ("reflect",   Forall [] [gam, del] [] [] []
-           (arrPure (one (TFn (arrPure (STail gam) (STail del))))
+       , ("reflect",   Forall [] [gam, del] [] [] [epsV]
+           (arrPure (one (TFn (arrEps (STail gam) (STail del))))
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
        , ("apply",     applyTy)
