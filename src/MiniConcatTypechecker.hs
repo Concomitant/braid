@@ -1349,6 +1349,11 @@ data DataDecl = DataDecl
   { dName   :: String
   , dParams :: [TyParam]
   , dBody   :: Ty
+  , dResource :: Bool   -- declared with `resource`: a threaded wire.
+                        -- Nominal like any data type, but it also (a)
+                        -- generates no fold — you unroll it, you do not
+                        -- eliminate it by points — and (b) folds onto
+                        -- the ARROW as `=Name>` when it rides a suffix.
   } deriving (Eq, Show)
 
 dataSig :: DataDecl -> (String, [TyParam])
@@ -1411,6 +1416,8 @@ dataDeclArtifacts d =
 -- not sums get no fold; recursion nested under other constructors
 -- (e.g. List(Rose(a))) is passed to the case untransformed.
 dataFoldSrc :: DataDecl -> Maybe (String, String)
+dataFoldSrc d | dResource d = Nothing   -- a resource is unrolled, not
+                                        -- eliminated by points
 dataFoldSrc d =
   case dBody d of
     TSum row -> do
@@ -1534,8 +1541,10 @@ parseTypeLine aliases dataSigs line =
       -- stack parameter is forced into tail position by the parser.
       -- `data` is always nominal; `type` is a transparent alias unless
       -- self-recursive (which forces nominality)
-      pure $ if kw == "data" || occursData name body
-               then Right (DataDecl name params body)
+      -- a resource is nominal by keyword, never an alias: its whole
+      -- point is that `Int Int` must NOT silently become a GameState
+      pure $ if kw == "data" || kw == "resource" || occursData name body
+               then Right (DataDecl name params body (kw == "resource"))
                else Left  (Alias name params body)
     _ -> Left $ "Malformed type declaration (missing '='): " ++ line
   where
@@ -1543,10 +1552,10 @@ parseTypeLine aliases dataSigs line =
       toks <- normalizeToks <$> tokenize lhs
       case toks of
         [TokIdent kw, TokIdent name]
-          | kw `elem` ["type", "data"], validName name ->
+          | kw `elem` declKws, validName name ->
               Right (kw, name, [])
         (TokIdent kw : TokIdent name : TokLParen : rest)
-          | kw `elem` ["type", "data"], validName name ->
+          | kw `elem` declKws, validName name ->
               (,,) kw name <$> paramList rest
         _ -> Left $ "Malformed type declaration: " ++ line
     -- a bare name is ONE WIRE; `...` is a whole stack and may only be
@@ -1559,8 +1568,9 @@ parseTypeLine aliases dataSigs line =
     paramList (TokEllipsis : _) =
       Left "'...' must be the last type parameter"
     paramList _ = Left "Malformed type parameter list"
+    declKws = ["type", "data", "resource"]
     validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
-                              , "type", "data", "•" ]
+                              , "type", "data", "resource", "•" ]
     tyParams t = let (_, ss, _, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
@@ -1907,9 +1917,20 @@ bestAlias aliases t =
             go best (y : ys) = go (if f y < f best then y else best) ys
     minimumOn _ [] = error "bestAlias: impossible"
 
-showTyA :: [Alias] -> Ty -> String
+-- What the type printer folds names back on: structural aliases, and
+-- the nominal resource names — which fold onto the arrow rather than
+-- onto a wire, so they cannot ride in the alias list.
+data Disp = Disp { dispAliases :: [Alias], dispResources :: [String] }
+
+noDisp :: Disp
+noDisp = Disp [] []
+
+aliasDisp :: [Alias] -> Disp
+aliasDisp as = Disp as []
+
+showTyA :: Disp -> Ty -> String
 showTyA as t =
-  case bestAlias as t of
+  case bestAlias (dispAliases as) t of
     Just (al, args)
       | null args -> aName al
       | otherwise ->
@@ -1926,18 +1947,18 @@ showTyA as t =
         n ++ "(" ++ intercalate ", " (map (showStackA as) args) ++ ")"
       TFin e    -> "Fin(" ++ show e ++ ")"
 
-showArgA :: [Alias] -> TyArg -> String
+showArgA :: Disp -> TyArg -> String
 showArgA as (AStack st) = showStackA as st
 showArgA _  (AWidth e)  = show e
 
-showRowA :: [Alias] -> SumRow -> String
+showRowA :: Disp -> SumRow -> String
 showRowA as row = intercalate " | " (go row)
   where
     go RNil            = []
     go (RTail v)       = [show v]
     go (RCons st rest) = showStackA as st : go rest
 
-showStackA :: [Alias] -> SType -> String
+showStackA :: Disp -> SType -> String
 showStackA _  SEnd        = "•"
 showStackA _  (STail v)   = show v
 showStackA as st          = unwords (go st)
@@ -1947,11 +1968,43 @@ showStackA as st          = unwords (go st)
     go (SCons t rest)   = showTyA as t : go rest
     go (SExp b e rest)  = showExpAt b e : go rest
 
-showArrowA :: [Alias] -> Arrow -> String
+-- A closed stack as its wires, deepest first; Nothing if open.
+closedWires :: SType -> Maybe [Ty]
+closedWires SEnd        = Just []
+closedWires (SCons t r) = (t :) <$> closedWires r
+closedWires _           = Nothing
+
+-- The trailing run of resource wires (they ride on top, so they are at
+-- the END of the wire list), and the wires beneath them.
+resSuffix :: [String] -> [Ty] -> ([Ty], [String])
+resSuffix rs ts =
+  let isRes (TData n []) = n `elem` rs
+      isRes _            = False
+      (revRes, revRest)  = span isRes (reverse ts)
+  in (reverse revRest, reverse [ n | TData n [] <- revRes ])
+
+-- `A =IO Log GameState> B` — the note's spelling.  The grade and the
+-- threaded resources are the same thing said two ways (the set of
+-- resource wires the def touches), so one arrow carries both; with no
+-- resources it degrades to the plain glyph.
+arrowBetween :: EffRow -> [String] -> String
+arrowBetween e [] = arrowGlyph e
+arrowBetween e ns = " =" ++ unwords ([ "IO" | eIO e ] ++ ns) ++ "> "
+
+showArrowA :: Disp -> Arrow -> String
+showArrowA as (Arrow s1 s2 e)
+  | (Just w1, Just w2) <- (closedWires s1, closedWires s2)
+  , (p1, r1) <- resSuffix (dispResources as) w1
+  , (p2, r2) <- resSuffix (dispResources as) w2
+  , not (null r1), r1 == r2                  -- same suffix in AND out
+  = showWires as p1 ++ arrowBetween e r1 ++ showWires as p2
+  where
+    showWires d [] = "•"
+    showWires d ws = unwords (map (showTyA d) ws)
 showArrowA as (Arrow s1 s2 e) =
   showStackA as s1 ++ arrowGlyph e ++ showStackA as s2
 
-showSchemeA :: [Alias] -> Scheme -> String
+showSchemeA :: Disp -> Scheme -> String
 showSchemeA as (Forall tvars svars rvars nvars evars arr) =
   "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
                      ++ map show nvars)
@@ -2641,7 +2694,7 @@ splitDefs src = do
     go doc (l : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
-      | (kw : _) <- words l, kw `elem` ["type", "data"] = do
+      | (kw : _) <- words l, kw `elem` ["type", "data", "resource"] = do
           (ds, ts, ps) <- go Nothing rest
           pure (ds, (l, doc) : ts, ps)
       | ("def" : _) <- words l = do

@@ -402,6 +402,24 @@ moduleTypeTests =
     -- KINDED type parameters: a bare name is one wire, `...` is a
     -- stack.  The polymorphic pair was inexpressible while every
     -- parameter was stack-kinded (the split was ambiguous).
+    -- RESOURCES (design-effects stage 2): a nominal threaded wire,
+    -- folding onto the ARROW as `=Name>` when it rides a suffix.
+  , ("resource Log = Str\ndef note = _ unLog >> cat >> Log\nnote",
+     "Str =Log> •")
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = _ unLog >> cat >> Log\ndef score = (dup >> *) ... >> _ (\"s\" ... >> note) ... >> _ _ bump\nscore",
+     "Int =Log Counter> Int")
+    -- the grade and the resources are the same arrow: one `=IO Log>`
+  , ("resource Log = Str\ndef peek = unLog >> dup >> print ... >> Log\npeek",
+     "• =IO Log> •")
+  , ("resource Log = Str\ndef quiet = unLog >> dup >> drop ... >> Log\nquiet",
+     "• =Log> •")
+    -- NOMINAL, which is the whole point: a bare Int Int is never a
+    -- resource, so nothing folds by accident
+  , ("resource GameState = Int Int\ndef notState = swap\nnotState",
+     "a0 a1 ⇒ a1 a0")
+    -- the roll/unroll doors do not fold (no suffix on the input side)
+  , ("resource Log = Str\nLog",   "Str ⇒ Log")
+  , ("resource Log = Str\nunLog", "Log ⇒ Str")
     -- the grade is inferred through defs, not read off a name
   , ("def shout = toStr >> print\nshout",          "a0 ⇒! •")
   , ("def quiet = toStr >> drop\nquiet",           "a0 ⇒ •")
@@ -923,6 +941,9 @@ moduleFailTests =
   , ("1 >> rotLast",                  "Unknown primitive: rotLast")
     -- Fin is a built-in type former, not a user name
   , ("type Fin = Int\n1",             "Malformed type declaration")
+    -- a resource is unrolled, not eliminated by points: no fold
+  , ("resource Log = Str\nfoldLog",   "Unknown primitive: foldLog")
+  , ("resource resource = Int\n1",    "Malformed type declaration")
     -- a declared pure Fn type refuses an io quotation: the declaration
     -- is not decoration
   , ("data Quiet = (Fn⟨Str ⇒ •⟩)\n[print] >> Quiet >> drop",
@@ -982,7 +1003,9 @@ runModuleType (src, expected) =
           | otherwise ->
               Just $ show src ++ ": expected " ++ expected
                    ++ ", got " ++ rendered
-          where rendered = showArrowA (modAliases m) (normalizeArrow arr)
+          where rendered = showArrowA (Disp (modAliases m)
+                                   [ dName d | d <- modDatas m, dResource d ])
+                            (normalizeArrow arr)
 
 runEval :: (String, [String], String) -> IO (Maybe String)
 runEval (src, wantLog, wantStack) = do

@@ -101,7 +101,7 @@ loop st = do
               liftIO (typeOfWith show st (drop 4 l))
               loop st
           | ":t " `isPrefixOf` l -> do
-              liftIO (typeOfWith (showArrowA (rsAliases st)) st (drop 3 l))
+              liftIO (typeOfWith (showArrowA (dispOf st)) st (drop 3 l))
               loop st
           | ":doc " `isPrefixOf` l -> do
               liftIO (docOf st (trim (drop 5 l)))
@@ -124,6 +124,11 @@ continueOpen line = go (lineDepth line) line
             Nothing   -> pure Nothing
             Just next -> go (d + lineDepth next) (acc ++ "\n" ++ next)
 
+-- the REPL's display context: structural aliases, and the nominal
+-- resources whose wires fold onto the arrow as `=Name>`
+dispOf :: ReplState -> Disp
+dispOf st = Disp (rsAliases st) [ dName d | d <- rsDatas st, dResource d ]
+
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
 
@@ -135,7 +140,7 @@ renderParam q          = pName q
 
 renderData :: ReplState -> DataDecl -> String
 renderData st d =
-  "type " ++ dName d ++ params ++ " = " ++ showTyA [] (dBody d) ++ docSuffix
+  "type " ++ dName d ++ params ++ " = " ++ showTyA noDisp (dBody d) ++ docSuffix
   where
     params
       | null (dParams d) = ""
@@ -148,7 +153,7 @@ renderData st d =
 
 renderAlias :: ReplState -> Alias -> String
 renderAlias st al =
-  "type " ++ aName al ++ params ++ " = " ++ showTyA [] (aBody al) ++ docSuffix
+  "type " ++ aName al ++ params ++ " = " ++ showTyA noDisp (aBody al) ++ docSuffix
   where
     params
       | null (aParams al) = ""
@@ -162,7 +167,7 @@ renderAlias st al =
 renderDef :: ReplState -> String -> String
 renderDef st name =
   case M.lookup name (rsEnv st) of
-    Just sc -> "def " ++ name ++ " : " ++ showSchemeA (rsAliases st) sc
+    Just sc -> "def " ++ name ++ " : " ++ showSchemeA (dispOf st) sc
                  ++ docSuffix
     Nothing -> "def " ++ name ++ " : ???"
   where
@@ -186,7 +191,7 @@ docOf st name
         (d : _) -> renderData st { rsDocs = M.empty } d
         [] ->
           case M.lookup name (rsEnv st) of
-            Just sc -> name ++ " : " ++ showSchemeA (rsAliases st) sc
+            Just sc -> name ++ " : " ++ showSchemeA (dispOf st) sc
             Nothing ->
               case [ al | al <- rsAliases st, aName al == name ] of
                 (al : _) -> renderAlias st { rsDocs = M.empty } al
@@ -196,7 +201,7 @@ docOf st name
 renderStackTy :: ReplState -> String
 renderStackTy st =
   let Arrow _ o _ = normalizeArrow (arrPure SEnd (rsStackTy st))
-  in showStackA (rsAliases st) o
+  in showStackA (dispOf st) o
 
 renderStack :: ReplState -> String
 renderStack st =
@@ -207,7 +212,7 @@ renderStack st =
     -- pretty display names (a0/ρ0) without touching internal state
     displayTy =
       let Arrow _ o _ = normalizeArrow (arrPure SEnd (rsStackTy st))
-      in showStackA (rsAliases st) o
+      in showStackA (dispOf st) o
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
 typeOfWith render st src =
@@ -275,7 +280,7 @@ handleLine st line =
                       pure st1
                     Right m -> do
                       putStrLn $ "def " ++ fn ++ " : "
-                               ++ maybe "?" (showSchemeA (rsAliases st1))
+                               ++ maybe "?" (showSchemeA (dispOf st1))
                                     (M.lookup fn (modEnv m))
                       pure st1 { rsEnv = modEnv m
                                , rsRun = buildRunDefs (rsRun st1) m }
@@ -291,7 +296,7 @@ handleLine st line =
         Right m  ->
           case modDefs m of
             [(n, sc, _)] -> do
-              putStrLn $ "def " ++ n ++ " : " ++ showSchemeA (rsAliases st) sc
+              putStrLn $ "def " ++ n ++ " : " ++ showSchemeA (dispOf st) sc
               pure st
                 { rsEnv      = modEnv m
                 , rsRun      = buildRunDefs (rsRun st) m
@@ -327,7 +332,7 @@ handleLine st line =
         Left _ ->
           -- the mismatch is against the persistent REPL stack: say so
           Left $ "this line needs input stack '"
-               ++ showStackA (rsAliases st)
+               ++ showStackA (dispOf st)
                     (let Arrow i' _ _ = normalizeArrow (arrPure i SEnd) in i')
                ++ "' but the current stack is '"
                ++ renderStackTy st

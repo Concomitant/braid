@@ -393,6 +393,38 @@ grade inferred.
      what buys the fold its meaning — an accidental GameState is now
      unspellable.
 3. Theories/`use` (elaboration only).
+   **Architecture settled 2026-08-26, from a survey of the checker.**
+   The note has been saying ε (effects) and γ (ambient bundles) are ONE
+   variable sort. In the code they are not, and the difference is the
+   whole design:
+   - `unifyEff` ABSORBS — an open grade takes on the other side's
+     labels. That is why `io` propagates through composition with no
+     joins and no annotations: inference discovers it.
+   - `unifyStack` is rigid and front-anchored. `(STail v, st) ->
+     bindStackVar s v st` swallows the entire rest greedily, and there
+     is no suffix matching anywhere in the unifier.
+   So a resource suffix can never be INFERRED — a remainder variable
+   eats `Log Counter` and nothing records that they were there. Stage 4
+   is therefore an ELABORATOR, not a solver extension: it puts the
+   wires at statically known positions and lets inference CHECK the
+   result. (Inference as the verifier of elaboration, not an input to
+   it — which is also what keeps the error messages tractable.)
+   It can be syntactic, consulting `Env` for arities the way
+   `compileAbsOpen'.classify` already does, on three commitments:
+   - **(a) `use` names only resources, never raw stacks.** One name =
+     one wire, so the parser survives on syntax alone. This is what
+     nominality bought.
+   - **(b) Resource wires are topmost, in `use` order, never reordered
+     mid-scope.** Lets each stage take a fixed `_`-prefix instead of a
+     solved permutation. A word that consumed one resource and
+     produced a different one would break it and force the
+     type-directed path.
+   - **(c) Open-arity atoms keep their final-atom obligation.** A
+     stage's resource `...` and an open word's `...` are the same slot;
+     if both want it, reject rather than permute.
+   The template is `dataFoldSrc`, which already generates `_`-padded
+   routing from a declaration alone, with zero unification, and hands
+   the result to the ordinary parse+infer path.
 4. Ambient threading (elaborator frames pure stages inside `use`).
 5. Resource mark + linear `World` + explicit/split levels.
 Each stage independently useful; 1–2 are small; 4 is the big
