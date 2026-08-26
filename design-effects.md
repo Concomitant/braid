@@ -372,11 +372,26 @@ grade inferred.
      wires, and `=A B>` is their juxtaposition — the same reading as
      everywhere else, and forced by the tail-only discipline: threaded
      wires ride on top, in order.
-   - **It folds**, like `Maybe` and every other alias: any def whose
-     type ends in that suffix displays folded, whether the author
-     reached for the name or not. The wire IS the effect, so a def that
-     threads a GameState is stateful by construction, not by intent.
-     Revisit if the folding turns out noisy rather than revealing.
+   - **NOMINAL, not a structural alias** (corrected 2026-08-25, before
+     any code). The first draft said a resource folds like `Maybe` —
+     structurally, on shape. That cannot work: nothing distinguishes
+     "this `Int Int` is a GameState" from "these are two Ints", so
+     `resource GameState = Int Int` would silently rename every def
+     that happens to thread two Ints. Structural folding is only honest
+     when the shape IS the meaning (`(a | •)` really is optionality);
+     a resource's meaning is exactly the part the shape does not carry.
+     So a resource declares a DISTINCT type, `data`-style: it rolls and
+     unrolls, and only a genuine GameState wire ever displays as one.
+   - Which reconciles the suffix reading rather than breaking it: each
+     resource contributes ONE wire (its contents boxed), so
+     `=Log GameState>` is still an ordered suffix, still juxtaposition
+     — a suffix of nominal wires instead of raw ones. Rolls are free at
+     runtime, as every `data` roll already is, and threading is still a
+     single `...`.
+   - The cost, stated: touching a resource's contents needs an explicit
+     unroll, where raw threaded wires needed none. That ceremony is
+     what buys the fold its meaning — an accidental GameState is now
+     unspellable.
 3. Theories/`use` (elaboration only).
 4. Ambient threading (elaborator frames pure stages inside `use`).
 5. Resource mark + linear `World` + explicit/split levels.
