@@ -354,7 +354,29 @@ grade inferred.
    displays as today so all tests survive). **SHIPPED 2026-08-25** —
    see "Stage 1 as shipped" above; the placement rule it was to carry
    became the left-to-right decree instead.
-2. Bundle declarations + `=Name>` display sugar over wire suffixes.
+2. **Resource** declarations + `=Name>` display sugar over wire
+   suffixes. (Decisions taken 2026-08-25, before implementation:)
+   - **Called `resource`, not `bundle` or `environment`.** "Environment"
+     already means the TYPING environment here (`Env`/`VarEnv` — name
+     resolution), and reusing it for runtime wires would collide on the
+     one word that sounds like it fits. There is no canonical category
+     theory term to borrow: `A S ⇒ B S` curries to `A → [S, B ⊗ S]`, so
+     these are the Kleisli category of the state monad and S is the
+     "state object" — accurate for state, wrong for a log (Writer) or a
+     config (Reader). Threading is tensorial strength and S its
+     parameter, but Para's parameter is CONSUMED, not threaded. Optics
+     calls the carried-along object the *residual*, which rows already
+     took. So: the note's own word, which stage 5 already speaks
+     ("resource mark", "per-resource wires").
+   - **An ordered suffix, juxtaposed.** A resource names a run of
+     wires, and `=A B>` is their juxtaposition — the same reading as
+     everywhere else, and forced by the tail-only discipline: threaded
+     wires ride on top, in order.
+   - **It folds**, like `Maybe` and every other alias: any def whose
+     type ends in that suffix displays folded, whether the author
+     reached for the name or not. The wire IS the effect, so a def that
+     threads a GameState is stateful by construction, not by intent.
+     Revisit if the folding turns out noisy rather than revealing.
 3. Theories/`use` (elaboration only).
 4. Ambient threading (elaborator frames pure stages inside `use`).
 5. Resource mark + linear `World` + explicit/split levels.
