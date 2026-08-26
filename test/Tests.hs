@@ -442,6 +442,18 @@ moduleTypeTests =
     -- even when the body never touches one
   , ("resource Log = Str\ndef f = use Log >> dup\nf",
      "a0 ρ0 =Log> a0 a0 ρ0")
+    -- `use` scopes COMPOSE.  A word threading exactly the scope's
+    -- resources is already shaped like the stack, so it needs no
+    -- routing and is callable from a scope over the same resources.
+    -- Without this, a multi-resource word could be WRITTEN with `use`
+    -- and then never CALLED from one, which makes the scope a notation
+    -- rather than an abstraction.
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step = use Log Counter >> toStr >> note >> bump\ndef twice = use Log Counter >> step >> step\ntwice",
+     "a0 a1 ρ0 =Log Counter> ρ0")
+    -- ... and a resourceful step is exactly a fold's step function, so
+    -- folding it over data is the ordinary `fold`
+  , ("resource Books = Str\ndef say = unBooks _ >> cat >> Books\ndef step = use Books >> toStr >> say\n[step]",
+     "• ⇒ Fn⟨a0 ρ0 =Books> ρ0⟩")
     -- THEORIES (stage 3): named slots, instances selected BY NAME with
     -- `use`, resolution as a renaming at elaboration.  Generic code is
     -- written once; only the scope differs.
@@ -954,6 +966,11 @@ moduleFailTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
     -- the case(…) special form is gone: `case` is an ordinary unknown name
   , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
+    -- composition is exact: a word threading a resource the scope does
+    -- not have (or in another order) is still a routing error, with the
+    -- mismatch named on both sides
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step = use Log Counter >> toStr >> note >> bump\ndef bad = use Counter Log >> step\n1",
+     "threads Log Counter, but this scope is over Counter Log")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")

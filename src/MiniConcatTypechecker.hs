@@ -2894,6 +2894,14 @@ elabScope env rs body = do
       in case touching of
         -- a pure stage: step over the resources, act, thread the rest
         [] -> Right [ pad k ++ atoms ++ tailPass ]
+        -- a word that already threads exactly this scope's resources,
+        -- in this order, is shaped like the stack: apply it with no
+        -- routing at all.  This is what lets `use` scopes COMPOSE — a
+        -- word written under `use Log Count` is callable under `use Log
+        -- Count`, which is the difference between the scope being a
+        -- notation and it being an abstraction.
+        [(a, u)] | [a] == atoms, u == rs ->
+          Right [ atoms ++ tailPass ]
         -- one resource operation, alone in its stage: bring its wire up
         -- beside the working wires, apply, put it back
         [(a, [r])] | [a] == atoms, Just j <- elemIndex r rs ->
@@ -2901,9 +2909,10 @@ elabScope env rs body = do
                ++ [ pad (k - 1) ++ [a] ++ tailPass ]
                ++ [ swapStage i | i <- reverse [j .. k - 2] ] )
         [(a, u)] | [a] == atoms ->
-          Left $ "`use`: " ++ renderTerm a ++ " touches "
-              ++ show (length u) ++ " resources at once; the elaborator \
-                 \routes one per stage"
+          Left $ "`use`: " ++ renderTerm a ++ " threads " ++ unwords u
+              ++ ", but this scope is over " ++ unwords rs
+              ++ "; the elaborator routes one resource per stage, or a \
+                 \word threading the whole scope unchanged"
         _ -> Left $ "`use`: a stage may contain at most one resource \
                     \operation, and it must be alone — put "
                  ++ renderTerm (fst (head touching)) ++ " on its own line"

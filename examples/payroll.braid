@@ -1,0 +1,76 @@
+# A whole small program: pay a list of timesheets, keeping an audit log
+# and a headcount, with the pay policy chosen by name.
+#
+# This is the effects machinery doing a job rather than demonstrating
+# itself. Three things are in play and they meet in `step`:
+#   - a RESOURCE, one wire carrying all the state the pass accumulates
+#   - a THEORY, so the pay policy is swappable and audited by a law
+#   - a GRADE, inferred: the reporting pass prints, so it says so
+
+# ---- the state -------------------------------------------------------
+# A resource is NOMINAL and is one wire however wide its contents, so a
+# log and a headcount travel together and `Str Int` is never silently
+# mistaken for a Books. One wire is also what a fold's accumulator is,
+# which is why bundling the state this way is what makes the pass below
+# an ordinary `fold` instead of special machinery.
+resource Books = Str Int
+
+def say  = unBooks _ ; (log n s -> (log s ; cat) n) ; Books
+def hire = unBooks ; _ (1 ... ; +) ; Books
+
+# ---- the policy ------------------------------------------------------
+# The law is the point: a policy that charges for zero hours is not a
+# model of this theory, and the module will not start. `Salaried` with
+# `pay = drop ; 5000` is rejected at module start with
+#   law 'nothingForNothing' fails for instance Salaried: an instance
+#   must be an audited model of its theory
+theory Policy(a) =
+    pay  : a ⇒ Int
+    none : • ⇒ a
+    law nothingForNothing = (none ; pay) 0 ; eq? ; (forget ; true | forget ; false) ; merge
+
+instance Hourly : Policy(Int) =
+    pay  = 20 _ ; *
+    none = 0
+
+instance Overtime : Policy(Int) =
+    pay  = 30 _ ; *
+    none = 0
+
+# ---- one timesheet ---------------------------------------------------
+# Inside `use` nothing is threaded by hand: `pay` is pure, `say` and
+# `hire` touch Books, and the elaborator writes every `_` and `...`.
+# The scope names a resource AND an instance in one header — the
+# resource contributes a wire, the instance contributes a renaming.
+def step =
+    use Books Hourly
+    pay
+    toStr
+    say
+    " " ; say
+    hire                        # a0 ρ0 =Books> ρ0
+
+def rush =
+    use Books Overtime
+    pay ; toStr ; say ; " " ; say ; hire
+
+# ---- the pass --------------------------------------------------------
+# `step` consumes one timesheet and returns the books, which is exactly
+# a fold's step function — so folding it over a list is the ordinary
+# `fold`, with the empty books as the seed.
+def payroll  = [step] ("" 0 ; Books) ... ; fold
+def rushJob  = [rush] ("" 0 ; Books) ... ; fold
+
+def report = unBooks ; (log n -> "paid: " log ; cat ; print ; n) ; print
+
+(8 10 40 ; pack) ; payroll ; report      # paid: 160 200 800   /  3
+(8 10 40 ; pack) ; rushJob ; report      # paid: 240 300 1200  /  3
+
+# `use` scopes COMPOSE: a word that threads exactly the scope's
+# resources needs no routing, so `step` is callable from another scope.
+def twice =
+    use Books
+    step
+    step
+
+("" 0 ; Books) 5 6 ; twice ; report      # paid: 100 120  /  2

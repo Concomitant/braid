@@ -204,7 +204,11 @@ the prelude; every REPL line runs against a persistent typed stack.
     to a pure stage is `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩`, an
     ordinary prelude word (tensorial strength — run a program one wire
     deeper). It only saves you the counting (`examples/resources.braid`
-    shows both spellings side by side).
+    shows both spellings side by side). Scopes compose: a word threading
+    exactly its scope's resources is callable from that scope, so a
+    resourceful step is an ordinary fold's step function and a whole
+    stateful pass over data is `[step] seed ... ; fold`
+    (`examples/payroll.braid`).
 13. **Code is data.** `reflect` turns a quotation into its spine — a
     list of stages of atoms — so `take`/`map`/`reverse` slice and
     transform *programs*; `evalCode` runs them (dynamically checked,
@@ -222,6 +226,8 @@ and `tree` (data types and folds), `lists`, `conditionals` and `case`
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `theories` (theories, instances, laws that run),
+`payroll` (a whole small program: a resource, a theory and a grade
+meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
 `code`, `transpose`, `io` — and finish with `registrar`, which uses
 most of the language in forty lines about grade school.
@@ -229,7 +235,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 650+ case test suite, a full
+(typechecker, interpreter, REPL), a 660-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

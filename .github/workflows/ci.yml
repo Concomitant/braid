@@ -17,4 +17,4 @@ jobs:
           path: ~/.cabal
           key: cabal-${{ runner.os }}-${{ hashFiles('braid.cabal') }}
       - run: cabal build all
-      - run: cabal run -v0 braid-tests   # 656 tests incl. every example
+      - run: cabal run -v0 braid-tests   # 660 tests incl. every example

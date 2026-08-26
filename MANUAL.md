@@ -416,7 +416,8 @@ prelude word: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a 
 one wire deeper, composable once per context wire. Nothing about
 ambient threading is machinery you cannot write yourself; `use` only
 saves you the counting. See `examples/resources.braid` and §14 for the
-current limits (one resource operation per stage).
+current limits (one resource operation per stage, or a word threading
+the whole scope unchanged).
 
 ### Rows `(p₁ | p₂ | …)`
 The sum functor's action: one wire in carrying `(Δ₁|Δ₂|…)`, component
@@ -1046,11 +1047,16 @@ holds for them too: final atom of their stage (§9).
   operation, and it must be alone in that stage** — otherwise *"a stage
   may contain at most one resource operation, and it must be alone —
   put X on its own line"*, naming the operation it found. An operation
-  touching two resources at once is rejected outright (*"touches 2
-  resources at once; the elaborator routes one per stage"*): the
-  elaborator brings one resource wire up, acts, and puts it back, and
-  two at once would need a permutation it will not guess. Both limits
-  are the elaborator's,
+  touching *some* of the scope's resources is rejected (*"X threads Log,
+  but this scope is over Log Counter"*): the elaborator brings one
+  resource wire up, acts, and puts it back, and a subset at once would
+  need a permutation it will not guess. The exception is the one that
+  matters: a word threading **exactly** the scope's resources, in
+  order, is already shaped like the stack, so it applies with no
+  routing at all. That is what makes `use` scopes **compose** — a word
+  written under `use Log Counter` is callable under `use Log Counter`,
+  and without it a multi-resource word could be written with `use` and
+  then never called from one. Both limits are the elaborator's,
   not the type system's — by hand, `_`/`...` still do anything.
 - A `use` with nothing after it is an error (*"`use …` ends its scope"*)
   — like a binder, its body is the rest of the scope, so there has to

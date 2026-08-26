@@ -167,12 +167,27 @@ ambient scope is a prelude def, not a compiler feature.
 resource operation, and it must be alone in that stage** — anything
 else is rejected with *"a stage may contain at most one resource
 operation, and it must be alone — put X on its own line"*. An operation
-that touches two resources at once is rejected outright (*"touches 2
-resources at once; the elaborator routes one per stage"*): the router
-brings one resource wire up, acts, and puts it back, and two at once
-would need a solved permutation rather than a fixed `_`-prefix. Both
-limits are the elaborator's, not the type system's, and both relax
-without breaking programs.
+touching a *subset* of the scope's resources is rejected (*"X threads
+Log, but this scope is over Log Counter"*): the router brings one
+resource wire up, acts, and puts it back, and a subset at once would
+need a solved permutation rather than a fixed `_`-prefix. Both limits
+are the elaborator's, not the type system's, and both relax without
+breaking programs.
+
+**Amendment (2026-08-26, from writing a program with it): scopes
+compose.** The rule above was first implemented as "one resource per
+operation, full stop", which had a consequence nobody noticed until a
+real program hit it: a word threading two resources could be *written*
+under `use` and then never *called* from one, because the call site is
+itself a stage inside a scope. `use` was a notation for a def body
+rather than an abstraction, and the composite word — the ordinary unit
+of program structure — was exactly what it could not express. The fix
+needs no routing: a word threading precisely the scope's resources, in
+order, already has the stack's shape, so it applies with an empty
+`_`-prefix. The general subset case still wants the permutation and is
+still rejected. The lesson is the one this note keeps relearning: the
+limits that matter are found by writing programs, not by reading the
+elaborator.
 
 **Amendment (2026-08-26, at implementation): resources ride DEEPEST,
 not on top.** The note says "data at the bottom, bundle on top", and
