@@ -331,8 +331,26 @@ quote in it — like `1 "a" .foo -> x _ y` — is unambiguous either way.
 
 ### Ambient scopes `use R1 R2`
 
-`use` names resources (§8) and opens a scope over them, taking the
-**rest of the enclosing scope as its body** — the same scope-taking
+One header may name **both**, freely mixed — they are two kinds of
+scoped selection, not two features:
+
+```braid
+resource Log = Str
+theory Sink(a)   = emit : a ⇒ a
+instance Loud : Sink(Int) = emit = dup ; print ...
+
+def run =
+    use Log Loud        # a resource AND an instance
+    dup ; *
+    emit                # resolves to Loud's; the Log threads past it
+```
+
+A resource contributes a wire the elaborator threads; an instance
+contributes no wire at all and disappears at elaboration, leaving its
+slots renamed.
+
+`use` names resources and instances (§8) and opens a scope over them,
+taking the **rest of the enclosing scope as its body** — the same scope-taking
 shape as the binders `x y ->` and `-> x y`, and the same rule about
 needing a rest to reach. An elaborator running between parse and
 inference writes every `_` and `...` the threading needs, from the
@@ -377,6 +395,21 @@ resources, even when the body never touches one:
 def f = use Log >> dup          # a0 ρ0 =Log> a0 a0 ρ0 — Log is claimed,
                                 #   though the body never mentions it
 ```
+
+**`use` also selects instances**, and may mix them with resources in
+one header — it is the same word for both kinds of scoped selection:
+
+```braid
+def total = use IntSum ; [op] unit ... ; foldExp   # Intⁿ⁰ ⇒ Int
+```
+
+A header may name both kinds at once — `use Log Counter IntSum` opens
+a scope over two resources and one instance, in one line.
+
+An instance name binds the theory's slots to that instance's programs
+for the rest of the scope. Unlike a resource, an instance claims no
+wire and asserts nothing about the incoming stack: the selection is a
+renaming at elaboration (§8), so it disappears before inference.
 
 **What `use` does to a pure stage is `lift`** (§10), an ordinary
 prelude word: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a program
@@ -613,6 +646,62 @@ def bump = unCounter ; 1 ... ; + ; Counter      # • =Counter> •
 Threading a resource by hand is `_` and `...` like anything else; `use`
 (§6) writes that padding. See `examples/resources.braid` and
 `design-effects.md`.
+
+**`theory` / `instance`** — named slots, models, and laws that run.
+Both are **block** declarations: a header line ending in `=`, then
+indented lines, the same shape as `def name =` with an indented body. A
+theory's entries are `slot : Σ ⇒ Θ` and `law name = <program>`; an
+instance's are `slot = <program>`. Theory parameters are kinded exactly
+like a type declaration's (a bare name is one wire, `...` a stack).
+
+```braid
+theory Monoid(a) =
+    unit   : • ⇒ a
+    op     : a a ⇒ a
+    sample : • ⇒ a
+    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
+
+instance IntSum : Monoid(Int) =
+    unit   = 0
+    op     = +
+    sample = 7
+
+instance StrCat : Monoid(Str) =
+    unit   = ""
+    op     = cat
+    sample = "x"
+
+def total  = use IntSum ; [op] unit ... ; foldExp     # Intⁿ⁰ ⇒ Int
+def joined = use StrCat ; [op] unit ... ; foldExp     # Strⁿ⁰ ⇒ Str
+```
+
+**These are not typeclasses.** Nothing is inferred and nothing is
+dispatched: `use IntSum` (§6) selects an instance **by name**, and the
+selection is a *renaming at elaboration* — each slot resolves to a
+generated def, so resolution costs nothing per call, once per scope.
+The trade is deliberate (`design-effects.md`): you give up inferring
+*which* instance, and get annotation-freeness, coherence in a
+structural type system, and no need for higher kinds.
+
+**An instance is audited, three ways**, each with its own message:
+
+| check | example message |
+|---|---|
+| slot signatures, read at the instance's argument | `instance Bad: slot 'unit' is • ⇒ Str but theory Monoid declares • ⇒ Int` |
+| completeness, and no extras | `instance Partial: no binding for 'op' (declared by theory Monoid)` · `instance Extra: 'huh' is not an operation of theory Monoid` |
+| a law is a program `• ⇒ Bool` | `law 'silly' of I must be a program with type '• ⇒ Bool', but is • ⇒ Int` |
+
+**Laws run.** They are ordinary Braid programs, and they execute **at
+module start, before main**. A failing one rejects the module:
+
+```text
+law 'leftUnit' fails for instance BadUnit: an instance must be an
+audited model of its theory
+```
+
+`theory` and `instance` are file declarations, not REPL lines (the
+REPL says so). See `examples/theories.braid`, §14 for the limits, and
+`design-effects.md` for the position.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
@@ -966,6 +1055,20 @@ holds for them too: final atom of their stage (§9).
 - A `use` with nothing after it is an error (*"`use …` ends its scope"*)
   — like a binder, its body is the rest of the scope, so there has to
   be a rest.
+- A **law body must fit on one line** — the block parser reads one
+  entry per line, so a law is a single program, `;`-chained if it needs
+  to be.
+- A law over a **parametric** theory cannot invent a value of `a`:
+  there is no way to write a literal at an unknown type. A theory that
+  wants sampled laws declares a witness slot (`sample : • ⇒ a`) and
+  each instance supplies it — not a workaround, but an audited model
+  supplying the evidence its audit runs on.
+- Laws are checked by **running**, on whatever samples the program
+  names — property testing's poor cousin next to QuickCheck (no
+  generation, no shrinking). What is different is that the check is
+  part of *being an instance*, not a separate test suite.
+- `theory` and `instance` are file declarations; the REPL takes
+  programs, and says so.
 - A resource is **nominal**: structural shapes never fold into one.
   `resource GameState = Int Int` leaves `swap : a0 a1 ⇒ a1 a0` exactly
   as it was, and only a genuine rolled `GameState` wire ever displays
@@ -984,11 +1087,11 @@ holds for them too: final atom of their stage (§9).
 - `design-indices.md` — `Fin(n)` and witnessed introductions: why
   `Aⁿ` is `Fin(n) → A`, and why there is no `tabulate`.
 - `design-effects.md` — the effects position (effects are wires, IO is
-  a linear wire, the placement ladder as a PCM); **stages 1, 2 and 4 —
-  the io grade, `resource` declarations and `use` — have shipped**,
-  including the amendment that flipped the resource wires from the top
-  of the stack to the bottom. Stage 3 (theories and instances) and
-  stage 5 (the linear `World`) are position only.
+  a linear wire, the placement ladder as a PCM); **stages 1, 2, 3 and 4
+  — the io grade, `resource` declarations, `use`, and
+  theories/instances with runnable laws — have shipped**, including the
+  amendment that flipped the resource wires from the top of the stack
+  to the bottom. Only stage 5 (the linear `World`) is position only.
 - `design-metaprogramming.md` — typed code as the free category
   (`Path`), Forth's compiler lifted from a monoid; position taken.
 - `guide-open-arity.md` — practical rules for open words.
@@ -997,4 +1100,5 @@ holds for them too: final atom of their stage (§9).
 - `examples/` — every feature running, and CI-guarded; start with
   `registrar.braid` (most of the language in forty lines), then
   `ladder.braid`, `cuts.braid`, `stream.braid`, `arrows.braid`,
-  `functors.braid`, `resources.braid`, `gla.braid`.
+  `functors.braid`, `resources.braid`, `theories.braid` (theories,
+  instances, and laws that run), `gla.braid`.

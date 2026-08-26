@@ -1,0 +1,57 @@
+# Theories: named slots, instances, and laws you actually run.
+#
+# Not typeclasses. Nothing is inferred and nothing is dispatched: an
+# instance is chosen BY NAME with `use`, and the choice is a renaming at
+# elaboration — resolution once per scope, never a dictionary per call.
+# That is the trade design-effects.md records: you give up inferring
+# WHICH instance, and get back annotation-freeness, coherence in a
+# structural type system, and no need for higher kinds.
+#
+# What makes an instance more than a promise is that the theory's laws
+# are ordinary Braid programs, and they RUN — at module start, before
+# main. An instance that fails them is not an instance.
+
+theory Monoid(a) =
+    unit   : • ⇒ a
+    op     : a a ⇒ a
+    # A law over a PARAMETRIC theory cannot invent a value of `a` — there
+    # is no way to write a literal at an unknown type. So the theory
+    # asks for one. That is not a workaround: an audited model supplies
+    # the evidence its audit runs on.
+    sample : • ⇒ a
+    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
+    law assoc = (sample sample sample ; op _ ; op) (sample sample sample ; _ op ; op) ; eq? ; (forget ; true | forget ; false) ; merge
+
+# ---- three models of one theory --------------------------------------
+instance IntSum : Monoid(Int) =
+    unit   = 0
+    op     = +
+    sample = 7
+
+instance IntProd : Monoid(Int) =
+    unit   = 1
+    op     = *
+    sample = 7
+
+instance StrCat : Monoid(Str) =
+    unit   = ""
+    op     = cat
+    sample = "x"
+
+# ---- generic code, written once --------------------------------------
+# `use IntSum` makes `unit` and `op` mean IntSum's, for the rest of the
+# scope. The body is the same three times; only the scope differs.
+def total  = use IntSum  ; [op] unit ... ; foldExp
+def prod   = use IntProd ; [op] unit ... ; foldExp
+def joined = use StrCat  ; [op] unit ... ; foldExp
+
+1 2 3 4     ; total  ; print      # 10
+1 2 3 4     ; prod   ; print      # 24
+"a" "b" "c" ; joined ; print      # abc
+
+# The slot signatures are checked against the theory, read at the
+# instance's argument: giving IntSum a Str unit would be
+#   instance IntSum: slot 'unit' is • ⇒ Str but theory Monoid declares • ⇒ Int
+# and a model that breaks a law is rejected when the module starts:
+#   law 'leftUnit' fails for instance BadUnit: an instance must be an
+#   audited model of its theory

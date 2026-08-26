@@ -1391,6 +1391,50 @@ data DataDecl = DataDecl
                         -- the ARROW as `=Name>` when it rides a suffix.
   } deriving (Eq, Show)
 
+-- A THEORY is named slots plus laws.  Not a typeclass: nothing is
+-- inferred or dispatched, an instance is selected BY NAME with `use`,
+-- and the laws are ordinary Braid programs that must evaluate to `true`
+-- — so an instance is an AUDITED model rather than a promise
+-- (design-effects.md: "laws as runnable checks ... the
+-- laws-are-programs doctrine given a front door").
+data Theory = Theory
+  { thName   :: String
+  , thParams :: [TyParam]
+  , thSlots  :: [(String, Arrow)]    -- declared signatures
+  , thLaws   :: [(String, String)]   -- name, program source
+  } deriving (Eq, Show)
+
+-- An INSTANCE fills a theory's slots.  Each binding becomes an ordinary
+-- def named `Inst#slot`, so resolution is a renaming at elaboration —
+-- once per scope, never a dictionary per call.
+data Instance = Instance
+  { inName     :: String
+  , inTheory   :: String
+  , inArgs     :: [SType]
+  , inBindings :: [(String, String)]  -- slot, program source
+  } deriving (Eq, Show)
+
+-- NOT `#`: that starts a comment, so a generated name using it would be
+-- eaten by the lexer the moment it appeared in emitted source.
+slotDefName :: String -> String -> String
+slotDefName inst slot = inst ++ "@" ++ slot
+
+lawDefName :: String -> String -> String
+lawDefName inst lawNm = inst ++ "@law@" ++ lawNm
+
+-- a generated law def, and the (instance, law) it came from
+lawParts :: String -> Maybe (String, String)
+lawParts n = case breakOn "@law@" n of
+  Just (i, l) -> Just (i, l)
+  Nothing     -> Nothing
+  where
+    breakOn pat str = go "" str
+      where
+        go _   []          = Nothing
+        go acc r@(c : cs)
+          | take (length pat) r == pat = Just (reverse acc, drop (length pat) r)
+          | otherwise = go (c : acc) cs
+
 dataSig :: DataDecl -> (String, [TyParam])
 dataSig d = (dName d, dParams d)
 
@@ -1534,6 +1578,78 @@ lookupAlias n = go
 -- scope are needed to resolve references in the RHS; the declared name
 -- itself is in scope for self-reference, which makes the declaration a
 -- nominal data type rather than a transparent alias).
+-- `theory Name(params)` + indented `slot : Σ ⇒ Θ` and `law nm = prog`
+parseTheory :: [Alias] -> [(String, [TyParam])] -> String -> [String]
+            -> Either String Theory
+parseTheory aliases dataSigs header body = do
+  (name, params) <- parseHead
+  entries <- mapM (parseEntry params) (filter (not . blank) body)
+  let slots = [ e | Left  e <- entries ]
+      laws  = [ e | Right e <- entries ]
+  case slots of
+    [] -> Left $ "theory " ++ name ++ " declares no operations"
+    _  -> Right ()
+  pure (Theory name params slots laws)
+  where
+    blank l = all isSpace (takeWhile (/= '#') l)
+    parseHead = do
+      -- the header carries the block's `=`; it is punctuation, not a name
+      toks <- normalizeToks <$> tokenize (takeWhile (/= '=') header)
+      case toks of
+        [TokIdent "theory", TokIdent n] -> Right (n, [])
+        (TokIdent "theory" : TokIdent n : TokLParen : rest) ->
+          (,) n <$> theoryParams rest
+        _ -> Left $ "Malformed theory declaration: " ++ header
+    theoryParams (TokIdent p : TokComma : r) = (PWire (TV p) :) <$> theoryParams r
+    theoryParams [TokIdent p, TokRParen]     = Right [PWire (TV p)]
+    theoryParams [TokEllipsis, TokRParen]    = Right [PStack (SV "s")]
+    theoryParams _ = Left "Malformed theory parameter list"
+
+    -- `law nm = program` | `slot : Σ ⇒ Θ`
+    parseEntry params l =
+      case words l of
+        ("law" : nm : "=" : _) ->
+          Right (Right (nm, drop 1 (dropWhile (/= '=') l)))
+        _ -> case break (== ':') l of
+          (lhs, ':' : sig)
+            | [nm] <- words lhs -> do
+                -- a slot signature is an arrow; reuse the Fn parser
+                ty <- parseTyBody aliases dataSigs params ("Fn⟨" ++ sig ++ "⟩")
+                case ty of
+                  TFn arr -> Right (Left (nm, arr))
+                  _ -> Left $ "theory: slot '" ++ nm
+                           ++ "' needs a signature like `Σ ⇒ Θ`"
+          _ -> Left $ "Malformed theory entry: " ++ dropWhile isSpace l
+
+-- `instance Name : Theory(args)` + indented `slot = program`
+parseInstance :: [Alias] -> [(String, [TyParam])] -> String -> [String]
+              -> Either String Instance
+parseInstance aliases dataSigs header body = do
+  (nm, th, args) <- parseHead
+  binds <- mapM parseBind (filter (not . blank) body)
+  pure (Instance nm th args binds)
+  where
+    blank l = all isSpace (takeWhile (/= '#') l)
+    parseHead =
+      case break (== ':') (takeWhile (/= '=') header) of
+        (lhs, ':' : rhs) | ["instance", nm] <- words lhs -> do
+          toks <- normalizeToks <$> tokenize rhs
+          case toks of
+            [TokIdent th] -> Right (nm, th, [])
+            (TokIdent th : TokLParen : rest) -> (,,) nm th <$> instArgs rest
+            _ -> Left $ "Malformed instance head: " ++ header
+        _ -> Left $ "Malformed instance declaration: " ++ header
+    instArgs rest = do
+      let names = [ n | TokIdent n <- takeWhile (/= TokRParen) rest ]
+      mapM one names
+    one n = do
+      t <- parseTyBody aliases dataSigs [] n
+      Right (SCons t SEnd)
+    parseBind l =
+      case break (== '=') l of
+        (lhs, '=' : rhs) | [nm] <- words lhs -> Right (nm, rhs)
+        _ -> Left $ "Malformed instance binding: " ++ dropWhile isSpace l
+
 parseTypeLine :: [Alias] -> [(String, [TyParam])] -> String
               -> Either String (Either Alias DataDecl)
 parseTypeLine aliases dataSigs line =
@@ -2700,15 +2816,47 @@ leadingRes rs (SCons (TData n []) r) | n `elem` rs = n : leadingRes rs r
 leadingRes _  _                                    = []
 
 elabUse :: Env -> Term -> Either String Term
-elabUse env = go
+elabUse env = elabUseWith env []
+
+-- `use` names RESOURCES (wires to thread) and INSTANCES (slots to
+-- resolve).  Both are scoped selection with no inference and no
+-- dispatch: an instance's operations are renamed to that instance's
+-- defs, once, for the rest of the scope.
+elabUseWith :: Env -> [(String, [String])] -> Term -> Either String Term
+elabUseWith env instSlots = go
   where
-    go (Use rs b)      = go b >>= elabScope env rs
+    go (Use ns b) = do
+      b' <- go b
+      let (is, rs) = partitionEithers
+                       [ maybe (Right n) (Left . (,) n) (lookup n instSlots)
+                       | n <- ns ]
+          b'' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' is
+      case rs of
+        [] -> pure b''
+        _  -> elabScope env rs b''
     go (Seq a b)       = Seq <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
     go (Quote t)       = Quote <$> go t
     go (Alts cs r)     = Alts <$> mapM go cs <*> pure r
     go (OpenAbs sl h b) = OpenAbs sl h <$> go b
     go t               = Right t
+
+-- the Term-level twin of renameSlots: within a `use Inst` scope every
+-- occurrence of one of the theory's operations means THIS instance's
+partitionEithers :: [Either a b] -> ([a], [b])
+partitionEithers xs = ([ a | Left a <- xs ], [ b | Right b <- xs ])
+
+renameSlotsT :: String -> [String] -> Term -> Term
+renameSlotsT inst slots = go
+  where
+    go (Prim n) | n `elem` slots = Prim (slotDefName inst n)
+    go (Seq a b)        = Seq (go a) (go b)
+    go (Tensor ts)      = Tensor (map go ts)
+    go (Quote t)        = Quote (go t)
+    go (Alts cs r)      = Alts (map go cs) r
+    go (Use ns b)       = Use ns (go b)
+    go (OpenAbs sl h b) = OpenAbs sl h (go b)
+    go t                = t
 
 elabScope :: Env -> [String] -> Term -> Either String Term
 elabScope env rs body = do
@@ -2760,6 +2908,105 @@ elabScope env rs body = do
                     \operation, and it must be alone — put "
                  ++ renderTerm (fst (head touching)) ++ " on its own line"
 
+-- A law is a program that must be runnable on nothing and answer yes:
+-- `• ⇒ Bool`.  Checked here so a malformed law is a declaration error
+-- rather than a mystery at module start.
+checkLawType :: Env -> String -> Either String ()
+checkLawType env n = do
+  sc <- maybe (Left $ "internal: missing law def " ++ n) Right (M.lookup n env)
+  let Arrow i o _ = runInfer0 (instantiate sc)
+      boolTy = TSum (RCons SEnd (RCons SEnd RNil))
+  case solve [CEqStack i SEnd, CEqStack o (SCons boolTy SEnd)] of
+    Right _ -> Right ()
+    Left _  ->
+      let (inst, lw) = maybe ("?", n) id (lawParts n)
+      in Left $ "law '" ++ lw ++ "' of " ++ inst ++ " must be a program "
+             ++ "with type `• ⇒ Bool`, but is "
+             ++ show (normalizeArrow (runInfer0 (instantiate sc)))
+
+-- An instance becomes ordinary defs: one per slot, one per law.  The
+-- slot bodies are the user's programs with the instance's own slots in
+-- scope (so a law may call `op` and mean this instance's `op`), which
+-- is the same renaming `use` performs — resolution once, not per call.
+instanceDefs :: [Theory] -> Instance
+             -> Either String [(String, String, Maybe String)]
+instanceDefs theories inst = do
+  th <- theoryOf theories (inTheory inst)
+  let slotNames = map fst (thSlots th)
+      given     = map fst (inBindings inst)
+  case [ n | n <- slotNames, n `notElem` given ] of
+    (n : _) -> Left $ "instance " ++ inName inst ++ ": no binding for '"
+                   ++ n ++ "' (declared by theory " ++ thName th ++ ")"
+    [] -> Right ()
+  case [ n | n <- given, n `notElem` slotNames ] of
+    (n : _) -> Left $ "instance " ++ inName inst ++ ": '" ++ n
+                   ++ "' is not an operation of theory " ++ thName th
+    [] -> Right ()
+  -- Each generated def is wrapped in its OWN instance's scope, so the
+  -- Term-level renaming does the work.  Renaming the source text
+  -- instead would have to re-implement tokenization — `op)` is not the
+  -- word `op` — and would get it subtly wrong.
+  let rename body = "use " ++ inName inst ++ " ; " ++ body
+      slots  = [ ( slotDefName (inName inst) n, rename body
+                 , Just ("slot '" ++ n ++ "' of " ++ inName inst) )
+               | (n, body) <- inBindings inst ]
+      laws   = [ ( lawDefName (inName inst) nm, rename body
+                 , Just ("law '" ++ nm ++ "' of " ++ inName inst
+                         ++ " — runs at module start") )
+               | (nm, body) <- thLaws th ]
+  pure (slots ++ laws)
+
+theoryOf :: [Theory] -> String -> Either String Theory
+theoryOf ths n = case [ t | t <- ths, thName t == n ] of
+  (t : _) -> Right t
+  []      -> Left $ "Unknown theory: " ++ n
+
+-- Every slot's inferred type must match what the theory declared, read
+-- at this instance's arguments.  This is the half of "audited model"
+-- that does not need to run.
+checkInstance :: Env -> [Theory] -> Instance -> Either String ()
+checkInstance env theories inst = do
+  th <- theoryOf theories (inTheory inst)
+  if length (inArgs inst) /= length (thParams th)
+    then Left $ "instance " ++ inName inst ++ ": theory " ++ thName th
+             ++ " expects " ++ show (length (thParams th)) ++ " argument(s)"
+    else Right ()
+  mapM_ (one th) (thSlots th)
+  where
+    one th (nm, declared) = do
+      let dn = slotDefName (inName inst) nm
+      sc <- maybe (Left $ "instance " ++ inName inst ++ ": missing " ++ dn)
+                  Right (M.lookup dn env)
+      wanted <- substArrow th (inArgs inst) declared
+      let got = runInfer0 (instantiate sc)
+      case solve [ CEqStack (arrIn got) (arrIn wanted)
+                 , CEqStack (arrOut got) (arrOut wanted) ] of
+        Right _ -> Right ()
+        Left _  -> Left $ "instance " ++ inName inst ++ ": slot '" ++ nm
+                       ++ "' is " ++ show (normalizeArrow got)
+                       ++ " but theory " ++ thName th ++ " declares "
+                       ++ show (normalizeArrow wanted)
+    arrIn  (Arrow i _ _) = i
+    arrOut (Arrow _ o _) = o
+    substArrow th args (Arrow i o e) = do
+      let bind (PWire tv, SCons t SEnd) = Right (Left (tv, t))
+          bind (PStack sv, st)          = Right (Right (sv, st))
+          bind (q, st) = Left $ "instance " ++ inName inst ++ ": parameter '"
+                             ++ pName q ++ "' takes one wire, given " ++ show st
+      bs <- mapM bind (zip (thParams th) args)
+      let tm = M.fromList [ b | Left  b <- bs ]
+          sm = M.fromList [ b | Right b <- bs ]
+      pure (Arrow (substParamsS tm sm i) (substParamsS tm sm o) e)
+
+-- substitute theory parameters through a stack
+substParamsS :: Map TVar Ty -> Map SVar SType -> SType -> SType
+substParamsS tm sm = go
+  where
+    go SEnd          = SEnd
+    go t@(STail v)   = M.findWithDefault t v sm
+    go (SCons t r)   = SCons (substParams tm sm M.empty t) (go r)
+    go (SExp b e r)  = sexp (go b) e (go r)
+
 -- Infer and alpha-normalize; the workhorse for tests.
 inferNormalized :: String -> Either String Arrow
 inferNormalized = fmap normalizeArrow . inferProgram
@@ -2798,6 +3045,8 @@ data Module = Module
   , modDatas   :: [DataDecl]       -- recursive (nominal) declarations
   , modDocs    :: Map String String -- ## doc comments, by def/type name
   , modMain    :: Maybe (Term, Arrow)
+  , modTheories  :: [Theory]
+  , modInstances :: [Instance]
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -2805,21 +3054,33 @@ data Module = Module
 -- by newline-sequencing).  A `## text` line is a doc comment: it binds
 -- to the next def or type line (consecutive doc lines join); doc text
 -- preceding a plain program line is dropped.
+-- Returns (defs, type/data/resource lines, BLOCK declarations, main).
+-- A block declaration is `theory`/`instance`: a header line plus the
+-- indented lines under it, kept raw for the declaration parser.
 splitDefs :: String
           -> Either String ( [(String, String, Maybe String)]
                            , [(String, Maybe String)]
+                           , [(String, [String], Maybe String)]
                            , String )
 splitDefs src = do
-  (defs, tys, progLines) <- go Nothing (lines src)
-  pure (defs, tys, intercalate "\n" progLines)
+  (defs, tys, decls, progLines) <- go Nothing (lines src)
+  pure (defs, tys, decls, intercalate "\n" progLines)
   where
-    go _ [] = Right ([], [], [])
+    go _ [] = Right ([], [], [], [])
     go doc (l : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
       | (kw : _) <- words l, kw `elem` ["type", "data", "resource"] = do
-          (ds, ts, ps) <- go Nothing rest
-          pure (ds, (l, doc) : ts, ps)
+          (ds, ts, bs, ps) <- go Nothing rest
+          pure (ds, (l, doc) : ts, bs, ps)
+      -- `theory` / `instance`: a header plus its indented block, raw
+      | (kw : _) <- words l, kw `elem` ["theory", "instance"] = do
+          let (block, rest') = spanBlock 0 rest
+          if null block
+            then Left $ "Empty " ++ kw ++ " body: " ++ l
+            else do
+              (ds, ts, bs, ps) <- go Nothing rest'
+              pure (ds, ts, (l, block, doc) : bs, ps)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
           -- a `#` comment on the `=` line is not code: treat a
@@ -2833,21 +3094,21 @@ splitDefs src = do
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
-                  (ds, ts, ps) <- go Nothing rest'
-                  pure ((name, intercalate "\n" block, doc) : ds, ts, ps)
+                  (ds, ts, bs, ps) <- go Nothing rest'
+                  pure ((name, intercalate "\n" block, doc) : ds, ts, bs, ps)
             else do
               -- inline body: it may leave a bracket open, in which case
               -- the following lines belong to it, not to the module
               let (cont, rest') = spanOpen l rest
-              (ds, ts, ps) <- go Nothing rest'
-              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, ps)
+              (ds, ts, bs, ps) <- go Nothing rest'
+              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, bs, ps)
       | otherwise = do
           -- a program line may leave a bracket open; the lines that
           -- close it are part of it, so `def`/`type`/`##` inside an open
           -- bracket is code, not a declaration
           let (cont, rest') = spanOpen l rest
-          (ds, ts, ps) <- go Nothing rest'
-          pure (ds, ts, l : cont ++ ps)
+          (ds, ts, bs, ps) <- go Nothing rest'
+          pure (ds, ts, bs, l : cont ++ ps)
 
     indented ln = not (all isSpace ln) && isSpace (head ln)
 
@@ -2907,26 +3168,44 @@ checkModule src = do
 checkModuleWith :: Env -> [String] -> [Alias] -> [DataDecl] -> String
                 -> Either String Module
 checkModuleWith env0 shadow0 aliases0 datas0 src = do
-  (defSrcs, tyLines, mainSrc) <- splitDefs src
+  (defSrcs, tyLines, declLines, mainSrc) <- splitDefs src
   (env1, _, _, ownAliases, ownDatas, docs0) <-
     foldM addType (env0, aliases0, datas0, [], [], M.empty) tyLines
+  let sigs = map dataSig ownDatas
+  -- theories first: an instance is checked against its theory, so the
+  -- theory must already be known.  Both run before any def, which is
+  -- what gives them file-wide scope.
+  theories <- sequence [ parseTheory ownAliases sigs h b
+                       | (h, b, _) <- declLines, take 6 h == "theory" ]
+  insts    <- sequence [ parseInstance ownAliases sigs h b
+                       | (h, b, _) <- declLines, take 8 h == "instance" ]
+  instDefs <- concat <$> mapM (instanceDefs theories) insts
+  slotTable <- sequence [ (,) (inName i) . map fst . thSlots
+                            <$> theoryOf theories (inTheory i)
+                        | i <- insts ]
   let genDefs =
         [ (fn, body, Just ("definition by points: one quoted case per "
                            ++ "constructor of " ++ dName dd
                            ++ ", recursive slots pre-folded"))
         | dd <- reverse ownDatas, Just (fn, body) <- [dataFoldSrc dd] ]
   (env', _, defsRev, docs) <-
-    foldM addDef (env1, shadow0, [], docs0) (genDefs ++ defSrcs)
+    foldM (addDef slotTable) (env1, shadow0, [], docs0)
+          (genDefs ++ instDefs ++ defSrcs)
+  -- every slot's inferred type must match the theory's declaration,
+  -- instantiated at this instance's arguments
+  mapM_ (checkInstance env' theories) insts
+  mapM_ (checkLawType env') [ n | (n, _, _) <- instDefs, isJust (lawParts n) ]
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
       else do
         term0 <- parseProgram mainSrc
-        term  <- elabUse env' term0
+        term  <- elabUseWith env' slotTable term0
         arr   <- inferTermIn env' term
         pure (Just (term, arr))
   -- own lists are built latest-first, which is exactly the match order
-  pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart)
+  pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
+                theories insts)
   where
     preludeTypeNames = map aName aliases0 ++ map dName datas0
 
@@ -2963,7 +3242,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs' )
-    addDef (env, shadow, acc, docs) (name, bodySrc, doc) = do
+    addDef slotTable (env, shadow, acc, docs) (name, bodySrc, doc) = do
       if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
         else Right ()
@@ -2972,7 +3251,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
       -- `use` scopes are written out here, between parse and infer, the
       -- same slot substRecurse occupies: a syntactic Term rewrite with
       -- the Env available for arities and resource signatures.
-      term1 <- either (Left . inDef) Right (elabUse env1 term0)
+      term1 <- either (Left . inDef) Right (elabUseWith env1 slotTable term0)
       let term = substRecurse name term1
       arr  <- either (Left . inDef) Right (inferDefTermIn name env1 term)
       let sc = generalize env1 arr
@@ -4141,6 +4420,11 @@ openTailedS SEnd          = False
 runModule :: String -> IO (Either String ([Value], [String]))
 runModule src = runExceptT $ do
   m <- liftEither (checkModule src)
+  -- AUDITED MODELS: every law runs before main and must answer true.
+  -- An instance that fails its theory's laws is not an instance, and
+  -- saying so at module start is the whole difference between a law
+  -- that documents and a law that holds.
+  mapM_ (runLaw m) [ (n, t) | (n, _, t) <- modDefs m, isJust (lawParts n) ]
   case modMain m of
     Nothing -> pure ([], [])
     Just (term, arr@(Arrow i o _))
@@ -4151,6 +4435,18 @@ runModule src = runExceptT $ do
           case desyncError o out of
             Just e  -> throwError e
             Nothing -> pure (out, logs)
+
+-- Run one generated law def; anything but `true` is a module error.
+runLaw :: Module -> (String, Term)
+       -> ExceptT String IO ()
+runLaw m (n, t) = do
+  (out, _) <- evalTerm (modEnv m) (moduleRunDefs m) M.empty t []
+  case out of
+    [VSum 0 []] -> pure ()
+    _ ->
+      let (inst, lw) = maybe ("?", n) id (lawParts n)
+      in throwError $ "law '" ++ lw ++ "' fails for instance " ++ inst
+                   ++ ": an instance must be an audited model of its theory"
 
 -- adjacent pairs of a segment (bases of width 2 come interleaved)
 chunk2 :: [a] -> [(a, a)]

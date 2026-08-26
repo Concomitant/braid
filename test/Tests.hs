@@ -442,6 +442,13 @@ moduleTypeTests =
     -- even when the body never touches one
   , ("resource Log = Str\ndef f = use Log >> dup\nf",
      "a0 ρ0 =Log> a0 a0 ρ0")
+    -- THEORIES (stage 3): named slots, instances selected BY NAME with
+    -- `use`, resolution as a renaming at elaboration.  Generic code is
+    -- written once; only the scope differs.
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance IntSum : Monoid(Int) =\n    unit = 0\n    op   = +\ndef total = use IntSum ; [op] unit ... ; foldExp\ntotal",
+     "Intⁿ⁰ ⇒ Int")
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
+     "Strⁿ⁰ ⇒ Str")
     -- the grade is inferred through defs, not read off a name
   , ("def shout = toStr >> print\nshout",          "a0 ⇒! •")
   , ("def quiet = toStr >> drop\nquiet",           "a0 ⇒ •")
@@ -506,6 +513,8 @@ evalTests =
     -- grades are erased: several effectful atoms run left-to-right,
     -- deepest wire first — the order they are written in
   , ("1 2 3 >> print print print",        ["1","2","3"], "")
+    -- laws RUN at module start; a passing instance is transparent
+  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance Good : M(Int) =\n    unit = 0\n    op = +\n    sample = 7\ndef t = use Good ; [op] unit ... ; foldExp\n1 2 3 >> t >> print", ["6"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
   , ("fin1 10 20 30 >> at >> print",      ["20"], "")
@@ -934,12 +943,15 @@ evalTests =
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- a FALSE law rejects the module when it starts running
+  [ ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
+     "law 'leftUnit' fails for instance BadUnit")
     -- the evalCode arity gap: spliced code produces 2 wires but the
     -- context typed the hit track as 0 (Δ is existential, chosen by the
     -- caller). Used to leak silently (a value on a stack typed empty);
     -- the top-level width backstop now catches it as a clean error,
     -- delivering the guarantee spec-code.md already claimed.
-  [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
     -- the case(…) special form is gone: `case` is an ordinary unknown name
   , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
@@ -965,6 +977,19 @@ moduleFailTests =
   , ("type Fin = Int\n1",             "Malformed type declaration")
     -- a resource is unrolled, not eliminated by points: no fold
   , ("resource Log = Str\nfoldLog",   "Unknown primitive: foldLog")
+    -- an instance is AUDITED: its slots must match the theory's
+    -- signatures, read at the instance's own argument
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Bad : Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
+     "slot 'unit' is • ⇒ Str but theory Monoid declares • ⇒ Int")
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Partial : Monoid(Int) =\n    unit = 0\n1",
+     "no binding for 'op'")
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Extra : Monoid(Int) =\n    unit = 0\n    op   = +\n    huh  = 1\n1",
+     "'huh' is not an operation of theory Monoid")
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance I : NoSuch(Int) =\n    unit = 0\n    op = +\n1",
+     "Unknown theory: NoSuch")
+    -- a law must be a program that can run on nothing and answer yes
+  , ("theory T(a) =\n    f : a ⇒ a\n    law silly = 5\ninstance I : T(Int) =\n    f = id\n1",
+     "must be a program with type `• ⇒ Bool`")
     -- one resource operation per stage; the elaborator says so
   , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f = use Log Counter >> \"x\" >> note bump\n1",
      "at most one resource operation")

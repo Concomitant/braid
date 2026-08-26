@@ -224,11 +224,15 @@ handleLine :: ReplState -> String -> IO ReplState
 handleLine st line =
   case splitDefs line of
     Left err -> report err
-    Right ([(name, _, _)], [], rest)
+    Right ([(name, _, _)], [], [], rest)
       | all isSpace rest -> defLine name
-    Right ([], [(tyLine, _)], rest)
+    Right ([], [(tyLine, _)], [], rest)
       | all isSpace rest -> typeLine tyLine
-    Right ([], [], _) -> programLine
+    Right ([], [], [], _) -> programLine
+    -- theory/instance are block declarations: they need a whole module
+    Right (_, _, (_ : _), _) ->
+      report "theory and instance are file declarations — put them in a \
+             \.braid file rather than a REPL line"
     Right _           -> report "one definition per line, please"
   where
     report err = putStrLn ("error: " ++ err) >> pure st

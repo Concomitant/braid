@@ -1,10 +1,10 @@
-# Design note: effects (arrows → theories → wires) — STAGES 1, 2, 4 SHIPPED
+# Design note: effects (arrows → theories → wires) — STAGES 1, 2, 3, 4 SHIPPED
 
 Consolidates three discussions (2026-07-30 … 08-03). Status: **stages 1,
-2 and 4 of the staging below — the IO grade, `resource` declarations,
-and `use` — shipped 2026-08-25/26**; stage 3 (theories and instances,
-the machinery tier) and stage 5 (the resource mark and the linear
-`World`) remain design position. TWO decisions were reversed at
+2, 3 and 4 of the staging below — the IO grade, `resource`
+declarations, `use`, and theories/instances with runnable laws —
+shipped 2026-08-25/26**; only stage 5 (the resource mark and the linear
+`World`) remains design position. TWO decisions were reversed at
 implementation — the placement rule, and which end of the stack the
 resource wires ride on; both amendments are in place below, and neither
 rewrites what it replaced. Supersedes the effect-row sketch in the old
@@ -198,6 +198,84 @@ flipped during implementation, and the reason is routing, not taste:
 - Consequence, recorded because it changes a display rule: the `=Name>`
   fold reads a **prefix**, not a suffix.
 
+## Stage 3 as shipped (2026-08-26)
+
+**A theory declares slots and laws; an instance supplies programs.**
+Both are BLOCK declarations — a header line ending in `=`, then
+indented lines, the same shape `def name =` already had. A theory's
+entries are `slot : Σ ⇒ Θ` and `law name = <program>`; an instance's
+are `slot = <program>`. Theory parameters are kinded exactly like
+type-declaration parameters: a bare name is one wire, `...` a stack.
+
+```braid
+theory Monoid(a) =
+    unit   : • ⇒ a
+    op     : a a ⇒ a
+    sample : • ⇒ a
+    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
+
+instance IntSum : Monoid(Int) =
+    unit   = 0
+    op     = +
+    sample = 7
+
+instance StrCat : Monoid(Str) =
+    unit   = ""
+    op     = cat
+    sample = "x"
+
+def total  = use IntSum ; [op] unit ... ; foldExp     -- Intⁿ⁰ ⇒ Int
+def joined = use StrCat ; [op] unit ... ; foldExp     -- Strⁿ⁰ ⇒ Str
+```
+
+**Nothing is inferred and nothing is dispatched.** `use IntSum` selects
+an instance BY NAME, and the selection is a RENAMING at elaboration:
+each slot resolves to a generated def, so it costs nothing per call,
+once per scope. That is precisely the trade the "Why not typeclasses"
+section below records — you give up inferring *which* instance and get
+back annotation-freeness (no ambiguity forcing annotations Braid has no
+syntax for), coherence in a structural type system (`(• | •)` being
+both Bool and a sum makes instance-uniqueness ill-posed), and freedom
+from higher kinds.
+
+**`use` now takes BOTH resources and instances, and mixes them
+freely.** One word for both kinds of scoped selection — stage 4's form
+did not need a sibling.
+
+**The audit — three checks, three distinct messages, all verified.**
+
+1. Slot signatures are checked against the theory, read at the
+   instance's own argument: *instance Bad: slot 'unit' is • ⇒ Str but
+   theory Monoid declares • ⇒ Int*.
+2. Completeness, and no extras: *instance Partial: no binding for 'op'
+   (declared by theory Monoid)*; *instance Extra: 'huh' is not an
+   operation of theory Monoid*.
+3. A law must be a program of type `• ⇒ Bool`: *law 'silly' of I must
+   be a program with type '• ⇒ Bool', but is • ⇒ Int*.
+
+**Laws RUN.** They are ordinary Braid programs and they execute at
+module start, before main. A failing one rejects the module: *law
+'leftUnit' fails for instance BadUnit: an instance must be an audited
+model of its theory*. That is this note's own phrase — the
+laws-are-programs doctrine given a front door — with a front door now
+actually cut. See `examples/theories.braid`.
+
+**The limits, stated plainly.**
+
+- A law body must be a **single line**: the block parser reads one
+  entry per line.
+- A law over a **parametric** theory cannot invent a value of `a` —
+  there is no way to write a literal at an unknown type — so a theory
+  that wants sampled laws must declare a witness slot (`sample : • ⇒
+  a`) and each instance supplies it. That is not a workaround: an
+  audited model supplies the evidence its audit runs on.
+- Laws are checked by **running**, on whatever samples the program
+  names. Next to QuickCheck this is property testing's poor cousin —
+  no generation, no shrinking. What is different is that the check is
+  part of *being an instance* rather than a separate test suite.
+- `theory` and `instance` are file declarations, not REPL lines (the
+  REPL says so).
+
 ## The design, zoomed out
 
 **Effects are wires.** The classical effect zoo decomposes into
@@ -386,6 +464,12 @@ nothing).
 
 ## Why not typeclasses (recorded from the 08-03 discussion)
 
+*IMPLEMENTED 2026-08-26 (stage 3, above). The resolution mechanism
+turned out to be a **renaming at elaboration**: `use IntSum` rewrites
+each slot to a generated def for the rest of the scope, so there is no
+dictionary, no dispatch, and no per-call cost — resolution happens once
+per scope, by name.*
+
 Classes don't cost principal types (qualified types keep them). They
 cost: (1) annotation-freeness — ambiguity (`show . read`) forces
 annotations Braid has no syntax for; inference-completeness (the term
@@ -491,7 +575,7 @@ grade inferred.
   touches two resources at once. Ladder step 2/3 licences are untouched
   by this — these are routing limits, not commutativity ones.
 
-## The staging (1, 2 and 4 shipped; 3 and 5 remain)
+## The staging (1, 2, 3 and 4 shipped; 5 remains)
 
 1. IO bit on Arrow (the old arrows-plan stage 1; display `⇒!`, pure
    displays as today so all tests survive). **SHIPPED 2026-08-25** —
@@ -545,9 +629,10 @@ grade inferred.
      unroll, where raw threaded wires needed none. That ceremony is
      what buys the fold its meaning — an accidental GameState is now
      unspellable.
-3. Theories/instances — the machinery tier. **NOT shipped**; the
-   `use` half of this entry became stage 4 and shipped, so what remains
-   here is theories, instances, and their runnable laws.
+3. Theories/instances — the machinery tier. **SHIPPED 2026-08-26** —
+   see "Stage 3 as shipped" above; the `use` half of this entry had
+   already gone out as stage 4, and theories, instances and their
+   runnable laws followed it, sharing the same `use` word.
    **Architecture settled 2026-08-26, from a survey of the checker**
    (and confirmed by the implementation)**.**
    The note has been saying ε (effects) and γ (ambient bundles) are ONE
@@ -589,7 +674,8 @@ grade inferred.
    **SHIPPED 2026-08-26** — see "Stages 2 and 4 as shipped" above. The
    frame a pure stage gets is `lift`, which shipped as an ordinary
    prelude word; the elaborator writes its `_`s directly.
-5. Resource mark + linear `World` + explicit/split levels.
+5. Resource mark + linear `World` + explicit/split levels. **NOT
+   shipped** — the one stage still position only.
 Each stage independently useful; 1–2 were small; 4 was the big
-ergonomic payoff, and was cheap because 2 made the wires nominal; 5
-unlocks the power tier.
+ergonomic payoff, and was cheap because 2 made the wires nominal; 3
+rode in on 4's `use`; 5 unlocks the power tier.

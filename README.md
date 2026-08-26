@@ -142,6 +142,36 @@ the prelude; every REPL line runs against a persistent typed stack.
     (`examples/laws.braid`, `gla.braid`, `registrar.braid`), and
     they're operational: a checked law is a license to rewrite
     (contrapose a chain, parallelize a fold, flip a weighting).
+
+    Laws now have a front door. A **theory** declares named slots and
+    the laws they must satisfy; an **instance** supplies programs and
+    is *audited* by running them — at module start, before main, so a
+    failing model is not an instance and the module is rejected:
+    ```text
+    theory Monoid(a) =
+        unit   : • ⇒ a
+        op     : a a ⇒ a
+        sample : • ⇒ a
+        law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
+
+    instance IntSum : Monoid(Int) =
+        unit   = 0
+        op     = +
+        sample = 7
+
+    def total = use IntSum ; [op] unit ... ; foldExp     # Intⁿ⁰ ⇒ Int
+    ```
+    This is not typeclasses: nothing is inferred and nothing is
+    dispatched. `use IntSum` picks an instance **by name**, and the
+    pick is a renaming at elaboration — once per scope, no dictionary
+    per call. The trade is deliberate: you give up inferring *which*
+    instance, and keep annotation-freeness, coherence in a structural
+    type system, and freedom from higher kinds. The audit is
+    signatures, completeness, and laws typed `• ⇒ Bool`; the honest
+    limit is that a law runs on the samples it names — property
+    testing's poor cousin, minus generation and shrinking, plus being
+    part of what it *means* to be an instance
+    (`examples/theories.braid`).
 12. **Effects are wires.** State, logs, readers, exceptions,
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
@@ -191,14 +221,15 @@ and `tree` (data types and folds), `lists`, `conditionals` and `case`
 `resources` (threaded wires and `use`),
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
-`laws`, `parallel`, `matrices`, `gla` (bundles and the bialgebra),
+`laws`, `theories` (theories, instances, laws that run),
+`parallel`, `matrices`, `gla` (bundles and the bialgebra),
 `code`, `transpose`, `io` — and finish with `registrar`, which uses
 most of the language in forty lines about grade school.
 
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 640+ case test suite, a full
+(typechecker, interpreter, REPL), a 650+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -208,7 +239,8 @@ out, and what replaced it), `design-exponents.md` (dimension-indexed
 segments: why exponents not stars, why unary successors suffice, why
 the eliminator is a fold and not an unroll). Deliberately absent so
 far: floats, modules beyond the auto-loaded prelude, typed splicing,
-labeled record fields, and the rest of the effects staging — `resource`
-wires and `use` scopes have shipped, but there are no theories, no
-instances and no handlers (`design-effects.md` has the position, the
-staging, and the two decisions implementation reversed).
+labeled record fields, and the last stage of the effects staging —
+`resource` wires, `use` scopes, and theories/instances with runnable
+laws have shipped, but there is no resource mark, no linear `World`
+and no handlers (`design-effects.md` has the position, the staging,
+and the two decisions implementation reversed).
