@@ -237,10 +237,21 @@ meeting in one pass over data),
 `code`, `transpose`, `io` — and finish with `registrar`, which uses
 most of the language in forty lines about grade school.
 
+## Extending it
+
+There is **one arrow** — no `Arrow` class, no `Monad`, no higher kinds —
+so "a new kind of computation" is never a new arrow. It is a `data`
+(a new carrier, codata included), a `resource` (state threaded through a
+region), a plain `def` (a new combinator — loops and guards are already
+values), a `theory` + `instance` (a swappable interface with runnable
+laws), or, for a genuinely different category like a stream transducer,
+a `data` plus your own composition word. MANUAL §15 is the table, with a
+worked example for each row.
+
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 665-case test suite, a full
+(typechecker, interpreter, REPL), a 675-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

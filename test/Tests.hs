@@ -502,6 +502,33 @@ moduleTypeTests =
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- DECIDED laws (§12.9): `sameCode` normalizes both programs in the
+    -- free cartesian category over their words and compares.  `same`
+    -- means equal under EVERY interpretation — a proof, not a test.
+  [ ("[dup ; swap] [dup] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["same"], "")
+  , ("[dup ; _ drop] [id] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["same"], "")
+  , ("[dup ; _ dup] [dup ; dup _] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["same"], "")
+    -- naturality of copy, over an ARBITRARY word: the payoff, since no
+    -- amount of sampling quantifies over inputs
+  , ("[dup ; toStr toStr] [toStr ; dup] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["same"], "")
+  , ("[swap] [id id] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["differ"], "")
+    -- applying a word to one copy is not applying it to both
+  , ("[toStr ; dup] [dup ; toStr _] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["differ"], "")
+  , ("[1 ...] [2 ...] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["differ"], "")
+    -- the HONEST limit: `*` and `+` are uninterpreted here, so a law
+    -- true of Int arithmetic is not true of every interpretation and is
+    -- reported as differing.  `same` is a proof; `differ` is not a
+    -- disproof at any particular type.
+  , ("[2 _ ; *] [dup ; +] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+     ["differ"], "")
+  ] ++
     -- forward reference across the instance boundary, at RUNTIME: the
     -- module's own defs are mutually visible, so a slot body calling a
     -- def written after it resolves
@@ -990,6 +1017,10 @@ moduleFailTests =
     -- mismatch named on both sides
   , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step = use Log Counter >> toStr >> note >> bump\ndef bad = use Counter Log >> step\n1",
      "threads Log Counter, but this scope is over Counter Log")
+    -- outside the fragment `sameCode` reports, rather than guessing:
+    -- "I cannot tell" is not "they differ"
+  , ("[[dup]] [[dup]] ; sameCode ; drop ; 1", "outside the structural fragment")
+  , ("[(x -> x x)] [dup] ; sameCode ; drop ; 1", "outside the structural fragment")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")

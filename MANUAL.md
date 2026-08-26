@@ -979,6 +979,44 @@ property is a runnable theorem — every stage-boundary cut yields two
 runnable pieces with `run(prefix) ; run(suffix) = run(whole)`, atom
 slices within a stage are runnable sub-tensors, and any slice boxes.
 
+### Deciding a law: `sameCode`
+
+`sameCode : Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` answers whether two programs
+are the **same morphism**, by normalizing rather than testing.
+
+A program built from wiring (`id`/`_`/`dup`/`drop`/`swap`/`pass`),
+composition and juxtaposition, over words treated as *uninterpreted*, is
+a morphism of the free cartesian category on those words. Its word
+problem is solvable: run the program on distinct symbolic inputs and
+read off the tuple of terms it returns. Two programs are equal exactly
+when they consume the same number of wires and return the same tuple.
+Defs inside the fragment are inlined (so `sameCode` sees through your
+own words); a def already being expanded is recursive and stays opaque.
+
+```text
+[dup ; _ dup] [dup ; dup _]       ; sameCode   # true  — coassociativity
+[dup ; toStr toStr] [toStr ; dup] ; sameCode   # true  — copy is natural
+[toStr ; dup] [dup ; toStr _]     ; sameCode   # false
+```
+
+The third line is the point: a law about *an arbitrary word* is proved
+for every input, which no amount of sampling can do.
+
+**Read the two answers asymmetrically.** `true` means the programs agree
+under **every** interpretation of the words — a theorem. `false` means
+they are not the same morphism of the *free* category, which is **not** a
+counterexample at any particular type: `2 _ ; *` and `dup ; +` agree on
+every `Int`, and `sameCode` still says false, because `*` and `+` are
+only words to it. Laws that need `+` to be commutative, or need `Int`
+arithmetic, belong with the sampled laws — deciding those means
+normalizing modulo an equational theory (AC, ACU, a field) instead of a
+free one.
+
+Outside the fragment — a quotation, a row, a binder, a word with no
+closed arity, a quote that captured a bound name — `sameCode` **errors**
+rather than answering, because "I cannot tell" is not "they differ".
+`examples/laws.braid` shows decided and sampled laws side by side.
+
 ## 13. Open arity and exponents (summary)
 
 Words whose input has an open region (`ρ` tail or `aⁿ` exponent) work
@@ -1105,7 +1143,46 @@ holds for them too: final atom of their stage (§9).
   `Int` at runtime — but output does not distinguish an index from an
   ordinary `Int`; only the type does.
 
-## 15. Further reading
+## 15. Extending Braid — what to reach for
+
+Braid has **one arrow**. `⇒` is composition in a single cartesian
+category, and there is no class over categories to instantiate: no
+higher kinds, no `Arrow`, no `Monad`. So "I want a new kind of
+computation" never means "define a new arrow". It means one of five
+ordinary things, and which one is decided by *what the new thing is
+made of*, not by how exotic it feels.
+
+| You want | You write | Because |
+|---|---|---|
+| a new kind of **value** | `data` (codata: recurse through `Fn`) | carriers are declared sums; `foldX` is generated |
+| **state** threaded through a region | `resource` + `use` | a threaded wire, with the `_`/`...` written for you |
+| a new **combinator** or control form | an ordinary `def` | loops are values, guards are words, `...` accumulates |
+| a swappable **interface with laws** | `theory` + `instance` | models selected by name, audited by running the laws |
+| a category of **processes** | `data` + your own composition word | then present it as a `theory` if it has laws |
+
+Worked examples, in that order: `examples/tree.braid` and
+`stream.braid` (data and codata), `resources.braid` and `payroll.braid`
+(a resource, and a whole program using one), `ladder.braid` (control
+flow that is all ordinary defs), `theories.braid` (theories and
+instances), `circuits.braid` (a stream transducer — a genuinely
+different category — as data plus a composition word plus a theory).
+
+**What not to reach for.** Effects do not need new machinery: state is a
+`resource`, failure is the railway sum track, writer is a `resource`,
+nondeterminism is `List`, reader is a `resource` you only read. Only IO
+is irreducible, and it is a *grade* on the existing arrow (`⇒!`), not an
+arrow of its own. `examples/arrows.braid` shows that `Control.Arrow`'s
+whole interface — `arr`, `>>>`, `first`, `***`, `&&&`, `|||`, `app` —
+is already the syntax rather than a library.
+
+**The trade, stated once.** Because instances are selected by name and
+nothing is inferred or dispatched, you cannot write code generic over
+"any monoid" and have the right one found for you; you write `use
+IntSum`. What you get back is annotation-freeness, coherence in a
+structural type system, and no higher kinds to explain. That is the same
+trade `theory` makes everywhere, and it is deliberate.
+
+## 16. Further reading
 
 - `design-control-flow.md` — the control-flow design record (idiom
   inventory, deferral theorem, the guard-syntax history).

@@ -2684,6 +2684,14 @@ primEnv =
            (arrPure (one (TFn (arrEps (STail gam) (STail del))))
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
+       -- decide equality of two programs by NORMALIZING them, rather
+       -- than testing them at chosen inputs (§12.9).  Both must lie in
+       -- the structural fragment; outside it this is an error, not a
+       -- `false`, because "I cannot tell" is not "they differ".
+       , ("sameCode",  Forall [] [gam, del] [] [] [epsV]
+           (arrPure (SCons (TFn (arrEps (STail gam) (STail del)))
+                          (one (TFn (arrEps (STail gam) (STail del)))))
+                    (one tBool)))
        , ("apply",     applyTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
@@ -3572,6 +3580,112 @@ type VarEnv = Map String Value
 
 -- A function value captures the variable environment at reification, so
 -- quotations inside abstraction bodies are closures over the parameters.
+
+--------------------------------------------------------------------------------
+-- 12.9 Deciding program equality on the structural fragment
+--
+-- A program built from wiring (`id`/`_`/`dup`/`drop`/`swap`/`pass`),
+-- composition and juxtaposition, over words treated as UNINTERPRETED, is
+-- a morphism of the free cartesian category on those words.  That
+-- category's word problem is solvable, and the decision procedure is the
+-- obvious one: run the program on distinct symbolic inputs and read off
+-- the tuple of terms it returns.  Two programs are equal exactly when
+-- they consume the same number of wires and return the same tuple.
+--
+-- This is a PROOF for all inputs, not a test at chosen ones — which is
+-- what makes it worth having beside the sampled laws.  What it decides
+-- is exactly the laws that hold for every interpretation of the words
+-- involved: the naturality of copy and discard, functoriality of `first`,
+-- interchange, and every rearrangement of wires.  A law needing `+` to
+-- be commutative is NOT in this fragment: `+` is uninterpreted here, and
+-- the fragment is honest about the difference.
+--------------------------------------------------------------------------------
+
+-- The i-th output of a word applied to arguments; variables are inputs.
+data SymV = SVar !Int | SApp String [SymV] !Int
+  deriving (Eq, Ord)
+
+-- fresh-variable counter and the working stack (front wire first)
+type NState = (Int, [SymV])
+
+-- Count the wires of a CLOSED stack type; an open tail has no width.
+closedWidth :: SType -> Maybe Int
+closedWidth SEnd        = Just 0
+closedWidth (SCons _ r) = (1 +) <$> closedWidth r
+closedWidth _           = Nothing
+
+-- Pull n wires off the front, inventing fresh inputs when the stack is
+-- short: a program is normalized as a morphism on however many wires it
+-- turns out to need.
+takeSym :: Int -> NState -> ([SymV], NState)
+takeSym 0 s = ([], s)
+takeSym n (fr, x : st) = let (xs, s') = takeSym (n - 1) (fr, st) in (x : xs, s')
+takeSym n (fr, [])     =
+  let (xs, s') = takeSym (n - 1) (fr + 1, []) in (SVar fr : xs, s')
+
+normTerm :: Env -> RunDefs -> [String] -> Term -> NState -> Either String NState
+normTerm env defs seen term s0 = case term of
+  Seq a b        -> normTerm env defs seen a s0 >>= normTerm env defs seen b
+  Tensor ts      -> goAtoms ts s0
+  p@(Prim _)     -> goAtoms [p] s0
+  Quote _        -> outside "a quotation"
+  Alts _ _       -> outside "a row"
+  OpenAbs {}     -> outside "a binder"
+  Use _ _        -> outside "an unelaborated `use`"
+  where
+    outside what = Left ("outside the structural fragment: " ++ what)
+
+    -- mirrors evalTerm's goAtoms: each atom's outputs accumulate, the
+    -- leftover stack flows through the last one
+    goAtoms [] s = Right s
+    goAtoms (a : more) (fr, st) = do
+      (out, (fr1, st1)) <- atom (null more) a (fr, st)
+      (fr2, rest) <- goAtoms more (fr1, st1)
+      Right (fr2, out ++ rest)
+
+    atom isFinal (Prim n) s
+      | n == "id" || n == "_" = Right (wire 1 (\[x]    -> [x])    s)
+      | n == "dup"            = Right (wire 1 (\[x]    -> [x, x]) s)
+      | n == "drop"           = Right (wire 1 (\_      -> [])     s)
+      | n == "swap"           = Right (wire 2 (\[x, y] -> [y, x]) s)
+      -- `pass` is the open remainder: everything as the final atom, and
+      -- closed to nothing by the typechecker anywhere else
+      | n == "pass" =
+          let (fr, st) = s
+          in Right (if isFinal then (st, (fr, [])) else ([], s))
+      -- a def in the fragment is INLINED, which decides strictly more;
+      -- one already being expanded is recursive, so treat it as opaque
+      | Just de <- M.lookup n defs, not (deOpen de), n `notElem` seen =
+          let (args, (fr, st)) = takeSym (deArity de) s
+          in do (fr', outs) <- normTerm env defs (n : seen) (deBody de) (fr, args)
+                Right (outs, (fr', st))
+      -- literals are nullary constants, and distinct literals are
+      -- distinct constants (that is what makes `[1 ...]` and `[2 ...]`
+      -- decidably different rather than merely untested)
+      | isIntLiteral n || isStrLiteral n || isSymLiteral n =
+          let (fr, st) = s in Right ([SApp n [] 0], (fr, st))
+      -- any other word is uninterpreted: it needs a closed arity so we
+      -- know how many wires it eats and how many it returns
+      | Just (Forall _ _ _ _ _ (Arrow i o _)) <- M.lookup n env
+      , Just k <- closedWidth i
+      , Just m <- closedWidth o =
+          let (args, s') = takeSym k s
+          in Right ([SApp n args j | j <- [0 .. m - 1]], s')
+      | otherwise = Left ("outside the structural fragment: `" ++ n
+                          ++ "` has no closed arity")
+    atom _ t _ = Left ("outside the structural fragment: " ++ renderTerm t)
+
+    wire k f (fr, st) =
+      let (args, s') = takeSym k (fr, st) in (f args, s')
+
+-- A program's normal form: how many inputs it consumes, and the tuple of
+-- terms it returns.  `Left` means the program is outside the fragment,
+-- which is a different answer from "not equal".
+normalForm :: Env -> RunDefs -> Term -> Either String (Int, [SymV])
+normalForm env defs t = do
+  (fr, out) <- normTerm env defs [] t (0, [])
+  Right (fr, out)
+
 data Value
   = VInt Int
   | VStr String
@@ -4080,6 +4194,20 @@ runBuiltin _ _ "pass"  []               = Right ([], [])
 runBuiltin _ _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
 runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
 runBuiltin _ _ "print" [v]              = Right ([], [show v])
+-- Two programs are the same morphism when they consume the same number
+-- of wires and return the same tuple of symbolic terms.  A captured
+-- binder value would be a free constant we cannot see through, so a
+-- quote that closed over one is reported rather than guessed at.
+runBuiltin env defs "sameCode" [VFn s1 v1 t1, VFn s2 v2 t2]
+  | not (M.null v1) || not (M.null v2) =
+      Left "sameCode: a quotation that captured a bound name is outside \
+           \the structural fragment"
+  | otherwise =
+      case (normalForm env (M.union s1 defs) t1,
+            normalForm env (M.union s2 defs) t2) of
+        (Right n1, Right n2) -> Right ([VSum (if n1 == n2 then 0 else 1) []], [])
+        (Left e, _)          -> Left ("sameCode: " ++ e)
+        (_, Left e)          -> Left ("sameCode: " ++ e)
 runBuiltin _ _ "true"  []               = Right ([VSum 0 []], [])
 runBuiltin _ _ "false" []               = Right ([VSum 1 []], [])
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])

@@ -10,3 +10,40 @@ def lhs = [succ ; double]        ... ; map
 def rhs = [double ; succ ; succ] ... ; map
 
 samples >> lhs >> _ (samples >> rhs) >> eq? >> verdict >> print   # in1() = law holds
+
+# ---- laws that need no samples at all --------------------------------
+# The law above is TESTED: it holds at 0..5, and says nothing about 6.
+# Some laws can be DECIDED instead. A program built from wiring
+# (id/_/dup/drop/swap/pass), composition and juxtaposition, over words
+# treated as uninterpreted, is a morphism of the free cartesian category
+# on those words — and that category's word problem is solvable. So
+# `sameCode` normalizes both sides and compares, which proves the law
+# for every input and every interpretation at once.
+
+def verdict2 = ("proved" | "not proved") ; merge
+
+# the comonoid laws: copying is coassociative, cocommutative, counital
+[dup ; _ dup] [dup ; dup _] ; sameCode ; verdict2 ; print   # proved
+[dup ; swap]  [dup]         ; sameCode ; verdict2 ; print   # proved
+[dup ; _ drop] [id]         ; sameCode ; verdict2 ; print   # proved
+
+# the payoff: NATURALITY of copy, quantified over an arbitrary word.
+# No amount of sampling can say this, because it ranges over programs.
+[dup ; toStr toStr] [toStr ; dup] ; sameCode ; verdict2 ; print   # proved
+
+# and it really discriminates — applying a word to one copy is not
+# applying it to both
+[toStr ; dup] [dup ; toStr _] ; sameCode ; verdict2 ; print       # not proved
+
+# ---- the honest boundary ---------------------------------------------
+# `double = 2 _ ; *` and `dup ; +` agree on every Int. They are NOT the
+# same morphism of the free category, because `*` and `+` are only
+# words here — some interpretation tells them apart. So:
+#
+#   proved      = equal under EVERY interpretation (a theorem)
+#   not proved  = NOT a counterexample at any particular type
+#
+# A law that needs `+` to be commutative, or needs Int arithmetic, still
+# belongs with the sampled laws above. Deciding those means normalizing
+# modulo an equational theory (AC, ACU, a field) rather than a free one.
+[double] [dup ; +] ; sameCode ; verdict2 ; print                  # not proved
