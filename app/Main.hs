@@ -3,7 +3,7 @@ module Main (main) where
 import MiniConcatTypechecker
 import Control.Monad.Except (runExceptT, liftEither)
 import qualified Data.Map as M
-import Data.Char (isSpace)
+import Data.Char (isSpace, isAlphaNum)
 import Data.List (isPrefixOf, intercalate)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
@@ -52,6 +52,7 @@ data ReplState = ReplState
   , rsUserDefs :: [String]   -- user def names, in definition order
   , rsStackTy  :: SType      -- type of the current stack (internal names)
   , rsStack    :: [Value]    -- the current stack, front wire first
+  , rsUse      :: [String]   -- ambient `use` scope: a session-wide body
   }
 
 initialState :: ReplState
@@ -61,7 +62,7 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd []
+            [] SEnd [] []
 
 repl :: IO ()
 repl = do
@@ -85,9 +86,13 @@ loop st = do
         ":quit" -> pure ()
         ":clear" -> do
           liftIO (putStrLn "stack cleared")
-          loop st { rsStackTy = SEnd, rsStack = [] }
+          loop st { rsStackTy = SEnd, rsStack = [], rsUse = [] }
         ":s" -> do
-          liftIO (putStrLn (renderStack st))
+          liftIO $ do
+            putStrLn (renderStack st)
+            case rsUse st of
+              [] -> pure ()
+              ns -> putStrLn ("ambient: use " ++ unwords ns)
           loop st
         ":defs" -> do
           liftIO $ do
@@ -221,6 +226,33 @@ typeOfWith render st src =
     Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
 
 handleLine :: ReplState -> String -> IO ReplState
+handleLine st line
+  -- `use` at the top level.  In a file the body is the rest of the
+  -- block; in a session there is no rest yet, so a bare `use` line opens
+  -- a scope over every LATER line — the session is the body.  This is
+  -- selection, not sugar: it is what ML's `open` does.
+  | ("use" : names) <- words (trim line), all plainName names =
+      case names of
+        [] -> do
+          putStrLn "left the ambient scope"
+          pure st { rsUse = [] }
+        _ | Just bad <- firstUnknown names -> do
+              putStrLn $ "error: `use`: " ++ bad ++ " is not a resource \
+                         \(a REPL session cannot declare theories, so \
+                         \instances are file-only)"
+              pure st
+          | otherwise -> do
+              putStrLn ("ambient: use " ++ unwords names
+                        ++ "   (:clear or a bare `use` to leave)")
+              pure st { rsUse = names }
+  where
+    plainName n = not (null n) && all (\c -> isAlphaNum c || c == '_') n
+    firstUnknown ns =
+      case [ n | n <- ns
+               , not (any (\d -> dName d == n && dResource d) (rsDatas st)) ] of
+        (n : _) -> Just n
+        []      -> Nothing
+
 handleLine st line =
   case splitDefs line of
     Left err -> report err
@@ -328,8 +360,16 @@ handleLine st line =
                   putStrLn (renderStack st')
                   pure st'
 
+    -- REPL program lines go through the same elaboration a file's do:
+    -- `use` is written out between parse and infer.  Without this a
+    -- `use` on a program line reached inference unelaborated.
+    elabLine src = do
+      term0 <- parseProgram src
+      elabUseWith (rsEnv st) []
+        (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
+
     checkLine = do
-      term <- parseProgram line
+      term <- elabLine line
       Arrow i o _ <- inferTermIn (rsEnv st) term
       case solve [CEqStack i (rsStackTy st)] of
         Right s -> pure (apply s o)
@@ -343,7 +383,7 @@ handleLine st line =
                ++ "'  (:s to inspect, :clear to reset, or pass it along with ...)"
 
     evalLine = runExceptT $ do
-      term <- liftEither (parseProgram line)
+      term <- liftEither (elabLine line)
       evalTerm (rsEnv st) (rsRun st) M.empty term (rsStack st)
 
 -- Rename the stack type's free variables into a namespace the inference

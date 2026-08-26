@@ -2236,6 +2236,12 @@ appendStack (STail v) _ =
 
 -- Inference: given an Env and a Term, produce an arrPure and constraints
 infer :: Env -> Term -> Infer (Arrow, [Constraint])
+-- `use` is written out by `elabUseWith` between parse and infer.  If one
+-- reaches here the caller skipped elaboration, which used to crash with
+-- a pattern-match failure; say so instead.
+infer _   (Use _ _)      = pure ( arrPure SEnd SEnd
+                                , [CFail "`use` reached inference \
+                                    \unelaborated (internal)"] )
 infer env p@(Prim _)     = inferOperand env True p
 infer env q@(Quote _)    = inferOperand env True q
 infer env o@(OpenAbs {}) = inferOperand env True o

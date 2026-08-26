@@ -71,7 +71,10 @@ braid> :doc decide
 ```
 
 `:t` shows a type (`:t!` raw, un-folded); `:doc` and `:defs` browse
-the prelude; every REPL line runs against a persistent typed stack.
+the prelude; every REPL line runs against a persistent typed stack. A
+bare `use Log` line opens an ambient scope over the rest of the
+session — the resource threads itself through every later line, and a
+bare `use` leaves.
 
 ## A tour, in thirteen ideas
 

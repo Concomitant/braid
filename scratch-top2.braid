@@ -1,0 +1,10 @@
+resource Books = Str Int
+("" 0 ; Books)
+use Books
+8
+step
+def say  = unBooks _ ; (log n s -> (log s ; cat) n) ; Books
+def hire = unBooks ; _ (1 ... ; +) ; Books
+def step = use Books ; toStr ; say ; hire
+40
+step

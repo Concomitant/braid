@@ -1058,7 +1058,16 @@ holds for them too: final atom of their stage (§9).
   and without it a multi-resource word could be written with `use` and
   then never called from one. Both limits are the elaborator's,
   not the type system's — by hand, `_`/`...` still do anything.
-- A `use` with nothing after it is an error (*"`use …` ends its scope"*)
+- **In the REPL, `use` is a session-wide scope.** A file's `use` takes
+  the rest of the block as its body; a session has no rest yet, so a
+  bare `use Log Counter` line opens a scope over every LATER line and
+  every subsequent line is elaborated inside it. A bare `use` (or
+  `:clear`) leaves; `:s` shows the ambient scope alongside the stack.
+  Only resources can be named there — a session cannot declare a
+  theory, so instances stay file-only. This is selection, not sugar:
+  it is what ML's `open` does.
+- A `use` with nothing after it **in a file** is an error (*"`use …`
+  ends its scope"*)
   — like a binder, its body is the rest of the scope, so there has to
   be a rest.
 - An instance's carrier is a full type **expression**, so a theory may
