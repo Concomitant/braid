@@ -46,6 +46,7 @@ the current stack is rejected with a message naming the stack.
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
 | `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
 | `⇒!` , `->!` | the effectful arrow — an arrow carrying the `io` grade (§3) |
+| `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, grade included (§3, §8) |
 
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
@@ -119,6 +120,25 @@ alike. Effect tails are invisible in display, the same hiding a `ρ`
 tail already gets inside `Fn⟨…⟩`. Writing a grade in a type: §5 and
 §8. The two edges: §14.
 
+**A threaded resource folds onto the arrow too.** A `resource` (§8) is
+a nominal wire you thread rather than consume; resource wires ride
+**deepest**, and when both sides of an arrow begin with the same run of
+them, that run moves onto the arrow — which is exactly what "threaded
+through" means. The io grade rides on the same arrow, because it says
+the same kind of thing:
+
+```text
+note  : Str =Log> •                       -- Str in, Log threaded
+bump  : • =Counter> •
+score : Int ρ0 =Log Counter> Int ρ0       -- two resources, in `use` order
+peek  : • =IO Log> •                      -- grade and resources, one arrow
+```
+
+The fold is display, not inference: it fires when the prefixes match
+exactly, and a resource anywhere but the bottom prints as an ordinary
+wire (`_ bump ... : a0 Counter ρ0 ⇒ a0 Counter ρ0`). Threading them by
+hand is `_`/`...` as usual; `use` (§6) writes that padding for you.
+
 ## 4. The remainder discipline
 
 Three spellings of "and the rest passes through":
@@ -181,6 +201,10 @@ Type formers:
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
   match exactly (`:t!` shows raw).
+- **Resources**: `resource Name = <stack>` (§8) — a `data` declaration
+  under another keyword. One nominal wire, carrying its contents boxed,
+  meant to be threaded rather than consumed; a run of them shared by
+  both sides of an arrow folds onto the arrow as `=Log Counter>` (§3).
 - **Exponents**: `A^n` (input `Int^3`, `R^n`; display `Int³`, `ℝⁿ`) — a
   segment repeated n times. `n` is erased at runtime; concrete
   exponents expand away. See §13 and `design-exponents.md`.
@@ -302,6 +326,62 @@ of bare identifiers, `a b -> c d` is claimed by the *cutting* binder at
 the start of a scope or after a newline (its documented position), and
 read as *naming* anywhere else. Anything with a literal, group, or
 quote in it — like `1 "a" .foo -> x _ y` — is unambiguous either way.
+
+### Ambient scopes `use R1 R2`
+
+`use` names resources (§8) and opens a scope over them, taking the
+**rest of the enclosing scope as its body** — the same scope-taking
+shape as the binders `x y ->` and `-> x y`, and the same rule about
+needing a rest to reach. An elaborator running between parse and
+inference writes every `_` and `...` the threading needs, from the
+resource declarations alone:
+
+```braid
+resource Log     = Str
+resource Counter = Int
+def note = unLog _ ; cat ; Log                  # Str =Log> •
+def bump = unCounter ; 1 ... ; + ; Counter      # • =Counter> •
+
+def score =
+    use Log Counter
+    dup ; *
+    bump
+    "scored "
+    note
+```
+
+The same program written by hand — same wires, same type, all of the
+arithmetic visible, and a third resource would renumber every line:
+
+```braid
+def scoreByHand =
+    _ _ (dup ; *) ...
+    _ bump ...
+    _ _ "scored " ...
+    swap ...                    # bring Log up beside the Str
+    _ note ...
+    swap ...                    # and put it back
+```
+
+Both are `Int ρ0 =Log Counter> Int ρ0`. Inference is the *checker* of
+the elaboration, never an input to it: the elaborator places the wires
+at statically known offsets (resources ride deepest, in `use` order),
+and the ordinary type checker verifies the result.
+
+**`use` asserts its claim.** The incoming wires must really be those
+resources, even when the body never touches one:
+
+```braid
+def f = use Log >> dup          # a0 ρ0 =Log> a0 a0 ρ0 — Log is claimed,
+                                #   though the body never mentions it
+```
+
+**What `use` does to a pure stage is `lift`** (§10), an ordinary
+prelude word: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a program
+one wire deeper, composable once per context wire. Nothing about
+ambient threading is machinery you cannot write yourself; `use` only
+saves you the counting. See `examples/resources.braid` and §14 for the
+current limits (one resource operation per stage).
 
 ### Rows `(p₁ | p₂ | …)`
 The sum functor's action: one wire in carrying `(Δ₁|Δ₂|…)`, component
@@ -496,6 +576,42 @@ body. A declaration's right-hand side is parsed as a stack,
 so both literal exponents (`type T3 = (Int^3 | Str)`) and exponent
 *variables* (`type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩`) belong there.
 
+**`resource Name = <stack>`** declares a threaded wire — a `data`
+declaration under another keyword, and nominal for the same reason
+`data` is:
+
+```braid
+resource Log     = Str
+resource Counter = Int
+resource GameState = Int Int
+```
+
+- **Nominal.** `Int Int` is never silently a GameState — `def notState
+  = swap : a0 a1 ⇒ a1 a0`, unfolded. Structural folding would rename
+  every def that happened to thread two Ints; a resource's meaning is
+  exactly the part its shape does not carry, so it declares a distinct
+  type instead.
+- **One wire**, its contents boxed, whatever the declared stack's
+  width. That is what makes `=Log Counter>` an ordered run of wires
+  (§3) rather than a guess about widths.
+- **Roll and unroll, no fold.** `Log : Str ⇒ Log` and `unLog : Log ⇒
+  Str` are generated as for any `data`; `foldLog` is *not* — you unroll
+  a resource, you do not eliminate it by points (`foldLog` reports
+  *Unknown primitive*). Roll/unroll are free at runtime.
+- **Rides deepest.** Resource wires sit at the bottom of the stack, in
+  the order a `use` names them, which is what puts every offset a known
+  distance from the deepest wire (§6). Operations are ordinary defs
+  that unroll, work, and roll back:
+
+```braid
+def note = unLog _ ; cat ; Log                  # Str =Log> •
+def bump = unCounter ; 1 ... ; + ; Counter      # • =Counter> •
+```
+
+Threading a resource by hand is `_` and `...` like anything else; `use`
+(§6) writes that padding. See `examples/resources.braid` and
+`design-effects.md`.
+
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
 like any type stack (params splice, `•` is empty, `Fn` nests). The
@@ -686,6 +802,14 @@ over `loop`.
 (derived from their own eliminators — `foldExp` + `cons`/`reverse`,
 Church-style for `pack2`).
 
+**Strength**: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` — run a program
+one wire deeper, the wire beneath untouched; compose it once per
+context wire (`[dup >> *] >> lift >> lift : • ⇒ Fn⟨a0 a1 Int ⇒ a0 a1
+Int⟩`). This is tensorial strength, the action of `(A ⊗ −)` on a
+morphism, and it is exactly what threads a resource past a pure stage —
+so ambient threading (§6) needs no machinery for the pure case, only
+the counting. `def lift = (f -> [_ (f ... >> apply)])`.
+
 ## 11. Control flow — the idioms
 
 Two tiers of predicate: **routers** (`odd?`, keep + route — branches
@@ -827,6 +951,23 @@ holds for them too: final atom of their stage (§9).
   left to right — deepest wire first, the order they are written in
   (`print print : a0 a1 ⇒! •`). That order is decreed, not checked, so
   a mis-ordered pair is a wrong behaviour, not a type error.
+- Inside a `use` scope, a stage may contain **at most one resource
+  operation, and it must be alone in that stage** — otherwise *"a stage
+  may contain at most one resource operation, and it must be alone —
+  put note on its own line"*. An operation touching two resources at
+  once is rejected outright (*"touches 2 resources at once; the
+  elaborator routes one per stage"*): the elaborator brings one
+  resource wire up, acts, and puts it back, and two at once would need
+  a permutation it will not guess. Both limits are the elaborator's,
+  not the type system's — by hand, `_`/`...` still do anything.
+- A `use` with nothing after it is an error (*"`use …` ends its scope"*)
+  — like a binder, its body is the rest of the scope, so there has to
+  be a rest.
+- A resource is **nominal**: structural shapes never fold into one.
+  `resource GameState = Int Int` leaves `swap : a0 a1 ⇒ a1 a0` exactly
+  as it was, and only a genuine rolled `GameState` wire ever displays
+  as one. The ceremony (`unLog` before you touch the contents, `Log`
+  after) is what buys the arrow fold its meaning.
 - A `Fin` prints as a bare integer. Erasure is honest — a `Fin` *is* an
   `Int` at runtime — but output does not distinguish an index from an
   ordinary `Int`; only the type does.
@@ -840,9 +981,11 @@ holds for them too: final atom of their stage (§9).
 - `design-indices.md` — `Fin(n)` and witnessed introductions: why
   `Aⁿ` is `Fin(n) → A`, and why there is no `tabulate`.
 - `design-effects.md` — the effects position (effects are wires, IO is
-  a linear wire, the placement ladder as a PCM); **stage 1, the io
-  grade, has shipped** — stages 2–5 (bundles, theories, ambient
-  threading, the linear `World`) are position only.
+  a linear wire, the placement ladder as a PCM); **stages 1, 2 and 4 —
+  the io grade, `resource` declarations and `use` — have shipped**,
+  including the amendment that flipped the resource wires from the top
+  of the stack to the bottom. Stage 3 (theories and instances) and
+  stage 5 (the linear `World`) are position only.
 - `design-metaprogramming.md` — typed code as the free category
   (`Path`), Forth's compiler lifted from a monoid; position taken.
 - `guide-open-arity.md` — practical rules for open words.
@@ -851,4 +994,4 @@ holds for them too: final atom of their stage (§9).
 - `examples/` — every feature running, and CI-guarded; start with
   `registrar.braid` (most of the language in forty lines), then
   `ladder.braid`, `cuts.braid`, `stream.braid`, `arrows.braid`,
-  `functors.braid`, `gla.braid`.
+  `functors.braid`, `resources.braid`, `gla.braid`.

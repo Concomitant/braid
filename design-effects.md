@@ -1,11 +1,14 @@
-# Design note: effects (arrows → theories → wires) — STAGE 1 SHIPPED
+# Design note: effects (arrows → theories → wires) — STAGES 1, 2, 4 SHIPPED
 
-Consolidates three discussions (2026-07-30 … 08-03). Status: **stage 1
-of the staging below — the IO grade — shipped 2026-08-25**; stages 2–5
-remain design position. One decision was reversed at implementation
-(the placement rule; amendment in place, below). Supersedes the
-effect-row sketch in the old plan file; extends
-design-control-flow.md §7.
+Consolidates three discussions (2026-07-30 … 08-03). Status: **stages 1,
+2 and 4 of the staging below — the IO grade, `resource` declarations,
+and `use` — shipped 2026-08-25/26**; stage 3 (theories and instances,
+the machinery tier) and stage 5 (the resource mark and the linear
+`World`) remain design position. TWO decisions were reversed at
+implementation — the placement rule, and which end of the stack the
+resource wires ride on; both amendments are in place below, and neither
+rewrites what it replaced. Supersedes the effect-row sketch in the old
+plan file; extends design-control-flow.md §7.
 
 ## Stage 1 as shipped (2026-08-25)
 
@@ -65,6 +68,136 @@ there is no subeffecting, so a pure quote unified into an io context
 types as io. Let-generalization at `def` boundaries restores per-use
 freshness; inside one expression nothing does.
 
+## Stages 2 and 4 as shipped (2026-08-26)
+
+**A `resource` is a `data` declaration under another keyword.**
+
+```text
+resource Log     = Str
+resource Counter = Int
+```
+
+It is NOMINAL, which was the corrected decision of the stage-2 entry
+below and is the whole reason the fold can mean anything: an `Int Int`
+stack is never silently a GameState (`resource GameState = Int Int` ⇒
+`def notState = swap : a0 a1 ⇒ a1 a0`, unfolded, as it should be). It
+contributes exactly ONE wire, its contents boxed. It generates the roll
+`Log` and the unroll `unLog` — and NO `foldLog`: you unroll a resource,
+you do not eliminate it by points (`foldLog` is *Unknown primitive*).
+Rolls are free at runtime, as every `data` roll already is.
+
+**A shared resource PREFIX folds onto the arrow, and the grade joins
+it.** When both sides of an arrow begin with the same run of resource
+wires, that run is what "threaded through" means, so it moves onto the
+arrow itself:
+
+```text
+note  : Str =Log> •
+bump  : • =Counter> •
+score : Int ρ0 =Log Counter> Int ρ0
+peek  : • =IO Log> •            -- grade and resources are ONE arrow
+```
+
+The last line is the note's `=IO Log GameState>` spelling arriving
+intact: the io grade and the resource list are the same statement said
+twice — the set of resource wires the def touches — so one arrow
+carries both, and with no resources it degrades to the plain glyph.
+The fold is display only; nothing about it is inferred, and that is
+structural rather than an omission: `unifyEff` ABSORBS (which is how
+`io` propagates with no annotation anywhere), while `unifyStack` is
+rigid and front-anchored with no suffix matching, so a remainder
+variable eats `Log Counter` and nothing records that they were there.
+ε and γ are not one variable sort in the code — the survey under stage
+3 below has the detail — and that is precisely why stage 4 is an
+elaborator with inference as its checker, rather than an extension of
+the solver.
+
+**Stage 4: `use` is a scope-taking form**, in the same family as the
+binders `x y ->` and `-> x y` — `use Log Counter` takes the REST of the
+enclosing scope as its body. An elaborator running between parse and
+infer writes every `_` and `...` from the resource signatures alone:
+
+```braid
+def score =
+    use Log Counter
+    dup ; *
+    bump
+    "scored "
+    note
+```
+
+The same program without it, which is what the language gave you before
+stage 4 — and note that adding a third resource renumbers every line:
+
+```braid
+def scoreByHand =
+    _ _ (dup ; *) ...
+    _ bump ...
+    _ _ "scored " ...
+    swap ...
+    _ note ...
+    swap ...
+```
+
+Both infer `Int ρ0 =Log Counter> Int ρ0`. Inference is the CHECKER of
+the elaboration, never an input to it.
+
+**`use` ASSERTS its claim.** The scope opens with `unLog >> Log` per
+resource — the identity on a Log that typechecks on nothing else — so
+the incoming wires must really be those resources even when the body
+never touches one: `def f = use Log >> dup : a0 ρ0 =Log> a0 a0 ρ0`.
+Without the assertion a `use` header whose body ignored a resource
+would be padding rather than a statement.
+
+**Strength is an ordinary word.** `lift` shipped in the prelude:
+
+```text
+lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩
+def lift = (f -> [_ (f ... >> apply)])
+```
+
+Run a program one wire deeper; compose it once per context wire. This
+is tensorial strength — the action of `(A ⊗ −)` on a morphism — and it
+is exactly what `use` does to a pure stage, which is why stage 4 needed
+no new machinery for the pure case: the elaborator writes the padding
+that `lift` would otherwise compose. The categorical content of the
+ambient scope is a prelude def, not a compiler feature.
+
+**The limits, stated plainly.** A stage may contain **at most one
+resource operation, and it must be alone in that stage** — anything
+else is rejected with *"a stage may contain at most one resource
+operation, and it must be alone — put X on its own line"*. An operation
+that touches two resources at once is rejected outright (*"touches 2
+resources at once; the elaborator routes one per stage"*): the router
+brings one resource wire up, acts, and puts it back, and two at once
+would need a solved permutation rather than a fixed `_`-prefix. Both
+limits are the elaborator's, not the type system's, and both relax
+without breaking programs.
+
+**Amendment (2026-08-26, at implementation): resources ride DEEPEST,
+not on top.** The note says "data at the bottom, bundle on top", and
+the stage-2 entry below calls the resources an ordered *suffix*. That
+flipped during implementation, and the reason is routing, not taste:
+
+- Braid's positional vocabulary is **deepest-anchored** — `_` counts
+  from the deepest wire. With the resource on top, the value width
+  between the data and the resource is not statically known, and every
+  padding FIXES it: `bump : • =Counter> •`, `_ bump : a0 =Counter> a0`,
+  `_ _ bump : a0 a1 =Counter> a0 a1`. Writing "bump the Counter,
+  whatever lies below" would need `ρ Counter ⇒ ρ Counter` — a SPLICE,
+  the construct design-flexible-arity.md deleted for being
+  non-principal. (This retroactively explains why `rotLast` existed at all:
+  top-anchored routing needs it, and it died with the splice.)
+- Bottom-anchored, every offset is known from the `use` header alone
+  and the words stay width-polymorphic: `bump ... : Counter ρ0 ⇒
+  Counter ρ0`, `_ bump ... : a0 Counter ρ0 ⇒ a0 Counter ρ0`.
+- The preference for top-anchoring was that a pure stage is then a tidy
+  `X ...` rather than `_ _ X ...`. But the ELABORATOR writes that
+  padding — the elegance being protected is invisible at the surface,
+  while the routability it costs is decisive.
+- Consequence, recorded because it changes a display rule: the `=Name>`
+  fold reads a **prefix**, not a suffix.
+
 ## The design, zoomed out
 
 **Effects are wires.** The classical effect zoo decomposes into
@@ -73,8 +206,11 @@ wire, reader = closure capture, exceptions = the railway sum,
 nondeterminism = List. Verified in-session: a `Log GameState` arrow is
 expressible today as `A GameState Str ⇒ B GameState Str`, with pure
 stages threading the bundle by a single `...` (data at the bottom,
-bundle on top). Only **IO** is irreducible — a genuine observational
-capability, not plumbing.
+bundle on top). *Amended 2026-08-26, at implementation: the bundle
+rides at the BOTTOM and the data on top — `GameState Str A ⇒ GameState
+Str B` — because Braid's positional vocabulary counts from the deepest
+wire; the shipped section above has the argument.* Only **IO** is
+irreducible — a genuine observational capability, not plumbing.
 
 **IO is a linear wire.** The true string diagram for a premonoidal
 category (Jeffrey 1997) reifies effect order as one linear control
@@ -346,16 +482,26 @@ grade inferred.
   copyable mark; third parties meet it only as an (accurate) error.
 - Open: quotes capture their `use` scope lexically (position taken:
   yes, closure-like); Code⟨⟩ reflection of elaborated (wire-threaded)
-  code; what a `scope` is syntactically.
+  code. *Settled by stage 4: a `scope` is syntactically what the
+  binders already were — `use R…` takes the rest of the enclosing scope
+  as its body, the same rule as `x y ->` and `-> x y`, so the form
+  needed no new notion of scope.*
+- Shipped limits of the `use` elaborator (both relaxable): one resource
+  operation per stage, alone in that stage; and no operation that
+  touches two resources at once. Ladder step 2/3 licences are untouched
+  by this — these are routing limits, not commutativity ones.
 
-## The staging (1 shipped, 2–5 not scheduled)
+## The staging (1, 2 and 4 shipped; 3 and 5 remain)
 
 1. IO bit on Arrow (the old arrows-plan stage 1; display `⇒!`, pure
    displays as today so all tests survive). **SHIPPED 2026-08-25** —
    see "Stage 1 as shipped" above; the placement rule it was to carry
    became the left-to-right decree instead.
 2. **Resource** declarations + `=Name>` display sugar over wire
-   suffixes. (Decisions taken 2026-08-25, before implementation:)
+   suffixes. **SHIPPED 2026-08-26** — see "Stages 2 and 4 as shipped"
+   above; *suffix* became *prefix* at implementation (amendment there,
+   and on the bullet below). (Decisions taken 2026-08-25, before
+   implementation:)
    - **Called `resource`, not `bundle` or `environment`.** "Environment"
      already means the TYPING environment here (`Env`/`VarEnv` — name
      resolution), and reusing it for runtime wires would collide on the
@@ -371,7 +517,14 @@ grade inferred.
    - **An ordered suffix, juxtaposed.** A resource names a run of
      wires, and `=A B>` is their juxtaposition — the same reading as
      everywhere else, and forced by the tail-only discipline: threaded
-     wires ride on top, in order.
+     wires ride on top, in order. *Amended 2026-08-26, at
+     implementation: the juxtaposition and its order survived, the END
+     did not — threaded wires ride DEEPEST, so `=A B>` folds a leading
+     PREFIX. Top-anchored routing needs a splice (`ρ Counter ⇒ ρ
+     Counter`), which is exactly the non-principal construct
+     design-flexible-arity.md deleted; bottom-anchored, every offset is
+     known from the `use` header alone. The argument in full is in the
+     shipped section above.*
    - **NOMINAL, not a structural alias** (corrected 2026-08-25, before
      any code). The first draft said a resource folds like `Maybe` —
      structurally, on shape. That cannot work: nothing distinguishes
@@ -392,8 +545,11 @@ grade inferred.
      unroll, where raw threaded wires needed none. That ceremony is
      what buys the fold its meaning — an accidental GameState is now
      unspellable.
-3. Theories/`use` (elaboration only).
-   **Architecture settled 2026-08-26, from a survey of the checker.**
+3. Theories/instances — the machinery tier. **NOT shipped**; the
+   `use` half of this entry became stage 4 and shipped, so what remains
+   here is theories, instances, and their runnable laws.
+   **Architecture settled 2026-08-26, from a survey of the checker**
+   (and confirmed by the implementation)**.**
    The note has been saying ε (effects) and γ (ambient bundles) are ONE
    variable sort. In the code they are not, and the difference is the
    whole design:
@@ -418,7 +574,11 @@ grade inferred.
      mid-scope.** Lets each stage take a fixed `_`-prefix instead of a
      solved permutation. A word that consumed one resource and
      produced a different one would break it and force the
-     type-directed path.
+     type-directed path. *Amended 2026-08-26: DEEPEST, not topmost —
+     the commitment is that the position is statically known, and only
+     the bottom end gives that (see the amendment in the shipped
+     section). Everything else in this bullet stands, `_`-prefix
+     included.*
    - **(c) Open-arity atoms keep their final-atom obligation.** A
      stage's resource `...` and an open word's `...` are the same slot;
      if both want it, reject rather than permute.
@@ -426,6 +586,10 @@ grade inferred.
    routing from a declaration alone, with zero unification, and hands
    the result to the ordinary parse+infer path.
 4. Ambient threading (elaborator frames pure stages inside `use`).
+   **SHIPPED 2026-08-26** — see "Stages 2 and 4 as shipped" above. The
+   frame a pure stage gets is `lift`, which shipped as an ordinary
+   prelude word; the elaborator writes its `_`s directly.
 5. Resource mark + linear `World` + explicit/split levels.
-Each stage independently useful; 1–2 are small; 4 is the big
-ergonomic payoff; 5 unlocks the power tier.
+Each stage independently useful; 1–2 were small; 4 was the big
+ergonomic payoff, and was cheap because 2 made the wires nominal; 5
+unlocks the power tier.

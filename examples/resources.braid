@@ -1,0 +1,58 @@
+# Resources: effects as wires, and `use` to stop threading them by hand.
+#
+# The design bet (design-effects.md) is that the effect zoo decomposes
+# into structure Braid already has — state is a threaded wire, a log is
+# a wire, a reader is closure capture — and only IO is irreducible. A
+# `resource` names such a wire. It is NOMINAL, so `Int Int` is never
+# silently a GameState, and it rides DEEPEST, which is what puts every
+# offset a known distance from the bottom.
+
+resource Log     = Str
+resource Counter = Int
+
+# ---- the resource's operations: the only place roll/unroll appears ----
+def note = unLog _ ; cat ; Log         # Str =Log> •
+def bump = unCounter ; 1 ... ; + ; Counter
+
+# ---- by hand: the wires are visible, and you count -------------------
+# This is what the language gives you with no help: `_` steps over a
+# resource, `...` threads the rest, and adding a third resource would
+# renumber every line.
+def scoreByHand =
+    _ _ (dup ; *) ...
+    _ bump ...
+    _ _ "scored " ...
+    swap ...                           # bring Log up beside the Str
+    _ note ...
+    swap ...                           # and put it back
+
+# ---- with `use`: the same program, none of the arithmetic ------------
+# `use` opens an ambient scope; the elaborator writes every `_` and
+# `...` above from the resource signatures alone. It also ASSERTS the
+# claim — the incoming wires must really be a Log and a Counter.
+def score =
+    use Log Counter
+    dup ; *
+    bump
+    "scored "
+    note
+
+# score : Int ρ0 =Log Counter> Int ρ0
+#   the resources fold onto the ARROW, which is what "threaded through"
+#   means: the same prefix going in and coming out.
+
+("" ; Log) (0 ; Counter) 7
+score
+score
+unLog _ _ ; print ...                  # "scored scored "
+unCounter _ ; print ...                # 2
+print                                  # 2401 — 7 squared, twice
+
+# ---- strength is an ordinary word ------------------------------------
+# What `use` does to a PURE stage is exactly `lift`: run a program one
+# wire deeper. It is the action of (A ⊗ −) on a morphism, and it needs
+# no compiler support — compose it once per context wire.
+(":" ; Log) 7
+([dup ; *] ; lift) ...
+apply
+unLog _ ; print print                  # ":" untouched, 49

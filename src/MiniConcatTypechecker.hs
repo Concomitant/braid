@@ -811,6 +811,13 @@ data Term
                           -- The body's input is the unnamed slots, in
                           -- order, then the rest.  All-named and no `...`
                           -- = input-closed: the original behaviour.
+  | Use [String] Term     -- `use R1 R2` — an ambient scope.  The named
+                          -- resources ride DEEPEST, and the rest of
+                          -- the enclosing scope is the body; every
+                          -- stage in it gets its routing written by
+                          -- the elaborator (`elabUse`), which runs
+                          -- between parse and infer.  This node never
+                          -- reaches inference.
   | Alts [Term] Bool      -- (p₁ | … | pₙ [| ...]): code row — the sum
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
@@ -1026,6 +1033,9 @@ parseProgram input = do
 parseProgramToks :: [Token] -> Either String (Term, [Token])
 parseProgramToks toks =
   case toks of
+    -- `use R1 R2` opens an AMBIENT SCOPE, taking the rest of the scope
+    -- as its body exactly as the binders do
+    (TokIdent "use" : ts) | Just (rs, r) <- usePrefix ts -> mkUse rs r
     -- a leading arrow names the wires this scope was handed
     (TokArrow : ts) -> mkName ts
     _ ->
@@ -1041,6 +1051,9 @@ parseProgramToks toks =
       (nm, r') <- mkName rest
       Right (Seq acc nm, r')
     loop acc (TokNewline : rest)
+      | (TokIdent "use" : ts) <- rest, Just (rs, r) <- usePrefix ts = do
+          (u, r') <- mkUse rs r
+          Right (Seq acc u, r')
       | (TokArrow : ts) <- rest = do
           (nm, r') <- mkName ts
           Right (Seq acc nm, r')
@@ -1095,6 +1108,28 @@ parseProgramToks toks =
       let repush = [ TokIdent (fromMaybe "_" s) | s <- slots ] ++ [TokEllipsis]
       (body, rest') <- parseProgramToks (repush ++ TokNewline : bodyToks)
       Right (OpenAbs slots True body, rest')
+
+    -- a run of resource names, then the body (a stage break or `->`)
+    usePrefix ts = case span isUseTok ts of
+      (ns@(_ : _), r) -> Just ([ n | TokIdent n <- ns ], r)
+      _               -> Nothing
+    isUseTok (TokIdent n) = n /= "_"
+    isUseTok _            = False
+
+    mkUse names rest = do
+      case [ n | (n, i) <- zip names [0 :: Int ..], n `elem` take i names ] of
+        (n : _) -> Left $ "Duplicate resource in `use`: " ++ n
+        []      -> Right ()
+      bodyToks <- case rest of
+        (TokArrow : more)   -> Right more
+        (TokSeq : more)     -> Right more
+        (TokNewline : more) -> Right more
+        r | endsScope r -> Left "'use …' ends its scope: there is no body \
+                                \for the resources to be ambient in"
+        (t : _) -> Left $ "'use …' must be followed by its body (a newline, \
+                          \';' or '->'), got: " ++ show t
+      (body, rest') <- parseProgramToks bodyToks
+      Right (Use names body, rest')
 
     slotOf (TokIdent "_") = Right Nothing
     slotOf (TokIdent n)   = Right (Just n)
@@ -1974,14 +2009,16 @@ closedWires SEnd        = Just []
 closedWires (SCons t r) = (t :) <$> closedWires r
 closedWires _           = Nothing
 
--- The trailing run of resource wires (they ride on top, so they are at
--- the END of the wire list), and the wires beneath them.
-resSuffix :: [String] -> [Ty] -> ([Ty], [String])
-resSuffix rs ts =
+-- The LEADING run of resource wires, and the working wires above them.
+-- Resources ride deepest (the 2026-08-26 flip), which is what puts every
+-- offset a known distance from the bottom — the property that lets the
+-- elaborator route them without consulting inference.
+resPrefix :: [String] -> [Ty] -> ([String], [Ty])
+resPrefix rs ts =
   let isRes (TData n []) = n `elem` rs
       isRes _            = False
-      (revRes, revRest)  = span isRes (reverse ts)
-  in (reverse revRest, reverse [ n | TData n [] <- revRes ])
+      (res, rest)        = span isRes ts
+  in ([ n | TData n [] <- res ], rest)
 
 -- `A =IO Log GameState> B` — the note's spelling.  The grade and the
 -- threaded resources are the same thing said two ways (the set of
@@ -1993,16 +2030,22 @@ arrowBetween e ns = " =" ++ unwords ([ "IO" | eIO e ] ++ ns) ++ "> "
 
 showArrowA :: Disp -> Arrow -> String
 showArrowA as (Arrow s1 s2 e)
-  | (Just w1, Just w2) <- (closedWires s1, closedWires s2)
-  , (p1, r1) <- resSuffix (dispResources as) w1
-  , (p2, r2) <- resSuffix (dispResources as) w2
-  , not (null r1), r1 == r2                  -- same suffix in AND out
-  = showWires as p1 ++ arrowBetween e r1 ++ showWires as p2
-  where
-    showWires d [] = "•"
-    showWires d ws = unwords (map (showTyA d) ws)
+  -- a resource PREFIX shared by both sides is what "threaded through"
+  -- means, so that is exactly when the name is earned.  Works on open
+  -- stacks: the resources are at the bottom, the tail is far away.
+  | r1 <- leadingRes (dispResources as) s1
+  , r2 <- leadingRes (dispResources as) s2
+  , not (null r1), r1 == r2
+  = showStackA as (dropWires (length r1) s1)
+      ++ arrowBetween e r1
+      ++ showStackA as (dropWires (length r1) s2)
 showArrowA as (Arrow s1 s2 e) =
   showStackA as s1 ++ arrowGlyph e ++ showStackA as s2
+
+dropWires :: Int -> SType -> SType
+dropWires 0 st            = st
+dropWires n (SCons _ rest) = dropWires (n - 1) rest
+dropWires _ st            = st
 
 showSchemeA :: Disp -> Scheme -> String
 showSchemeA as (Forall tvars svars rvars nvars evars arr) =
@@ -2531,6 +2574,7 @@ primsIn (Quote t)       = primsIn t
 primsIn (OpenAbs slots _ t) =
   [ n | n <- primsIn t, n `notElem` [ x | Just x <- slots ] ]
 primsIn (Alts comps _)  = concatMap primsIn comps
+primsIn (Use _ b)      = primsIn b
 
 -- Replace the def-local keyword `recurse` with the def's own name
 -- (parse-time, shadow-aware) — anonymous self-reference in def bodies.
@@ -2543,6 +2587,7 @@ substRecurse nm = go
     go (Seq a b)        = Seq (go a) (go b)
     go (Quote t)        = Quote (go t)
     go (Alts cs r)      = Alts (map go cs) r
+    go (Use rs b)       = Use rs (go b)
     go t@(OpenAbs slots hasRest b)
       | Just "recurse" `elem` slots = t
       | otherwise                   = OpenAbs slots hasRest (go b)
@@ -2636,6 +2681,84 @@ normalizeArrow arr =
              (zip evs [ Eff False (Just (EV ("ε" ++ show n)))
                       | n <- [0 :: Int ..] ])
   in substOnce (Subst tm sm rm nm em) arr
+
+--------------------------------------------------------------------------------
+-- 9.5 The ambient elaborator (`use`)
+--
+-- Resources ride DEEPEST, in `use` order, so every offset here is a
+-- constant known from the header alone.  That is the whole reason this
+-- can be syntactic: it never consults inference, so inference stays the
+-- CHECKER of what we emit rather than an input to it, and a type error
+-- is reported against the user's program rather than from inside a
+-- rewrite they never wrote (design-effects.md).
+--------------------------------------------------------------------------------
+
+-- the leading run of resource wires on a stack (works on open stacks
+-- too, unlike closedWires — a resource op's tail is often open)
+leadingRes :: [String] -> SType -> [String]
+leadingRes rs (SCons (TData n []) r) | n `elem` rs = n : leadingRes rs r
+leadingRes _  _                                    = []
+
+elabUse :: Env -> Term -> Either String Term
+elabUse env = go
+  where
+    go (Use rs b)      = go b >>= elabScope env rs
+    go (Seq a b)       = Seq <$> go a <*> go b
+    go (Tensor ts)     = Tensor <$> mapM go ts
+    go (Quote t)       = Quote <$> go t
+    go (Alts cs r)     = Alts <$> mapM go cs <*> pure r
+    go (OpenAbs sl h b) = OpenAbs sl h <$> go b
+    go t               = Right t
+
+elabScope :: Env -> [String] -> Term -> Either String Term
+elabScope env rs body = do
+  stages <- mapM routeStage (spineOf body)
+  -- `use Log Counter` is a CLAIM about the incoming wires, so make it
+  -- one: `unLog >> Log` is the identity on a Log and typechecks on
+  -- nothing else.  Without this a body that never touches a resource
+  -- would leave its wires unconstrained, and the scope would be padding
+  -- rather than a statement.
+  let assert = [ [ Seq (Prim ("un" ++ r)) (Prim r) | r <- rs ]
+                 ++ [Prim "pass"] | not (null rs) ]
+  pure (chainTerm (assert ++ concat stages))
+  where
+    k = length rs
+    pad n = replicate n (Prim "_")
+    swapStage d = pad d ++ [Prim "swap", Prim "pass"]
+
+    schemeOf (Prim n) = M.lookup n env
+    schemeOf _        = Nothing
+
+    resUse a = case schemeOf a of
+      Just (Forall _ _ _ _ _ (Arrow i _ _)) -> leadingRes rs i
+      _                                     -> []
+
+    -- an open-arity word must stay final, so it takes the remainder
+    -- itself instead of us appending one (§13 rule 1)
+    isOpen a = case schemeOf a of
+      Just (Forall _ _ _ _ _ (Arrow i o _)) -> openTailedS i || openTailedS o
+      _                                     -> False
+
+    routeStage atoms0 =
+      let atoms = [ a | a <- atoms0, a /= Prim "pass" ]
+          tailPass = [ Prim "pass" | not (null atoms), not (isOpen (last atoms)) ]
+          touching = [ (a, u) | a <- atoms, let u = resUse a, not (null u) ]
+      in case touching of
+        -- a pure stage: step over the resources, act, thread the rest
+        [] -> Right [ pad k ++ atoms ++ tailPass ]
+        -- one resource operation, alone in its stage: bring its wire up
+        -- beside the working wires, apply, put it back
+        [(a, [r])] | [a] == atoms, Just j <- elemIndex r rs ->
+          Right ( [ swapStage i | i <- [j .. k - 2] ]
+               ++ [ pad (k - 1) ++ [a] ++ tailPass ]
+               ++ [ swapStage i | i <- reverse [j .. k - 2] ] )
+        [(a, u)] | [a] == atoms ->
+          Left $ "`use`: " ++ renderTerm a ++ " touches "
+              ++ show (length u) ++ " resources at once; the elaborator \
+                 \routes one per stage"
+        _ -> Left $ "`use`: a stage may contain at most one resource \
+                    \operation, and it must be alone — put "
+                 ++ renderTerm (fst (head touching)) ++ " on its own line"
 
 -- Infer and alpha-normalize; the workhorse for tests.
 inferNormalized :: String -> Either String Arrow
@@ -2798,8 +2921,9 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
     if all isSpace mainSrc
       then pure Nothing
       else do
-        term <- parseProgram mainSrc
-        arr  <- inferTermIn env' term
+        term0 <- parseProgram mainSrc
+        term  <- elabUse env' term0
+        arr   <- inferTermIn env' term
         pure (Just (term, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart)
@@ -2844,8 +2968,12 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
         then Left $ "Duplicate definition: " ++ name
         else Right ()
       term0 <- either (Left . inDef) Right (parseProgram bodySrc)
-      let term = substRecurse name term0
-          env1 = M.delete name env   -- a shadowed def must not leak in
+      let env1 = M.delete name env   -- a shadowed def must not leak in
+      -- `use` scopes are written out here, between parse and infer, the
+      -- same slot substRecurse occupies: a syntactic Term rewrite with
+      -- the Env available for arities and resource signatures.
+      term1 <- either (Left . inDef) Right (elabUse env1 term0)
+      let term = substRecurse name term1
       arr  <- either (Left . inDef) Right (inferDefTermIn name env1 term)
       let sc = generalize env1 arr
       pure ( M.insert name sc env
@@ -3053,6 +3181,8 @@ preludeSrc = unlines
   , "## the railway at apply time: ρ ⇒ (result | Str ρ)."
   , "def box = (cd -> [(cd) ... >> evalCode])"
   , "## sum an Int bundle: the variadic +"
+  , "## run a program one wire deeper: `[f] >> lift` is f with one wire riding beneath it, untouched.  Compose it once per context wire.  This is tensorial STRENGTH — the action of (A ⊗ −) on a morphism — and it is what threads a resource past a pure stage, so it is an ordinary word rather than machinery."
+  , "def lift = (f -> [_ (f ... >> apply)])"
   , "def sumN = [+] 0 ... >> foldExp"
     -- the GLA generators are now DERIVED: mapN/mapN2 lift any one- or
     -- two-wire word pointwise, so `+` and `*` are the only arithmetic
@@ -3772,6 +3902,7 @@ groundTerm env cv = go cv
     go vars (Tensor ts)  = Tensor <$> mapM (go vars) ts
     go vars (Quote t)    = Quote <$> go vars t
     go vars (Alts cs r)  = Alts <$> mapM (go vars) cs <*> pure r
+    go vars (Use rs b)   = Use rs <$> go vars b
     go vars (OpenAbs slots hasRest b) =
       OpenAbs slots hasRest
         <$> go (foldr M.delete vars [ n | Just n <- slots ]) b
@@ -3787,6 +3918,7 @@ elimAbsTerm env = go
     go (Tensor ts)    = Tensor <$> mapM go ts
     go (Quote t)      = Quote <$> go t
     go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
+    go (Use rs b)     = Use rs <$> go b
     go (OpenAbs slots hasRest b) = do
       b' <- go b
       -- compileAbsOpen wants the layout [body inputs (deepest)]
@@ -3876,6 +4008,7 @@ freeNamesIn = go
     go (Tensor ts)    = concatMap go ts
     go (Quote t)      = go t
     go (Alts cs _)    = concatMap go cs
+    go (Use _ b)      = go b
     go (OpenAbs slots _ b) =
       filter (`notElem` [ n | Just n <- slots ]) (go b)
 

@@ -332,6 +332,13 @@ moduleTypeTests =
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
+    -- STRENGTH as an ordinary word: run a program one wire deeper.
+    -- Composing it once per context wire is exactly what threads a
+    -- resource past a pure stage, which is why stage 4 needs no new
+    -- machinery for the pure case.
+  , ("lift",                          "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩")
+  , ("[dup >> *] >> lift",            "• ⇒ Fn⟨a0 Int ⇒ a0 Int⟩")
+  , ("[dup >> *] >> lift >> lift",    "• ⇒ Fn⟨a0 a1 Int ⇒ a0 a1 Int⟩")
     -- INDICES: Fin(n) with witnessed introductions.  Every intro's n
     -- is forced by an input — a live bundle, or a literal's offset.
     -- EFFECTS: the io grade.  Five prims are marked; everything else
@@ -404,10 +411,15 @@ moduleTypeTests =
     -- parameter was stack-kinded (the split was ambiguous).
     -- RESOURCES (design-effects stage 2): a nominal threaded wire,
     -- folding onto the ARROW as `=Name>` when it rides a suffix.
-  , ("resource Log = Str\ndef note = _ unLog >> cat >> Log\nnote",
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\nnote",
      "Str =Log> •")
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = _ unLog >> cat >> Log\ndef score = (dup >> *) ... >> _ (\"s\" ... >> note) ... >> _ _ bump\nscore",
-     "Int =Log Counter> Int")
+    -- bottom-anchored routing is width-polymorphic: the resource stays
+    -- put and the remainder threads, which is what lets the elaborator
+    -- place wires without consulting inference
+  , ("resource Log = Str\ndef note = (unLog _ >> cat >> Log) ...\nnote",
+     "Str ρ0 =Log> ρ0")
+  , ("resource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef tick = _ bump ...\ntick",
+     "a0 Counter ρ0 ⇒ a0 Counter ρ0")
     -- the grade and the resources are the same arrow: one `=IO Log>`
   , ("resource Log = Str\ndef peek = unLog >> dup >> print ... >> Log\npeek",
      "• =IO Log> •")
@@ -420,6 +432,16 @@ moduleTypeTests =
     -- the roll/unroll doors do not fold (no suffix on the input side)
   , ("resource Log = Str\nLog",   "Str ⇒ Log")
   , ("resource Log = Str\nunLog", "Log ⇒ Str")
+    -- STAGE 4: `use` opens an ambient scope and the elaborator writes
+    -- every `_`/`...` — the body below contains none.
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f = use Log Counter >> dup >> * >> bump\nf",
+     "Int ρ0 =Log Counter> Int ρ0")
+  , ("resource Log = Str\nresource Counter = Int\ndef note = unLog _ >> cat >> Log\ndef f = use Log Counter >> \"x\" >> note\nf",
+     "ρ0 =Log Counter> ρ0")
+    -- `use` ASSERTS its claim: the wires must really be those resources,
+    -- even when the body never touches one
+  , ("resource Log = Str\ndef f = use Log >> dup\nf",
+     "a0 ρ0 =Log> a0 a0 ρ0")
     -- the grade is inferred through defs, not read off a name
   , ("def shout = toStr >> print\nshout",          "a0 ⇒! •")
   , ("def quiet = toStr >> drop\nquiet",           "a0 ⇒ •")
@@ -943,6 +965,10 @@ moduleFailTests =
   , ("type Fin = Int\n1",             "Malformed type declaration")
     -- a resource is unrolled, not eliminated by points: no fold
   , ("resource Log = Str\nfoldLog",   "Unknown primitive: foldLog")
+    -- one resource operation per stage; the elaborator says so
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f = use Log Counter >> \"x\" >> note bump\n1",
+     "at most one resource operation")
+  , ("resource Log = Str\ndef f = use Log\n1", "ends its scope")
   , ("resource resource = Int\n1",    "Malformed type declaration")
     -- a declared pure Fn type refuses an io quotation: the declaration
     -- is not decoration

@@ -145,14 +145,36 @@ the prelude; every REPL line runs against a persistent typed stack.
 12. **Effects are wires.** State, logs, readers, exceptions,
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
-    railway sum, a list. Only IO is irreducible, so IO is the one
-    thing the types track. An effectful arrow prints `⇒!`, a pure one
+    railway sum, a list. Only IO is irreducible, so `io` is the one
+    label a grade ever needs. An effectful arrow prints `⇒!`, a pure one
     `⇒`, and which you get is **inferred, never annotated**: five
     prims are marked (`print`, `readLine`, `readFile`, `writeFile`,
     `evalCode`) and every other grade follows from composition — `def
     shout = toStr >> print : a0 ⇒! •`. Quoting stays pure, since
     pushing an action isn't doing it: `[print] : • ⇒ Fn⟨a0 ⇒! •⟩`, and
     `apply` is what transfers the grade out.
+
+    The other wires you can *name*: `resource Log = Str` declares a
+    threaded wire — nominal, so `Int Int` is never silently a
+    GameState, and one wire however wide its contents. A run of them
+    shared by both sides of an arrow folds onto the arrow, grade
+    included: `note : Str =Log> •`, `peek : • =IO Log> •`. And `use`
+    makes the threading disappear — it opens a scope over its
+    resources, taking the rest of the block as its body, and an
+    elaborator writes every `_` and `...` for you:
+    ```text
+    def score =
+        use Log Counter
+        dup ; *
+        bump
+        "scored "
+        note                # Int ρ0 =Log Counter> Int ρ0
+    ```
+    Nothing there is compiler magic you couldn't write: what `use` does
+    to a pure stage is `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩`, an
+    ordinary prelude word (tensorial strength — run a program one wire
+    deeper). It only saves you the counting (`examples/resources.braid`
+    shows both spellings side by side).
 13. **Code is data.** `reflect` turns a quotation into its spine — a
     list of stages of atoms — so `take`/`map`/`reverse` slice and
     transform *programs*; `evalCode` runs them (dynamically checked,
@@ -166,6 +188,7 @@ the prelude; every REPL line runs against a persistent typed stack.
 (railway), `ladder` (every guard idiom), `iterate` (while), then `nat`
 and `tree` (data types and folds), `lists`, `conditionals` and `case`
 (rows, deferred sums, `case(…)`), `tag` (naming wires in passing),
+`resources` (threaded wires and `use`),
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `parallel`, `matrices`, `gla` (bundles and the bialgebra),
@@ -175,7 +198,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 620+ case test suite, a full
+(typechecker, interpreter, REPL), a 640+ case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -185,6 +208,7 @@ out, and what replaced it), `design-exponents.md` (dimension-indexed
 segments: why exponents not stars, why unary successors suffice, why
 the eliminator is a fold and not an unroll). Deliberately absent so
 far: floats, modules beyond the auto-loaded prelude, typed splicing,
-labeled record fields, and effects beyond the inferred `io` grade (no
-bundles, no theories, no handlers — `design-effects.md` has the
-position and the staging).
+labeled record fields, and the rest of the effects staging — `resource`
+wires and `use` scopes have shipped, but there are no theories, no
+instances and no handlers (`design-effects.md` has the position, the
+staging, and the two decisions implementation reversed).
