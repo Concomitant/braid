@@ -1622,6 +1622,21 @@ parseTheory aliases dataSigs header body = do
           _ -> Left $ "Malformed theory entry: " ++ dropWhile isSpace l
 
 -- `instance Name : Theory(args)` + indented `slot = program`
+-- Split a type-argument list on commas that are not nested inside
+-- `(…)` or `Fn⟨…⟩`, dropping the trailing `)` that closed the list.
+splitTopCommas :: String -> [String]
+splitTopCommas = go 0 ""
+  where
+    go :: Int -> String -> String -> [String]
+    go _ acc []                     = [reverse acc | not (blankStr acc)]
+    go d acc (c : cs)
+      | c `elem` ("(\10216" :: String) = go (d + 1) (c : acc) cs
+      | c == ')' && d == 0          = [reverse acc | not (blankStr acc)]
+      | c `elem` (")\10217" :: String) = go (d - 1) (c : acc) cs
+      | c == ',' && d == 0          = reverse acc : go 0 "" cs
+      | otherwise                   = go d (c : acc) cs
+    blankStr = all isSpace
+
 parseInstance :: [Alias] -> [(String, [TyParam])] -> String -> [String]
               -> Either String Instance
 parseInstance aliases dataSigs header body = do
@@ -1630,18 +1645,21 @@ parseInstance aliases dataSigs header body = do
   pure (Instance nm th args binds)
   where
     blank l = all isSpace (takeWhile (/= '#') l)
+    -- An argument is a full type EXPRESSION, not a bare name: a
+    -- theory's carrier is routinely parameterized
+    -- (`Pipeline(Circuit(Int, Int))`), and scraping identifiers out of
+    -- the token stream read that as three separate arguments.  Split
+    -- the source on top-level commas and hand each piece to the
+    -- ordinary type parser, which already knows every type form.
     parseHead =
       case break (== ':') (takeWhile (/= '=') header) of
-        (lhs, ':' : rhs) | ["instance", nm] <- words lhs -> do
-          toks <- normalizeToks <$> tokenize rhs
-          case toks of
-            [TokIdent th] -> Right (nm, th, [])
-            (TokIdent th : TokLParen : rest) -> (,,) nm th <$> instArgs rest
+        (lhs, ':' : rhs) | ["instance", nm] <- words lhs ->
+          case break (== '(') (dropWhile isSpace rhs) of
+            (th, "")        | [t] <- words th -> Right (nm, t, [])
+            (th, _ : inner) | [t] <- words th ->
+              (,,) nm t <$> mapM one (splitTopCommas inner)
             _ -> Left $ "Malformed instance head: " ++ header
         _ -> Left $ "Malformed instance declaration: " ++ header
-    instArgs rest = do
-      let names = [ n | TokIdent n <- takeWhile (/= TokRParen) rest ]
-      mapM one names
     one n = do
       t <- parseTyBody aliases dataSigs [] n
       Right (SCons t SEnd)
@@ -2986,7 +3004,7 @@ checkInstance env theories inst = do
       let dn = slotDefName (inName inst) nm
       sc <- maybe (Left $ "instance " ++ inName inst ++ ": missing " ++ dn)
                   Right (M.lookup dn env)
-      wanted <- substArrow th (inArgs inst) declared
+      wanted <- slotArrowAt inst th declared
       let got = runInfer0 (instantiate sc)
       case solve [ CEqStack (arrIn got) (arrIn wanted)
                  , CEqStack (arrOut got) (arrOut wanted) ] of
@@ -2997,15 +3015,31 @@ checkInstance env theories inst = do
                        ++ show (normalizeArrow wanted)
     arrIn  (Arrow i _ _) = i
     arrOut (Arrow _ o _) = o
-    substArrow th args (Arrow i o e) = do
-      let bind (PWire tv, SCons t SEnd) = Right (Left (tv, t))
-          bind (PStack sv, st)          = Right (Right (sv, st))
-          bind (q, st) = Left $ "instance " ++ inName inst ++ ": parameter '"
-                             ++ pName q ++ "' takes one wire, given " ++ show st
-      bs <- mapM bind (zip (thParams th) args)
-      let tm = M.fromList [ b | Left  b <- bs ]
-          sm = M.fromList [ b | Right b <- bs ]
-      pure (Arrow (substParamsS tm sm i) (substParamsS tm sm o) e)
+
+-- A slot's DECLARED type, with the theory's parameters replaced by this
+-- instance's arguments.
+slotArrowAt :: Instance -> Theory -> Arrow -> Either String Arrow
+slotArrowAt inst th (Arrow i o e) = do
+  let bind (PWire tv, SCons t SEnd) = Right (Left (tv, t))
+      bind (PStack sv, st)          = Right (Right (sv, st))
+      bind (q, st) = Left $ "instance " ++ inName inst ++ ": parameter '"
+                         ++ pName q ++ "' takes one wire, given " ++ show st
+  bs <- mapM bind (zip (thParams th) (inArgs inst))
+  let tm = M.fromList [ b | Left  b <- bs ]
+      sm = M.fromList [ b | Right b <- bs ]
+  pure (Arrow (substParamsS tm sm i) (substParamsS tm sm o) e)
+
+-- A theory declaration IS a signature, so every slot can be
+-- FORWARD-DECLARED at its declared type.  That is what lets a slot body
+-- call the module's own defs (an instance of any substance does) while a
+-- def calls the slot — without it the two are ordered against each other
+-- and one direction is always impossible.
+declaredSlots :: [Theory] -> Instance -> Either String [(String, Scheme)]
+declaredSlots theories inst = do
+  th <- theoryOf theories (inTheory inst)
+  sequence [ (,) (slotDefName (inName inst) nm) . generalize M.empty
+               <$> slotArrowAt inst th declared
+           | (nm, declared) <- thSlots th ]
 
 -- substitute theory parameters through a stack
 substParamsS :: Map TVar Ty -> Map SVar SType -> SType -> SType
@@ -3178,15 +3212,19 @@ checkModuleWith :: Env -> [String] -> [Alias] -> [DataDecl] -> String
                 -> Either String Module
 checkModuleWith env0 shadow0 aliases0 datas0 src = do
   (defSrcs, tyLines, declLines, mainSrc) <- splitDefs src
-  (env1, _, _, ownAliases, ownDatas, docs0) <-
+  (env1, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
     foldM addType (env0, aliases0, datas0, [], [], M.empty) tyLines
-  let sigs = map dataSig ownDatas
+  -- theory and instance heads name types, and the type they name is
+  -- routinely one of the prelude's (`Wrap(List(Int))`), so they are
+  -- parsed against every alias and data type in scope — not just the
+  -- module's own.
+  let sigs = map dataSig allDatas
   -- theories first: an instance is checked against its theory, so the
   -- theory must already be known.  Both run before any def, which is
   -- what gives them file-wide scope.
-  theories <- sequence [ parseTheory ownAliases sigs h b
+  theories <- sequence [ parseTheory allAliases sigs h b
                        | (h, b, _) <- declLines, take 6 h == "theory" ]
-  insts    <- sequence [ parseInstance ownAliases sigs h b
+  insts    <- sequence [ parseInstance allAliases sigs h b
                        | (h, b, _) <- declLines, take 8 h == "instance" ]
   instDefs <- concat <$> mapM (instanceDefs theories) insts
   slotTable <- sequence [ (,) (inName i) . map fst . thSlots
@@ -3197,9 +3235,13 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
                            ++ "constructor of " ++ dName dd
                            ++ ", recursive slots pre-folded"))
         | dd <- reverse ownDatas, Just (fn, body) <- [dataFoldSrc dd] ]
+  slotSigs <- concat <$> mapM (declaredSlots theories) insts
+  let envSig = foldr (\(n, sc) e -> M.insert n sc e) env1 slotSigs
+  -- instance bodies come LAST, over an environment that already holds
+  -- every module def and every slot's declared signature
   (env', _, defsRev, docs) <-
-    foldM (addDef slotTable) (env1, shadow0, [], docs0)
-          (genDefs ++ instDefs ++ defSrcs)
+    foldM (addDef slotTable) (envSig, shadow0 ++ map fst slotSigs, [], docs0)
+          (genDefs ++ defSrcs ++ instDefs)
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
   mapM_ (checkInstance env' theories) insts
@@ -3636,14 +3678,37 @@ moduleRunDefs = buildRunDefs M.empty
 
 -- Fold a module's data artifacts and defs onto a base environment.
 -- Data-artifact bodies are prim-only (constructors, unrollers, merge),
--- so their scope is inert; defs follow, in order, and capture it.
+-- so their scope is inert.
+--
+-- A module's own defs are MUTUALLY visible: every one captures the
+-- finished scope rather than the prefix that happened to precede it.
+-- Sequential capture would make runtime resolution depend on source
+-- order in a way the typechecker no longer does — a theory slot is
+-- forward-declared at its declared type, so a slot body may call a
+-- module def while a module def calls the slot, and only one of those
+-- can come first.  `base` entries keep the scopes they were built with,
+-- so a module def shadowing a prelude name cannot reach back into the
+-- prelude's own calls.
 buildRunDefs :: RunDefs -> Module -> RunDefs
 buildRunDefs base m =
-  extendRunDefs base
-    (  [ (name, ar, op, term)
-       | d <- modDatas m, (name, (ar, op, term)) <- snd (dataDeclArtifacts d) ]
-    ++ [ (name, arityOf sc, openOf sc, term)
-       | (name, sc, term) <- modDefs m ] )
+  let arts = [ (name, ar, op, term)
+             | d <- modDatas m
+             , (name, (ar, op, term)) <- snd (dataDeclArtifacts d) ]
+      -- a checked file carries the prelude as a PREFIX of modDefs; those
+      -- keep sequential capture, so a module def shadowing a prelude
+      -- name cannot reach back into the prelude's own calls
+      preNames = [ n | (n, _, _) <- modDefs preludeModule ]
+      nameOf (n, _, _) = n
+      (preDefs, ownDefs)
+        | map nameOf (take (length preNames) (modDefs m)) == preNames
+            = splitAt (length preNames) (modDefs m)
+        | otherwise = ([], modDefs m)
+      entryOf (name, sc, term) = (name, arityOf sc, openOf sc, term)
+      base' = extendRunDefs base (arts ++ map entryOf preDefs)
+      final = foldl step base' (map entryOf ownDefs)
+      step acc (name, ar, op, body) =
+        M.insert name (DefEntry ar op body final) acc
+  in final
   where
     arityOf (Forall _ _ _ _ _ (Arrow i _ _)) = closedArity i
     openOf  (Forall _ _ _ _ _ (Arrow i _ _)) = openTailed i

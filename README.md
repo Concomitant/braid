@@ -226,6 +226,8 @@ and `tree` (data types and folds), `lists`, `conditionals` and `case`
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `theories` (theories, instances, laws that run),
+`arrows` (Control.Arrow's interface, as plain syntax) and `circuits`
+(the arrows that aren't: stream transducers as ordinary data),
 `payroll` (a whole small program: a resource, a theory and a grade
 meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
@@ -235,7 +237,7 @@ most of the language in forty lines about grade school.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 660-case test suite, a full
+(typechecker, interpreter, REPL), a 665-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

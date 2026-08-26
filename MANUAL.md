@@ -1061,6 +1061,18 @@ holds for them too: final atom of their stage (§9).
 - A `use` with nothing after it is an error (*"`use …` ends its scope"*)
   — like a binder, its body is the rest of the scope, so there has to
   be a rest.
+- An instance's carrier is a full type **expression**, so a theory may
+  be instantiated at a parameterized type (`Pipeline(Circuit(Int,
+  Int))`, `Wrap(List(Int))`, `Wrap(Fn⟨Int ⇒ Int⟩)`) — which is what
+  every structure worth having a theory of actually looks like. Theory
+  and instance heads are read against every type in scope, the
+  prelude's included.
+- A slot body may call **the module's own defs**, and a def may call the
+  slot: a theory declaration is a signature, so slots are
+  forward-declared at their declared types and neither direction has to
+  come first. At runtime a module's own defs are mutually visible for
+  the same reason (the prelude keeps sequential capture, so shadowing a
+  prelude name cannot reach back into the prelude's own calls).
 - A **law body must fit on one line** — the block parser reads one
   entry per line, so a law is a single program, `;`-chained if it needs
   to be.

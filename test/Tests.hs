@@ -459,6 +459,19 @@ moduleTypeTests =
     -- written once; only the scope differs.
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance IntSum : Monoid(Int) =\n    unit = 0\n    op   = +\ndef total = use IntSum ; [op] unit ... ; foldExp\ntotal",
      "Intⁿ⁰ ⇒ Int")
+    -- an instance's carrier is a full type EXPRESSION, not a bare name.
+    -- Every structure worth having a theory of is parameterized, so
+    -- scraping identifiers out of the head read `T(List(Int))` as two
+    -- arguments and rejected it.
+  , ("theory Wrap(a) =\n    wrap : a ⇒ a\ninstance L : Wrap(List(Int)) =\n    wrap = id\ndef w = use L ; wrap\nw",
+     "List(Int) ⇒ List(Int)")
+  , ("theory Wrap(a) =\n    wrap : a ⇒ a\ninstance F : Wrap(Fn⟨Int ⇒ Int⟩) =\n    wrap = id\ndef w = use F ; wrap\nw",
+     "Fn⟨Int ⇒ Int⟩ ⇒ Fn⟨Int ⇒ Int⟩")
+    -- a slot body may call the module's OWN defs: a theory declaration
+    -- is a signature, so slots are forward-declared and the two
+    -- directions (def calls slot, slot calls def) both work
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\ninstance S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\ntotal",
+     "Intⁿ⁰ ⇒ Int")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ ⇒ Str")
     -- the grade is inferred through defs, not read off a name
@@ -489,6 +502,12 @@ moduleTypeTests =
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- forward reference across the instance boundary, at RUNTIME: the
+    -- module's own defs are mutually visible, so a slot body calling a
+    -- def written after it resolves
+  [ ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\ninstance S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\n1 2 3 >> total >> print",
+     ["6"], "")
+  ] ++
   [ ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", ["6"],  "")   -- succ, double
   , ("1 2 >> swap",                        [],     "2 1")
   , ("1 2 3 >> (1 ... >> +) ... >> + ...",   [],     "4 3")

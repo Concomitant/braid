@@ -1,0 +1,75 @@
+# Processes as data — the arrows that are NOT already Braid's arrow.
+#
+# `examples/arrows.braid` shows that Control.Arrow's INTERFACE is just
+# Braid's syntax: `arr f` is any pure program, `f >>> g` is `f ; g`,
+# `first f` is `f _`, `f *** g` is `f g`, `app` is `apply`. That covers
+# every arrow whose category is the one Braid already computes in.
+#
+# The effect-shaped arrows are not new categories either: the state
+# arrow is a threaded `resource`, the Kleisli/Maybe arrow is the railway
+# sum track, the writer arrow is a Log resource, nondeterminism is List.
+# Only IO is irreducible, and it is a GRADE on the arrow (`⇒!`) rather
+# than an arrow of its own (design-effects.md).
+#
+# What is genuinely left over is arrows that are PROCESSES: Yampa's
+# signal functions, Hughes' stream transducers, circuits. Those really
+# are a different category — and in Braid they are an ordinary
+# recursive data type whose composition is an ordinary word. Nothing
+# abstracts over the category; there is no `Arrow` class here, because
+# Braid has no higher kinds to write one with.
+
+# A circuit consumes an input and returns an output AND ITS SUCCESSOR.
+# Recursion through Fn is what makes it codata (cf. examples/stream.braid).
+data Circuit(a, b) = Fn⟨a ⇒ b Circuit(a, b)⟩
+
+def stepC = (c x -> c ; unCircuit ; _ x ; apply)
+
+# the identity circuit, and `>>>`: run f, feed g, pair the successors
+def idC   = [(x -> x idC)] ; Circuit
+def compC = (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
+
+# A circuit that CANNOT be a pure function: its output depends on every
+# input it has already seen. This is the whole reason Arrows exist.
+def sumFrom = (n -> [(x -> n x ; + ; dup ; _ sumFrom)] ; Circuit)
+def scale   = (n -> [(x -> (n x ; *) (n ; scale))] ; Circuit)
+
+# ---- the theory ------------------------------------------------------
+# `thenP : a a ⇒ a` with a two-sided identity is a MONOID, and that is
+# all a category with one object is. The subtlety is equality: a circuit
+# is codata, so it cannot be compared — only OBSERVED. The theory asks
+# for the observation, which makes the laws honest about being finite
+# tests of an infinite object.
+theory Pipeline(a) =
+    idP     : • ⇒ a
+    thenP   : a a ⇒ a
+    observe : a ⇒ Int
+    sample  : • ⇒ a
+    law leftId  = (sample ; idP ... ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+    law rightId = (sample ; _ idP ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+
+# feed 3 then 4, and report both outputs summed — two steps, because one
+# step cannot tell a stateful circuit from a stateless one
+def probe = (c -> c 3 ; stepC ; (y c2 -> c2 4 ; stepC ; (z c3 -> (y z ; +) (c3 ; drop))))
+
+instance CircuitPipe : Pipeline(Circuit(Int, Int)) =
+    idP     = idC
+    thenP   = compC
+    observe = probe
+    sample  = 0 ; sumFrom
+
+# The carrier is a PARAMETERIZED type and the slots are the module's own
+# recursive words: both are ordinary, and both are what a theory over a
+# real structure needs.
+
+def solo   = use CircuitPipe ; sample ; observe
+def paired = use CircuitPipe ; sample idP ; thenP ; observe
+
+solo   ; print              # 10  — running sum: 3, then 3+4
+paired ; print              # 10  — composing with the identity changes nothing
+
+# and the composite really is stateful: sum, then double
+(0 ; sumFrom) (2 ; scale) ; compC
+_ 3  ; stepC ; (y c -> (y ; print) c)      # 6
+_ 4  ; stepC ; (y c -> (y ; print) c)      # 14
+_ 10 ; stepC ; (y c -> (y ; print) c)      # 34
+drop
