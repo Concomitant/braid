@@ -161,7 +161,9 @@ last so the runtime segment can be its witness):
 - a recursive call must be the final atom of its stage;
 - `...` must be the final atom of its stage;
 - the naming binder `-> x y z` ends the stage it follows, and its body
-  is the rest of the scope.
+  is the rest of the scope;
+- `use R1 R2` (§6) is the same shape: the resource names end it, and
+  the rest of the scope is its body.
 
 ## 5. Types
 
@@ -954,11 +956,12 @@ holds for them too: final atom of their stage (§9).
 - Inside a `use` scope, a stage may contain **at most one resource
   operation, and it must be alone in that stage** — otherwise *"a stage
   may contain at most one resource operation, and it must be alone —
-  put note on its own line"*. An operation touching two resources at
-  once is rejected outright (*"touches 2 resources at once; the
-  elaborator routes one per stage"*): the elaborator brings one
-  resource wire up, acts, and puts it back, and two at once would need
-  a permutation it will not guess. Both limits are the elaborator's,
+  put X on its own line"*, naming the operation it found. An operation
+  touching two resources at once is rejected outright (*"touches 2
+  resources at once; the elaborator routes one per stage"*): the
+  elaborator brings one resource wire up, acts, and puts it back, and
+  two at once would need a permutation it will not guess. Both limits
+  are the elaborator's,
   not the type system's — by hand, `_`/`...` still do anything.
 - A `use` with nothing after it is an error (*"`use …` ends its scope"*)
   — like a binder, its body is the rest of the scope, so there has to

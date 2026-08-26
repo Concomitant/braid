@@ -186,8 +186,8 @@ flipped during implementation, and the reason is routing, not taste:
   `_ _ bump : a0 a1 =Counter> a0 a1`. Writing "bump the Counter,
   whatever lies below" would need `ρ Counter ⇒ ρ Counter` — a SPLICE,
   the construct design-flexible-arity.md deleted for being
-  non-principal. (This retroactively explains why `rotLast` existed at all:
-  top-anchored routing needs it, and it died with the splice.)
+  non-principal. (This retroactively explains why `rotLast` existed at
+  all: top-anchored routing needs it, and it died with the splice.)
 - Bottom-anchored, every offset is known from the `use` header alone
   and the words stay width-polymorphic: `bump ... : Counter ρ0 ⇒
   Counter ρ0`, `_ bump ... : a0 Counter ρ0 ⇒ a0 Counter ρ0`.
