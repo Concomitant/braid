@@ -346,8 +346,8 @@ handleLine st line =
     programLine =
       case checkLine of
         Left err -> report err
-        Right newTy -> do
-          r <- evalLine
+        Right (newTy, term) -> do
+          r <- evalLine term
           case r of
             Left err -> report ("runtime error: " ++ err)
             Right (stack', logs)
@@ -368,11 +368,16 @@ handleLine st line =
       elabUseWith (rsEnv st) []
         (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
+    -- The CHECKED term is the term that runs: a splice site's stamp is
+    -- written during inference, so re-elaborating for the run would
+    -- discard it and leave the splice unchecked.
     checkLine = do
-      term <- elabLine line
-      Arrow i o _ <- inferTermIn (rsEnv st) term
+      term0 <- elabLine line
+      (Arrow i o _, term1) <-
+        inferTermStamped (rsEnv st) (numberSplices (rsEnv st) term0)
       case solve [CEqStack i (rsStackTy st)] of
-        Right s -> pure (apply s o)
+        Right s -> pure ( apply s o
+                        , mapStamps' (\_ d -> fmap (apply s) d) term1 )
         Left _ ->
           -- the mismatch is against the persistent REPL stack: say so
           Left $ "this line needs input stack '"
@@ -382,9 +387,8 @@ handleLine st line =
                ++ renderStackTy st
                ++ "'  (:s to inspect, :clear to reset, or pass it along with ...)"
 
-    evalLine = runExceptT $ do
-      term <- liftEither (elabLine line)
-      evalTerm (rsEnv st) (rsRun st) M.empty term (rsStack st)
+    evalLine term =
+      runExceptT (evalTerm (rsEnv st) (rsRun st) M.empty term (rsStack st))
 
 -- Rename the stack type's free variables into a namespace the inference
 -- fresh-name generator (a0…, ρ0…) can never produce, so vars surviving
@@ -392,7 +396,13 @@ handleLine st line =
 -- next line's fresh vars.
 freshenStackTy :: SType -> SType
 freshenStackTy sty =
-  let (tvs, svs, rvs, nvs, evs) = varsOfStack sty
+  let (tvs0, svs0, rvs0, nvs0, evs) = varsOfStack sty
+      -- an existential is a CONSTANT: freshening it would make a boxed
+      -- splice's result flexible again on the next line
+      tvs = filter (not . isRigidT) tvs0
+      svs = filter (not . isRigidS) svs0
+      rvs = filter (not . isRigidR) rvs0
+      nvs = filter (not . isRigidN) nvs0
       tm = M.fromList
              (zip tvs [ TVarTy (TV ("_a" ++ show n)) | n <- [0 :: Int ..] ])
       sm = M.fromList

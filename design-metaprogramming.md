@@ -267,3 +267,30 @@ first real payoff; stage 5 is the bootstrapping tier.
   datatypes; Braid's Elgot `loop` may need the same treatment.
 - Do monomorphic path values bite in practice, or is `def`-level
   generalization enough?
+
+## AMENDMENT 2026-08-31: The gap is closed (immediate, not via `Path`)
+
+The `evalCode` hole — where a lying context typed the hit track at a
+different arity than the code actually produces — is now closed without
+waiting for `Path`. The mechanism is simpler and immediate:
+
+1. **Stamp and check.** Every `evalCode` site is numbered during
+   elaboration and stamped with the output type its context settles on.
+   When the splice runs, the inferred result type is unified against that
+   stamp. A mismatch rides the miss track with the untouched input segment
+   as evidence.
+
+2. **Existentials.** If a definition's stamp variable would be generalized
+   into its scheme, the variable is frozen into an existential constant
+   (displayed `∃0`, `∃1`, …). Callers cannot refine it, so they must
+   consume the hit track parametrically (`forget`, `drop`, `pass`), never
+   at a specific type (`print`). The cost is explicit: `box : Code ⇒
+   Fn⟨ρ0 ⇒! (∃0 | Str ρ0)⟩` — the result's type is deferred. To use a
+   splice's result at a known type, inline the splice where that type is
+   statically known.
+
+A stamp variable shared with the definition's input is rejected outright
+to prevent a caller from choosing the splice's type. Splices nested inside
+spliced code share the same discipline. This closes the gap without
+blocking `Path`'s design (§5–8) — it can still land as a typed composition
+layer when ready.

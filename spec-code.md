@@ -32,7 +32,7 @@ closures — await curry), and segment-consuming or open-arity atoms
 wiring, arithmetic, literals, groups, closed rows, and exact defs all
 reflect — the GLA fragment in particular.
 
-## evalCode : Code ρ1 ⇒ (ρ2 | Str ρ1)
+## evalCode : Code ρ1 ⇒! (ρ2 | Str ρ1)
 
 The dynamically-checked splice: rebuild the term, infer its principal
 type in-process, run it on the segment. Any failure (malformed code,
@@ -49,6 +49,20 @@ line previously only claimed. It is a backstop, not a type-level fix —
 the real fix is a type-aligned `Path(Γ,Δ)` (the free category on the
 quiver) where the free variable becomes unwritable rather than
 checked; see design-metaprogramming.md.
+
+**AMENDMENT 2026-08-31:** The gap is closed. Every `evalCode` site is
+**stamped** during elaboration with the output type its context settles
+on. At runtime, the spliced code's inferred result type is **unified**
+against that stamp; a mismatch rides the miss track with the untouched
+segment as evidence. Splices that generalize freeze their result type as
+**existential constants** (`∃0`, `∃1`, …), preventing callers from
+choosing the type via argument types; existentials must be consumed
+parametrically (`forget`, `drop`, `pass`), never by `print`. The trade
+is transparent: `box : Code ⇒ Fn⟨ρ0 ⇒! (∃0 | Str ρ0)⟩` — deferring the
+*run* costs the result's *type*. To use a splice's result at a known type, splice it
+where that type is statically known. A stamp variable shared with the
+definition's input is rejected outright. This mechanism applies to splices
+nested inside spliced code as well.
 
 ## First transforms (examples/transpose.braid)
 

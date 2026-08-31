@@ -979,6 +979,37 @@ property is a runnable theorem — every stage-boundary cut yields two
 runnable pieces with `run(prefix) ; run(suffix) = run(whole)`, atom
 slices within a stage are runnable sub-tensors, and any slice boxes.
 
+### The splice check
+
+Every `evalCode` site is checked against the type its context imposes.
+The checker stamps each invocation during elaboration with the output
+type that constraint solving settles on. When the splice runs, its
+inferred result type is unified against that stamp. A mismatch rides the
+miss track with the untouched input segment as evidence — no crash, same
+error path as `parse` or `readFile`.
+
+Splices that generalize — those whose stamp would become part of a
+definition's polymorphic scheme — freeze their result type into
+existential constants (`∃0`, `∃1`, …), because a caller's argument type
+must not determine the splice's output. Callers must consume the hit
+track parametrically (`forget`, `drop`, `pass`), never `print` (which
+demands exactly one wire of a known type). The cost is transparent:
+
+```braid
+box : Code ⇒ Fn⟨ρ0 ⇒! (∃0 | Str ρ0)⟩
+```
+
+Deferring the *run* costs the result's *type*: what boxed code returns
+is only discovered when it runs. To use a splice's result at a known
+type, splice it where that type is statically known.
+Splices nested inside spliced code share the same discipline. A stamp
+variable that also appears in the definition's input is rejected outright
+— *"a splice's result type shares a0 with this definition's input"* — to
+prevent a caller from choosing the runtime-built code's type by choosing
+an argument.
+
+See `examples/cuts.braid` for splices in context.
+
 ### Deciding a law: `sameCode`
 
 `sameCode : Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` answers whether two programs
@@ -1142,6 +1173,12 @@ holds for them too: final atom of their stage (§9).
 - A `Fin` prints as a bare integer. Erasure is honest — a `Fin` *is* an
   `Int` at runtime — but output does not distinguish an index from an
   ordinary `Int`; only the type does.
+- An `∃` in a displayed type marks an **existential**: a type the
+  definition cannot know, because it is whatever code built at runtime
+  turns out to return (§12). It is frozen rather than generalized —
+  unifying with nothing but itself — so callers consume it
+  parametrically (`forget`, `drop`, `pass`) and never at a specific
+  type like `print`, which would be assuming the answer.
 
 ## 15. Extending Braid — what to reach for
 

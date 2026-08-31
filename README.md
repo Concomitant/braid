@@ -215,9 +215,10 @@ bare `use` leaves.
 13. **Code is data.** `reflect` turns a quotation into its spine — a
     list of stages of atoms — so `take`/`map`/`reverse` slice and
     transform *programs*; `evalCode` runs them (dynamically checked,
-    failures on the miss track); `unparse`/`parse` and
-    `readFile`/`writeFile` round-trip code through disk. The
-    graphical-linear-algebra transpose is `reverse >> map dualize`.
+    splices are type-checked at the site and mismatches ride the miss
+    track); `unparse`/`parse` and `readFile`/`writeFile` round-trip code
+    through disk. The graphical-linear-algebra transpose is
+    `reverse >> map dualize`.
 
 ## Examples
 
@@ -251,7 +252,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 675-case test suite, a full
+(typechecker, interpreter, REPL), a 683-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -260,8 +261,8 @@ it —
 out, and what replaced it), `design-exponents.md` (dimension-indexed
 segments: why exponents not stars, why unary successors suffice, why
 the eliminator is a fold and not an unroll). Deliberately absent so
-far: floats, modules beyond the auto-loaded prelude, typed splicing,
-labeled record fields, and the last stage of the effects staging —
+far: floats, modules beyond the auto-loaded prelude, labeled record
+fields, and the last stage of the effects staging —
 `resource` wires, `use` scopes, and theories/instances with runnable
 laws have shipped, but there is no resource mark, no linear `World`
 and no handlers (`design-effects.md` has the position, the staging,

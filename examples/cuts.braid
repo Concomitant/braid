@@ -39,6 +39,10 @@ def s2 = ([dup drop] ; getCode) ; uncons ; (nil | (s r -> s)) ; merge
     (_ print ; print | forget) ; merge                    # 7 7
 
 # ---- boxing: cut a slice, box it, use it LATER as a value ------------
+# Deferring the RUN costs the result's TYPE.  What boxed code returns is
+# only discovered when it runs, so the hit track is EXISTENTIAL and the
+# caller must stay parametric — `forget`, not `print`.  To USE a splice's
+# result at a known type, splice it where that type is known (above).
 def box = (cd -> [(cd) ... ; evalCode])
-(2 c ; take) ; box                                 # Fn⟨ρ ⇒ (ρ' | Str ρ)⟩ — unopened
-apply ; (print | forget) ; merge                   # 3 — the boxed prefix, run at last
+(2 c ; take) ; box                        # Fn⟨ρ ⇒! (∃0 | Str ρ)⟩ — unopened
+apply ; (forget ; "ran the boxed prefix" | pass) ; merge ; print

@@ -347,6 +347,10 @@ moduleTypeTests =
   , ("readLine",  "• ⇒! (Str | Str)")
   , ("readFile",  "Str ⇒! (Str | Str)")
   , ("evalCode",  "Code ρ0 ⇒! (ρ1 | Str ρ0)")
+    -- `box` defers the RUN, and that costs the result's TYPE: what the
+    -- boxed code returns is discovered when it runs, so the hit track is
+    -- an existential its callers must stay parametric in
+  , ("box",       "Code ⇒ Fn⟨ρ0 ⇒! (∃0 | Str ρ0)⟩")
     -- pushing an action is PURE; the effect lives inside the Fn, and
     -- `apply` is where it transfers back out
   , ("[print]",   "• ⇒ Fn⟨a0 ⇒! •⟩")
@@ -943,8 +947,17 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2 >> + >> dup >> *] >> getCode\ndef cutAt =\n    k ->\n    (k c >> take) >> evalCode\n    ((k c >> skip) ... >> evalCode >> (print | forget) >> merge | forget) >> merge\n0 >> cutAt\n1 >> cutAt\n3 >> cutAt", ["9", "9", "9"], "")
     -- vertical cuts: atom slices within a stage are runnable sub-tensors
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef s0 = ([1 2 >> +] >> getCode) >> uncons >> (nil | (s r -> s)) >> merge\n(1 s0 >> take >> single) >> evalCode >> (print | forget) >> merge\n(1 s0 >> skip >> single) >> evalCode >> (print | forget) >> merge", ["1", "2"], "")
-    -- box: Code -> Fn without running; the check fires at apply
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge", ["3"], "")
+    -- box: Code -> Fn without running; the check fires at apply.
+    -- Deferring the RUN costs the result's TYPE: what boxed code returns
+    -- is discovered when it runs, so the hit track is existential and a
+    -- caller must stay parametric (`forget`, not `print`).
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (forget >> \"ran\" | pass) >> merge >> print", ["ran"], "")
+    -- a splice whose code produces the WRONG WIDTH now rides the miss
+    -- track (it used to reach the top-level backstop as "result desync")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", [], "")
+    -- …and the wrong TYPE at the right width, likewise: this is the
+    -- smuggle the hole allowed — a Str reaching a List(Int)
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n([ \"hi\" ] >> getCode) >> evalCode\n((x -> 1 x >> pack) | drop >> nil) >> merge\n[toStr] ... >> map >> print", ["in1()"], "")
     -- pack builds the same value as the list(…) literal; pack2 makes
     -- two-wire elements; the empty pack is nil
   , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
@@ -1009,7 +1022,17 @@ moduleFailTests =
     -- caller). Used to leak silently (a value on a stack typed empty);
     -- the top-level width backstop now catches it as a clean error,
     -- delivering the guarantee spec-code.md already claimed.
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", "result desync")
+    -- assuming a shape for a boxed splice's result is a type error: it
+    -- is the hole this closes (`print` demands exactly one wire)
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge",
+     "is existential")
+    -- a splice result may not share a variable with the def's input
+  , ("def bad = (cd x -> (cd) ... >> evalCode >> ((y -> y x >> pack) | forget >> nil) >> merge)\n1",
+     "shares a1 with this definition's input")
+    -- (was a "result desync" moduleFailTest: spliced code produced 2
+    -- wires where the context typed the hit track as 1.  The splice
+    -- check now catches that AT the splice, so it rides the miss track
+    -- instead of reaching the top-level width backstop — see evalTests.)
     -- the case(…) special form is gone: `case` is an ordinary unknown name
   , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
     -- composition is exact: a word threading a resource the scope does
@@ -1174,6 +1197,14 @@ unifTests =
   , ("a^n ~ Int Str (copies clash)",   expN "n" (SCons (TVarTy (TV "a")) SEnd), SCons TInt (SCons TStr SEnd), False)
   , ("Int^n Str ~ Int Int Str (rest anchored)", expNr "n" intS (SCons TStr SEnd), SCons TInt (SCons TInt (SCons TStr SEnd)), True)
   , ("Int^n Str ~ Int Int (no anchor)", expNr "n" intS (SCons TStr SEnd), ints 2, False)
+    -- existentials (a splice's frozen result) unify with themselves and
+    -- absorb FLEXIBLE variables, but never with a concrete stack: that
+    -- rigidity is what stops a caller assuming a shape for code that
+    -- only exists at runtime
+  , ("∃ρ ~ ∃ρ (itself)",        STail (SV "∃0"), STail (SV "∃0"), True)
+  , ("∃ρ ~ ρ (absorbs a var)",  STail (SV "∃0"), STail (SV "rho"), True)
+  , ("∃ρ ~ Int (rigid)",        STail (SV "∃0"), intS,             False)
+  , ("∃ρ ~ • (rigid)",          STail (SV "∃0"), SEnd,             False)
   ]
   where
     intS = SCons TInt SEnd
