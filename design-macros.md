@@ -460,6 +460,25 @@ now, `a =Circuit> b` denotes a machine, and the tag says which. The
 operational-honesty requirement is discharged BY the receipt, not
 violated by the second composition.
 
+**Exits (2026-09-04, from "how do we get back out?").** Entering is a
+marker; leaving is a model. Entry functors are generically available
+(`arrP`, strength, a stamp); exit is a semantic choice — a functor
+`K → Base`, an algebra of the mode (handlers-are-models, for
+categories). Because homs reify as data, exits are ordinary words:
+**observe/run** (eliminators — `stepC`, folds, `probe`; codata modes
+exit only this way, which is why `theory Pipeline` already carries an
+`observe` slot — a mode's exits are theory slots beside `thenP`),
+**discharge through the adjunction** (`install`/`reify`, unit/counit,
+triangle laws runnable; specializing to plain handlers for carrier
+modes), and **interpret** (a functor out, given the generators'
+images — reflect's purpose). The `use K` scope's END is free and
+separate: leaving the scope costs nothing; leaving the type is where
+the models apply. Round-trip laws are honest per mode (`reify ∘
+install = id` runs; `observe ∘ enter = id` fails for Circuit and the
+mode says so). Corollary nobody planned: a mode exporting no
+eliminators is SEALED — abstraction and capability-safety fall out of
+the mode system for free.
+
 Exclusive to rung 3 after this: per-mode object languages and per-mode
 structural rules (linearity as a mode). The ladder, complete:
 (1) labels — shared objects, shared hom, annotation index;
