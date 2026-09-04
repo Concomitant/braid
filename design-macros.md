@@ -395,6 +395,22 @@ mode set and marked shifts, mode inference never happens (shifts are
 written) and per-mode inference is each mode's own HM problem. Open
 research, honestly labeled.
 
+**Objects: added, never merged (2026-09-04, from the "illusion"
+question).** Rung-2 object sharing is representation, not illusion:
+the fiber's `Int` is literally the base `Int` with the carrier beside
+it (`:t!` shows `Log Str ⇒ Log` under `Str =Log> •`) — same objects,
+new morphisms, the Kleisli/Freyd definition taken at its word. What is
+policy rather than discovery: every supported transport is
+**injective on objects** — identity-on-objects (carriers, grades) or
+an embedding reified by declaration (`Circuit(a,b)` joins the shared
+vocabulary as a nominal type). Functors that merge or quotient objects
+are ruled out, because receipts must stay univocal: a displayed name
+must mean one thing regardless of whose image you are reading. The
+multimodal rung is where forced sharing WOULD become a lie — a mode
+whose composition differs pretending its objects are stacks — which is
+exactly why that rung gives modes their own objects and makes crossing
+an explicit adjunction rather than a nominal pun.
+
 **The bridge, which is why this costs nothing to defer:** the current
 label route is the degenerate mode theory in which every mode shares
 its objects and every modality is identity-on-objects. Grade labels
