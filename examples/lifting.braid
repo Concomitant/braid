@@ -1,0 +1,47 @@
+# Every functor, seen from the user's side, is one function:
+#
+#     Fn⟨a ⇒ b⟩  ⇒  (something better)
+#
+# Take an ordinary function; get back the logged version, the
+# game-advancing version, the version that runs one wire deeper
+# (`lift`, in the prelude — tensorial strength). The lift IS the mark:
+# you can see `>> logged` in the text, and the RESULT's arrow carries
+# the receipt (`=Log>`). Nothing is inferred, nothing is hidden.
+
+# ---- game rules advance game state -----------------------------------
+# The moves are ordinary functions. No Game anywhere in sight.
+
+resource Game = Int
+
+def play  = (f -> [unGame >> f ... >> apply >> Game])
+#   play : Fn⟨Int ⇒ Int⟩ ⇒ Fn⟨• =Game> •⟩ — a pure rule, made a move
+
+def raise = 1 ... >> +
+def dbl   = 2 _  >> *
+
+# Lifted moves are VALUES, so a game is data: pack the rules, lift them
+# all, fold them over the state. (A move sequence read from a file
+# would run identically.)
+([raise] [dbl] [raise] [dbl] >> pack) >> [play] ... >> map
+[(x g -> g x >> apply)] (0 >> Game) ... >> fold
+unGame >> print                                    # 6 — ((0+1)·2+1)·2
+
+# ---- the logged version of a function --------------------------------
+# The wrapper's body is written OBLIVIOUSLY: `use Log` inside the quote
+# makes the elaborator thread the log wire, so `logged` is one line.
+
+resource Log = Str
+def note = unLog _ >> cat >> Log
+
+def logged = (f -> [use Log >> dup >> toStr >> note >> " " >> note >> f ... >> apply])
+#   logged : Fn⟨a ⇒ ρ⟩ ⇒ Fn⟨a =Log> ρ⟩ — same function, now it remembers
+
+def celsius = (n -> 9 n >> * >> _ 5 >> div >> 32 ... >> +)
+
+([celsius] >> logged) ("" >> Log) 100 >> apply
+_ print                                            # 212
+unLog >> print                                     # 100 — the log
+
+# The same shape one level up: a `Code ⇒ Code` functor applied by `use`
+# is this action on a whole region's spine instead of one quotation —
+# "the logged version of this block". See design-macros.md.

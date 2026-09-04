@@ -1197,7 +1197,9 @@ made of*, not by how exotic it feels.
 | a swappable **interface with laws** | `theory` + `instance` | models selected by name, audited by running the laws |
 | a category of **processes** | `data` + your own composition word | then present it as a `theory` if it has laws |
 
-Worked examples, in that order: `examples/tree.braid` and
+Worked examples, in that order: `lifting.braid` first (every functor
+is a function `Fn⟨a ⇒ b⟩ ⇒ something better` — the logged version of a
+function, game rules as lifted moves), then `examples/tree.braid` and
 `stream.braid` (data and codata), `resources.braid` and `payroll.braid`
 (a resource, and a whole program using one), `ladder.braid` (control
 flow that is all ordinary defs), `theories.braid` (theories and

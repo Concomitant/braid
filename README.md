@@ -227,6 +227,8 @@ bare `use` leaves.
 and `tree` (data types and folds), `lists`, `conditionals` and `case`
 (rows, deferred sums, `case(…)`), `tag` (naming wires in passing),
 `resources` (threaded wires and `use`),
+`lifting` (every functor is `Fn⟨a ⇒ b⟩ ⇒ something better`:
+the logged version of a function, game rules as lifted moves),
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `theories` (theories, instances, laws that run),
@@ -252,7 +254,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 683-case test suite, a full
+(typechecker, interpreter, REPL), a 684-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

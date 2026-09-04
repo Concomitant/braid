@@ -203,6 +203,31 @@ Recorded because the vocabulary keeps earning its keep:
   is the `use` line, one line up. Only representable structure can be a
   label, because only it leaves a wire there is anything to fold.
 
+## Amendment (2026-09-04): the lift view, front and center
+
+The user-facing face of every functor is one function:
+
+    Fn⟨a ⇒ b⟩  ⇒  (something better)
+
+— its action on morphisms. Level 1 is that function *directly*
+(`logged : Fn⟨a ⇒ ρ⟩ ⇒ Fn⟨a =Log> ρ⟩`, `play : Fn⟨Int ⇒ Int⟩ ⇒
+Fn⟨• =Game> •⟩`, `lift` itself); a `use`-applied `Code ⇒ Code` functor
+is the same action applied to a whole region's spine instead of one
+quotation. Teach the level-1 form first — "take an ordinary function,
+get back the better version, in one word" — because it is the
+experience the arrows literature promises, and here it needs no
+classes and no lifting choreography (`examples/lifting.braid`). The
+reframe worth stating in every doc that touches this: **lifting is
+word application, not type coercion** — the cool behavior arrives
+because you applied a word, and that application is itself the mark.
+
+On marking, since the question recurs: a level-1 lift is marked by its
+own application in the text, and its *receipt* is the result's arrow
+(`=Log>` appears). A region functor is marked by its `use` header. The
+only unmarked residue is type-unchanged provenance for region functors
+— exactly the OPEN coeffect/tagging question below, unchanged by this
+amendment.
+
 ## The splice check (stage 1, shipped 2026-08-31)
 
 `evalCode : Code Γ ⇒! (Δ | Str Γ)` let the caller choose Δ and never
