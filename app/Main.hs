@@ -307,7 +307,7 @@ handleLine st line =
               case dataFoldSrc dd of
                 Nothing -> pure st1
                 Just (fn, body) ->
-                  case checkModuleWith (M.delete fn (rsEnv st1)) preludeNames
+                  case checkModuleWith (M.delete fn (rsEnv st1)) (rsRun st1) preludeNames
                          (rsAliases st1) (rsDatas st1)
                          ("def " ++ fn ++ " = " ++ body) of
                     Left err -> do
@@ -327,7 +327,8 @@ handleLine st line =
       let envBase
             | name `elem` rsUserDefs st = M.delete name (rsEnv st)
             | otherwise                 = rsEnv st
-      case checkModuleWith envBase preludeNames (rsAliases st) (rsDatas st) line of
+      case checkModuleWith envBase (rsRun st) preludeNames
+                           (rsAliases st) (rsDatas st) line of
         Left err -> report err
         Right m  ->
           case modDefs m of

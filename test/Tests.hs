@@ -1213,6 +1213,44 @@ unifTests =
     expN nm b = SExp b (Exp 0 (Just (NV nm))) SEnd
     expNr nm b r = SExp b (Exp 0 (Just (NV nm))) r
 
+-- The ELABORATION-TIME evaluator: the same `evalTerm`, run purely and
+-- on a step budget, which is what lets a functor be applied while a
+-- module is still being checked (design-macros.md, stage 2).  Pinned
+-- here because stage 3 depends on all three properties: pure programs
+-- run, IO edges are unreachable, and the budget actually bites.
+pureEvalTests :: [(String, Int, String, Either String String)]
+pureEvalTests =
+  [ ("arithmetic",   1000, "1 2 >> +",            Right "3")
+  , ("quote/apply",  1000, "[dup >> *] >> _ 5 >> apply", Right "25")
+  , ("list library", 1000, "(1 2 3 >> pack) >> [+] 0 ... >> fold", Right "6")
+    -- `print` is NOT an IO edge: it accumulates into the returned log,
+    -- so it stays pure here (its io GRADE is what keeps it out of a
+    -- functor).  The real edges are readLine/readFile/writeFile, and
+    -- reaching one during elaboration says so rather than lying —
+    -- unreachable in practice, since a functor is checked pure first.
+  , ("print is pure",  1000, "\"x\" >> print",  Right "")
+  , ("io unreachable", 1000, "readLine >> (pass | pass) >> merge",
+     Left "IO edge was reached")
+    -- purity is not totality: the budget is the only thing standing
+    -- between a looping functor and a hung compiler
+  , ("budget bites",      3, "1 2 >> + >> 3 >> + >> 4 >> +",
+     Left "step budget exhausted")
+  ]
+
+runPureE :: (String, Int, String, Either String String) -> Maybe String
+runPureE (nm, fuel, src, expected) =
+  let got = do
+        t0 <- parseProgram src
+        t1 <- elabUseWith (modEnv preludeModule) [] t0
+        (out, _) <- runPureEvalWith fuel
+                      (evalTerm (modEnv preludeModule)
+                                (moduleRunDefs preludeModule) emptyVarEnv t1 [])
+        pure (unwords (map show out))
+  in case (expected, got) of
+       (Right want, Right have) | want == have -> Nothing
+       (Left frag, Left err) | frag `isInfixOf` err -> Nothing
+       _ -> Just $ nm ++ ": expected " ++ show expected ++ ", got " ++ show got
+
 runUnif :: (String, SType, SType, Bool) -> Maybe String
 runUnif (name, a, b, wantOk) =
   case unifyStack emptySubst a b of
@@ -1239,11 +1277,12 @@ main = do
         ++ evalFs
         ++ mfailFs
         ++ map runUnif unifTests
+        ++ map runPureE pureEvalTests
         ++ exFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
-            + length unifTests + length exNames
+            + length unifTests + length pureEvalTests + length exNames
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

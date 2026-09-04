@@ -1,4 +1,5 @@
 {-# LANGUAGE DeriveFunctor #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module MiniConcatTypechecker where
 
@@ -7,7 +8,8 @@ import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, partition, (\\))
 import Control.Monad.State
-import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither)
+import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
+                             MonadError, catchError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
@@ -3441,7 +3443,8 @@ splitDefs src = do
 -- docs are folded into the result so the runtime and printer see them.
 checkModule :: String -> Either String Module
 checkModule src = do
-  m <- checkModuleWith (modEnv preludeModule) preludeNames
+  m <- checkModuleWith (modEnv preludeModule)
+                       (moduleRunDefs preludeModule) preludeNames
                        (modAliases preludeModule)
                        (modDatas preludeModule) src
   let shadowed = map aName (modAliases m) ++ map dName (modDatas m)
@@ -3460,12 +3463,20 @@ checkModule src = do
 -- error.  `aliases0` are type aliases in scope for RHS references (and
 -- shadowable by user `type` lines); only the module's OWN aliases are
 -- returned in modAliases (latest first).
-checkModuleWith :: Env -> [String] -> [Alias] -> [DataDecl] -> String
-                -> Either String Module
-checkModuleWith env0 shadow0 aliases0 datas0 src = do
+-- `run0` is the runtime scope the module is checked ON TOP OF.  It is
+-- threaded through both folds so that, by the time a declaration is
+-- reached, everything ABOVE it is not merely typed but RUNNABLE — which
+-- is what lets a functor (a `Code ⇒ Code` word) be evaluated while the
+-- module is still being checked.  Prefix visibility, deliberately: the
+-- knotted mutual scope `buildRunDefs` gives the finished module does
+-- not exist mid-fold, and "a functor is runnable before its first use"
+-- is exactly the ordering rule (design-macros.md).
+checkModuleWith :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl]
+                -> String -> Either String Module
+checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
   (defSrcs, tyLines, declLines, mainSrc) <- splitDefs src
-  (env1, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
-    foldM addType (env0, aliases0, datas0, [], [], M.empty) tyLines
+  (env1, runTy, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
+    foldM addType (env0, run0, aliases0, datas0, [], [], M.empty) tyLines
   -- theory and instance heads name types, and the type they name is
   -- routinely one of the prelude's (`Wrap(List(Int))`), so they are
   -- parsed against every alias and data type in scope — not just the
@@ -3491,8 +3502,9 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
   let envSig = foldr (\(n, sc) e -> M.insert n sc e) env1 slotSigs
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  (env', _, defsRev, docs) <-
-    foldM (addDef slotTable) (envSig, shadow0 ++ map fst slotSigs, [], docs0)
+  (env', _, _, defsRev, docs) <-
+    foldM (addDef slotTable)
+          (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0)
           (genDefs ++ defSrcs ++ instDefs)
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
@@ -3512,7 +3524,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
   where
     preludeTypeNames = map aName aliases0 ++ map dName datas0
 
-    addType (env, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
+    addType (env, run, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
       decl <- parseTypeLine aliasesIn (map dataSig datasIn) line
       let n = either aName dName decl
       if any ((== n) . aName) ownAl || any ((== n) . dName) ownDt
@@ -3526,7 +3538,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
       let docs' = maybe docs (\d -> M.insert n d docs) doc
       case decl of
         Left al ->
-          pure ( env
+          pure ( env, run
                , al : filter ((/= n) . aName) aliasesIn
                , datasIn, al : ownAl, ownDt, docs' )
         Right dd -> do
@@ -3540,12 +3552,16 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
             then Left $ "Type " ++ n
                      ++ ": constructor name collides with an existing definition"
             else Right ()
-          let (scs, _) = dataDeclArtifacts dd
+          -- constructors/unrollers must be CALLABLE by a functor, so the
+          -- data artifacts join the elaboration-time scope too
+          let (scs, runs) = dataDeclArtifacts dd
           pure ( foldr (uncurry M.insert) envC scs
+               , extendRunDefs run [ (nm, ar, op, t)
+                                   | (nm, (ar, op, t)) <- runs ]
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs' )
-    addDef slotTable (env, shadow, acc, docs) (name, bodySrc, doc) = do
+    addDef slotTable (env, run, shadow, acc, docs) (name, bodySrc, doc) = do
       if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
         else Right ()
@@ -3564,6 +3580,7 @@ checkModuleWith env0 shadow0 aliases0 datas0 src = do
                        (rigidifyStamps name env1 arr0 term3)
       let sc = generalize env1 arr
       pure ( M.insert name sc env
+           , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
            , filter (/= name) shadow
            , (name, sc, term) : acc
            , maybe docs (\d -> M.insert name d docs) doc )
@@ -3801,7 +3818,7 @@ preludeSrc = unlines
 
 preludeModule :: Module
 preludeModule =
-  case checkModuleWith primEnv [] [] [] preludeSrc of
+  case checkModuleWith primEnv M.empty [] [] [] preludeSrc of
     Left err -> error ("prelude failed to check: " ++ err)
     Right m  -> m
 
@@ -4075,20 +4092,63 @@ buildRunDefs base m =
         M.insert name (DefEntry ar op body final) acc
   in final
   where
-    arityOf (Forall _ _ _ _ _ (Arrow i _ _)) = closedArity i
-    openOf  (Forall _ _ _ _ _ (Arrow i _ _)) = openTailed i
-    openTailed (SCons _ rest) = openTailed rest
-    openTailed (STail _)      = True
-    openTailed (SExp _ _ _)   = True   -- erased width: needs the whole segment
-    openTailed SEnd           = False
+
 
 -- Evaluate a term: returns the final stack and the print log.  The Env
 -- is needed to compute closed arities of grouped compound operands; the
 -- VarEnv holds named-abstraction parameters in scope.
 type Eval = ExceptT String IO
 
-evalTerm :: Env -> RunDefs -> VarEnv -> Term -> [Value]
-         -> Eval ([Value], [String])
+-- The evaluator runs in TWO phases, so it is generic in its monad.
+--
+--   * at runtime, in `Eval` — IO edges work, no step budget;
+--   * at ELABORATION, purely, so a functor (a `Code ⇒ Code` word) can
+--     be run while a module is still being checked.  There, IO must be
+--     unreachable — which it is, because a functor's grade is checked
+--     `⇒` and not `⇒!` before it may run — and evaluation is
+--     fuel-bounded, because purity is not totality: a functor can loop.
+--
+-- `tick` is the budget hook; the IO instance ignores it.
+class MonadError String m => EvalM m where
+  liftEvalIO :: IO a -> m a
+  tick       :: m ()
+
+instance EvalM (ExceptT String IO) where
+  liftEvalIO = liftIO
+  tick       = pure ()
+
+-- The pure phase: a step budget in State, errors in Either.
+type PureEval = StateT Int (Either String)
+
+instance EvalM PureEval where
+  liftEvalIO _ =
+    throwError "internal: an IO edge was reached during elaboration \
+               \(a functor must be pure — this should have been a grade error)"
+  tick = do
+    n <- get
+    if n <= (0 :: Int)
+      then throwError "elaboration step budget exhausted: a functor \
+                      \did not terminate (or needs a larger budget)"
+      else put (n - 1)
+
+-- One run of the evaluator at elaboration time.
+elabFuel :: Int
+elabFuel = 1000000
+
+runPureEval :: PureEval a -> Either String a
+runPureEval = runPureEvalWith elabFuel
+
+runPureEvalWith :: Int -> PureEval a -> Either String a
+runPureEvalWith n m = evalStateT m n
+
+-- no binder parameters in scope (the usual starting VarEnv)
+emptyVarEnv :: VarEnv
+emptyVarEnv = M.empty
+
+{-# SPECIALIZE evalTerm :: Env -> RunDefs -> VarEnv -> Term -> [Value]
+                        -> Eval ([Value], [String]) #-}
+evalTerm :: EvalM m => Env -> RunDefs -> VarEnv -> Term -> [Value]
+         -> m ([Value], [String])
 evalTerm env defs vars term st =
   case term of
     Seq t u -> do
@@ -4104,6 +4164,8 @@ evalTerm env defs vars term st =
   where
     goAtoms [] stk = pure (stk, [])   -- leftover remainder flows through last
     goAtoms (a : more) stk = do
+      tick   -- `loop` and def recursion re-enter goAtoms, so this counts
+             -- every atom application, not merely every source stage
       (out, stk', logs) <- applyAtom (null more) a stk
       (outRest, logs') <- goAtoms more stk'
       pure (out ++ outRest, logs ++ logs')
@@ -4135,7 +4197,7 @@ evalTerm env defs vars term st =
     -- the miss track like any other IO failure
     applyAtom _ (Prim "readLine") stk
       | not (M.member "readLine" vars), not (M.member "readLine" defs) = do
-          r <- liftIO (try getLine)
+          r <- liftEvalIO (try getLine)
           case r of
             Left e  -> pure ([VSum 1 [VStr (show (e :: IOException))]], stk, [])
             Right t -> pure ([VSum 0 [VStr t]], stk, [])
@@ -4144,9 +4206,9 @@ evalTerm env defs vars term st =
           (args, stk') <- takeWires "readFile" 1 stk
           case args of
             [VStr path] -> do
-              r <- liftIO (try (do t <- readFile path
-                                   _ <- evaluate (length t)
-                                   pure t))
+              r <- liftEvalIO (try (do t <- readFile path
+                                       _ <- evaluate (length t)
+                                       pure t))
               case r of
                 Left e  ->
                   pure ([VSum 1 [VStr (show (e :: IOException))]], stk', [])
@@ -4157,7 +4219,7 @@ evalTerm env defs vars term st =
           (args, stk') <- takeWires "writeFile" 2 stk
           case args of
             [VStr path, VStr contents] -> do
-              r <- liftIO (try (writeFile path contents))
+              r <- liftEvalIO (try (writeFile path contents))
               case r of
                 Left e  ->
                   pure ([VSum 1 [VStr (show (e :: IOException))]], stk', [])
@@ -4414,8 +4476,11 @@ evalTerm env defs vars term st =
               case checkSplice env (numberSplices env term0) stamp of
                 Left e -> missWith e
                 Right term -> do
-                  r <- liftIO (runExceptT
-                         (evalTerm env defs M.empty term seg))
+                  -- a spliced program's failure is a VALUE on the miss
+                  -- track, not this program's failure: catch rather than
+                  -- nest a second runExceptT (which would pin us to IO)
+                  r <- (Right <$> evalTerm env defs M.empty term seg)
+                         `catchError` (pure . Left)
                   case r of
                     Left e -> missWith e
                     Right (out, logs) -> pure ([VSum 0 out], keep, logs)
@@ -4597,6 +4662,10 @@ termToCodeV env t = do
     -- a stamp is a fact about ONE site in ONE module; reflected code is
     -- re-stamped when it is spliced, so drop it here
     atomVal (Splice _ _) = Right (VSum 0 [VSym ".evalCode"])
+    -- `use` is written out before reification; if one survives, the
+    -- group wildcard below would loop forever rebuilding it
+    atomVal (Use _ _) =
+      Left "internal: an unelaborated `use` reached code reification"
     atomVal g = do
       c <- termToCodeV env g
       pure (VSum 6 [c])
@@ -4917,6 +4986,21 @@ runLaw m (n, t) = do
       let (inst, lw) = maybe ("?", n) id (lawParts n)
       in throwError $ "law '" ++ lw ++ "' fails for instance " ++ inst
                    ++ ": an instance must be an audited model of its theory"
+
+-- A scheme's runtime shape: how many wires it consumes, and whether it
+-- wants the whole remaining segment.  Shared by the runtime scope
+-- builder and the elaboration-time one.
+arityOf :: Scheme -> Int
+arityOf (Forall _ _ _ _ _ (Arrow i _ _)) = closedArity i
+
+openOf :: Scheme -> Bool
+openOf (Forall _ _ _ _ _ (Arrow i _ _)) = openTailed i
+
+openTailed :: SType -> Bool
+openTailed (SCons _ rest) = openTailed rest
+openTailed (STail _)      = True
+openTailed (SExp _ _ _)   = True   -- erased width: needs the whole segment
+openTailed SEnd           = False
 
 -- adjacent pairs of a segment (bases of width 2 come interleaved)
 chunk2 :: [a] -> [(a, a)]
