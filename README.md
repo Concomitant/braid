@@ -264,7 +264,8 @@ out, and what replaced it), `design-exponents.md` (dimension-indexed
 segments: why exponents not stars, why unary successors suffice, why
 the eliminator is a fold and not an unroll), and `design-macros.md`
 (elaboration as a library: functors over `Code`, the five invariants,
-and the transport of `⇒` into other categories). Deliberately absent so
+and the transport of `⇒` into other categories). `READING.md` is the
+annotated bibliography behind all of them. Deliberately absent so
 far: floats, modules beyond the auto-loaded prelude, labeled record
 fields, and the last stage of the effects staging —
 `resource` wires, `use` scopes, and theories/instances with runnable
