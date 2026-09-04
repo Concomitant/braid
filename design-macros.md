@@ -331,6 +331,20 @@ non-idempotent grade monoid; termination was never tracked — the same
 reason macro evaluation is fuel-bounded rather than totality-checked).
 Recorded as a known boundary, not papered over.
 
+**Sharpened (2026-09-04, from the `a ⇒ a` counterpoint).** The
+crispest statement: Braid's free theorems hold only *up to termination
+and cost*. Verified: `a ⇒ a` is inhabited by the identity, by the
+identity-at-a-cost (`(x -> 1000 >> (n -> n) >> drop >> x) : a0 ⇒ a0`),
+and by divergence (`def dvg = recurse` types `ρ0 ⇒ ρ1` — divergence
+inhabits everything). So "the receipt is the mark" fails exactly on
+this slack: the wrong functor applied to `id` still reads `a ⇒ a`.
+Consequences for the open routes: provenance tagging marks the
+*derivation*, not the extension (the right alarm, not a proof);
+quantitative grades close the cost half properly (`a ⇒⁵ a` — this
+counterpoint is the standing argument for eventually paying that
+arc's price); the termination half closes only with totality
+checking, i.e. never, here.
+
 ## Surface decisions (2026-08-29)
 
 - **Declaration layer, direction 3**: fixed name-first surface
