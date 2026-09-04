@@ -345,6 +345,65 @@ counterpoint is the standing argument for eventually paying that
 arc's price); the termination half closes only with totality
 checking, i.e. never, here.
 
+## Amendment (2026-09-04): representability demoted — the multimodal direction
+
+The claim "a label can decorate composition but not change it; a
+non-representable category must appear as values" was stated as a
+theorem. Checked against the literature, it is an **artifact of the
+single-judgment architecture**, not a fact about the design space. If
+the typing judgment itself is indexed — `a ⊢_m b` at mode m — then
+arrows in a different category carry their own objects and their own
+composition judgmentally, and nothing needs to be squeezed into one
+category's types. The type theory for this exists and is mature:
+
+- **MTT** (Gratzer–Kavvos–Nuyts–Birkedal): a type theory parametrized
+  by a *mode theory* — a strict 2-category whose objects are modes
+  (categories), 1-cells are modalities (functors), 2-cells are
+  transformations. Sound; canonicity; normalization; conversion
+  decidable when equality of modalities and 2-cells is decidable.
+- **Adjoint logic** (Reed; Pfenning–Davies lineage; Licata–Shulman,
+  and Licata–Shulman–Riley's fibrational framework): modes may have
+  *different structural rules* — linear here, cartesian there — and
+  crossing between modes happens by adjunctions (the shifts), with
+  the triangle identities as the crossing laws.
+- **Melliès–Zeilberger**: "a type system is a functor" over a category
+  of untyped terms — multiple refinement systems over one base, which
+  is precisely the Braid picture (Code as the base; type systems
+  above it).
+- **Elevator** (Jang–Pientka 2024): metaprogramming *as* adjoint
+  modes — code and programs are two modes C ≥ P, code is a suspended
+  object at C, shifts move between them, and per-mode substructural
+  discipline gives resource guarantees about generated code. Our
+  phase distinction (Code/program, the ordering rule) is their mode
+  preorder.
+
+The mapping onto Braid is uncomfortably good: modes declared like
+theories (the mode theory is a *presentation* — generators and
+relations); `use`-style markers as modal shifts (modes are named,
+never inferred — the marker invariant survives verbatim, since these
+theories are checking-style and annotation-rich, and our markers ARE
+the annotations); install/reify as the unit/counit of an adjunction;
+laws between transports as 2-cells, with the decidability condition
+on 2-cell equality landing exactly on the `sameCode`/fragment story;
+linearity (the `World`) as a *mode*, not a special case; a Circuit
+mode with its own feedback rule (ArrowLoop judgmentally).
+
+What is NOT off the shelf: principal HM-style inference in a
+multimodal setting under a no-annotations constraint — the literature
+checks, it does not infer. The plausible line: with a finite nominal
+mode set and marked shifts, mode inference never happens (shifts are
+written) and per-mode inference is each mode's own HM problem. Open
+research, honestly labeled.
+
+**The bridge, which is why this costs nothing to defer:** the current
+label route is the degenerate mode theory in which every mode shares
+its objects and every modality is identity-on-objects. Grade labels
+ship now; the multimodal architecture is their strict generalization;
+moving later wastes nothing. Recorded as the third architecture in
+the design space — (1) single judgment + labels (current), (2) rows
+with carriers (stage 7), (3) multimodal (research-grade, with real
+metatheory to lean on when wanted).
+
 ## Surface decisions (2026-08-29)
 
 - **Declaration layer, direction 3**: fixed name-first surface
