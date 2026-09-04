@@ -420,6 +420,55 @@ the design space — (1) single judgment + labels (current), (2) rows
 with carriers (stage 7), (3) multimodal (research-grade, with real
 metatheory to lean on when wanted).
 
+## Amendment (2026-09-04): rung 2½ — shared objects, owned composition
+
+The ladder gains a rung, from the question "what if we kept
+monomorphisms on objects but allowed other composition behavior?" —
+which turns out to name a shipping architecture: **Hughes arrows** are
+exactly a family of categories sharing one object vocabulary (Hask's)
+while each owns its hom and composition. Braid's version substitutes
+nominal modes + written markers for type classes, and runnable laws
+for trusted instances:
+
+```
+mode Circuit = CircuitPipe        -- a mode IS an instance of theory
+                                  --   Arrow(k): thenP/arrP/idP, with
+                                  --   the category axioms as laws
+def pipe = use Circuit ; f ; g    -- the scope inserts arrP/thenP
+pipe : a =Circuit> b              -- the receipt carries the mode
+```
+
+- **Typing**: `Arrow` grows a nominal mode field (default base — zero
+  cost when unused); unification requires modes equal; cross-mode
+  composition without `arrP` is a type error; declared functors
+  convert, laws audited.
+- **Elaboration**: the stages-2–5 functor machinery, scope-marked, so
+  markers-written is untouched.
+- **Execution**: shared objects make representation cheap — the mode's
+  hom reifies as the nominal `K(a,b)` data type, so the mode's
+  judgment layer *refines* the value layer (Melliès–Zeilberger,
+  load-bearing at last).
+- **Inference**: survives because the term and type languages are
+  unchanged and there are no mode variables — the mode is fixed per
+  scope by the marker; mode-generic code is templates.
+
+This dissolves the "the arrow must have one operational reading"
+objection from the type-directed-composition discussion: that
+objection was really about the run/construct ambiguity being invisible
+in the type, and the mode tag is what makes it visible — `a ⇒ b` runs
+now, `a =Circuit> b` denotes a machine, and the tag says which. The
+operational-honesty requirement is discharged BY the receipt, not
+violated by the second composition.
+
+Exclusive to rung 3 after this: per-mode object languages and per-mode
+structural rules (linearity as a mode). The ladder, complete:
+(1) labels — shared objects, shared hom, annotation index;
+(2) carriers — shared objects, representably-shifted hom;
+(2½) modes-lite — shared objects, owned composition, reified homs;
+(3) multimodal — owned objects, owned everything. Each a strict
+specialization of the next; markers survive at every rung; inference
+guaranteed at 1–2½, open at 3.
+
 ## Surface decisions (2026-08-29)
 
 - **Declaration layer, direction 3**: fixed name-first surface
