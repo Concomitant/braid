@@ -179,13 +179,13 @@ bare `use` leaves.
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
     railway sum, a list. Only IO is irreducible, so `io` is the one
-    label a grade ever needs. An effectful arrow prints `⇒!`, a pure one
-    `⇒`, and which you get is **inferred, never annotated**: five
-    prims are marked (`print`, `readLine`, `readFile`, `writeFile`,
-    `evalCode`) and every other grade follows from composition — `def
-    shout = toStr >> print : a0 ⇒! •`. Quoting stays pure, since
-    pushing an action isn't doing it: `[print] : • ⇒ Fn⟨a0 ⇒! •⟩`, and
-    `apply` is what transfers the grade out.
+    label a grade ever needs. An arrow marked io prints `=IO>`, a pure one
+    `⇒` — the label sits on the arrow just like resource names do — and
+    which you get is **inferred, never annotated**: five prims are marked
+    (`print`, `readLine`, `readFile`, `writeFile`, `evalCode`) and every
+    other grade follows from composition — `def shout = toStr >> print : a0 =IO> •`.
+    Quoting stays pure, since pushing an action isn't doing it:
+    `[print] : • ⇒ Fn⟨a0 =IO> •⟩`, and `apply` is what transfers the grade out.
 
     The other wires you can *name*: `resource Log = Str` declares a
     threaded wire — nominal, so `Int Int` is never silently a
@@ -254,7 +254,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 690-case test suite, a full
+(typechecker, interpreter, REPL), a 698-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

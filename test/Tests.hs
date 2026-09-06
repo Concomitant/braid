@@ -49,10 +49,10 @@ passTests =
   , ("1 2 >> +",      "• ⇒ Int")
     -- strict tensor: `1 +` is (• ⇒ Int) ⊗ (Int Int ⇒ Int), NOT increment
   , ("1 +",           "Int Int ⇒ Int Int")
-  , ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", "• ⇒! •")
+  , ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", "• =IO> •")
 
     -- newline is strict >>
-  , ("1 2\n(1 ... >> +) (2 _ >> *)\n+\nprint", "• ⇒! •")
+  , ("1 2\n(1 ... >> +) (2 _ >> *)\n+\nprint", "• =IO> •")
   , ("1 2\n\n+",                 "• ⇒ Int")   -- blank lines collapse
 
     -- a bracket may span lines: a newline against a delimiter's inner
@@ -83,7 +83,7 @@ passTests =
     -- quotations and apply (quotes are terminal-source constants)
   , ("[dup >> *]",               "• ⇒ Fn⟨Int ⇒ Int⟩")
   , ("[dup >> *] 7 >> apply",    "• ⇒ Int")
-  , ("[dup >> *] 7 >> apply >> print", "• ⇒! •")   -- spec example (49)
+  , ("[dup >> *] 7 >> apply >> print", "• =IO> •")   -- spec example (49)
   , ("apply",                    "Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
 
     -- grouping: (p) is the open program p, never reified
@@ -152,7 +152,7 @@ passTests =
   , ("1 2 3 -> _ _ z -> drop drop drop >> z", "• ⇒ Int")
   , ("1 2 -> a _ -> drop drop >> a",          "• ⇒ Int")
     -- bare and mid-line: the arrow ends the stage it follows
-  , ("1 \"a\" .foo -> x _ y -> print print _ >> x ...", "• ⇒! Int Sym")
+  , ("1 \"a\" .foo -> x _ y -> print print _ >> x ...", "• =IO> Int Sym")
   , ("5 ; -> x -> x ... >> +",   "• ⇒ Int")   -- after a separator
   , ("5 -> n -> n ... >> *",     "• ⇒ Int")   -- explicit body marker
   , ("5\n-> n\nn ... >> *",      "• ⇒ Int")   -- ...or an ordinary stage break
@@ -343,27 +343,27 @@ moduleTypeTests =
     -- is forced by an input — a live bundle, or a literal's offset.
     -- EFFECTS: the io grade.  Five prims are marked; everything else
     -- infers.  A pure arrow prints exactly as it always did.
-  , ("print",     "a0 ⇒! •")
-  , ("readLine",  "• ⇒! (Str | Str)")
-  , ("readFile",  "Str ⇒! (Str | Str)")
-  , ("evalCode",  "Code ρ0 ⇒! (ρ1 | Str ρ0)")
+  , ("print",     "a0 =IO> •")
+  , ("readLine",  "• =IO> (Str | Str)")
+  , ("readFile",  "Str =IO> (Str | Str)")
+  , ("evalCode",  "Code ρ0 =IO> (ρ1 | Str ρ0)")
     -- `box` defers the RUN, and that costs the result's TYPE: what the
     -- boxed code returns is discovered when it runs, so the hit track is
     -- an existential its callers must stay parametric in
-  , ("box",       "Code ⇒ Fn⟨ρ0 ⇒! (∃0 | Str ρ0)⟩")
+  , ("box",       "Code ⇒ Fn⟨ρ0 =IO> (∃0 | Str ρ0)⟩")
     -- pushing an action is PURE; the effect lives inside the Fn, and
     -- `apply` is where it transfers back out
-  , ("[print]",   "• ⇒ Fn⟨a0 ⇒! •⟩")
-  , ("[print] 5 >> apply", "• ⇒! •")
+  , ("[print]",   "• ⇒ Fn⟨a0 =IO> •⟩")
+  , ("[print] 5 >> apply", "• =IO> •")
   , ("[dup >> *] 5 >> apply", "• ⇒ Int")
     -- reflect READS a program without running it: pure, any grade
   , ("reflect",   "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)")
     -- composition propagates
-  , ("1 >> print", "• ⇒! •")
+  , ("1 >> print", "• =IO> •")
   , ("dup >> *",   "Int ⇒ Int")        -- and pure stays bare
     -- several effectful atoms in one stage are legal and run
     -- left-to-right (deepest first) — design-effects.md's decree
-  , ("print print", "a0 a1 ⇒! •")
+  , ("print print", "a0 a1 =IO> •")
   , ("at",        "Fin(n0) a0ⁿ⁰ ⇒ a0")
   , ("indicesN",  "a0ⁿ⁰ ⇒ (Fin(n0) a0)ⁿ⁰")
   , ("checkedAt", "Int a0ⁿ⁰ ⇒ (Fin(n0) a0ⁿ⁰ | Int a0ⁿ⁰)")
@@ -479,12 +479,12 @@ moduleTypeTests =
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ ⇒ Str")
     -- the grade is inferred through defs, not read off a name
-  , ("def shout = toStr >> print\nshout",          "a0 ⇒! •")
+  , ("def shout = toStr >> print\nshout",          "a0 =IO> •")
   , ("def quiet = toStr >> drop\nquiet",           "a0 ⇒ •")
-  , ("def p = print\ndef q = p\nq",               "a0 ⇒! •")
+  , ("def p = print\ndef q = p\nq",               "a0 =IO> •")
     -- ε-polymorphism: one `map`, both readings, no annotation
   , ("[toStr] (1 2 3 >> pack) >> map",             "• ⇒ List(Str)")
-  , ("def logAll = [dup >> print ...] ... >> map\nlogAll", "List(a0) ⇒! List(a0)")
+  , ("def logAll = [dup >> print ...] ... >> map\nlogAll", "List(a0) =IO> List(a0)")
   , ("data Pair(a, b) = (a b)\nPair",     "a0 a1 ⇒ Pair(a0, a1)")
   , ("data Pair(a, b) = (a b)\nunPair",   "Pair(a0, a1) ⇒ a0 a1")
     -- `...` takes a whole stack into ONE wire: how multi-wire
@@ -506,10 +506,23 @@ moduleTypeTests =
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- FUNCTORS (stage 3): `use` grows a third kind of name.  A functor
+    -- is any pure `Code ⇒ Code` word; the scope's body is reified, the
+    -- word RUNS at elaboration, and the result is spliced back and
+    -- re-inferred.  Here `Traced` weaves a trace after every stage.
+  [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\ndef weave   = (f h -> [(s -> (s >> pack) h >> append)] f >> flatMap)\ndef tracer  = (f -> f ([trace] >> getCode) >> weave)\nfunctor Traced = tracer\ndef process =\n    use Traced\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
+     ["7", "49", "2", "98", "98"], "")
+    -- an identity functor changes nothing
+  , ("def idF = (c -> c)\nfunctor Same = idF\ndef p = use Same ; 1 ... >> +\n3 >> p >> print",
+     ["4"], "")
+    -- three kinds of name in ONE header: instance renames, resource
+    -- routes, functor rewrites — in that order
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\ninstance Loud : Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run =\n    use Log Loud Same\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
+     ["25"], "")
     -- DECIDED laws (§12.9): `sameCode` normalizes both programs in the
     -- free cartesian category over their words and compares.  `same`
     -- means equal under EVERY interpretation — a proof, not a test.
-  [ ("[dup ; swap] [dup] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
+  , ("[dup ; swap] [dup] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
      ["same"], "")
   , ("[dup ; _ drop] [id] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
      ["same"], "")
@@ -1040,6 +1053,21 @@ moduleFailTests =
     -- mismatch named on both sides
   , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step = use Log Counter >> toStr >> note >> bump\ndef bad = use Counter Log >> step\n1",
      "threads Log Counter, but this scope is over Counter Log")
+    -- a functor's word must be a pure `Code ⇒ Code`, checked at the
+    -- first use (declarations are hoisted, so that is where the prefix
+    -- scope is what it will be at run time)
+  , ("def w = dup >> *\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+     "must be Code ⇒ Code")
+  , ("def w = (c -> c >> unparse >> print >> c)\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+     "must be pure")
+  , ("functor F = nosuch\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+     "not defined at this point")
+    -- purity is not totality: the budget is what stands between a
+    -- looping functor and a hung compiler
+  , ("def w = (c -> c >> w)\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+     "step budget exhausted")
+  , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
+     "Duplicate functor declaration")
     -- outside the fragment `sameCode` reports, rather than guessing:
     -- "I cannot tell" is not "they differ"
   , ("[[dup]] [[dup]] ; sameCode ; drop ; 1", "outside the structural fragment")
@@ -1241,7 +1269,7 @@ runPureE :: (String, Int, String, Either String String) -> Maybe String
 runPureE (nm, fuel, src, expected) =
   let got = do
         t0 <- parseProgram src
-        t1 <- elabUseWith (modEnv preludeModule) [] t0
+        t1 <- elabUseWith (elabCtx0 (modEnv preludeModule) []) t0
         (out, _) <- runPureEvalWith fuel
                       (evalTerm (modEnv preludeModule)
                                 (moduleRunDefs preludeModule) emptyVarEnv t1 [])

@@ -4,29 +4,39 @@ Consolidates three discussions (2026-07-30 … 08-03). Status: **stages 1,
 2, 3 and 4 of the staging below — the IO grade, `resource`
 declarations, `use`, and theories/instances with runnable laws —
 shipped 2026-08-25/26**; only stage 5 (the resource mark and the linear
-`World`) remains design position. TWO decisions were reversed at
-implementation — the placement rule, and which end of the stack the
-resource wires ride on; both amendments are in place below, and neither
-rewrites what it replaced. Supersedes the effect-row sketch in the old
-plan file; extends design-control-flow.md §7.
+`World`) remains design position. THREE decisions were reversed at
+implementation — the placement rule, which end of the stack the
+resource wires ride on, and the display form of the io label; all amendments
+are in place below, and neither rewrites what it replaced. Supersedes the
+effect-row sketch in the old plan file; extends design-control-flow.md §7.
+
+**Amendment (2026-09-06): IO display changed from `⇒!` to `=IO>`.** The
+io grade was originally given its own glyph (`⇒!`) when it was the only
+label and could afford one. With functors and modes about to mint labels
+beside it, one spelling for all of them is the honest one — io is not
+inherently special, it is the label whose carrier you cannot touch. The
+`=IO>` form displays consistently with resource labels like `=Log>`, where
+the label rides on the arrow. The old `⇒!` and `->!` spellings still lex
+for source compatibility. See stage 1 below for detail.
 
 ## Stage 1 as shipped (2026-08-25)
 
 Every arrow carries a **grade** — the set of resource wires it
 touches. Stage 1 has exactly one label, `io`. A pure arrow prints as
-it always did (`⇒`); an effectful one prints `⇒!`. Effect tails never
-display: the same information hiding `ρ` already gets inside `Fn⟨…⟩`.
+it always did (`⇒`); one marked io prints `=IO>`. The label rides on
+the arrow like resource names do. Effect tails never display: the same
+information hiding `ρ` already gets inside `Fn⟨…⟩`.
 
 **Five prims are marked; everything else is inferred.** There is no
 effect annotation anywhere — not in the prelude, the examples, or the
 tests.
 
 ```text
-print     : a0 ⇒! •
-readLine  : • ⇒! (Str | Str)
-readFile  : Str ⇒! (Str | Str)
-writeFile : Str Str ⇒! Maybe(Str)
-evalCode  : Code ρ0 ⇒! (ρ1 | Str ρ0)
+print     : a0 =IO> •
+readLine  : • =IO> (Str | Str)
+readFile  : Str =IO> (Str | Str)
+writeFile : Str Str =IO> Maybe(Str)
+evalCode  : Code ρ0 =IO> (ρ1 | Str ρ0)
 ```
 
 `evalCode` is unconditionally io because it runs arbitrary code: the
@@ -50,23 +60,24 @@ serves pure and effectful quotes alike. Prelude defs (`map`, `filter`,
 ε-polymorphism is inferred.
 
 ```text
-1 >> print                    : • ⇒! •               composition propagates
-def shout = toStr >> print    : a0 ⇒! •              inferred through defs
+1 >> print                    : • =IO> •              composition propagates
+def shout = toStr >> print    : a0 =IO> •             inferred through defs
 def quiet = toStr >> drop     : a0 ⇒ •               pure stays bare
-[print]                       : • ⇒ Fn⟨a0 ⇒! •⟩      PUSHING is pure
-[print] 5 >> apply            : • ⇒! •               apply transfers it out
+[print]                       : • ⇒ Fn⟨a0 =IO> •⟩    PUSHING is pure
+[print] 5 >> apply            : • =IO> •              apply transfers it out
 [dup >> *] 5 >> apply         : • ⇒ Int              same apply, pure quote
-[dup >> print ...] ... >> map : List(a0) ⇒! List(a0) ε-polymorphic
-print print                   : a0 a1 ⇒! •           legal; left-to-right
+[dup >> print ...] ... >> map : List(a0) =IO> List(a0) ε-polymorphic
+print print                   : a0 a1 =IO> •          legal; left-to-right
 ```
 
-**A declared `Fn` type MEANS its grade.** New surface syntax `⇒!`
-(ASCII `->!`) writes the io form: `Fn⟨Str ⇒! •⟩`. A declaration that
-says `Fn⟨Str ⇒ •⟩` refuses an io quotation — *Cannot unify effects: io
-vs pure*. That strictness is the point, and it is also the limit:
+**A declared `Fn` type MEANS its grade.** The `=IO>` spelling writes
+the io form writable in declarations: `Fn⟨Str =IO> •⟩`. A declaration
+that says `Fn⟨Str ⇒ •⟩` refuses an io quotation — *Cannot unify effects:
+io vs pure*. That strictness is the point, and it is also the limit:
 there is no subeffecting, so a pure quote unified into an io context
 types as io. Let-generalization at `def` boundaries restores per-use
-freshness; inside one expression nothing does.
+freshness; inside one expression nothing does. (ASCII `->!` and the old
+`⇒!` spelling still lex for backward compatibility.)
 
 ## Stages 2 and 4 as shipped (2026-08-26)
 
@@ -101,7 +112,7 @@ peek  : • =IO Log> •            -- grade and resources are ONE arrow
 The last line is the note's `=IO Log GameState>` spelling arriving
 intact: the io grade and the resource list are the same statement said
 twice — the set of resource wires the def touches — so one arrow
-carries both, and with no resources it degrades to the plain glyph.
+carries both, and with no resources it displays as the label `=IO>`.
 The fold is display only; nothing about it is inferred, and that is
 structural rather than an omission: `unifyEff` ABSORBS (which is how
 `io` propagates with no annotation anywhere), while `unifyStack` is
@@ -309,9 +320,9 @@ irreducible — a genuine observational capability, not plumbing.
 category (Jeffrey 1997) reifies effect order as one linear control
 wire threading every effectful box; pure boxes float free. Interchange
 holds/fails as topology. GHC's `State# RealWorld` and Clean's unique
-`World` are this wire in production. Braid's `⇒!` / `=IO>` annotation
-is bookkeeping for that wire, unexposed because Braid lacks linearity
-— so far.
+`World` are this wire in production. Braid's `=IO>` label (displayed on
+the arrow like a resource name) is bookkeeping for that wire, unexposed
+because Braid lacks linearity — so far.
 
 **Labels are the wires' names.** `A =IO Log GameState> B` is not a
 list of effect labels; it is the set of resource wires the def
@@ -320,7 +331,7 @@ explicit):
 
 | level | user writes | user sees | linearity exposure |
 |---|---|---|---|
-| ambient (default) | `note`, `print`, plain `;` in `use` scopes | `=Log>`, `⇒!` inferred | zero — the elaborator draws the wire, so linearity holds by construction |
+| ambient (default) | `note`, `print`, plain `;` in `use` scopes | `=Log>`, `=IO>` inferred | zero — the elaborator draws the wire, so linearity holds by construction |
 | explicit (opt-in) | `w -> … ; print! ; …` | `World` in types | one error family, at genuine bugs |
 | split (opt-in) | `splitWorld : World ⇒ Stdout Fs …` | per-resource wires | same; disjoint wires commute BY GEOMETRY (per-resource fusion licenses) |
 
@@ -592,10 +603,10 @@ grade inferred.
 
 ## The staging (1, 2, 3 and 4 shipped; 5 remains)
 
-1. IO bit on Arrow (the old arrows-plan stage 1; display `⇒!`, pure
-   displays as today so all tests survive). **SHIPPED 2026-08-25** —
-   see "Stage 1 as shipped" above; the placement rule it was to carry
-   became the left-to-right decree instead.
+1. IO bit on Arrow (the old arrows-plan stage 1; display `=IO>` as a
+   label like resource names, pure displays as `⇒` so all tests survive).
+   **SHIPPED 2026-08-25** — see "Stage 1 as shipped" above; the placement
+   rule it was to carry became the left-to-right decree instead.
 2. **Resource** declarations + `=Name>` display sugar over wire
    suffixes. **SHIPPED 2026-08-26** — see "Stages 2 and 4 as shipped"
    above; *suffix* became *prefix* at implementation (amendment there,

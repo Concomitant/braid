@@ -8,7 +8,7 @@
 # The effect-shaped arrows are not new categories either: the state
 # arrow is a threaded `resource`, the Kleisli/Maybe arrow is the railway
 # sum track, the writer arrow is a Log resource, nondeterminism is List.
-# Only IO is irreducible, and it is a GRADE on the arrow (`⇒!`) rather
+# Only IO is irreducible, and it is a GRADE on the arrow (`=IO>`) rather
 # than an arrow of its own (design-effects.md).
 #
 # What is genuinely left over is arrows that are PROCESSES: Yampa's

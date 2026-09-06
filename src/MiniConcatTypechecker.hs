@@ -212,8 +212,13 @@ arrPure i o = Arrow i o effPure
 arrIO :: SType -> SType -> Arrow
 arrIO i o = Arrow i o effIO
 
+-- IO is a LABEL like any other, so it rides in the manifest rather than
+-- decorating the arrow: `a0 =IO> •`, not `a0 ⇒! •`.  The bang was a
+-- leftover from when io was the only grade and could afford its own
+-- glyph; with functors and modes minting labels beside it, one
+-- spelling for all of them is the honest one (2026-09-06).
 arrowGlyph :: EffRow -> String
-arrowGlyph e = if eIO e then " ⇒! " else " ⇒ "
+arrowGlyph e = if eIO e then " =IO> " else " ⇒ "
 
 instance Show Arrow where
   show (Arrow s1 s2 e) = show s1 ++ arrowGlyph e ++ show s2
@@ -910,7 +915,7 @@ data Token
   | TokLAngle     -- ⟨ (open a Fn type: Fn⟨Σ ⇒ Θ⟩)
   | TokRAngle     -- ⟩ (close a Fn type)
   | TokFatArrow   -- ⇒ (the arrow inside a Fn type)
-  | TokBangArrow  -- ⇒! / ->! (an IO arrow in a Fn type)
+  | TokBangArrow  -- =IO> (and the older ⇒! / ->!): an IO arrow in a Fn type
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -940,6 +945,10 @@ tokenize = go
     go ('(':cs)         = (TokLParen :) <$> go cs
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
+    -- `=IO>`: what the manifest DISPLAYS, so also what you write.  (The
+    -- older `⇒!`/`->!` spellings still lex, for source that predates
+    -- the 2026-09-06 move of io into the manifest.)
+    go ('=':'I':'O':'>':cs) = (TokBangArrow :) <$> go cs
     go ('-':'>':'!':cs) = (TokBangArrow :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
     go ('-':cs)
@@ -2619,9 +2628,7 @@ primEnv =
         in Forall [] [sg, th] [] [] [epsV]
              (arrEps (SCons body (STail sg)) (STail th))
       int2 = SCons TInt (one TInt)
-      codeStructTy =
-        TData "List"
-          [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
+      codeStructTy = codeTy
       int2Router = Forall [] [] [] [] []
         (arrPure int2
                (one (TSum (RCons int2 (RCons int2 RNil)))))
@@ -3084,24 +3091,90 @@ leadingRes rs (SCons (TData n []) r) | n `elem` rs = n : leadingRes rs r
 leadingRes _  _                                    = []
 
 elabUse :: Env -> Term -> Either String Term
-elabUse env = elabUseWith env []
+elabUse env = elabUseWith (elabCtx0 env [])
 
 -- `use` names RESOURCES (wires to thread) and INSTANCES (slots to
 -- resolve).  Both are scoped selection with no inference and no
 -- dispatch: an instance's operations are renamed to that instance's
 -- defs, once, for the rest of the scope.
-elabUseWith :: Env -> [(String, [String])] -> Term -> Either String Term
-elabUseWith env instSlots = go
+-- What a `use` scope needs to know: the environment and the runnable
+-- prefix scope (a functor is EVALUATED here), which instance names
+-- carry which slots, and which functor names are implemented by which
+-- word.
+data ElabCtx = ElabCtx
+  { ecEnv   :: Env
+  , ecRun   :: RunDefs
+  , ecSlots :: [(String, [String])]
+  , ecFuncs :: [(String, String)]
+  }
+
+elabCtx0 :: Env -> [(String, [String])] -> ElabCtx
+elabCtx0 env slots = ElabCtx env M.empty slots []
+
+-- Apply one functor to a scope body: reify the code, RUN the word
+-- (purely, on a step budget), splice the result back.  The word's type
+-- was checked `Code ⇒ Code` and pure where the functor was declared.
+runFunctor :: ElabCtx -> (String, String) -> Term -> Either String Term
+runFunctor ctx (fname, word) body = do
+  -- declarations are hoisted above defs, so the word is checked at the
+  -- first USE, where the prefix scope is what it will be at run time.
+  -- That is the ordering rule made concrete.
+  either (Left . (pre ++)) Right (checkFunctorWord (ecEnv ctx) fname word)
+  cv  <- inF (reflectPure (ecEnv ctx) body)
+  out <- inF (runPureEval (evalTerm (ecEnv ctx) (ecRun ctx) emptyVarEnv
+                            (Prim word) [cv]))
+  case fst out of
+    [c] -> inF (codeToTermV c)
+    vs  -> Left $ pre ++ "a functor must return exactly one Code value, "
+                ++ "but " ++ word ++ " returned " ++ show (length vs)
+  where
+    pre  = "`use " ++ fname ++ "`: "
+    inF  = either (Left . (pre ++)) Right
+
+-- A functor's word must be a pure `Code ⇒ Code`: pure because it runs
+-- at elaboration (the io grade IS the phase distinction), and
+-- Code ⇒ Code because it rewrites a program's spine.
+checkFunctorWord :: Env -> String -> String -> Either String ()
+checkFunctorWord env fname word =
+  case M.lookup word env of
+    Nothing -> Left $ "functor " ++ fname ++ ": " ++ word
+                   ++ " is not defined at this point (a functor's word "
+                   ++ "must be defined before the functor line)"
+    Just sc ->
+      let arr@(Arrow i o g) = runInfer0 (instantiate sc)
+          codeS = SCons codeTy SEnd
+      in case solve [CEqStack i codeS, CEqStack o codeS] of
+           Left _ -> Left $ "functor " ++ fname ++ ": " ++ word
+                         ++ " must be Code ⇒ Code, but is "
+                         ++ show (normalizeArrow arr)
+           Right _
+             | eIO g -> Left $ "functor " ++ fname ++ ": " ++ word
+                            ++ " must be pure — a functor runs while the "
+                            ++ "module is being elaborated, so it cannot do IO"
+             | otherwise -> Right ()
+
+elabUseWith :: ElabCtx -> Term -> Either String Term
+elabUseWith ctx = go
   where
     go (Use ns b) = do
       b' <- go b
-      let (is, rs) = partitionEithers
-                       [ maybe (Right n) (Left . (,) n) (lookup n instSlots)
-                       | n <- ns ]
+      -- three kinds of name, applied in a fixed order: instances rename,
+      -- resources route, functors rewrite — so a functor always sees
+      -- fully renamed, fully routed code.
+      let fs   = [ (n, w) | n <- ns, Just w <- [lookup n (ecFuncs ctx)] ]
+          rest = [ n | n <- ns, isNothing (lookup n (ecFuncs ctx)) ]
+          (is, rs) = partitionEithers
+                       [ maybe (Right n) (Left . (,) n) (lookup n (ecSlots ctx))
+                       | n <- rest ]
           b'' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' is
-      case rs of
-        [] -> pure b''
-        _  -> elabScope env rs b''
+      routed <- case rs of
+                  [] -> pure b''
+                  _  -> elabScope (ecEnv ctx) rs b''
+      -- left to right: functor composition of Code ⇒ Code words IS `;`,
+      -- so `use F G` is sugar for one composed functor
+      -- Code cannot encode a `use`, so a functor's output never contains
+      -- one: no re-walk needed
+      foldM (flip (runFunctor ctx)) routed fs
     go (Seq a b)       = Seq <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
     go (Quote t)       = Quote <$> go t
@@ -3371,6 +3444,11 @@ splitDefs src = do
           (ds, ts, bs, ps) <- go Nothing rest
           pure (ds, (l, doc) : ts, bs, ps)
       -- `theory` / `instance`: a header plus its indented block, raw
+      -- `functor F = word`: a declaration line with no block, so it
+      -- rides the block bucket with an empty body
+      | ("functor" : _) <- words l = do
+          (ds, ts, bs, ps) <- go Nothing rest
+          pure (ds, ts, (l, [], doc) : bs, ps)
       | (kw : _) <- words l, kw `elem` ["theory", "instance"] = do
           let (block, rest') = spanBlock 0 rest
           if null block
@@ -3438,6 +3516,21 @@ splitDefs src = do
             _ -> Left $ "Malformed definition: " ++ l
         _ -> Left $ "Malformed definition (missing '='): " ++ l
 
+-- `Code = List(Stage)`, `Stage = List(Atom)` — the reified spine.
+codeTy :: Ty
+codeTy = TData "List"
+           [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
+
+-- `functor Name = word` — a declaration line, no block.
+parseFunctorLine :: String -> Either String (String, String)
+parseFunctorLine l =
+  case break (== '=') (takeWhile (/= '#') l) of
+    (lhs, '=' : rhs)
+      | ["functor", nm] <- words lhs
+      , [w] <- words rhs -> Right (nm, w)
+    _ -> Left $ "Malformed functor declaration (want `functor Name = word`): "
+             ++ dropWhile isSpace l
+
 -- Check a module against the prelude: user defs and type aliases may
 -- shadow prelude ones (once each); the prelude's defs, aliases, and
 -- docs are folded into the result so the runtime and printer see them.
@@ -3489,6 +3582,12 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
                        | (h, b, _) <- declLines, take 6 h == "theory" ]
   insts    <- sequence [ parseInstance allAliases sigs h b
                        | (h, b, _) <- declLines, take 8 h == "instance" ]
+  funcs    <- sequence [ parseFunctorLine h
+                       | (h, _, _) <- declLines, take 7 h == "functor" ]
+  case [ n | (n, i) <- zip (map fst funcs) [0 :: Int ..]
+           , n `elem` take i (map fst funcs) ] of
+    (n : _) -> Left $ "Duplicate functor declaration: " ++ n
+    []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories) insts
   slotTable <- sequence [ (,) (inName i) . map fst . thSlots
                             <$> theoryOf theories (inTheory i)
@@ -3502,8 +3601,8 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
   let envSig = foldr (\(n, sc) e -> M.insert n sc e) env1 slotSigs
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  (env', _, _, defsRev, docs) <-
-    foldM (addDef slotTable)
+  (env', runFinal, _, defsRev, docs) <-
+    foldM (addDef slotTable funcs)
           (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0)
           (genDefs ++ defSrcs ++ instDefs)
   -- every slot's inferred type must match the theory's declaration,
@@ -3515,7 +3614,7 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
       then pure Nothing
       else do
         term0 <- parseProgram mainSrc
-        term1 <- elabUseWith env' slotTable term0
+        term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs) term0
         (arr, term) <- inferTermStamped env' (numberSplices env' term1)
         pure (Just (term, arr))
   -- own lists are built latest-first, which is exactly the match order
@@ -3561,7 +3660,7 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs' )
-    addDef slotTable (env, run, shadow, acc, docs) (name, bodySrc, doc) = do
+    addDef slotTable funcs (env, run, shadow, acc, docs) (name, bodySrc, doc) = do
       if M.member name env && name `notElem` shadow
         then Left $ "Duplicate definition: " ++ name
         else Right ()
@@ -3570,7 +3669,8 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
       -- `use` scopes are written out here, between parse and infer, the
       -- same slot substRecurse occupies: a syntactic Term rewrite with
       -- the Env available for arities and resource signatures.
-      term1 <- either (Left . inDef) Right (elabUseWith env1 slotTable term0)
+      term1 <- either (Left . inDef) Right
+                 (elabUseWith (ElabCtx env1 run slotTable funcs) term0)
       let term2 = numberSplices env1 (substRecurse name term1)
       (arr0, term3) <- either (Left . inDef) Right
                          (inferDefTermStamped name env1 term2)

@@ -238,8 +238,8 @@ handleLine st line
           pure st { rsUse = [] }
         _ | Just bad <- firstUnknown names -> do
               putStrLn $ "error: `use`: " ++ bad ++ " is not a resource \
-                         \(a REPL session cannot declare theories, so \
-                         \instances are file-only)"
+                         \(a session cannot declare theories or functors, \
+                         \so instances and functors are file-only)"
               pure st
           | otherwise -> do
               putStrLn ("ambient: use " ++ unwords names
@@ -366,7 +366,7 @@ handleLine st line =
     -- `use` on a program line reached inference unelaborated.
     elabLine src = do
       term0 <- parseProgram src
-      elabUseWith (rsEnv st) []
+      elabUseWith (elabCtx0 (rsEnv st) [])
         (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
     -- The CHECKED term is the term that runs: a splice site's stamp is

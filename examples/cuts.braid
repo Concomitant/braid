@@ -44,5 +44,5 @@ def s2 = ([dup drop] ; getCode) ; uncons ; (nil | (s r -> s)) ; merge
 # caller must stay parametric — `forget`, not `print`.  To USE a splice's
 # result at a known type, splice it where that type is known (above).
 def box = (cd -> [(cd) ... ; evalCode])
-(2 c ; take) ; box                        # Fn⟨ρ ⇒! (∃0 | Str ρ)⟩ — unopened
+(2 c ; take) ; box                        # Fn⟨ρ =IO> (∃0 | Str ρ)⟩ — unopened
 apply ; (forget ; "ran the boxed prefix" | pass) ; merge ; print

@@ -45,7 +45,7 @@ the current stack is rejected with a message naming the stack.
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
 | `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
-| `⇒!` , `->!` | the effectful arrow — an arrow carrying the `io` grade (§3) |
+| `=IO>` , `⇒!` , `->!` | the io manifest label on an arrow (§3); legacy spellings still lex |
 | `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, grade included (§3, §8) |
 
 Identifiers are any run of characters not in the punctuation set —
@@ -99,15 +99,15 @@ must be covered by some atom. `1 2 >> +` works (two made, two used);
 `1 >> +` is a type error (one made, two needed).
 
 **Every arrow carries a grade** — the set of resource wires it touches.
-There is one label today, `io`: a pure arrow prints `⇒`, an effectful
-one prints `⇒!`.
+There is one label today, `io`: a pure arrow prints `⇒`, one marked io
+prints `=IO>`. The label rides on the arrow just like resource names do.
 
 ```braid
-1 >> print                  # • ⇒! •            composition propagates it
-def shout = toStr >> print  # a0 ⇒! •           inferred through defs
+1 >> print                  # • =IO> •          composition propagates it
+def shout = toStr >> print  # a0 =IO> •         inferred through defs
 def quiet = toStr >> drop   # a0 ⇒ •            pure stays bare
-[print]                     # • ⇒ Fn⟨a0 ⇒! •⟩   pushing an action is pure
-[print] 5 >> apply          # • ⇒! •            apply transfers it out
+[print]                     # • ⇒ Fn⟨a0 =IO> •⟩ pushing an action is pure
+[print] 5 >> apply          # • =IO> •          apply transfers it out
 [dup >> *] 5 >> apply       # • ⇒ Int           same apply, pure quote
 ```
 
@@ -118,7 +118,8 @@ every other arrow's grade follows from composition. Higher-order words
 quotation they run, so one `apply` serves pure and effectful quotes
 alike. Effect tails are invisible in display, the same hiding a `ρ`
 tail already gets inside `Fn⟨…⟩`. Writing a grade in a type: §5 and
-§8. The two edges: §14.
+§8. The two edges: §14. The `=IO>` spelling is writable in declarations;
+the older `⇒!` and `->!` spellings still lex for old source.
 
 **A threaded resource folds onto the arrow too.** A `resource` (§8) is
 a nominal wire you thread rather than consume; resource wires ride
@@ -198,7 +199,7 @@ Type formers:
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
   hom: `apply` is modus ponens. The arrow inside carries its grade, and
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
-  (*Cannot unify effects: io vs pure*); `Fn⟨Str ⇒! •⟩` is the io form
+  (*Cannot unify effects: io vs pure*); `Fn⟨Str =IO> •⟩` is the io form
   (§8).
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
@@ -220,7 +221,7 @@ Type formers:
 ### Quotation `[p]`
 `[p] : • ⇒ Fn⟨…⟩` — pushes the program as a value; a **pure point**
 even when `p` does real work, and even when that work is io
-(`[print] : • ⇒ Fn⟨a0 ⇒! •⟩` — the grade rides inside, and `apply`
+(`[print] : • ⇒ Fn⟨a0 =IO> •⟩` — the grade rides inside, and `apply`
 transfers it out). Run with `apply : Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1`
 (the `Fn` sits *below* its arguments). Quotes capture in-scope binder
 names (closures).
@@ -554,7 +555,7 @@ type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩    # n, m are WIDTHS: used under `^`
 type Sq(n) = Mat(n, n)                # widths pass on to another alias
 type Endo(a) = Fn⟨a ⇒ a⟩              # a reified program as a type…
 type Pred(a) = Fn(a -> (a | a))       # …Unicode Fn⟨Σ ⇒ Θ⟩ or ASCII Fn(Σ -> Θ)
-type Sink(a) = Fn⟨a ⇒! •⟩             # an io program: ⇒! (ASCII `->!`)
+type Sink(a) = Fn⟨a =IO> •⟩           # an io program: =IO> (writable; ASCII `->!` or old `⇒!` still lex)
 data List(a) = (• | a List(a))        # recursive nominal type
 data Tree(a) = (a | Tree(a) Tree(a))
 data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # codata: recursion THROUGH a Fn
@@ -708,7 +709,7 @@ REPL says so). See `examples/theories.braid`, §14 for the limits, and
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
 like any type stack (params splice, `•` is empty, `Fn` nests). The
 arrow's shape is part of the type: `⇒` declares a **pure** program and
-rejects an io quotation, `Fn⟨Σ ⇒! Θ⟩` (ASCII `Fn(Σ ->! Θ)`) declares an
+rejects an io quotation, `Fn⟨Σ =IO> Θ⟩` (ASCII `Fn(Σ ->! Θ)`) declares an
 io one and demands it (§3, §14). This
 names function-carrier types — `Endo`, `Pred`, State-style monad
 carriers — and, when the recursion runs *through* the `Fn`, gives
@@ -764,7 +765,7 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | `toStr` | `a0 ⇒ Str` |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
 | `symStr` | `Sym ⇒ Str` |
-| `print` | `a0 ⇒! •` — io (§3) |
+| `print` | `a0 =IO> •` — io (§3) |
 | `true` / `false` | `• ⇒ Bool` |
 
 Routers (the primitive comparators; hit = track 1 — the predicate
@@ -791,12 +792,12 @@ Metaprogramming & IO (railway-typed edges):
 | word | type |
 |---|---|
 | `reflect` | `Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code \| Str)` |
-| `evalCode` | `Code ρ0 ⇒! (ρ1 \| Str ρ0)` — io, dynamically checked |
+| `evalCode` | `Code ρ0 =IO> (ρ1 \| Str ρ0)` — io, dynamically checked |
 | `unparse` | `Code ⇒ Str` |
 | `parse` | `Str ⇒ (Code \| Str)` |
-| `readLine` | `• ⇒! (Str \| Str)` — io; one line from stdin, EOF misses |
-| `readFile` | `Str ⇒! (Str \| Str)` — io |
-| `writeFile` | `Str Str ⇒! (• \| Str)` — io; hit is the empty success, miss carries the error |
+| `readLine` | `• =IO> (Str \| Str)` — io; one line from stdin, EOF misses |
+| `readFile` | `Str =IO> (Str \| Str)` — io |
+| `writeFile` | `Str Str =IO> (• \| Str)` — io; hit is the empty success, miss carries the error |
 
 These four and `print` are the **whole** io surface: nothing else is
 marked, every other grade is inferred (§3). `reflect` and `parse` stay
@@ -970,7 +971,7 @@ its (determinate) output type fails with a clean `result desync` error
 instead of silently desyncing. Backstop, not a type-level fix — the
 typed design is `design-metaprogramming.md`.
 `unparse`/`parse` + `readFile`/`writeFile` round-trip code through
-disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ ⇒! (r | Str ρ)⟩` defers
+disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ =IO> (r | Str ρ)⟩` defers
 instead of running — the other half of `reflect`'s round trip.
 
 **Cut soundness** (`examples/cuts.braid`): Braid is not
@@ -996,7 +997,7 @@ track parametrically (`forget`, `drop`, `pass`), never `print` (which
 demands exactly one wire of a known type). The cost is transparent:
 
 ```braid
-box : Code ⇒ Fn⟨ρ0 ⇒! (∃0 | Str ρ0)⟩
+box : Code ⇒ Fn⟨ρ0 =IO> (∃0 | Str ρ0)⟩
 ```
 
 Deferring the *run* costs the result's *type*: what boxed code returns
@@ -1110,7 +1111,7 @@ holds for them too: final atom of their stage (§9).
   inside one expression nothing does.
 - Several effectful atoms in one tensor stage are **legal**, and run
   left to right — deepest wire first, the order they are written in
-  (`print print : a0 a1 ⇒! •`). That order is decreed, not checked, so
+  (`print print : a0 a1 =IO> •`). That order is decreed, not checked, so
   a mis-ordered pair is a wrong behaviour, not a type error.
 - Inside a `use` scope, a stage may contain **at most one resource
   operation, and it must be alone in that stage** — otherwise *"a stage
@@ -1209,7 +1210,7 @@ different category — as data plus a composition word plus a theory).
 **What not to reach for.** Effects do not need new machinery: state is a
 `resource`, failure is the railway sum track, writer is a `resource`,
 nondeterminism is `List`, reader is a `resource` you only read. Only IO
-is irreducible, and it is a *grade* on the existing arrow (`⇒!`), not an
+is irreducible, and it is a *grade* on the existing arrow (`=IO>`), not an
 arrow of its own. `examples/arrows.braid` shows that `Control.Arrow`'s
 whole interface — `arr`, `>>>`, `first`, `***`, `&&&`, `|||`, `app` —
 is already the syntax rather than a library.
