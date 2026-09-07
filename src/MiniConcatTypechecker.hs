@@ -6,7 +6,7 @@ module MiniConcatTypechecker where
 import qualified Data.Map as M
 import Data.Map (Map)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust)
-import Data.List (nub, intercalate, elemIndex, isPrefixOf, partition, (\\))
+import Data.List (nub, intercalate, elemIndex, isPrefixOf, stripPrefix, partition, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
                              MonadError, catchError)
@@ -438,9 +438,7 @@ bindTyVar s a t
   | isRigidT a =
       case t of
         TVarTy b | not (isRigidT b) -> bindTyVar s b (TVarTy a)
-        _ -> Left ("the splice result " ++ show a ++ " is existential and "
-                   ++ "cannot be assumed to be " ++ show t
-                   ++ " — consume the hit track parametrically")
+        _ -> Left (rigidMsg (show a) (show t))
   | occursTy a t = Left $ "Occurs check failed: " ++ show a ++ " in " ++ show t
   | otherwise     = Right s { tySub = M.insert a t (tySub s) }
 
@@ -464,8 +462,7 @@ bindNVar s n k (Exp k' mv')
       if k == k' then Right s
       else Left $ "Occurs check failed on exponent: " ++ show n
   | isRigidN n =
-      Left $ "the splice result " ++ show n ++ " is existential (width); "
-          ++ "consume it parametrically"
+      Left $ rigidMsg (show n) "a fixed width"
   | k' < k =
       case mv' of
         Just m ->  -- k + n = k' + m, k' < k: bind m := n + (k - k')
@@ -581,7 +578,7 @@ bindStackVar s v st
   | isRigidS v =
       case st of
         STail w | not (isRigidS w) -> bindStackVar s w (STail v)
-        _ -> Left (rigidMsg (show v) st)
+        _ -> Left (rigidMsg (show v) (show st))
   | occursStack v st =
       Left $ "Occurs check failed on stack: " ++ show v ++ " in " ++ show st
   | otherwise = Right s { stSub = M.insert v st (stSub s) }
@@ -653,8 +650,7 @@ bindRowVar s v row
   | isRigidR v =
       case row of
         RTail w | not (isRigidR w) -> bindRowVar s w (RTail v)
-        _ -> Left ("the splice result " ++ show v ++ " is existential "
-                   ++ "(sum row); consume it parametrically")
+        _ -> Left (rigidMsg (show v) "a fixed set of alternatives")
   | occursRow v row =
       Left $ "Occurs check failed on sum row: " ++ show v ++ " in " ++ show row
   | otherwise = Right s { rowSub = M.insert v row (rowSub s) }
@@ -680,11 +676,19 @@ isRigidR (RV n) = rigidTag `isPrefixOf` n
 isRigidN :: NVar -> Bool
 isRigidN (NV n) = rigidTag `isPrefixOf` n
 
-rigidMsg :: String -> SType -> String
-rigidMsg v st =
-  "the splice result " ++ v ++ " is existential and cannot be assumed to be "
-    ++ show st ++ " — code produced at runtime has whatever type it has, so "
-    ++ "consume the hit track parametrically (forget/drop/pass it along)"
+-- A skolem was asked to become something concrete.  The expected type
+-- quantifies over it, so the code must work for EVERY choice; demanding
+-- one is exactly the failure subsumption exists to catch.
+rigidMsg :: String -> String -> String
+rigidMsg v what =
+  "'" ++ dropRigid v ++ "' is universally quantified in the expected type "
+    ++ "but this code requires it to be " ++ what
+    ++ " — the expected type promises the code works for every choice of '"
+    ++ dropRigid v ++ "', so it must stay parametric in it"
+
+-- skolems are displayed under the name the user actually wrote
+dropRigid :: String -> String
+dropRigid v = fromMaybe v (stripPrefix rigidTag v)
 
 -- Solve a list of constraints
 solve :: [Constraint] -> Either String Subst
@@ -837,6 +841,58 @@ instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
   -- effect variables are FRESHENED, never closed: closing ε for a
   -- non-final atom would let `1 print` typecheck as pure.
   openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
+
+-- Is a scheme AT LEAST AS GENERAL as an expected arrow?
+--
+-- Two places need this and they are the same question at two phases: a
+-- theory slot's declared arrow is an expectation written in the theory,
+-- and `evalAs`'s witness is an expectation written in the program.  In
+-- both, the expected arrow's variables stand for "whatever the CONTEXT
+-- chose", which the checked code does not get to pick.  So they are
+-- skolemized for the duration of the check and the candidate is
+-- instantiated fresh.
+--
+-- Plain unification would be unsound: `drop 1 1 : a b ⇒ Int Int` unifies
+-- with an expected `a ⇒ a a` at a := Int, and then a context that chose
+-- Str runs it anyway.  Subsumption rejects that, because the skolem for
+-- `a` refuses to become Int.
+--
+-- Effect tails are deliberately NOT skolemized: unifyEff's absorption is
+-- the intended reading here (a pure body satisfies an io-declared slot;
+-- an io body under a pure declaration clashes, naming the grade).  An
+-- effect-POLYMORPHIC declaration is therefore checked leniently; no
+-- theory in the wild writes one, and tightening it needs a rigid guard
+-- in bindEffVar, which is a separate decision.
+subsumes :: Scheme -> Arrow -> Either String ()
+subsumes sc expected =
+  let want = skolemizeArrow expected
+      got  = runInfer0 (instantiate sc)
+  in () <$ solve [ CEqStack (arrowIn got)  (arrowIn want)
+                 , CEqStack (arrowOut got) (arrowOut want)
+                 , CEqEff   (arrowEff got) (arrowEff want) ]
+
+arrowIn :: Arrow -> SType
+arrowIn (Arrow i _ _) = i
+
+arrowOut :: Arrow -> SType
+arrowOut (Arrow _ o _) = o
+
+arrowEff :: Arrow -> EffRow
+arrowEff (Arrow _ _ e) = e
+
+-- Freeze every type/stack/row/width variable of an arrow into a rigid
+-- constant, so unification may not choose a value for it.  The rigid
+-- naming convention (`rigidTag`) and the guards in bindTyVar/
+-- bindStackVar/bindRowVar/bindNVar are what enforce it.
+skolemizeArrow :: Arrow -> Arrow
+skolemizeArrow arr =
+  let (tvs, svs, rvs, nvs, _) = varsOfArrow arr
+      sk s = rigidTag ++ s
+      tSub = M.fromList [ (v, TVarTy (TV (sk n)))       | v@(TV n) <- tvs ]
+      sSub = M.fromList [ (v, STail  (SV (sk n)))       | v@(SV n) <- svs ]
+      rSub = M.fromList [ (v, RTail  (RV (sk n)))       | v@(RV n) <- rvs ]
+      nSub = M.fromList [ (v, Exp 0 (Just (NV (sk n)))) | v@(NV n) <- nvs ]
+  in substOnce (Subst tSub sSub rSub nSub M.empty) arr
 
 -- exponent variables on a stack's spine (not inside element types)
 spineExpVars :: SType -> [NVar]
@@ -3328,16 +3384,18 @@ checkInstance env theories inst = do
       sc <- maybe (Left $ "instance " ++ inName inst ++ ": missing " ++ dn)
                   Right (M.lookup dn env)
       wanted <- slotArrowAt inst th declared
-      let got = runInfer0 (instantiate sc)
-      case solve [ CEqStack (arrIn got) (arrIn wanted)
-                 , CEqStack (arrOut got) (arrOut wanted) ] of
-        Right _ -> Right ()
-        Left _  -> Left $ "instance " ++ inName inst ++ ": slot '" ++ nm
-                       ++ "' is " ++ show (normalizeArrow got)
+      -- SUBSUMPTION, not unification: the theory's variables are the
+      -- CALLER's to choose, so a body that merely unifies at one choice
+      -- (`drop 1 1` against `a ⇒ a a`) must be rejected.  This also
+      -- compares the effect row, which the old stack-only check did not
+      -- — an io body under a pure-declared slot used to pass, and
+      -- `functor F = <that slot>` then broke the phase invariant.
+      case subsumes sc wanted of
+        Right () -> Right ()
+        Left e   -> Left $ "instance " ++ inName inst ++ ": slot '" ++ nm
+                       ++ "' is " ++ show (normalizeArrow (runInfer0 (instantiate sc)))
                        ++ " but theory " ++ thName th ++ " declares "
-                       ++ show (normalizeArrow wanted)
-    arrIn  (Arrow i _ _) = i
-    arrOut (Arrow _ o _) = o
+                       ++ show (normalizeArrow wanted) ++ " (" ++ e ++ ")"
 
 -- A slot's DECLARED type, with the theory's parameters replaced by this
 -- instance's arguments.

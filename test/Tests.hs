@@ -1038,7 +1038,13 @@ moduleFailTests =
     -- assuming a shape for a boxed splice's result is a type error: it
     -- is the hole this closes (`print` demands exactly one wire)
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge",
-     "is existential")
+     "is universally quantified in the expected type")
+    -- an instance body must SUBSUME its slot's declared type, effect row
+    -- included: an io body under a pure-declared slot used to pass the
+    -- stack-only check, and `functor F = <that slot>` then carried IO
+    -- into elaboration, breaking the phase invariant.
+  , ("theory Rewriter =\n    rw : Code ⇒ Code\n\ninstance Loud : Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud = use Loud ; rw\n1",
+     "Cannot unify effects: io vs pure")
     -- a splice result may not share a variable with the def's input
   , ("def bad = (cd x -> (cd) ... >> evalCode >> ((y -> y x >> pack) | forget >> nil) >> merge)\n1",
      "shares a1 with this definition's input")
