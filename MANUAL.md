@@ -111,8 +111,8 @@ def quiet = toStr >> drop   # a0 ⇒ •            pure stays bare
 [dup >> *] 5 >> apply       # • ⇒ Int           same apply, pure quote
 ```
 
-Grades are **inferred, never annotated**: five prims are marked io
-(`print`, `readLine`, `readFile`, `writeFile`, `evalCode` — §9) and
+Grades are **inferred, never annotated**: four prims are marked io
+(`print`, `readLine`, `readFile`, `writeFile` — §9) and
 every other arrow's grade follows from composition. Higher-order words
 (`apply`, `loop`, `map`, `foldExp`, `mapN`) share the grade of the
 quotation they run, so one `apply` serves pure and effectful quotes
@@ -792,18 +792,20 @@ Metaprogramming & IO (railway-typed edges):
 | word | type |
 |---|---|
 | `reflect` | `Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code \| Str)` |
-| `evalCode` | `Code ρ0 =IO> (ρ1 \| Str ρ0)` — io, dynamically checked |
+| `evalAs` | `Fn⟨ρ0 ⇒ ρ1⟩ Code ρ0 ⇒ (ρ1 \| Str ρ0)` — witness-checked |
 | `unparse` | `Code ⇒ Str` |
 | `parse` | `Str ⇒ (Code \| Str)` |
 | `readLine` | `• =IO> (Str \| Str)` — io; one line from stdin, EOF misses |
 | `readFile` | `Str =IO> (Str \| Str)` — io |
 | `writeFile` | `Str Str =IO> (• \| Str)` — io; hit is the empty success, miss carries the error |
 
-These four and `print` are the **whole** io surface: nothing else is
+These three and `print` are the **whole** io surface: nothing else is
 marked, every other grade is inferred (§3). `reflect` and `parse` stay
-pure — `reflect` READS a quotation, it never runs it — while
-`evalCode` is io unconditionally, because what it will run is not
-known until it runs.
+pure — `reflect` READS a quotation, it never runs it — and so does
+`evalAs`, which takes its grade from its witness: a pure witness admits
+only pure code and stays pure, an io witness permits io. That is the
+sandbox — what runtime-loaded code may do is bounded by the type you
+were willing to write for it.
 
 Exponent tier (widths erased; see §13):
 
@@ -962,17 +964,12 @@ parameters are fetched by depth from the deepest wire and never cross
 it. True closures, and parameters used inside a quotation or a row
 component, are still gated onto the miss track with an explanation. Code is an ordinary list — slice with `take`, transform
 with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
-`code.braid`). `evalCode` re-checks dynamically and runs; failures
-ride the miss track *with the untouched segment as evidence*. Its
-hit-track type `ρ1` is chosen by the *context*, not the code — the one
-place checker and value can disagree. A top-level **width backstop**
-catches the mismatch: a program whose result stack width differs from
-its (determinate) output type fails with a clean `result desync` error
-instead of silently desyncing. Backstop, not a type-level fix — the
-typed design is `design-metaprogramming.md`.
-`unparse`/`parse` + `readFile`/`writeFile` round-trip code through
-disk (`examples/io.braid`). `box : Code ⇒ Fn⟨ρ =IO> (r | Str ρ)⟩` defers
-instead of running — the other half of `reflect`'s round trip.
+`code.braid`). `evalAs` checks the code against a
+witness and runs it; failures ride the miss track *with the untouched
+segment as evidence*. `unparse`/`parse` + `readFile`/`writeFile`
+round-trip code through disk (`examples/io.braid`).
+`box : Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩` defers instead of
+running — the other half of `reflect`'s round trip.
 
 **Cut soundness** (`examples/cuts.braid`): Braid is not
 token-concatenative, but at spine granularity the concatenative
@@ -982,23 +979,44 @@ slices within a stage are runnable sub-tensors, and any slice boxes.
 
 ### The splice check
 
-Every `evalCode` site is checked against the type its context imposes.
-The checker stamps each invocation during elaboration with the output
-type that constraint solving settles on. When the splice runs, its
-inferred result type is unified against that stamp. A mismatch rides the
-miss track with the untouched input segment as evidence — no crash, same
-error path as `parse` or `readFile`.
-
-Splices that generalize — those whose stamp would become part of a
-definition's polymorphic scheme — freeze their result type into
-existential constants (`∃0`, `∃1`, …), because a caller's argument type
-must not determine the splice's output. Callers must consume the hit
-track parametrically (`forget`, `drop`, `pass`), never `print` (which
-demands exactly one wire of a known type). The cost is transparent:
+Code that will only exist at runtime has no type the checker can
+discover, so `evalAs` asks you to write one. Its first operand is a
+**witness**: an ordinary program whose *arrow* is the expectation the
+loaded code must meet. The witness is never applied. It is spelled as a
+value because Braid has no type syntax inside terms — a program at the
+type you mean is the way to name that type.
 
 ```braid
-box : Code ⇒ Fn⟨ρ0 =IO> (∃0 | Str ρ0)⟩
+[dup ; *] c (7) ; evalAs      -- "I expect Int ⇒ Int"
 ```
+
+The context types against the witness's `ρ0 ⇒ ρ1` with ordinary
+variables, so a splice's result is ordinary too: usable, printable,
+composable. When the splice runs, the loaded code's inferred scheme must
+**subsume** the witness's arrow — be at least as general. Subsumption,
+not unification, and the difference is the soundness of the whole
+mechanism: types are erased by then, so the check cannot know which
+instantiation of a polymorphic witness the context chose, and must
+demand code that handles every one. Under a witness `[_]` (`a ⇒ a`),
+code that is merely `Int ⇒ Int` is refused — unification would have
+accepted it at `a := Int` and then run it on a `Str`.
+
+A mismatch rides the miss track with the untouched input segment as
+evidence — no crash, same error path as `parse` or `readFile`. And
+because the witness is a real program, it is also the fallback: on a
+miss it is still sitting there to run.
+
+`box` defers the run the same way, witness and all:
+
+```braid
+box : Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩
+```
+
+Cutting a program (`examples/cuts.braid`) is where this is felt: a cut
+names an intermediate type the whole program never mentions, and it
+differs per cut. Each cut states its own witnesses. That obligation is
+the honest price — the type between the halves is a fact about the cut,
+not about the program, so someone has to say it.
 
 Deferring the *run* costs the result's *type*: what boxed code returns
 is only discovered when it runs. To use a splice's result at a known
@@ -1100,7 +1118,7 @@ holds for them too: final atom of their stage (§9).
   stood where it was written, so shadowing `equals` later cannot change
   the behaviour of the prelude's `odd?` — nor of a quote you already
   built. The checker and the runtime agree on which definition a name
-  means. (The one dynamic exception is `evalCode`, which resolves
+  means. (The one dynamic exception is `evalAs`, which resolves
   spliced code against the live environment — priced by its railway.)
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
@@ -1174,12 +1192,6 @@ holds for them too: final atom of their stage (§9).
 - A `Fin` prints as a bare integer. Erasure is honest — a `Fin` *is* an
   `Int` at runtime — but output does not distinguish an index from an
   ordinary `Int`; only the type does.
-- An `∃` in a displayed type marks an **existential**: a type the
-  definition cannot know, because it is whatever code built at runtime
-  turns out to return (§12). It is frozen rather than generalized —
-  unifying with nothing but itself — so callers consume it
-  parametrically (`forget`, `drop`, `pass`) and never at a specific
-  type like `print`, which would be assuming the answer.
 
 ## 15. Extending Braid — what to reach for
 

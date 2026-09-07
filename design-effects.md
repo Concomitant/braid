@@ -36,13 +36,20 @@ print     : a0 =IO> •
 readLine  : • =IO> (Str | Str)
 readFile  : Str =IO> (Str | Str)
 writeFile : Str Str =IO> Maybe(Str)
-evalCode  : Code ρ0 =IO> (ρ1 | Str ρ0)
 ```
 
-`evalCode` is unconditionally io because it runs arbitrary code: the
-dynamic escape hatch sits at the top of the lattice even when the code
-it happens to run is pure. `reflect : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)`
-stays pure — it READS code, it never runs it.
+`reflect : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)` stays pure — it READS code, it
+never runs it.
+
+*(Amended 2026-09-07: `evalCode : Code ρ0 =IO> (ρ1 | Str ρ0)` was a
+fifth io prim, unconditionally io because it ran arbitrary code — the
+dynamic escape hatch sitting at the top of the lattice even when the
+code it happened to run was pure. It is replaced by `evalAs : Fn⟨ρ0
+=ε> ρ1⟩ Code ρ0 =ε> (ρ1 | Str ρ0)`, which shares ε with its witness
+like every other higher-order prim. The grade is no longer a blanket
+worst case but a BOUND: a pure witness admits only pure code and the
+splice stays pure. Runtime loading joined the ε discipline rather than
+standing outside it.)*
 
 **Grades unify; they do not join.** Composition forces two arrows'
 effect rows *equal*. The join everyone expects falls out of label

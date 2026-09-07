@@ -346,11 +346,11 @@ moduleTypeTests =
   , ("print",     "a0 =IO> •")
   , ("readLine",  "• =IO> (Str | Str)")
   , ("readFile",  "Str =IO> (Str | Str)")
-  , ("evalCode",  "Code ρ0 =IO> (ρ1 | Str ρ0)")
+  , ("evalAs",    "Fn⟨ρ0 ⇒ ρ1⟩ Code ρ0 ⇒ (ρ1 | Str ρ0)")
     -- `box` defers the RUN, and that costs the result's TYPE: what the
     -- boxed code returns is discovered when it runs, so the hit track is
     -- an existential its callers must stay parametric in
-  , ("box",       "Code ⇒ Fn⟨ρ0 =IO> (∃0 | Str ρ0)⟩")
+  , ("box",       "Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩")
     -- pushing an action is PURE; the effect lives inside the Fn, and
     -- `apply` is where it transfers back out
   , ("[print]",   "• ⇒ Fn⟨a0 =IO> •⟩")
@@ -601,7 +601,7 @@ evalTests =
   , ("0 0 >> checkedAt >> (at >> print | forget >> \"oob\" >> print) >> merge", ["0"], "")
     -- an index literal is a closed point, so it reflects like any
     -- other literal (not an open-arity word)
-  , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> c >> evalCode >> print) | print) >> forget", ["in1(20)"], "")
+  , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> [10] c >> evalAs >> print) | print) >> forget", ["in1(20)"], "")
   , ("1 >> sumN _",                                 [],     "0 1")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
@@ -826,7 +826,7 @@ evalTests =
   , ("def fizzbuzz = (n -> (n 15 >> mod >> zero) [\"FizzBuzz\"] [(n 3 >> mod >> zero) [\"Fizz\"] [(n 5 >> mod >> zero) [\"Buzz\"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)\n15 >> fizzbuzz >> print\n9 >> fizzbuzz >> print\n4 >> fizzbuzz >> print", ["FizzBuzz", "Fizz", "4"], "")
     -- unparse / parse round trip; parse feeds evalCode
   , ("\"dup >> *\" >> parse >> (unparse >> print | print) >> forget", ["dup >> *"], "")
-  , ("\"dup >> *\" >> parse >> ((c -> c (6) >> evalCode >> print) | print) >> forget", ["in1(36)"], "")
+  , ("\"dup >> *\" >> parse >> ((c -> [dup >> *] c (6) >> evalAs >> print) | print) >> forget", ["in1(36)"], "")
   , ("\"dup >>\" >> parse >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
     -- file IO round trip (railway edges)
   , ("\"/tmp/braid-sprint-test.txt\" \"hi\" >> writeFile >> (\"/tmp/braid-sprint-test.txt\" >> readFile >> (print | print) >> forget | print) >> forget", ["hi"], "")
@@ -835,16 +835,16 @@ evalTests =
   , ("(1 2 3 4 >> pack) >> 2 _ >> skip >> print", ["list(3, 4)"], "")
   , (".red >> symStr >> \"k=\" ... >> cat >> print", ["k=red"], "")
     -- Code v1: reflect / sections / evalCode / abstraction elimination
-  , ("[dup >> *] >> reflect >> ((c -> c (7) >> evalCode >> print) | print) >> forget", ["in1(49)"], "")
-  , ("[dup >> * >> 1 ... >> +] >> reflect >> ((c -> (2 c >> take) (6) >> evalCode >> print) | print) >> forget", ["in1(36)"], "")
-  , ("[(x y -> x (2 y >> *) >> +)] >> reflect >> ((c -> c (3) (4) >> evalCode >> print) | print) >> forget", ["in1(11)"], "")
-  , ("[(x y -> y)] >> reflect >> ((c -> c (3) (4) >> evalCode >> print) | print) >> forget", ["in1(4)"], "")
+  , ("[dup >> *] >> reflect >> ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget", ["in1(49)"], "")
+  , ("[dup >> * >> 1 ... >> +] >> reflect >> ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget", ["in1(36)"], "")
+  , ("[(x y -> x (2 y >> *) >> +)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["in1(11)"], "")
+  , ("[(x y -> y)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["in1(4)"], "")
     -- the closure gate: (x -> [x]) is a true closure, missed with a message
   , ("[(x -> [x])] >> reflect >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
     -- evalCode dynamic check: + on one wire misses, evidence kept
-  , ("[+] >> reflect >> ((c -> c (5) >> evalCode >> (forget >> 0 | forget >> 1) >> merge >> print) | forget >> 2 >> print) >> forget", ["1"], "")
+  , ("[+] >> reflect >> ((c -> [dup >> *] c (5) >> evalAs >> (forget >> 0 | forget >> 1) >> merge >> print) | forget >> 2 >> print) >> forget", ["1"], "")
     -- GLA: transpose of add is copy; linearity checked over reflected code
-  , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> (c >> transposeC) (5) >> evalCode >> print) | print) >> forget", ["in1(5, 5)"], "")
+  , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> [dup] (c >> transposeC) (5) >> evalAs >> print) | print) >> forget", ["in1(5, 5)"], "")
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
   , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> toStr _ >> _ toStr >> cat >> print", ["715"], "")
     -- split-apply-combine: dup broadcasts, filters split, folds apply
@@ -957,20 +957,20 @@ evalTests =
   , ("def sign = x -> [x >> toStr] (x >> negative) [\"neg\"] (x >> zero) [\"zero\"] >> firstTrue\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
     -- cut soundness: at stage boundaries, run(prefix) ; run(suffix) =
     -- run(whole) — the concatenative property at spine granularity
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2 >> + >> dup >> *] >> getCode\ndef cutAt =\n    k ->\n    (k c >> take) >> evalCode\n    ((k c >> skip) ... >> evalCode >> (print | forget) >> merge | forget) >> merge\n0 >> cutAt\n1 >> cutAt\n3 >> cutAt", ["9", "9", "9"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2 >> + >> dup >> *] >> getCode\ndef cutAt =\n    pre suf k ->\n    (pre) (k c >> take) >> evalAs\n    ((suf) (k c >> skip) ... >> evalAs >> (print | forget) >> merge | forget) >> merge\n[pass] [1 2 >> + >> dup >> *] 0 >> cutAt\n[1 2] [+ >> dup >> *] 1 >> cutAt\n[1 2 >> + >> dup] [*] 3 >> cutAt", ["9", "9", "9"], "")
     -- vertical cuts: atom slices within a stage are runnable sub-tensors
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef s0 = ([1 2 >> +] >> getCode) >> uncons >> (nil | (s r -> s)) >> merge\n(1 s0 >> take >> single) >> evalCode >> (print | forget) >> merge\n(1 s0 >> skip >> single) >> evalCode >> (print | forget) >> merge", ["1", "2"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef s0 = ([1 2 >> +] >> getCode) >> uncons >> (nil | (s r -> s)) >> merge\n[1] (1 s0 >> take >> single) >> evalAs >> (print | forget) >> merge\n[2] (1 s0 >> skip >> single) >> evalAs >> (print | forget) >> merge", ["1", "2"], "")
     -- box: Code -> Fn without running; the check fires at apply.
     -- Deferring the RUN costs the result's TYPE: what boxed code returns
     -- is discovered when it runs, so the hit track is existential and a
     -- caller must stay parametric (`forget`, not `print`).
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (forget >> \"ran\" | pass) >> merge >> print", ["ran"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[0] (2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (forget >> \"ran\" | pass) >> merge >> print", ["ran"], "")
     -- a splice whose code produces the WRONG WIDTH now rides the miss
     -- track (it used to reach the top-level backstop as "result desync")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n(c) ... >> evalCode >> (print | forget) >> merge", [], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n[0] (c) ... >> evalAs >> (print | forget) >> merge", [], "")
     -- …and the wrong TYPE at the right width, likewise: this is the
     -- smuggle the hole allowed — a Str reaching a List(Int)
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n([ \"hi\" ] >> getCode) >> evalCode\n((x -> 1 x >> pack) | drop >> nil) >> merge\n[toStr] ... >> map >> print", ["in1()"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[0] ([ \"hi\" ] >> getCode) >> evalAs\n((x -> 1 x >> pack) | drop >> nil) >> merge\n[toStr] ... >> map >> print", ["in1()"], "")
     -- pack builds the same value as the list(…) literal; pack2 makes
     -- two-wire elements; the empty pack is nil
   , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
@@ -997,24 +997,24 @@ evalTests =
     -- reflection: a binder with `_` slots compiles to pure wiring; check
     -- the ROUND-TRIP VALUE, not merely that reflection succeeded (a
     -- success-only test let a wrong permutation ship once)
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x _] >> getCode\n7 8 >> (c) ... >> evalCode >> (print print | forget) >> merge", ["7", "8"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x x _ >> + _ >> +] >> getCode\n1 2 >> (c) ... >> evalCode >> (print | forget) >> merge", ["4"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ z -> z _ x] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print print print | forget) >> merge", ["3", "2", "1"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x _] >> getCode\n7 8 >> [x _ -> x _] (c) ... >> evalAs >> (print print | forget) >> merge", ["7", "8"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x x _ >> + _ >> +] >> getCode\n1 2 >> [x _ -> x x _ >> + _ >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["4"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ z -> z _ x] >> getCode\n1 2 3 >> [x _ z -> z _ x] (c) ... >> evalAs >> (print print print | forget) >> merge", ["3", "2", "1"], "")
     -- OPEN binders eliminate too.  The erased passthrough is the
     -- stack's TAIL, so it rides above the param block inside each
     -- stage's `pass`; params are reached by depth from the DEEPEST
     -- wire, so every fetch is static and never crosses it.  Round-trip
     -- the VALUE — a success-only test would miss a wrong permutation.
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ...] >> getCode\n7 >> (c) ... >> evalCode >> (print | forget) >> merge", ["7"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ y ... -> y _ x ...] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print print print | forget) >> merge", ["3", "2", "1"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ...] >> getCode\n7 >> [x ... -> x ...] (c) ... >> evalAs >> (print | forget) >> merge", ["7"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ y ... -> y _ x ...] >> getCode\n1 2 3 >> [x _ y ... -> y _ x ...] (c) ... >> evalAs >> (print print print | forget) >> merge", ["3", "2", "1"], "")
     -- ...and when the body consumes OUT of the passthrough, inference
     -- has already pinned it to a concrete width, so it is counted in
     -- and the param block is lifted above it (this one returned 9
     -- instead of 7 until that lift was added)
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x x ... >> + + >> +] >> getCode\n1 2 3 >> (c) ... >> evalCode >> (print | forget) >> merge", ["7"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x x ... >> + + >> +] >> getCode\n1 2 3 >> [x ... -> x x ... >> + + >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["7"], "")
     -- the naming binder is an open binder, so it reflects as wiring too
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> x ... >> * ...] >> getCode\n7 >> (c) ... >> evalCode >> (print | forget) >> merge", ["49"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> drop >> x ...] >> getCode\n9 >> (c) ... >> evalCode >> (print | forget) >> merge", ["9"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> x ... >> * ...] >> getCode\n7 >> [-> x -> x ... >> * ...] (c) ... >> evalAs >> (print | forget) >> merge", ["49"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> drop >> x ...] >> getCode\n9 >> [-> x -> drop >> x ...] (c) ... >> evalAs >> (print | forget) >> merge", ["9"], "")
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
@@ -1035,19 +1035,20 @@ moduleFailTests =
     -- caller). Used to leak silently (a value on a stack typed empty);
     -- the top-level width backstop now catches it as a clean error,
     -- delivering the guarantee spec-code.md already claimed.
-    -- assuming a shape for a boxed splice's result is a type error: it
-    -- is the hole this closes (`print` demands exactly one wire)
+    -- box's first operand is the WITNESS, so handing it only the code
+    -- is an ordinary arity/type error rather than anything exotic
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge",
-     "is universally quantified in the expected type")
+     "Cannot unify types")
     -- an instance body must SUBSUME its slot's declared type, effect row
     -- included: an io body under a pure-declared slot used to pass the
     -- stack-only check, and `functor F = <that slot>` then carried IO
     -- into elaboration, breaking the phase invariant.
   , ("theory Rewriter =\n    rw : Code ⇒ Code\n\ninstance Loud : Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud = use Loud ; rw\n1",
      "Cannot unify effects: io vs pure")
-    -- a splice result may not share a variable with the def's input
-  , ("def bad = (cd x -> (cd) ... >> evalCode >> ((y -> y x >> pack) | forget >> nil) >> merge)\n1",
-     "shares a1 with this definition's input")
+    -- a witness is not optional: `evalAs` without one is an arity error
+    -- (there is no longer any way to splice without stating the type)
+  , ("def bad = (cd x -> (cd) ... >> evalAs >> ((y -> y x >> pack) | forget >> nil) >> merge)\n1",
+     "Cannot unify")
     -- (was a "result desync" moduleFailTest: spliced code produced 2
     -- wires where the context typed the hit track as 1.  The splice
     -- check now catches that AT the splice, so it rides the miss track

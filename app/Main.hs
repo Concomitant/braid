@@ -369,16 +369,13 @@ handleLine st line =
       elabUseWith (elabCtx0 (rsEnv st) [])
         (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
-    -- The CHECKED term is the term that runs: a splice site's stamp is
-    -- written during inference, so re-elaborating for the run would
-    -- discard it and leave the splice unchecked.
+    -- The CHECKED term is the term that runs: elaborating twice would
+    -- run something other than what was checked.
     checkLine = do
-      term0 <- elabLine line
-      (Arrow i o _, term1) <-
-        inferTermStamped (rsEnv st) (numberSplices (rsEnv st) term0)
+      term1 <- elabLine line
+      Arrow i o _ <- inferTermIn (rsEnv st) term1
       case solve [CEqStack i (rsStackTy st)] of
-        Right s -> pure ( apply s o
-                        , mapStamps' (\_ d -> fmap (apply s) d) term1 )
+        Right s -> pure (apply s o, term1)
         Left _ ->
           -- the mismatch is against the persistent REPL stack: say so
           Left $ "this line needs input stack '"

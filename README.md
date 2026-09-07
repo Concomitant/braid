@@ -181,8 +181,8 @@ bare `use` leaves.
     railway sum, a list. Only IO is irreducible, so `io` is the one
     label a grade ever needs. An arrow marked io prints `=IO>`, a pure one
     `⇒` — the label sits on the arrow just like resource names do — and
-    which you get is **inferred, never annotated**: five prims are marked
-    (`print`, `readLine`, `readFile`, `writeFile`, `evalCode`) and every
+    which you get is **inferred, never annotated**: four prims are marked
+    (`print`, `readLine`, `readFile`, `writeFile`) and every
     other grade follows from composition — `def shout = toStr >> print : a0 =IO> •`.
     Quoting stays pure, since pushing an action isn't doing it:
     `[print] : • ⇒ Fn⟨a0 =IO> •⟩`, and `apply` is what transfers the grade out.
@@ -214,9 +214,9 @@ bare `use` leaves.
     (`examples/payroll.braid`).
 13. **Code is data.** `reflect` turns a quotation into its spine — a
     list of stages of atoms — so `take`/`map`/`reverse` slice and
-    transform *programs*; `evalCode` runs them (dynamically checked,
-    splices are type-checked at the site and mismatches ride the miss
-    track); `unparse`/`parse` and `readFile`/`writeFile` round-trip code
+    transform *programs*; `evalAs` runs them (witness-checked: the loaded
+    code must subsume an ordinary program whose arrow is the expected type);
+    `unparse`/`parse` and `readFile`/`writeFile` round-trip code
     through disk. The graphical-linear-algebra transpose is
     `reverse >> map dualize`.
 

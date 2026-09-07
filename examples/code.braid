@@ -1,14 +1,15 @@
 # Code is data: reflect turns a quotation into its spine — a list of
 # stages of atoms — so the list library IS the metaprogramming
-# library. evalCode runs code with a dynamic check; failures ride the
+# library. evalAs runs code against a WITNESS whose type it must meet;
+# the witness is never applied, it is the expectation. Failures ride the
 # miss track carrying the untouched segment.
 
 [dup >> * >> 1 ... >> +] >> reflect
-    ((c -> (2 c >> take) (6) >> evalCode >> print) | print) >> forget   # in1(36): a 2-stage section, run
+    ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget   # in1(36): a 2-stage section, run
 
 # abstraction elimination: lambdas reflect as pure wiring
 [(x y -> x (2 y >> *) >> +)] >> reflect
-    ((c -> c (3) (4) >> evalCode >> print) | print) >> forget           # in1(11)
+    ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget           # in1(11)
 
 # true closures are gated onto the miss track with an explanation
 [(x -> [x])] >> reflect >> (forget >> "ground?!" ... >> print | print) >> forget

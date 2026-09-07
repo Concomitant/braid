@@ -7,4 +7,4 @@
     ("saved" >> print | print) >> forget
 
 ("/tmp/braid-square.braid" >> readFile >=> parse)
-    ((c -> c (7) >> evalCode >> print) | print) >> forget    # in1(49)
+    ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget    # in1(49)

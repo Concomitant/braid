@@ -15,34 +15,43 @@ def getCode = reflect ; ((c -> c) | drop ; nil) ; merge
 def c = [1 2 >> + >> dup >> *] ; getCode          # 4 stages: [1 2] [+] [dup] [*]
 
 # ---- horizontal cut soundness, at EVERY boundary k = 0..4 ------------
-# run the prefix, feed its output to the suffix: always 9 = run(whole)
+# run the prefix, feed its output to the suffix: always 9 = run(whole).
+# The CUT TYPE is the interesting part.  Splitting a program names an
+# intermediate the whole program never mentions, and it differs per cut:
+# after 1 stage the wires are Int Int, after 2 just Int.  So each cut
+# states its own pair of witnesses — the prefix's expectation and the
+# suffix's — and both are checked when the halves run.  That obligation
+# is the honest price of cutting: the type between the halves is a fact
+# about the cut, not about the program, so someone has to say it.
 def cutAt =
-    k ->
-    (k c ; take) ; evalCode
-    ((k c ; skip) ... ; evalCode ; (print | forget) ; merge | forget) ; merge
+    pre suf k ->
+    (pre) (k c ; take) ; evalAs
+    ((suf) (k c ; skip) ... ; evalAs ; (print | forget) ; merge | forget) ; merge
 
-0 ; cutAt      # 9
-1 ; cutAt      # 9   (cut mid-arithmetic: prefix leaves 1 2, suffix consumes)
-2 ; cutAt      # 9
-3 ; cutAt      # 9
-4 ; cutAt      # 9
+[pass]                [1 2 ; + ; dup ; *] 0 ; cutAt   # 9  (nothing | everything)
+[1 2]                 [+ ; dup ; *]       1 ; cutAt   # 9  (cut mid-arithmetic)
+[1 2 ; +]             [dup ; *]           2 ; cutAt   # 9
+[1 2 ; + ; dup]       [*]                 3 ; cutAt   # 9
+[1 2 ; + ; dup ; *]   [pass]                4 ; cutAt   # 9  (everything | nothing)
 
 # ---- vertical cuts: slice atoms inside one stage ---------------------
 def stage0 = c ; uncons ; (nil | (s r -> s)) ; merge      # the stage [1, 2]
-(1 stage0 ; take ; single) ; evalCode ; (print | forget) ; merge    # 1
-(1 stage0 ; skip ; single) ; evalCode ; (print | forget) ; merge    # 2
+[1] (1 stage0 ; take ; single) ; evalAs ; (print | forget) ; merge    # 1
+[2] (1 stage0 ; skip ; single) ; evalAs ; (print | forget) ; merge    # 2
 
 # a consuming stage cuts too: [dup drop] : a b ⇒ a a — take just [dup],
 # now a program of its own (: a ⇒ a a), cut free of its stage-mate
 def s2 = ([dup drop] ; getCode) ; uncons ; (nil | (s r -> s)) ; merge
-7 ; (1 s2 ; take ; single) ... ; evalCode
+7 ; [dup] (1 s2 ; take ; single) ... ; evalAs
     (_ print ; print | forget) ; merge                    # 7 7
 
 # ---- boxing: cut a slice, box it, use it LATER as a value ------------
-# Deferring the RUN costs the result's TYPE.  What boxed code returns is
-# only discovered when it runs, so the hit track is EXISTENTIAL and the
-# caller must stay parametric — `forget`, not `print`.  To USE a splice's
-# result at a known type, splice it where that type is known (above).
-def box = (cd -> [(cd) ... ; evalCode])
-(2 c ; take) ; box                        # Fn⟨ρ =IO> (∃0 | Str ρ)⟩ — unopened
-apply ; (forget ; "ran the boxed prefix" | pass) ; merge ; print
+# Deferring the RUN no longer costs the result's TYPE.  `box` takes the
+# WITNESS beside the code, so the boxed program is ordinarily typed and
+# its result is ordinarily usable — `print`, not just `forget`.  The
+# witness is never applied; it is the expectation the code must meet,
+# spelled as a value because there is no type syntax inside terms.  It
+# is also the fallback: on a miss it is still sitting there to run.
+def box = (w cd -> [(w) (cd) ... ; evalAs])
+[0] (2 c ; take) ; box              # Fn⟨ρ ⇒ (ρ Int | Str ρ)⟩ — unopened
+apply ; (print | forget) ; merge    # 3

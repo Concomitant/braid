@@ -168,7 +168,7 @@ Four costs a full `Fin` normally carries, each dodged, and why.
   runtime content only because width lives in the type; tagging turns
   every re-reading into a retagging operation, and "a vector with no
   box" IS the erasure. (iii) The untyped evaluator: tags mean
-  evidence-passing threaded through execution, and `evalCode`'s dynamic
+  evidence-passing threaded through execution, and `evalAs`'s dynamic
   splicing gets much hairier.
 
   The clinching observation: THE UNERASED BUNDLE ALREADY EXISTS. It is

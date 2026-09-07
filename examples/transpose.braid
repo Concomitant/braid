@@ -6,8 +6,8 @@ def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> 
 def dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom
 def transposeC = reverse >> [[dualAtom] ... >> map] ... >> map
 
-[+] >> reflect >> ((c -> (c >> transposeC) (5) >> evalCode >> print) | print) >> forget        # in1(5, 5)
-[dup >> +] >> reflect >> ((c -> (c >> transposeC) (6) >> evalCode >> print) | print) >> forget  # in1(12): x+x is symmetric
+[+] >> reflect >> ((c -> [dup] (c >> transposeC) (5) >> evalAs >> print) | print) >> forget        # in1(5, 5)
+[dup >> +] >> reflect >> ((c -> [dup >> +] (c >> transposeC) (6) >> evalAs >> print) | print) >> forget  # in1(12): x+x is symmetric
 
 def andB = (a b -> a [b] [false] ... >> cond)
 def allB = [true] [andB] ... >> foldList

@@ -344,8 +344,6 @@ data Constraint
   | CEqStack SType SType
   | CEqEff EffRow EffRow
   | CFail String   -- carry a deferred inference error to the solver
-  | CSite Int SType  -- splice site n expects this hit-track stack; the
-                     -- solver ignores it, the stamper reads it back
   deriving (Eq, Show)
 
 -- All variables (type, stack, row, exponent) in order of first
@@ -698,7 +696,6 @@ solve = foldM step emptySubst
     step s (CEqStack st1 st2) = unifyStack s st1 st2
     step s (CEqEff e1 e2)     = unifyEff s e1 e2
     step _ (CFail msg)        = Left msg
-    step s (CSite _ _)        = Right s
 
 --------------------------------------------------------------------------------
 -- 5. Inference monad and helpers (for fresh vars and instantiation)
@@ -930,13 +927,6 @@ data Term
                           -- the elaborator (`elabUse`), which runs
                           -- between parse and infer.  This node never
                           -- reaches inference.
-  | Splice Int (Maybe SType)
-                          -- a numbered `evalCode` site.  `evalCode`'s hit
-                          -- track is whatever the spliced code returns,
-                          -- which the type system cannot know — so the
-                          -- context's expectation is STAMPED here after
-                          -- solving and checked when the splice runs.
-                          -- `Nothing` before inference, `Just Δ` after.
   | Alts [Term] Bool      -- (p₁ | … | pₙ [| ...]): code row — the sum
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
@@ -2365,7 +2355,6 @@ infer :: Env -> Term -> Infer (Arrow, [Constraint])
 infer _   (Use _ _)      = pure ( arrPure SEnd SEnd
                                 , [CFail "`use` reached inference \
                                     \unelaborated (internal)"] )
-infer env s@(Splice _ _) = inferOperand env True s
 infer env p@(Prim _)     = inferOperand env True p
 infer env q@(Quote _)    = inferOperand env True q
 infer env o@(OpenAbs {}) = inferOperand env True o
@@ -2448,17 +2437,6 @@ inferOperand env final (Prim name)
     pick sc = do
       arr <- if final then instantiate sc else instantiateClosed sc
       pure (arr, [])
--- A splice instantiates `evalCode`'s scheme and, alongside, records
--- which stack the CONTEXT will force its hit track to be.  Recording it
--- as a constraint means it rides every path that already carries
--- constraints; the solver ignores it and the stamper reads it back.
-inferOperand _ final (Splice n _) = do
-  arr@(Arrow _ o _) <-
-    (if final then instantiate else instantiateClosed) evalCodeScheme
-  case o of
-    SCons (TSum (RCons hit _)) SEnd -> pure (arr, [CSite n hit])
-    _ -> pure (arr, [CFail "internal: evalCode's scheme shape changed"])
-
 inferOperand env _ (Quote p) = do
   -- Terminal-source constant: • ⇒ Fn⟨…⟩.  The quoted program is inferred
   -- as a whole; its remainder variables stay as metavariables inside
@@ -2809,8 +2787,16 @@ primEnv =
        , ("writeFile", Forall [] [] [] [] []
            (arrIO (SCons TStr (one TStr))
                   (one (TSum (RCons SEnd (RCons (one TStr) RNil))))))
-       , ("evalCode",  Forall [] [gam, del] [] [] []
-           (arrIO (SCons codeStructTy (STail gam))
+       -- Run code that will only exist at runtime, AGAINST A WITNESS.
+       -- The witness is never applied: its arrow is the expectation the
+       -- loaded code must meet, written as a value because Braid has no
+       -- type syntax in terms.  The context types against Γ ⇒ Δ with
+       -- ordinary variables — no existentials anywhere — and at runtime
+       -- the loaded code must SUBSUME the witness (§12).  Sharing ε with
+       -- the witness is the sandbox: a pure witness admits only pure
+       -- code, and running it stays pure.
+       , ("evalAs",  Forall [] [gam, del] [] [] [epsV]
+           (arrEps (SCons fnGD (SCons codeStructTy (STail gam)))
                   (one (TSum (RCons (STail del)
                         (RCons (SCons TStr (STail gam)) RNil))))))
        , ("reflect",   Forall [] [gam, del] [] [] [epsV]
@@ -2856,7 +2842,6 @@ primsIn (OpenAbs slots _ t) =
   [ n | n <- primsIn t, n `notElem` [ x | Just x <- slots ] ]
 primsIn (Alts comps _)  = concatMap primsIn comps
 primsIn (Use _ b)      = primsIn b
-primsIn (Splice _ _)   = ["evalCode"]
 
 -- Replace the def-local keyword `recurse` with the def's own name
 -- (parse-time, shadow-aware) — anonymous self-reference in def bodies.
@@ -2865,7 +2850,6 @@ substRecurse nm = go
   where
     go (Prim "recurse") = Prim nm
     go t@(Prim _)       = t
-    go t@(Splice _ _)   = t
     go (Tensor ts)      = Tensor (map go ts)
     go (Seq a b)        = Seq (go a) (go b)
     go (Quote t)        = Quote (go t)
@@ -2875,158 +2859,9 @@ substRecurse nm = go
       | Just "recurse" `elem` slots = t
       | otherwise                   = OpenAbs slots hasRest (go b)
 
-evalCodeScheme :: Scheme
-evalCodeScheme =
-  maybe (error "internal: evalCode missing from primEnv") id
-        (M.lookup "evalCode" primEnv)
-
--- Number the `evalCode` occurrences of a term so inference can stamp
--- each with what its context expects.  Shadow-aware exactly like the
--- runtime guard: a def or a binder slot named `evalCode` is an ordinary
--- name, not the primitive.
-numberSplices :: Env -> Term -> Term
-numberSplices env t0
-  | M.lookup "evalCode" env /= Just evalCodeScheme = t0
-  | otherwise = fst (go t0 (0 :: Int))
-  where
-    go (Prim "evalCode") n = (Splice n Nothing, n + 1)
-    go t@(Prim _)      n = (t, n)
-    go t@(Splice _ _)  n = (t, n)
-    go (Seq a b)       n = let (a', n1) = go a n
-                               (b', n2) = go b n1 in (Seq a' b', n2)
-    go (Tensor ts)     n = let (ts', n') = goL ts n in (Tensor ts', n')
-    go (Quote q)       n = let (q', n') = go q n in (Quote q', n')
-    go (Alts cs r)     n = let (cs', n') = goL cs n in (Alts cs' r, n')
-    go (Use rs b)      n = let (b', n') = go b n in (Use rs b', n')
-    go t@(OpenAbs slots hasRest b) n
-      | Just "evalCode" `elem` slots = (t, n)
-      | otherwise = let (b', n') = go b n in (OpenAbs slots hasRest b', n')
-    goL []       n = ([], n)
-    goL (x : xs) n = let (x', n1) = go x n
-                         (xs', n2) = goL xs n1 in (x' : xs', n2)
-
--- Write the solved expectations back into the term.
-stampTerm :: [(Int, SType)] -> Term -> Term
-stampTerm sites = mapStamps' (\n _ -> lookup n sites)
-
-mapStamps' :: (Int -> Maybe SType -> Maybe SType) -> Term -> Term
-mapStamps' f = go
-  where
-    go (Splice n d)    = Splice n (f n d)
-    go t@(Prim _)      = t
-    go (Seq a b)       = Seq (go a) (go b)
-    go (Tensor ts)     = Tensor (map go ts)
-    go (Quote q)       = Quote (go q)
-    go (Alts cs r)     = Alts (map go cs) r
-    go (Use rs b)      = Use rs (go b)
-    go (OpenAbs sl h b) = OpenAbs sl h (go b)
-
-stampStacks :: Term -> [SType]
-stampStacks t = [ d | Just d <- go t ]
-  where
-    go (Splice _ d)    = [d]
-    go (Prim _)        = []
-    go (Seq a b)       = go a ++ go b
-    go (Tensor ts)     = concatMap go ts
-    go (Quote q)       = go q
-    go (Alts cs _)     = concatMap go cs
-    go (Use _ b)       = go b
-    go (OpenAbs _ _ b) = go b
-
--- Freeze a definition's splice stamps.  A stamp that survives into the
--- scheme would let every caller decide, for itself, the type of code
--- that only exists at runtime — the hole.  Freezing makes those
--- variables constants, so callers must stay parametric.  A stamp
--- sharing a variable with the definition's INPUT is rejected outright:
--- the type of dynamically produced code cannot depend on an argument.
-rigidifyStamps :: String -> Env -> Arrow -> Term -> Either String (Arrow, Term)
-rigidifyStamps who env arr@(Arrow i _ _) term
-  | (v : _) <- [ v | v <- stv, v `elem` itv ] = clash (show v)
-  | (v : _) <- [ v | v <- ssv, v `elem` isv ] = clash (show v)
-  | (v : _) <- [ v | v <- srv, v `elem` irv ] = clash (show v)
-  | (v : _) <- [ v | v <- snv, v `elem` inv ] = clash (show v)
-  | M.null (tySub sub) && M.null (stSub sub)
-      && M.null (rowSub sub) && M.null (expSub sub) = Right (arr, term)
-  | otherwise =
-      Right ( substOnce sub arr
-            , mapStamps' (\_ d -> fmap (substStack sub) d) term )
-  where
-    stamps = stampStacks term
-    (stv, ssv, srv, snv, _) = foldr (catVars . varsOfStack) noVars stamps
-    (itv, isv, irv, inv, _) = varsOfStack i
-    (etv, esv, erv, env', _) = freeVarsEnv env
-    freeze keep xs = [ x | x <- nub xs, x `notElem` keep ]
-    sub = Subst
-      (M.fromList [ (v, TVarTy (TV (rigidTag ++ who ++ "." ++ tn v)))
-                  | v <- freeze etv stv ])
-      (M.fromList [ (v, STail (SV (rigidTag ++ who ++ "." ++ sn v)))
-                  | v <- freeze esv ssv ])
-      (M.fromList [ (v, RTail (RV (rigidTag ++ who ++ "." ++ rn v)))
-                  | v <- freeze erv srv ])
-      (M.fromList [ (v, Exp 0 (Just (NV (rigidTag ++ who ++ "." ++ nn v))))
-                  | v <- freeze env' snv ])
-      M.empty
-    -- qualified by the definition: two definitions' existentials are
-    -- DIFFERENT unknowns and must not unify with each other
-    tn (TV n) = n
-    sn (SV n) = n
-    rn (RV n) = n
-    nn (NV n) = n
-    clash v = Left $
-      "a splice's result type shares " ++ v ++ " with this definition's "
-        ++ "input: the type of code produced at runtime cannot be chosen "
-        ++ "by a caller — consume the hit track parametrically"
-
-substStack :: Subst -> SType -> SType
-substStack sub d = let Arrow d' _ _ = substOnce sub (arrPure d SEnd) in d'
-
--- A stamp is a compile-time fact; at the splice its variables (frozen
--- or not) are wildcards again, so freshen them all.
-thawStamp :: SType -> Infer SType
-thawStamp d = do
-  let (tvs, svs, rvs, nvs, evs) = varsOfStack d
-  tm <- M.fromList <$> mapM (\v -> (,) v . TVarTy <$> freshTyVarName) tvs
-  sm <- M.fromList <$> mapM (\v -> (,) v . STail <$> freshSVarName) svs
-  rm <- M.fromList <$> mapM (\v -> (,) v . RTail <$> freshRVarName) rvs
-  nm <- M.fromList <$> mapM (\v -> (,) v . Exp 0 . Just <$> freshNVarName) nvs
-  em <- M.fromList <$> mapM (\v -> (,) v . Eff False . Just <$> freshEVarName) evs
-  pure (substStack (Subst tm sm rm nm em) d)
-
--- Infer a spliced program AND check its output against the site's
--- stamp.  ONE `runInfer0` covers both, so the program's metavariables
--- and the stamp's freshened ones cannot collide.
--- Returns the code with ITS OWN splice sites stamped, so a splice
--- nested inside spliced code is checked in turn when it runs.
-checkSplice :: Env -> Term -> Maybe SType -> Either String Term
-checkSplice env term stamp =
-  case unknownPrims env term of
-    (n : _) -> Left $ "Unknown primitive: " ++ n
-    [] -> do
-      let cs = runInfer0 $ do
-                 (Arrow _ o _, cs') <- infer env term
-                 case stamp of
-                   Nothing -> pure cs'
-                   Just d  -> do
-                     d' <- thawStamp d
-                     pure (cs' ++ [CEqStack o d'])
-      s <- solve cs
-      pure (stampTerm [ (n, apply s d) | CSite n d <- cs ] term)
-
-unknownPrims :: Env -> Term -> [String]
-unknownPrims env term =
-  nub [ n | n <- primsIn term
-          , not (isIntLiteral n), not (isStrLiteral n), not (isSymLiteral n)
-          , not (M.member n env)
-          , Nothing <- [injIndex n], Nothing <- [finIndex n] ]
-
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
-inferTermIn env term = fst <$> inferTermStamped env term
-
--- …and hand back the term with every splice site stamped with the
--- output type the context settled on.
-inferTermStamped :: Env -> Term -> Either String (Arrow, Term)
-inferTermStamped env term =
+inferTermIn env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
                , not (isStrLiteral n)
@@ -3038,8 +2873,7 @@ inferTermStamped env term =
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
       s <- solve cs
-      pure ( apply s arr
-           , stampTerm [ (n, apply s d) | CSite n d <- cs ] term )
+      pure (apply s arr)
 
 -- Infer a definition body, allowing MONOMORPHIC self-reference: the
 -- name is bound at a fresh monomorphic arrow while inferring, the
@@ -3047,11 +2881,8 @@ inferTermStamped env term =
 -- and two constraints tie the knot.  Generalization happens afterwards
 -- in the caller.  (Polymorphic recursion is undecidable — not offered.)
 inferDefTermIn :: String -> Env -> Term -> Either String Arrow
-inferDefTermIn name env term = fst <$> inferDefTermStamped name env term
-
-inferDefTermStamped :: String -> Env -> Term -> Either String (Arrow, Term)
-inferDefTermStamped name env term
-  | name `notElem` primsIn term = inferTermStamped env term
+inferDefTermIn name env term
+  | name `notElem` primsIn term = inferTermIn env term
   | otherwise =
       case nub [ n | n <- primsIn term
                    , n /= name
@@ -3073,8 +2904,7 @@ inferDefTermStamped name env term
                 pure (a, cs' ++ [ CEqStack bi (STail fi)
                                 , CEqStack bo (STail fo) ])
           s <- solve cs
-          pure ( apply s arr
-               , stampTerm [ (n, apply s d) | CSite n d <- cs ] term )
+          pure (apply s arr)
 
 inferProgram :: String -> Either String Arrow
 inferProgram src = do
@@ -3673,8 +3503,8 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
       else do
         term0 <- parseProgram mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs) term0
-        (arr, term) <- inferTermStamped env' (numberSplices env' term1)
-        pure (Just (term, arr))
+        arr <- inferTermIn env' term1
+        pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
                 theories insts)
@@ -3729,13 +3559,8 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
       -- the Env available for arities and resource signatures.
       term1 <- either (Left . inDef) Right
                  (elabUseWith (ElabCtx env1 run slotTable funcs) term0)
-      let term2 = numberSplices env1 (substRecurse name term1)
-      (arr0, term3) <- either (Left . inDef) Right
-                         (inferDefTermStamped name env1 term2)
-      -- a splice expectation that would otherwise be generalized is
-      -- frozen, so callers cannot pick the type of runtime-built code
-      (arr, term) <- either (Left . inDef) Right
-                       (rigidifyStamps name env1 arr0 term3)
+      let term = substRecurse name term1
+      arr <- either (Left . inDef) Right (inferDefTermIn name env1 term)
       let sc = generalize env1 arr
       pure ( M.insert name sc env
            , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
@@ -3939,9 +3764,11 @@ preludeSrc = unlines
   , "def ifRoute   = (x p a -> x >> p ... >> apply >> (a ... >> apply | pass))"
   , "def elifRoute = (s p a -> s >> (in1 | p ... >> apply >> (a ... >> apply | pass)) >> merge)"
   , "## box a Code value as a runnable Fn WITHOUT running it: the"
-  , "## deferred half of reflect's round trip.  The dynamic check rides"
-  , "## the railway at apply time: ρ ⇒ (result | Str ρ)."
-  , "def box = (cd -> [(cd) ... >> evalCode])"
+  , "## deferred half of reflect's round trip.  Takes the WITNESS whose"
+  , "## type the code must meet, so the boxed Fn is ordinarily typed —"
+  , "## Fn⟨Γ ⇒ (Δ | Str Γ)⟩ — and the check rides the railway at apply"
+  , "## time.  On a miss the witness is still there to fall back to."
+  , "def box = (w cd -> [(w) (cd) ... >> evalAs])"
   , "## sum an Int bundle: the variadic +"
   , "## run a program one wire deeper: `[f] >> lift` is f with one wire riding beneath it, untouched.  Compose it once per context wire.  This is tensorial STRENGTH — the action of (A ⊗ −) on a morphism — and it is what threads a resource past a pure stage, so it is an ordinary word rather than machinery."
   , "def lift = (f -> [_ (f ... >> apply)])"
@@ -4050,7 +3877,6 @@ normTerm env defs seen term s0 = case term of
   Alts _ _       -> outside "a row"
   OpenAbs {}     -> outside "a binder"
   Use _ _        -> outside "an unelaborated `use`"
-  Splice _ _     -> outside "a splice"
   where
     outside what = Left ("outside the structural fragment: " ++ what)
 
@@ -4315,7 +4141,6 @@ evalTerm env defs vars term st =
       pure (st2, l1 ++ l2)
     Tensor ts      -> goAtoms ts st
     p@(Prim _)     -> goAtoms [p] st
-    s@(Splice _ _) -> goAtoms [s] st
     q@(Quote _)    -> goAtoms [q] st
     o@(OpenAbs {}) -> goAtoms [o] st
     a@(Alts {})    -> goAtoms [a] st
@@ -4342,13 +4167,14 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               throwError "Runtime type error in apply: expected a quotation"
-    -- evalCode: dynamically-checked splice.  Rebuild the term, infer
-    -- its type in-process, run it on the segment; failures ride the
-    -- miss track WITH the untouched segment as evidence.
-    applyAtom isFinal (Splice _ stamp) stk = runSplice isFinal stamp stk
-    applyAtom isFinal (Prim "evalCode") stk
-      | not (M.member "evalCode" vars), not (M.member "evalCode" defs) =
-          runSplice isFinal Nothing stk
+    -- evalAs: witness-checked splice.  Rebuild the term, infer it in
+    -- process, check it SUBSUMES the witness's arrow, then run it on the
+    -- segment.  Every failure rides the miss track WITH the untouched
+    -- segment as evidence — so the caller can fall back to the witness,
+    -- which is a real program, not just a type.
+    applyAtom isFinal (Prim "evalAs") stk
+      | not (M.member "evalAs" vars), not (M.member "evalAs" defs) =
+          runAs isFinal stk
 
     -- IO edges, in print's mold: effects with honest railway types
     -- readLine: one line from stdin; EOF (or a closed stream) rides
@@ -4616,24 +4442,26 @@ evalTerm env defs vars term st =
           (out, logs) <- evalTerm env defs vars t' args
           pure (out, stk', logs)
 
-    -- A splice: rebuild the code, typecheck it, CHECK ITS OUTPUT against
-    -- the type this site was stamped with, and only then run it.  Every
-    -- failure is a value on the miss track with the untouched input
-    -- segment as evidence — including, now, the one that used to be
-    -- silent: code whose result is not the type the context assumed.
-    runSplice isFinal stamp stk = do
-      (args, stk') <- takeWires "evalCode" 1 stk
+    -- A splice: rebuild the code, typecheck it, check that it SUBSUMES
+    -- the witness's arrow, and only then run it.  Every failure is a
+    -- value on the miss track with the untouched input segment as
+    -- evidence.  Subsumption rather than unification is the whole point:
+    -- types are erased by now, so the check cannot know which
+    -- instantiation of a polymorphic witness the context chose, and must
+    -- demand code that handles every one.
+    runAs isFinal stk = do
+      (args, stk') <- takeWires "evalAs" 2 stk
       let seg  = if isFinal then stk' else []
           keep = if isFinal then [] else stk'
           missWith msg = pure ([VSum 1 (VStr msg : seg)], keep, [])
       case args of
-        [c] ->
+        [VFn _ wv wt, c] ->
           case codeToTermV c of
             Left e -> missWith e
-            Right term0 -> do
-              case checkSplice env (numberSplices env term0) stamp of
+            Right term ->
+              case witnessArrow wv wt >>= checkAgainst term of
                 Left e -> missWith e
-                Right term -> do
+                Right () -> do
                   -- a spliced program's failure is a VALUE on the miss
                   -- track, not this program's failure: catch rather than
                   -- nest a second runExceptT (which would pin us to IO)
@@ -4642,7 +4470,14 @@ evalTerm env defs vars term st =
                   case r of
                     Left e -> missWith e
                     Right (out, logs) -> pure ([VSum 0 out], keep, logs)
-        _ -> throwError "evalCode: expected a Code value"
+        _ -> throwError "evalAs: expected a witness and a Code value"
+
+    -- the witness's TYPE is what it contributes; it is never applied
+    witnessArrow wv wt = groundTerm env wv wt >>= inferTermIn env
+
+    checkAgainst term want = do
+      got <- inferTermIn env term
+      subsumes (generalize M.empty got) want
 
     takeWires name k stk
       | length stk >= k = pure (take k stk, drop k stk)
@@ -4781,7 +4616,6 @@ renderTerm t =
     rAtom (OpenAbs slots hasRest b) =
       "(" ++ unwords (map (maybe "_" id) slots ++ ["..." | hasRest])
           ++ " -> " ++ renderTerm b ++ ")"
-    rAtom (Splice _ _)  = "evalCode"
     rAtom g = "(" ++ renderTerm g ++ ")"
     esc '"'  = "\\\""
     esc '\\' = "\\\\"
@@ -4817,9 +4651,6 @@ termToCodeV env t = do
       pure (VSum 5 [encodeListV cs, encodeBoolV residual])
     atomVal (OpenAbs {}) =
       Left "internal: abstraction survived elimination"
-    -- a stamp is a fact about ONE site in ONE module; reflected code is
-    -- re-stamped when it is spliced, so drop it here
-    atomVal (Splice _ _) = Right (VSum 0 [VSym ".evalCode"])
     -- `use` is written out before reification; if one survives, the
     -- group wildcard below would loop forever rebuilding it
     atomVal (Use _ _) =
@@ -4871,7 +4702,6 @@ groundTerm env cv = go cv
     go vars t@(Prim n)
       | Just v <- M.lookup n vars = valueToCode env v
       | otherwise                 = Right t
-    go _    t@(Splice _ _) = Right t
     go vars (Seq a b)    = Seq <$> go vars a <*> go vars b
     go vars (Tensor ts)  = Tensor <$> mapM (go vars) ts
     go vars (Quote t)    = Quote <$> go vars t
@@ -4978,7 +4808,6 @@ freeNamesIn :: Term -> [String]
 freeNamesIn = go
   where
     go (Prim n)       = [n]
-    go (Splice _ _)   = ["evalCode"]
     go (Seq a b)      = go a ++ go b
     go (Tensor ts)    = concatMap go ts
     go (Quote t)      = go t
@@ -5072,7 +4901,6 @@ compileAbsOpen' env ps k0 open body = do
       | any (any (`elem` ps) . freeNamesIn) cs =
           Left "reflect: parameter used inside a row component — not reflectable yet"
       | otherwise = Right (AtomInfo 1 1 [] t)
-    classify (Splice _ _) = segErr "evalCode"
     classify (OpenAbs {}) =
       Left "internal: nested abstraction not yet eliminated"
     classify g = groupInfo g

@@ -5,8 +5,8 @@ implementation planned yet. Answers the "Typed splice is future work"
 hole in spec-code.md; depends on design-effects.md's result that Braid
 is already an arrow, and does not supersede it.
 
-The thread that produced this: `evalCode`'s `ρ2` is free, so a lying
-context is not caught — a live REPL session printed `stack: 2 : •`, a
+The thread that produced this: originally, `evalCode`'s `ρ2` was free, so a lying
+context was not caught — a live REPL session printed `stack: 2 : •`, a
 value and its own type disagreeing. Two patches were tried and
 discarded (a witness-passing typed splice; a sealed dynamic region)
 before the right question arrived: *we have the exponential `Fn⟨Γ ⇒ Δ⟩`
@@ -294,3 +294,26 @@ to prevent a caller from choosing the splice's type. Splices nested inside
 spliced code share the same discipline. This closes the gap without
 blocking `Path`'s design (§5–8) — it can still land as a typed composition
 layer when ready.
+
+## AMENDMENT 2026-09-07: Witness-based checking replaces stamps and existentials
+
+The stamping mechanism of the 2026-08-31 amendment was correct but paid
+for one primitive with existential constants throughout the type system.
+The same guarantee — that loaded code's inferred scheme must line up
+with the expected type — is now achieved more directly: `evalAs : Fn⟨ρ0
+⇒ ρ1⟩ Code ρ0 ⇒ (ρ1 | Str ρ0)` takes a **witness** (an ordinary program
+whose arrow is the expectation) as its first operand. No type syntax
+exists inside terms, so the expectation is written as a value. At
+runtime, `subsumes` checks the loaded code's inferred scheme against the
+witness's arrow — subsumption (not unification), because types are
+erased and the checker cannot know which instantiation the context
+chose. This move mirrors theory slots' declared arrows — both are
+checked by subsumption. Gained: ordinary result types throughout (no
+`∃0`, `∃1`, constants in the type system), a usable fallback on the miss
+track, and effect sandboxing (evalAs shares its effect variable with the
+witness, so a pure witness admits only pure code, keeping the whole
+thing pure). Cost: a cut between two halves must now state its own
+witness, since the type in between is a fact about the cut rather than
+the program. The existential did not vanish; it moved. Where stamping
+inferred the cut type and froze it, the witness has the programmer
+discharge it at the site.

@@ -64,6 +64,24 @@ where that type is statically known. A stamp variable shared with the
 definition's input is rejected outright. This mechanism applies to splices
 nested inside spliced code as well.
 
+**AMENDMENT 2026-09-07:** The stamping fix was sound but expensive —
+existential constants propagated throughout the type system wherever a
+definition might generalize. The same guarantee is achieved more simply
+with `evalAs : Fn⟨ρ0 ⇒ ρ1⟩ Code ρ0 ⇒ (ρ1 | Str ρ0)`, which takes a
+**witness** (an ordinary program whose arrow is the expectation the
+loaded code must meet) as its first operand. At runtime, the loaded
+code's inferred scheme is checked against the witness's arrow by
+`subsumes` — subsumption, not unification, since types are erased and
+the check cannot know which instantiation the context chose. The witness
+is never applied; it is spelled as a value because Braid has no type
+syntax inside terms. This move mirrors how theory slots declare their
+expected arrow — both are checked by subsumption. Gained: ordinary
+result types (no existential constants in the type system), a usable
+fallback on a miss, and effect sandboxing (evalAs shares its effect
+variable with the witness, so a pure witness admits only pure code).
+Cost: a cut must now state its own witnesses, since the type between two
+halves is a fact about the cut rather than the program.
+
 ## First transforms (examples/transpose.braid)
 
 Transpose (GLA dagger): reverse the spine, dualize atoms (dup↔+,

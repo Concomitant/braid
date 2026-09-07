@@ -256,6 +256,57 @@ earns its keep only for code that did not exist at compile time (disk,
 input, REPL-of-the-REPL). If it is later dropped, the stamp machinery
 is a deletion, not a redesign, and `∃` goes with it.
 
+**AMENDMENT 2026-09-07: the stamp is replaced by a witness, and `∃` is
+gone.** The reservation above was exercised. Stamping was sound but
+paid for ONE primitive with skolems threaded through unification,
+generalization, display, and the REPL — and its cost fell where the
+paragraph above admits: deferring the run cost the result's type. The
+replacement applies invariant five to runtime splicing. *The directing
+type is written:*
+
+```
+evalAs : Fn⟨Γ =ε> Δ⟩ Code Γ =ε> (Δ | Str Γ)
+```
+
+The first operand is a **witness**: an ordinary program whose arrow is
+the expectation the loaded code must meet, never applied, spelled as a
+value because Braid has no type syntax inside terms. A program at the
+type you mean is how you name that type. The context types against
+`Γ ⇒ Δ` with ordinary variables, so nothing existential enters the
+system; at runtime the loaded code's scheme must **subsume** the
+witness's arrow.
+
+Subsumption, not unification, is what makes it sound: types are erased
+by then, so the check cannot know which instantiation of a polymorphic
+witness the context chose, and must demand code that handles every one.
+Under `[_]` (`a ⇒ a`), code that is merely `Int ⇒ Int` is refused —
+unification would accept it at `a := Int` and then run it on a `Str`.
+The routine is `subsumes`, and it is the same check at two phases: a
+theory slot's declared arrow is an expectation written in the theory, a
+witness is one written in the program. (Writing it exposed a live hole
+in the other caller — `checkInstance` compared stacks only, never the
+effect row, so an io body under a pure slot passed and `functor F =
+<that slot>` carried IO into elaboration. Fixed the same day.)
+
+Three things are gained beyond the deletion. Results are ordinarily
+typed, so a boxed program's output is usable rather than merely
+forgettable (`box : Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩`). The
+witness is a real program, so it is the fallback: on a miss it is still
+there to run. And sharing ε with the witness makes the grade a
+**sandbox** — a pure witness admits only pure code and the splice stays
+pure, where `evalCode` was unconditionally io.
+
+The cost is real and worth stating: a cut must now state its own
+witnesses. Splitting a program names an intermediate the whole program
+never mentions, and it differs per cut — after one stage the wires are
+`Int Int`, after two just `Int`. That is exactly the existential cut
+type from the typed-code section above, and the witness is where the
+existential went: not eliminated, but *discharged at the site by the
+programmer* instead of inferred and frozen. The type between two halves
+is a fact about the cut, not about the program, so someone has to say
+it. `examples/cuts.braid` says it five times, once per boundary, and
+reads better for it.
+
 ## Laws for functors
 
 Functor laws are *easier* than value-level laws, because functor
