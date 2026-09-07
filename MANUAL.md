@@ -958,11 +958,15 @@ prelude defs plus core forms. See `examples/ladder.braid` and
 `Stage = List(Atom)`, `data Atom = (prim | int | str | sym | quote |
 row | group)`. Lambdas reflect as pure wiring (abstraction
 elimination) — **every** binder, open ones and the naming form
-included, since the erased passthrough is the stack's *tail* and so
-rides above the parameter block inside each stage's `pass`, while
-parameters are fetched by depth from the deepest wire and never cross
-it. True closures, and parameters used inside a quotation or a row
-component, are still gated onto the miss track with an explanation. Code is an ordinary list — slice with `take`, transform
+included, and whatever the body contains: injections, `merge`, open
+groups. The parameter block is treated as a *resource* for the body's
+duration — parked as the deepest wires, exactly where `use` parks a
+resource, and every body stage routed over it with a leading `_` per
+parameter; open-arity atoms eat upward and never reach it, a fetch is
+a `dup` on the block swapped up into place, and the block is dropped
+once at the end. True closures — parameters used inside a quotation or
+a row component — are still gated onto the miss track with an
+explanation. Code is an ordinary list — slice with `take`, transform
 with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
 `code.braid`). `evalAs` checks the code against a
 witness and runs it; failures ride the miss track *with the untouched

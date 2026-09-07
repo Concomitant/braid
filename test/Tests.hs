@@ -1000,18 +1000,24 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x _] >> getCode\n7 8 >> [x _ -> x _] (c) ... >> evalAs >> (print print | forget) >> merge", ["7", "8"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> x x _ >> + _ >> +] >> getCode\n1 2 >> [x _ -> x x _ >> + _ >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["4"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ z -> z _ x] >> getCode\n1 2 3 >> [x _ z -> z _ x] (c) ... >> evalAs >> (print print print | forget) >> merge", ["3", "2", "1"], "")
-    -- OPEN binders eliminate too.  The erased passthrough is the
-    -- stack's TAIL, so it rides above the param block inside each
-    -- stage's `pass`; params are reached by depth from the DEEPEST
-    -- wire, so every fetch is static and never crosses it.  Round-trip
-    -- the VALUE — a success-only test would miss a wrong permutation.
+    -- OPEN binders eliminate too.  The param block is the DEEPEST
+    -- segment (a resource for the body's duration), so the erased
+    -- passthrough rides above everything and every fetch crosses only
+    -- the static prefix of its own stage.  Round-trip the VALUE — a
+    -- success-only test would miss a wrong permutation.
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ...] >> getCode\n7 >> [x ... -> x ...] (c) ... >> evalAs >> (print | forget) >> merge", ["7"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ y ... -> y _ x ...] >> getCode\n1 2 3 >> [x _ y ... -> y _ x ...] (c) ... >> evalAs >> (print print print | forget) >> merge", ["3", "2", "1"], "")
-    -- ...and when the body consumes OUT of the passthrough, inference
-    -- has already pinned it to a concrete width, so it is counted in
-    -- and the param block is lifted above it (this one returned 9
-    -- instead of 7 until that lift was added)
+    -- ...including a body that consumes OUT of the passthrough (this
+    -- one returned 9 instead of 7 under an earlier layout)
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x x ... >> + + >> +] >> getCode\n1 2 3 >> [x ... -> x x ... >> + + >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["7"], "")
+    -- OPEN-ARITY atoms in a binder body: injections, merge, an open
+    -- group.  They eat upward from where they stand and the block sits
+    -- below them, so nothing needs a width — a parameter fetched AFTER
+    -- them included.  (Rejected outright under the params-on-top layout.)
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x -> x >> in1] >> getCode\n7 >> [x -> x >> in1] (c) ... >> evalAs >> (print | forget) >> merge", ["in1(7)"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [a b -> a b >> eq? >> (forget >> 1 | forget >> 0) >> merge] >> getCode\n3 3 >> [a b -> a b >> eq? >> (forget >> 1 | forget >> 0) >> merge] (c) ... >> evalAs >> (print | forget) >> merge\n3 4 >> [a b -> a b >> eq? >> (forget >> 1 | forget >> 0) >> merge] (c) ... >> evalAs >> (print | forget) >> merge", ["1", "0"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> dup >> in1 >> (forget >> 1 | forget >> 0) >> merge >> _ x >> +] >> getCode\n5 6 >> [x _ -> dup >> in1 >> (forget >> 1 | forget >> 0) >> merge >> _ x >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["6"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ... >> in2 >> (forget >> 0 | +) >> merge] >> getCode\n1 2 >> [x ... -> x ... >> in2 >> (forget >> 0 | +) >> merge] (c) ... >> evalAs >> (print | forget) >> merge", ["3"], "")
     -- the naming binder is an open binder, so it reflects as wiring too
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> x ... >> * ...] >> getCode\n7 >> [-> x -> x ... >> * ...] (c) ... >> evalAs >> (print | forget) >> merge", ["49"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> drop >> x ...] >> getCode\n9 >> [-> x -> drop >> x ...] (c) ... >> evalAs >> (print | forget) >> merge", ["9"], "")

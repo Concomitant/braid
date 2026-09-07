@@ -32,6 +32,20 @@ closures — await curry), and segment-consuming or open-arity atoms
 wiring, arithmetic, literals, groups, closed rows, and exact defs all
 reflect — the GLA fragment in particular.
 
+**AMENDMENT 2026-09-07:** the open-arity gate is gone. The parameter
+block is now the DEEPEST segment of the stack for the body's duration
+— parked exactly where `use` parks a resource wire, and routed the
+same way: every body stage gets one leading `_` per parameter
+(`P ⋉ stage`). Open-arity atoms eat upward from where they stand, so
+the block beneath them is never touched; injections, `merge`, `apply`,
+open groups anywhere in a binder body reflect, and a parameter may be
+fetched after them. A fetch is `dup` on the block swapped up by the
+width of the atoms to its left in its own stage — static, so no stack
+width is ever needed and an open binder's erased remainder simply
+rides above. The block is dropped once, at the end. The gate that
+remains is the true-closure one: parameters captured inside a
+quotation or a row component.
+
 ## evalCode : Code ρ1 ⇒! (ρ2 | Str ρ1)
 
 The dynamically-checked splice: rebuild the term, infer its principal

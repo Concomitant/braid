@@ -4715,6 +4715,18 @@ groundTerm env cv = go cv
 -- 11.6 Abstraction elimination (grinding the non-concatenative edges)
 --------------------------------------------------------------------------------
 
+-- The parameter block is a RESOURCE for the duration of the body: it
+-- sits at the DEEPEST position, exactly where `use` parks a resource
+-- wire, and every body stage is routed over it with a leading `_` per
+-- parameter (this is `P ⋉ stage`).  Open-arity atoms eat UPWARD from
+-- where they stand, so the block beneath them is never touched — an
+-- injection, a merge, an open group anywhere in the body is fine.  A
+-- use of a parameter is a `dup` on the resource (it is a copyable one)
+-- swapped up to its place in the stage; the number of swaps is the
+-- width of the atoms to its LEFT in that stage, which is static.  No
+-- stack width is ever needed, so an erased remainder (an open binder's
+-- `...`) simply rides above everything, untouched.  The block is
+-- dropped once, at the end.
 elimAbsTerm :: Env -> Term -> Either String Term
 elimAbsTerm env = go
   where
@@ -4723,64 +4735,26 @@ elimAbsTerm env = go
     go (Quote t)      = Quote <$> go t
     go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
     go (Use rs b)     = Use rs <$> go b
-    go (OpenAbs slots hasRest b) = do
+    go (OpenAbs slots _ b) = do
       b' <- go b
-      -- compileAbsOpen wants the layout [body inputs (deepest)]
-      -- [param block] — the params sit ABOVE the wires the body
-      -- consumes (its finalStage passes k0 wires and then drops the
-      -- params).  Braid binders bind the DEEPEST wires, so every
-      -- slot list with a `_` needs a permutation prefix that sinks
-      -- the unnamed wires below the named ones.
-      --
-      -- An open binder (`x ... ->`) works too, even though the
-      -- passthrough width is erased: the remainder is the stack's TAIL,
-      -- so it sits ABOVE the param block, and every emitted stage ends
-      -- in `pass` — one atom, no width.  Params are reached by depth
-      -- from the DEEPEST wire, so every fetch is static and none of
-      -- them ever crosses the erased segment.
-      --
-      -- The one thing that DOES need a width is a body that consumes
-      -- out of the remainder.  Inference has already solved that case
-      -- (the passthrough is pinned to a concrete stack), so ask it:
-      -- a determinate remainder is counted into the body's wires and
-      -- the binder compiles closed; an indeterminate one is genuinely
-      -- passed through and rides in the `pass`.
-      let names = [ n | Just n <- slots ]
-          anons = length [ () | Nothing <- slots ]
-          extra
-            | not hasRest = Nothing
-            | otherwise   = restWidth slots hasRest b'
-          e = fromMaybe 0 extra
-      inner <- compileAbsOpen' env names (anons + e)
-                               (hasRest && isNothing extra) b'
-      pure (foldr Seq inner
-              (paramsAboveStages slots
-                 ++ restAboveStages anons (length names) e))
+      -- Braid binders bind the DEEPEST wires in slot order, so the
+      -- entry layout is already [params][remainder] unless a `_` slot
+      -- interleaves a body wire with the names; then a permutation
+      -- prefix sinks the names below the unnamed wires.
+      inner <- compileAbs env [ n | Just n <- slots ] b'
+      pure (foldr Seq inner (paramsBelowStages slots))
     go t = Right t
 
-    -- wires the passthrough was pinned to, when inference determined it
-    restWidth slots hasRest b =
-      case inferTermIn env (OpenAbs slots hasRest b) of
-        Right (Arrow i _ _)
-          | let r = dropS (length slots) i
-          , not (openTailedS r) -> Just (closedArity r)
-        _ -> Nothing
-
-    dropS :: Int -> SType -> SType
-    dropS 0 s              = s
-    dropS k (SCons _ rest) = dropS (k - 1) rest
-    dropS _ s              = s
-
--- Adjacent-transposition stages that stably sink the UNNAMED slots
--- below the named ones, rearranging a positional parameter list into
--- the [body inputs][params] layout compileAbsOpen compiles against.
--- Stable (a bubble pass on the unnamed/named key), so each group keeps
--- its written order — in particular the first-written name stays the
--- deepest param.  Empty when there is nothing to move.
-paramsAboveStages :: [Maybe String] -> [Term]
-paramsAboveStages slots0 = go (map key slots0) []
+-- Adjacent-transposition stages that stably sink the NAMED slots below
+-- the unnamed ones: [slots in written order][rest] → [names][`_`
+-- wires][rest], the layout compileAbs compiles against.  Stable (a
+-- bubble pass on the named/unnamed key), so each group keeps its written
+-- order — in particular the first-written name stays the deepest param.
+-- Empty when there is nothing to move.
+paramsBelowStages :: [Maybe String] -> [Term]
+paramsBelowStages slots0 = go (map key slots0) []
   where
-    key = maybe (0 :: Int) (const 1)
+    key = maybe (1 :: Int) (const 0)
     go keys acc =
       case [ d | (d, (a, b)) <- zip [0 :: Int ..] (zip keys (drop 1 keys))
                , a > b ] of
@@ -4789,20 +4763,6 @@ paramsAboveStages slots0 = go (map key slots0) []
     swapAt d = replicate d (Prim "_") ++ [Prim "swap", Prim "pass"]
     swapIdx d xs =
       take d xs ++ [xs !! (d + 1), xs !! d] ++ drop (d + 2) xs
-
--- Lift the param block above `e` determinate remainder wires sitting on
--- top of it: [anons][params][rest] → [anons][rest][params], which is the
--- contiguous [body inputs][params] layout compileAbsOpen compiles
--- against once the remainder counts as body input.  Empty when the
--- remainder is indeterminate (e = 0): then it never moves at all — it
--- rides above the params inside each stage's `pass`.
-restAboveStages :: Int -> Int -> Int -> [Term]
-restAboveStages a n e =
-  [ Tensor (swapAt d)
-  | j <- [0 .. e - 1]
-  , d <- [a + j + n - 1, a + j + n - 2 .. a + j] ]
-  where
-    swapAt d = replicate d (Prim "_") ++ [Prim "swap", Prim "pass"]
 
 freeNamesIn :: Term -> [String]
 freeNamesIn = go
@@ -4816,113 +4776,90 @@ freeNamesIn = go
     go (OpenAbs slots _ b) =
       filter (`notElem` [ n | Just n <- slots ]) (go b)
 
--- (input arity, output arity, param copies to insert at relative input
--- offsets, replacement atom)
-data AtomInfo = AtomInfo Int Int [(Int, Int)] Term
+-- (input arity, param copies to insert at relative input offsets,
+-- replacement atom)
+data AtomInfo = AtomInfo Int [(Int, Int)] Term
 
+-- Rewrite `body` so the parameters `ps` arrive as a block of wires
+-- BELOW its input; the block is dropped at the end.
 compileAbs :: Env -> [String] -> Term -> Either String Term
-compileAbs env ps body = compileAbsOpen env ps 0 body
-
-compileAbsOpen :: Env -> [String] -> Int -> Term -> Either String Term
-compileAbsOpen env ps k0 = compileAbsOpen' env ps k0 False
-
--- Rewrite `body` (consuming k0 underlying wires) so the parameters
--- arrive as a block of wires BELOW those inputs; the block is dropped
--- at the end.  `open` says an erased remainder rides above the params,
--- so the final stage must let it through instead of ending exactly.
-compileAbsOpen' :: Env -> [String] -> Int -> Bool -> Term -> Either String Term
-compileAbsOpen' env ps k0 open body = do
-  stages <- rewriteChain k0 (spineOf body)
-  pure (chainTerm stages)
+compileAbs env ps body = do
+  stages <- mapM rewriteStage (spineOf body)
+  pure (chainTerm (concat stages ++ [finalStage]))
   where
     n = length ps
 
     swapAt d = replicate d (Prim "_") ++ [Prim "swap", Prim "pass"]
     dupAt d  = replicate d (Prim "_") ++ [Prim "dup", Prim "pass"]
-    -- copy the wire at depth `from` up to depth `to` (to <= from)
-    fetchTo from to =
-      dupAt from : [ swapAt j | j <- [from - 1, from - 2 .. to] ]
+    -- copy the parameter at depth `idx` up to depth `to` (to > idx)
+    fetchTo idx to = dupAt idx : [ swapAt j | j <- [idx + 1 .. to - 1] ]
 
-    rewriteChain k [] = Right [finalStage k]
-    rewriteChain k (stage : rest) = do
-      (pres, stage', k') <- rewriteStage k stage
-      ((pres ++ [stage']) ++) <$> rewriteChain k' rest
+    finalStage = replicate n (Prim "drop") ++ [Prim "pass"]
 
-    finalStage k = replicate k (Prim "_") ++ replicate n (Prim "drop")
-                     ++ [ Prim "pass" | open ]
-
-    rewriteStage k atoms0 = do
-      let (atoms, _) = case reverse atoms0 of
+    rewriteStage atoms0 = do
+      let (atoms, open) = case reverse atoms0 of
             (Prim "pass" : rs) -> (reverse rs, True)
             _                  -> (atoms0, False)
       infos <- mapM classify atoms
-      let inAs    = [ i | AtomInfo i _ _ _ <- infos ]
+      let inAs    = [ i | AtomInfo i _ _ <- infos ]
           offsets = init (scanl (+) 0 inAs)
           inserts = [ (off + rel, idx)
-                    | (AtomInfo _ _ specs _, off) <- zip infos offsets
+                    | (AtomInfo _ specs _, off) <- zip infos offsets
                     , (rel, idx) <- specs ]
-          -- insert left-to-right: shallower targets first; offsets are
-          -- final-layout positions, so each target is correct at its
-          -- moment of insertion
-          fetches = concat
-            [ fetchTo (k + j + idx) tgt
-            | (j, (tgt, idx)) <- zip [0 ..] inserts ]
-          p       = length inserts
-          bigA    = sum inAs - p
-          bigO    = sum [ o | AtomInfo _ o _ _ <- infos ] - p
-          atoms'  = [ a | AtomInfo _ _ _ a <- infos ]
-          k'      = (bigO + p) + (k - bigA)
-      if bigA > k
-        then Left "abstraction body consumes more than it has (internal)"
-        else Right (fetches, atoms' ++ [Prim "pass"], k')
+          -- targets are final-layout depths above the block; inserting
+          -- in ascending order, everything below a target is already in
+          -- place when its copy arrives
+          fetches = concat [ fetchTo idx (n + tgt) | (tgt, idx) <- inserts ]
+          atoms'  = [ a | AtomInfo _ _ a <- infos ]
+          stage   = replicate n (Prim "_") ++ atoms' ++ [ Prim "pass" | open ]
+          isWire (Prim "_")    = True
+          isWire (Prim "pass") = True
+          isWire _             = False
+      pure (fetches ++ [ stage | not (all isWire stage) ])
 
     classify :: Term -> Either String AtomInfo
     classify t@(Prim nm)
-      | Just i <- elemIndex nm ps = Right (AtomInfo 1 1 [(0, i)] (Prim "_"))
+      | Just i <- elemIndex nm ps = Right (AtomInfo 1 [(0, i)] (Prim "_"))
       | nm == "pass" = Left "reflect: '...' before the end of a stage in an abstraction body"
       | isIntLiteral nm || isStrLiteral nm || isSymLiteral nm =
-          Right (AtomInfo 0 1 [] t)
-      -- an index literal is a closed point (• ⇒ Fin(…)), so it
-      -- reflects like any other literal — not an open-arity word
-      | Just _ <- finIndex nm = Right (AtomInfo 0 1 [] t)
-      | Just _ <- injIndex nm = segErr nm
+          Right (AtomInfo 0 [] t)
+      | Just _ <- finIndex nm = Right (AtomInfo 0 [] t)
+      -- an injection is open-arity, hence final in its stage: nothing
+      -- to its right needs its width
+      | Just _ <- injIndex nm = Right (AtomInfo 0 [] t)
       | otherwise =
           case M.lookup nm env of
             Nothing -> Left $ "reflect: unknown name in abstraction body: " ++ nm
-            Just (Forall _ _ _ _ _ (Arrow i o _))
-              | openTailedS i || openTailedS o -> segErr nm
-              | otherwise ->
-                  Right (AtomInfo (closedArity i) (closedArity o) [] t)
+            -- an open-tailed word is final in its stage, so only its
+            -- closed prefix can sit left of anything
+            Just (Forall _ _ _ _ _ (Arrow i _ _)) ->
+              Right (AtomInfo (closedArity i) [] t)
     classify t@(Quote b)
       | any (`elem` ps) (freeNamesIn b) =
           Left "reflect: parameter captured in a quotation (a closure) — not reflectable yet"
-      | otherwise = Right (AtomInfo 0 1 [] t)
+      | otherwise = Right (AtomInfo 0 [] t)
     classify t@(Alts cs _)
       | any (any (`elem` ps) . freeNamesIn) cs =
           Left "reflect: parameter used inside a row component — not reflectable yet"
-      | otherwise = Right (AtomInfo 1 1 [] t)
+      | otherwise = Right (AtomInfo 1 [] t)
     classify (OpenAbs {}) =
       Left "internal: nested abstraction not yet eliminated"
     classify g = groupInfo g
 
-    -- a grouped compound: recursively thread the parameters it uses
+    -- a grouped compound: recursively thread the parameters it uses,
+    -- which arrive as ITS block, below its own inputs
     groupInfo g = do
       let used = nub [ nm | nm <- freeNamesIn g, nm `elem` ps ]
           usedIdx = [ i | Just i <- map (`elemIndex` ps) used ]
-      Arrow gi go _ <- inferGroupArrow g
-      if openTailedS gi || openTailedS go
-        then segErr "grouped program"
+      Arrow gi _ _ <- inferGroupArrow g
+      let gIn = closedArity gi
+      if null used
+        then Right (AtomInfo gIn [] g)
         else do
-          let gIn  = closedArity gi
-              gOut = closedArity go
-          if null used
-            then Right (AtomInfo gIn gOut [] g)
-            else do
-              g' <- compileAbsOpen env used gIn g
-              pure (AtomInfo (gIn + length used) gOut
-                             [ (gIn + j, idx)
-                             | (j, idx) <- zip [0 ..] usedIdx ]
-                             g')
+          g' <- compileAbs env used g
+          pure (AtomInfo (length used + gIn)
+                         (zip [0 ..] usedIdx)
+                         g')
 
     inferGroupArrow g = do
       let dummy = TV "_p"
@@ -4930,10 +4867,6 @@ compileAbsOpen' env ps k0 open body = do
             Forall [dummy] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
           arityEnv = foldr (\nm -> M.insert nm dummyScheme) env ps
       inferTermIn arityEnv g
-
-    segErr nm = Left $
-      "reflect: segment-consuming or open-arity atom '" ++ nm
-        ++ "' in an abstraction body — not reflectable yet"
 
 openTailedS :: SType -> Bool
 openTailedS (SCons _ r)   = openTailedS r
