@@ -639,6 +639,16 @@ bindEffVar s v row
   | eTail row == Just v, not (eIO row) = Right s
   | eTail row == Just v =
       Left $ "Occurs check failed on effect: " ++ show v
+  -- a skolem tail may only be renamed to a flexible one, never raised:
+  -- the expected grade is fixed, and code that needs io under a pure
+  -- expectation is exactly what the check exists to refuse
+  | isRigidE v =
+      case row of
+        Eff False (Just w) | not (isRigidE w) ->
+          Right s { effSub = M.insert w (Eff False (Just v)) (effSub s) }
+        _ -> Left $ "Cannot unify effects: " ++ showEff row
+                 ++ " vs pure (the expected type fixes the grade; "
+                 ++ "this code must stay pure)"
   | otherwise =
       Right s { effSub = M.insert v row (effSub s) }
 
@@ -673,6 +683,9 @@ isRigidR (RV n) = rigidTag `isPrefixOf` n
 
 isRigidN :: NVar -> Bool
 isRigidN (NV n) = rigidTag `isPrefixOf` n
+
+isRigidE :: EVar -> Bool
+isRigidE (EV n) = rigidTag `isPrefixOf` n
 
 -- A skolem was asked to become something concrete.  The expected type
 -- quantifies over it, so the code must work for EVERY choice; demanding
@@ -877,19 +890,24 @@ arrowOut (Arrow _ o _) = o
 arrowEff :: Arrow -> EffRow
 arrowEff (Arrow _ _ e) = e
 
--- Freeze every type/stack/row/width variable of an arrow into a rigid
--- constant, so unification may not choose a value for it.  The rigid
--- naming convention (`rigidTag`) and the guards in bindTyVar/
--- bindStackVar/bindRowVar/bindNVar are what enforce it.
+-- Freeze every variable of an arrow — type, stack, row, width, AND the
+-- effect tail — into a rigid constant, so unification may not choose a
+-- value for it.  The rigid naming convention (`rigidTag`) and the guards
+-- in the bind*Var functions are what enforce it.  Freezing the effect
+-- tail is what makes a pure expectation a SANDBOX: absorption would
+-- otherwise let io code raise the tail and pass.  (Before this the
+-- refusal happened only by accident, when the two inference runs
+-- happened to reuse the same tail name and tripped the occurs check.)
 skolemizeArrow :: Arrow -> Arrow
 skolemizeArrow arr =
-  let (tvs, svs, rvs, nvs, _) = varsOfArrow arr
+  let (tvs, svs, rvs, nvs, evs) = varsOfArrow arr
       sk s = rigidTag ++ s
       tSub = M.fromList [ (v, TVarTy (TV (sk n)))       | v@(TV n) <- tvs ]
       sSub = M.fromList [ (v, STail  (SV (sk n)))       | v@(SV n) <- svs ]
       rSub = M.fromList [ (v, RTail  (RV (sk n)))       | v@(RV n) <- rvs ]
       nSub = M.fromList [ (v, Exp 0 (Just (NV (sk n)))) | v@(NV n) <- nvs ]
-  in substOnce (Subst tSub sSub rSub nSub M.empty) arr
+      eSub = M.fromList [ (v, Eff False (Just (EV (sk n)))) | v@(EV n) <- evs ]
+  in substOnce (Subst tSub sSub rSub nSub eSub) arr
 
 -- exponent variables on a stack's spine (not inside element types)
 spineExpVars :: SType -> [NVar]

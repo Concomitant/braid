@@ -1,0 +1,44 @@
+# The original program is the witness for every transformed version
+# of itself.  reflect turns it into data; whatever we do to that data,
+# evalAs checks the result against the ORIGINAL's arrow before it runs.
+
+def getCode = reflect ; ((c -> c) | drop ; nil) ; merge
+
+# the program under study: a binder, two branches, two merges, and a
+# parameter fetched after them — all of it compiles to wiring, so all
+# of it is data
+def clamp = [(lo hi x -> lo x ; lt? ; (drop _ | _ drop) ; merge ; _ hi ; lt? ; (_ drop | drop _) ; merge)]
+
+"-- the wiring --" ; print
+clamp ; reflect ; (unparse ; print | print) ; forget
+
+# 1. run it as-is: the witness is the program itself
+"-- as-is --" ; print
+clamp (clamp ; getCode) (0) (10) (37) ; evalAs ; (print | forget) ; merge      # 10
+
+# 2. break it: slice off the last two stages, and the check says so
+"-- broken --" ; print
+clamp ((clamp ; getCode ; len) 2 ; - ; _ (clamp ; getCode) ; take) (0) (10) (37) ; evalAs
+    (print | print forget) ; merge                                  # Int Int (Int | Int) vs •
+
+# 3. round-trip it through disk as text
+"-- from disk --" ; print
+"/tmp/braid-clamp.braid" (clamp ; getCode ; unparse) ; writeFile ; (forget | print) ; merge
+("/tmp/braid-clamp.braid" ; readFile >=> parse)
+    ((c -> clamp c (0) (10) (-5) ; evalAs ; (print | forget) ; merge) | print) ; forget   # 0
+
+# 4. instrument a program: a trace after every stage, then run THAT.
+# The trace prints the deepest wire, so trace a point-free program
+# whose working value sits there.  (Trace `clamp` instead and you see
+# `lo` fourteen times: the parameter block is the deepest segment — a
+# resource — for the whole body.)
+def poly   = [dup ; * ; dup ; + ; _ 1 ; +]                # 2x² + 1
+def trace  = dup ... ; print ...
+def weave  = (f h -> [(s -> (s ; pack) h ; append)] f ; flatMap)
+def traced = (poly ; getCode) ([trace] ; getCode) ; weave
+
+"-- traced, pure witness --" ; print
+poly (traced) (5) ; evalAs ; (print | print forget) ; merge       # refused: the trace is io, the witness is not
+
+"-- traced, io witness --" ; print
+[trace ; poly ... ; apply] (traced) (5) ; evalAs ; (print | forget) ; merge   # 5 25 25 50 50 51, then 51

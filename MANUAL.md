@@ -805,7 +805,9 @@ pure — `reflect` READS a quotation, it never runs it — and so does
 `evalAs`, which takes its grade from its witness: a pure witness admits
 only pure code and stays pure, an io witness permits io. That is the
 sandbox — what runtime-loaded code may do is bounded by the type you
-were willing to write for it.
+were willing to write for it. Handing a pure witness io code rides the
+miss track: `Cannot unify effects: io vs pure (the expected type fixes
+the grade; this code must stay pure)`. See `examples/witness.braid`.
 
 Exponent tier (widths erased; see §13):
 

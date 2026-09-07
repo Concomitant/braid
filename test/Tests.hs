@@ -843,6 +843,13 @@ evalTests =
   , ("[(x -> [x])] >> reflect >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
     -- evalCode dynamic check: + on one wire misses, evidence kept
   , ("[+] >> reflect >> ((c -> [dup >> *] c (5) >> evalAs >> (forget >> 0 | forget >> 1) >> merge >> print) | forget >> 2 >> print) >> forget", ["1"], "")
+    -- THE SANDBOX: a pure witness refuses io code — by skolemizing the
+    -- effect tail, not by accident (before that, absorption let io
+    -- code raise the tail, and the refusal only happened when the two
+    -- inference runs reused a tail name and tripped the occurs check)
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[_] ([dup >> print ...] >> getCode) (5) >> evalAs >> (print | print forget) >> merge", ["Cannot unify effects: io vs pure (the expected type fixes the grade; this code must stay pure)"], "")
+    -- ...an io witness permits io, and admits pure code too
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[dup >> print ...] ([dup >> print ...] >> getCode) (5) >> evalAs >> (print | print forget) >> merge\n[dup >> print ...] ([_] >> getCode) (6) >> evalAs >> (print | print forget) >> merge", ["5", "5", "6"], "")
     -- GLA: transpose of add is copy; linearity checked over reflected code
   , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> [dup] (c >> transposeC) (5) >> evalAs >> print) | print) >> forget", ["in1(5, 5)"], "")
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
