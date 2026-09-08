@@ -1,0 +1,61 @@
+# A tracer that lifts at every cut.
+#
+# The tempting tracer reads the wire — `dup ... ; print ...` — and that
+# stage is `a ρ =IO> a ρ`: it needs a wire, so it fails at an empty cut
+# and, on a binder body, prints the parameter block (the deepest wire
+# for the body's duration).  The stage that can go anywhere touches NO
+# wire: `"after dup" pass ; print pass` is `ρ =IO> ρ`.  Its content
+# comes from the functor, which has the stage in hand.  That is what
+# `interpose` checks: the inserted stage must be a unit endomorphism,
+# `ρ ⇒ ρ`, whiskered by whatever the cut carries.
+
+def orNil = ((c -> c) | drop ; nil) ; merge
+
+# the marker for one stage, built as text and parsed back to Code
+def markStage = (s -> "\"after " (s ; pack ; unparse) ; cat ; _ "\" ... ; print ..." ; cat ; parse ; orNil)
+
+# after every stage s, insert markStage(s): a by-generators functor
+def marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise
+
+functor Traced = marked
+
+def poly =
+    use Traced
+    dup ; *
+    dup ; +
+    _ 1 ; +
+
+"-- every stage announces itself --" ; print
+5 ; poly ; print                       # after dup … after +, then 51
+
+# A binder body is wiring too, so it traces stage by stage — all of it,
+# including the routing of its parameter block.
+def clamp =
+    use Traced
+    (lo hi x -> lo x ; lt? ; (drop _ | _ drop) ; merge ; _ hi ; lt? ; (_ drop | drop _) ; merge)
+
+"-- a binder, elaborated and traced --" ; print
+0 10 37 ; clamp ; print                # fifteen markers, then 10
+
+# The same insertion with a FIXED marker is `interpose`, and the check
+# is what makes it a functor you can trust: a stage that reads a wire
+# is refused by name, at elaboration, before it is inserted anywhere.
+def tick = ["tick" ... ; print ...] ; getCode
+def ticked = tick ... ; interpose
+functor Ticked = ticked
+
+def twice =
+    use Ticked
+    dup ; +
+
+"-- interpose: one marker after every stage --" ; print
+21 ; twice ; print                     # tick, tick, 42
+
+# Uncomment to see the refusal:
+#   def peek = [dup ... ; print ...] ; getCode
+#   def peeked = peek ... ; interpose
+#   functor Peeked = peeked
+#   def bad = use Peeked ; dup ; +
+# interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a
+# wire; a stage inserted at every cut must be ρ ⇒ ρ, or E ρ ⇒ E ρ for
+# resource wires E routed beneath the whole scope

@@ -9,6 +9,17 @@ copies where they exist.
 - Power & Robinson, *Premonoidal categories and notions of
   computation* — the state construction `C(E⊗Σ, E⊗Θ)` that every
   resource fiber is; non-interchange is our left-to-right decree.
+- Jeffrey, *Premonoidal categories and a graphical view of programs*
+  (1997) — string
+  diagrams for premonoidal categories, with a **control wire** that
+  every effectful box touches. Braid's resource wire IS that wire, and
+  the stages `interpose` admits — `ρ ⇒ ρ`, `E ρ ⇒ E ρ` — are the boxes
+  touching only it: endomorphisms of the unit, whiskered by the rest of
+  the stack (`examples/traced.braid`, `metered.braid`).
+- Dantas & Walker, *Harmless advice* (POPL 2006) — advice that may
+  observe but not change the program's values: the naturality
+  condition an interposition is meant to satisfy, and what a tracer's
+  `ρ ⇒ ρ` type says on the wires (not on the log).
 - Hughes, *Generalising monads to arrows* (2000) and
   [*Programming with Arrows*](https://www.cse.chalmers.se/~rjmh/afp-arrows.pdf)
   — the machinery `examples/arrows.braid` shows is already syntax, and

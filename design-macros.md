@@ -122,7 +122,9 @@ The levels:
   Determined by the action on generators, so **functorial by
   construction**: respecting `;` is unviolatable, not audited.
   Renamings, interposition (tick, trace), dialects, `arr`/`thenP`
-  interpretation all live here.
+  interpretation all live here. (Functoriality is not liftability —
+  see the 2026-09-08 amendment for the rows that are *known to
+  type*, of which `interpose` is the checked one.)
 - **Level 2b — whole-spine** `Code ⇒ Code`: routing, optimizers,
   anything needing context beyond one generator. Functoriality, if
   claimed, is **audited** — laws at module start, `sameCode` deciding
@@ -227,6 +229,90 @@ own application in the text, and its *receipt* is the result's arrow
 only unmarked residue is type-unchanged provenance for region functors
 — exactly the OPEN coeffect/tagging question below, unchanged by this
 amendment.
+
+## Amendment (2026-09-08): the fibration picture, and the functors known to type
+
+Stage 4 shipped `interpose`, and with it a correction to how level 2a
+was described above. "Functorial by construction" is true of
+`stagewise`/`atomwise` and is *not the property anyone wants*:
+`stagewise [s -> s ; garbage]` respects `;` perfectly and produces
+Code that will not type. The property that matters is
+**liftability**.
+
+`reflect : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)` is a forgetful functor from
+typed programs (the total category) to `Code` (the base). Level-1
+macros work in the total category and carry a typing along by
+construction. A `Code ⇒ Code` functor works in the base, and typing
+its output is a **lifting problem** — does a typing exist over this
+base morphism? — answered by re-inference at the splice. "Won't run" =
+no lift exists. (Melliès & Zeilberger, *Functors are type refinement
+systems*: a type system is a functor from typed to untyped terms, and
+the questions are about lifts. Conjecture worth chasing, NOT recorded
+as fact: principal typing = cartesian lift, i.e. `reflect` is a
+fibration on its typeable part.)
+
+**The functors known to type** — one theorem: a functor out of the
+free category `Code = Free(G)` lifts whenever it is determined by an
+action on generators (or on typed local patterns) whose images have
+schemes *at least as general* as what they replace — a morphism of
+refinement systems. Six rows, five checked ONCE at declaration and
+free at every use, one checked per program:
+
+1. level 1 (`Fn ⇒ Fn`): never leaves the total category;
+2. tensoring with a resource, `E ⋉ –` (`use E` routing; abstraction
+   elimination is the same functor with the parameter block as `P`);
+3. whiskering, `interpose [η]` with `η ∈ K(I,I)` — an endomorphism of
+   the unit, whiskered by the cut; with a resource, `η ∈ C(E,E)`.
+   In Jeffrey's graphical premonoidal picture these are the boxes
+   touching only the control wire, and the resource wire IS that
+   wire. `interpose [η]` is the functor out of `Free(G)` given by the
+   graph morphism `s ↦ s ; (η ⋉ cod s)`; the class of all of them is a
+   monoid action of `K(I,I)` on `Free(G)` by right-whiskering, where
+   the monoid multiplication is `append` on the marker Code:
+   `interpose [η₁ ; η₂]`. Note what is NOT the action of the product:
+   `interpose [η₂]` applied after `interpose [η₁]` instruments η₁'s
+   insertions too (Code carries no provenance, so the second functor
+   sees one spine, as it stands — `s ; η₁` becomes `s ; η₂ ; η₁ ;
+   η₂`). Compose markers, not interpositions, when the product is
+   meant. Liftability = being in the image of the whiskering map
+   `K(I,I) × Ob → Mor`. Checked by **subsumption**: `scheme(η) ≥ ∀ρ.
+   E ρ =IO> E ρ` with ρ skolem and E read off η's own arrow.
+   Unification would bless `Int ρ ⇒ Int ρ` at `ρ := Int ρ'`. The
+   check is possible because Code carries names, not closures — `.η`
+   re-instantiates at every splice; a `Fn⟨ρ ⇒ ρ⟩` value is at one ρ
+   (the rank-1 wall). Cross-references: Plotkin–Power arity-one
+   algebraic operations (`tick : 1 → 1`); Dantas–Walker harmless
+   advice; the `a ⇒ a` counterpoint is `K(I,I)` being nontrivial (an
+   io `ρ ⇒ ρ` is not central: naturality holds on the wires, not on
+   the log).
+4. models (`use Inst`; `atomwise` with typed generator images) —
+   `checkInstance`;
+5. local rewrites `p ↦ q` with `scheme(q) ≥ scheme(p)` — the `rule`
+   design of stage 5b. **Unification blesses a call; subsumption
+   blesses a rule.** A `replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ Code ⇒ Code`
+   types, and the shared variables say only that p and q have a
+   common instance — symmetric, where "q may stand wherever p stands"
+   is not (verified: `dupInt ↦ dup` safe everywhere; `dup ↦ dupInt`
+   breaks the `Str` program; `two ↦ dup` narrows `a ⇒ Int` to `Int ⇒
+   Int` and the witness refuses it). The sufficient property is
+   rank-2, inexpressible as a `Fn` type, and already has a routine
+   with three consumers: `subsumes`. So a rule is a declaration over
+   names, checked once.
+6. **`lift2`** — the runtime lift of any `Code ⇒ Code` functor: `def
+   lift2 = (m f -> [f (m (f >> getCode) >> apply >> (c -> c)) ... >>
+   evalAs >> (... | drop ... >> f ... >> apply) >> merge])`, typed
+   `Fn⟨Code ⇒ Code⟩ Fn⟨Γ ⇒ Δ⟩ ⇒ Fn⟨Γ ⇒ Δ⟩`. Output arrow = input
+   arrow by construction; the untyped middle is discharged at the
+   boundary by the fibre the program started in, per program, and a
+   refused rewrite runs the original. This is the runtime counterpart
+   of `use F`: the two ways a level-2 functor becomes level 1.
+
+Non-local functors (delete, reorder, reverse, neighbour-dependent
+choice) are outside the class permanently: level 2b, re-inferred per
+application, audited by laws. The MANUAL carries the table; the
+"marker tracer" (`examples/traced.braid`) is the worked instance of
+row 3 — the stage that lifts everywhere reads no wire and gets its
+content from the functor, which has the stage in hand.
 
 ## The splice check (stage 1, shipped 2026-08-31)
 

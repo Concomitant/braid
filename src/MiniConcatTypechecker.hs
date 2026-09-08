@@ -867,12 +867,9 @@ instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
 -- Str runs it anyway.  Subsumption rejects that, because the skolem for
 -- `a` refuses to become Int.
 --
--- Effect tails are deliberately NOT skolemized: unifyEff's absorption is
--- the intended reading here (a pure body satisfies an io-declared slot;
--- an io body under a pure declaration clashes, naming the grade).  An
--- effect-POLYMORPHIC declaration is therefore checked leniently; no
--- theory in the wild writes one, and tightening it needs a rigid guard
--- in bindEffVar, which is a separate decision.
+-- The effect tail is skolemized too (see skolemizeArrow): a pure
+-- expectation admits only pure code, an io expectation admits both
+-- grades by absorption.
 subsumes :: Scheme -> Arrow -> Either String ()
 subsumes sc expected =
   let want = skolemizeArrow expected
@@ -2795,6 +2792,13 @@ primEnv =
            (arrPure (one TStr)
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
+       -- η c ; interpose — insert the stage η after every stage of c,
+       -- having CHECKED that η is a unit endomorphism (`ρ ⇒ ρ`, or
+       -- `E ρ ⇒ E ρ` over a resource prefix), so the woven program
+       -- types whenever c did.  The one checked Code ⇒ Code functor.
+       , ("interpose", Forall [] [] [] [] []
+           (arrPure (SCons codeStructTy (SCons codeStructTy SEnd))
+                    (one codeStructTy)))
        , ("readLine",  Forall [] [] [] [] []
            (arrIO SEnd
                   (one (TSum (RCons (one TStr)
@@ -3787,6 +3791,22 @@ preludeSrc = unlines
   , "## Fn⟨Γ ⇒ (Δ | Str Γ)⟩ — and the check rides the railway at apply"
   , "## time.  On a miss the witness is still there to fall back to."
   , "def box = (w cd -> [(w) (cd) ... >> evalAs])"
+  , "## a program's wiring as Code — nil when it has none to show (a closure)"
+  , "def getCode = reflect >> ((c -> c) | drop >> nil) >> merge"
+  , "## by-generators functors (level 2a): rewrite every stage, or every"
+  , "## atom, of a spine.  Functorial by construction — a stage's image"
+  , "## depends on that stage alone — which is a law that comes free, not"
+  , "## a promise that the result types."
+  , "def stagewise = flatMap"
+  , "def atomwise = (f c -> c >> [[f ... >> apply] ... >> flatMap] ... >> map)"
+  , "## insert a stage after every stage, UNCHECKED (level 2b); the"
+  , "## checked word is the prim `interpose`"
+  , "def interposeRaw = (h c -> c >> [(s -> (s >> pack) h >> append)] ... >> flatMap)"
+  , "## the runtime lift of any Code ⇒ Code functor to Fn ⇒ Fn: the"
+  , "## program is its own witness and its own fallback, so the result"
+  , "## has the program's arrow by construction — a rewrite the witness"
+  , "## refuses leaves the original running"
+  , "def lift2 = (m f -> [f (m (f >> getCode) >> apply >> (c -> c)) ... >> evalAs >> (... | drop ... >> f ... >> apply) >> merge])"
   , "## sum an Int bundle: the variadic +"
   , "## run a program one wire deeper: `[f] >> lift` is f with one wire riding beneath it, untouched.  Compose it once per context wire.  This is tensorial STRENGTH — the action of (A ⊗ −) on a morphism — and it is what threads a resource past a pure stage, so it is an ordinary word rather than machinery."
   , "def lift = (f -> [_ (f ... >> apply)])"
@@ -4473,7 +4493,7 @@ evalTerm env defs vars term st =
           keep = if isFinal then [] else stk'
           missWith msg = pure ([VSum 1 (VStr msg : seg)], keep, [])
       case args of
-        [VFn _ wv wt, c] ->
+        [VFn ws wv wt, c] ->
           case codeToTermV c of
             Left e -> missWith e
             Right term ->
@@ -4482,8 +4502,13 @@ evalTerm env defs vars term st =
                 Right () -> do
                   -- a spliced program's failure is a VALUE on the miss
                   -- track, not this program's failure: catch rather than
-                  -- nest a second runExceptT (which would pin us to IO)
-                  r <- (Right <$> evalTerm env defs M.empty term seg)
+                  -- nest a second runExceptT (which would pin us to IO).
+                  -- The code runs in the WITNESS's scope, not the
+                  -- caller's: the witness was typed against the module
+                  -- (`env`), and the scope that matches is the one it
+                  -- closed over — a prelude word such as `lift2` or `box`
+                  -- has only the prelude in its own early-bound snapshot.
+                  r <- (Right <$> evalTerm env ws M.empty term seg)
                          `catchError` (pure . Left)
                   case r of
                     Left e -> missWith e
@@ -4565,6 +4590,12 @@ runBuiltin env _ "reflect" [VFn _ cv t] =
   case reflectFn env cv t of
     Right c -> Right ([VSum 0 [c]], [])
     Left e  -> Right ([VSum 1 [VStr e]], [])
+runBuiltin env _ "interpose" [eta, c]    = do
+  etaT <- codeToTermV eta
+  checkInterposed env etaT
+  etaS <- decodeListV eta
+  cs   <- decodeListV c
+  Right ([encodeListV (concat [ s : etaS | s <- cs ])], [])
 runBuiltin _ _ "asInt?" [VStr t]        =
   case reads t :: [(Int, String)] of
     [(n, "")] -> Right ([VSum 0 [VInt n]], [])
@@ -4589,6 +4620,38 @@ runBuiltin _ _ name args =
 -- segment-consuming atoms (apply, injections, merge, loop, …) are
 -- rejected onto the miss track with an explanation.
 --------------------------------------------------------------------------------
+
+-- The stage `interpose` inserts after every cut must be a UNIT
+-- ENDOMORPHISM whiskered by the rest of the stack: `∀ρ. ρ ⇒ ρ`, or
+-- `∀ρ. E ρ ⇒ E ρ` for a closed prefix E of nullary data types — in
+-- practice resources, which `use` routing keeps deepest for the whole
+-- scope.  Such a stage touches no wire of the program, so inserting it
+-- at every cut leaves the program's type where it was.
+--
+-- E is read off the stage's own arrow (input and output unified), and
+-- then the stage's SCHEME must be at least as general as `E ρ ⇒ E ρ`
+-- with ρ rigid.  Subsumption, not unification: unifying with `ρ ⇒ ρ`
+-- would bless `Int ρ' ⇒ Int ρ'` at ρ := Int ρ', a stage that needs a
+-- wire and fails at any empty cut.  The expected grade is io, so a
+-- marker that prints passes and a pure stage passes by absorption.
+checkInterposed :: Env -> Term -> Either String ()
+checkInterposed env t = do
+  arr@(Arrow i o _) <- inferTermIn env t
+  let shown = "interpose: `" ++ renderTerm t ++ "` is "
+           ++ show (normalizeArrow arr)
+      rule  = "a stage inserted at every cut must be ρ ⇒ ρ, or E ρ ⇒ E ρ "
+           ++ "for resource wires E routed beneath the whole scope"
+      whisk (SCons ty@(TData _ []) r) = (ty :) <$> whisk r
+      whisk (STail _)                 = Just []
+      whisk _                         = Nothing
+  s <- either (const (Left (shown ++ ", not an endomorphism; " ++ rule)))
+              Right (solve [CEqStack i o])
+  e <- maybe (Left (shown ++ ", which reads a wire; " ++ rule))
+             Right (whisk (apply s i))
+  let side = foldr SCons (STail (SV "ρ")) e
+      want = Arrow side side (Eff True (Just (EV "ε")))
+  either (\err -> Left (shown ++ "; " ++ rule ++ " (" ++ err ++ ")"))
+         Right (subsumes (generalize M.empty arr) want)
 
 encodeListV :: [Value] -> Value
 encodeListV = foldr (\v r -> VSum 1 [v, r]) (VSum 0 [])

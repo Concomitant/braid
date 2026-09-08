@@ -258,6 +258,10 @@ moduleTypeTests =
     -- type aliases: display folding (Bool/Maybe from the prelude;
     -- user aliases beat prelude; fewest-params-bound wins ties)
   , ("5 >> odd? >> verdict",                    "• ⇒ Bool")
+    -- the runtime lift of a functor has the program's arrow BY
+    -- CONSTRUCTION; the checked interposition is a plain Code word
+  , ("lift2",     "Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
+  , ("interpose", "Code Code ⇒ Code")
   , ("7 >> zero? >> (forget | ...)",            "• ⇒ (• | Int)")
   , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
@@ -518,6 +522,33 @@ evalTests =
     -- three kinds of name in ONE header: instance renames, resource
     -- routes, functor rewrites — in that order
   , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\ninstance Loud : Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run =\n    use Log Loud Same\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
+     ["25"], "")
+    -- STAGE 4: the checked interposition.  A marker reads no wire —
+    -- `ρ =IO> ρ` — so `interpose` admits it at every cut
+  , ("def tick = [\"tick\" ... >> print ...] >> getCode\ndef ticked = tick ... >> interpose\nfunctor Ticked = ticked\ndef twice = use Ticked >> dup >> +\n21 >> twice >> print",
+     ["tick", "tick", "42"], "")
+    -- a resource endomorphism `Fuel ρ ⇒ Fuel ρ` is admitted too, and
+    -- meters every stage of the ROUTED program (the claim stage
+    -- `use Fuel` writes, then six cuts of arithmetic)
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef poly =\n    use Fuel Metered\n    dup >> *\n    dup >> +\n    _ 1 >> +\n(10 >> Fuel) 5 >> poly >> _ print >> unFuel >> print",
+     ["51", "3"], "")
+    -- the marker tracer of examples/traced.braid: the stage's text is
+    -- the marker's content, so it lifts everywhere a wire-reading
+    -- trace could not
+  , ("def orNil = ((c -> c) | drop >> nil) >> merge\ndef markStage = (s -> \"\\\"after \" (s >> pack >> unparse) >> cat >> _ \"\\\" ... >> print ...\" >> cat >> parse >> orNil)\ndef marked = [(s -> (s >> pack) (s >> markStage) >> append)] ... >> stagewise\nfunctor Traced = marked\ndef poly = use Traced >> dup >> * >> _ 1 >> +\n5 >> poly >> print",
+     ["after dup", "after *", "after _ 1", "after +", "26"], "")
+    -- by-generators functors: stagewise and atomwise are flatMaps on
+    -- the spine
+  , ("[dup >> +] >> getCode >> [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise >> unparse >> print",
+     ["dup >> dup >> + >> +"], "")
+  , ("[dup >> +] >> getCode >> [single] ... >> atomwise >> unparse >> print",
+     ["dup >> +"], "")
+    -- lift2: a Code ⇒ Code functor lifted to Fn ⇒ Fn at runtime, the
+    -- program its own witness — metered where the result types, and
+    -- the original where it does not
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [use Fuel >> dup >> *] >> lift2) (10 >> Fuel) 5 >> apply >> _ print >> unFuel >> print",
+     ["25", "7"], "")
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [dup >> *] >> lift2) 5 >> apply >> print",
      ["25"], "")
     -- DECIDED laws (§12.9): `sameCode` normalizes both programs in the
     -- free cartesian category over their words and compares.  `same`
@@ -1088,6 +1119,22 @@ moduleFailTests =
      "step budget exhausted")
   , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
      "Duplicate functor declaration")
+    -- `interpose` (stage 4) admits only unit endomorphisms — `ρ ⇒ ρ`,
+    -- or `E ρ ⇒ E ρ` over resource wires — and refuses by name, with
+    -- the stage's actual type, before inserting it anywhere.  Checked
+    -- by SUBSUMPTION: `Int ρ ⇒ Int ρ` is an instance of `ρ ⇒ ρ` but
+    -- not as general as it, and fails at any empty cut.
+  , ("def peek = [dup ... >> print ...] >> getCode\ndef peeked = peek ... >> interpose\nfunctor Peeked = peeked\ndef bad = use Peeked >> dup >> +\n3 >> bad >> print",
+     "interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a wire")
+  , ("def inc = [1 ... >> + ...] >> getCode\ndef inced = inc ... >> interpose\nfunctor Inced = inced\ndef bad = use Inced >> dup >> +\n3 >> bad >> print",
+     "is Int ρ0 ⇒ Int ρ0, which reads a wire")
+  , ("def w = [0 ...] >> getCode\ndef wd = w ... >> interpose\nfunctor W = wd\ndef bad = use W >> dup >> +\n3 >> bad >> print",
+     "`0 pass` is ρ0 ⇒ Int ρ0, not an endomorphism")
+    -- a resource stage passes the check, and then the scope must
+    -- actually thread the resource: this is the re-inference of the
+    -- expansion, and the error is an ordinary one
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef bad = use Metered >> dup >> +\n3 >> bad >> print",
+     "Cannot unify types: Int vs Fuel")
     -- outside the fragment `sameCode` reports, rather than guessing:
     -- "I cannot tell" is not "they differ"
   , ("[[dup]] [[dup]] ; sameCode ; drop ; 1", "outside the structural fragment")

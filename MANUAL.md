@@ -412,6 +412,15 @@ for the rest of the scope. Unlike a resource, an instance claims no
 wire and asserts nothing about the incoming stack: the selection is a
 renaming at elaboration (§8), so it disappears before inference.
 
+**The third kind of name is a functor** (§8, §12): `use Fuel Metered`
+threads the resource and then hands the routed, renamed body — as
+`Code` — to the word `Metered` names, splicing back what it returns.
+One header, three kinds, applied in a fixed order: instances rename,
+resources route, functors rewrite (left to right), so a functor always
+sees finished wiring. `functor Both = metered ; traced` then `use Both`
+is the recommended spelling whenever the order carries meaning:
+functor composition IS `;`.
+
 **What `use` does to a pure stage is `lift`** (§10), an ordinary
 prelude word: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a program
 one wire deeper, composable once per context wire. Nothing about
@@ -705,6 +714,22 @@ audited model of its theory
 REPL says so). See `examples/theories.braid`, §14 for the limits, and
 `design-effects.md` for the position.
 
+**`functor Name = word`** names a **functor**: any def whose type is
+`Code ⇒ Code` at pure grade. There is no `macro` keyword and nothing
+to register — `functor Traced = marked` records that `use Traced`
+means "run `marked` on this scope's wiring, at elaboration, and splice
+the result". The word is checked at the first `use` (declarations are
+hoisted, so that is where the prefix scope is what it will be at run
+time): *must be Code ⇒ Code*, *must be pure* (it runs while the module
+is being checked, so it cannot do IO — the grade IS the phase
+distinction), *not defined at this point* (a functor is runnable
+before its first use: the one place source order is semantic), and a
+looping functor exhausts a step budget rather than hanging the
+compiler. Not Haskell's `Functor`: nothing is dispatched on a type;
+this is a functor out of the free category of programs, selected by
+name. §12 has what a functor may and may not do; `examples/traced.braid`
+and `metered.braid` are the two idioms.
+
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
 like any type stack (params splice, `•` is empty, `Fn` nests). The
@@ -795,6 +820,7 @@ Metaprogramming & IO (railway-typed edges):
 | `evalAs` | `Fn⟨ρ0 ⇒ ρ1⟩ Code ρ0 ⇒ (ρ1 \| Str ρ0)` — witness-checked |
 | `unparse` | `Code ⇒ Str` |
 | `parse` | `Str ⇒ (Code \| Str)` |
+| `interpose` | `Code Code ⇒ Code` — `η c`: insert η after every stage of c; η must be `ρ ⇒ ρ` or `E ρ ⇒ E ρ`, checked (§12) |
 | `readLine` | `• =IO> (Str \| Str)` — io; one line from stdin, EOF misses |
 | `readFile` | `Str =IO> (Str \| Str)` — io |
 | `writeFile` | `Str Str =IO> (• \| Str)` — io; hit is the empty success, miss carries the error |
@@ -906,6 +932,14 @@ Int⟩`). This is tensorial strength, the action of `(A ⊗ −)` on a
 morphism, and it is exactly what threads a resource past a pure stage —
 so ambient threading (§6) needs no machinery for the pure case, only
 the counting. `def lift = (f -> [_ (f ... >> apply)])`.
+
+**Code** (§12): `getCode : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Code` (`reflect`, or `nil`
+for a closure); the by-generators functors `stagewise : Fn⟨Stage ⇒
+Code⟩ Code ⇒ Code` and `atomwise : Fn⟨Atom ⇒ Stage⟩ Code ⇒ Code`
+(`flatMap` on the spine, one level down for `atomwise`);
+`interposeRaw : Code Code ⇒ Code` (unchecked `interpose`); `lift2 :
+Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` — a functor applied at
+runtime, the program its own witness and its own fallback; `box`.
 
 ## 11. Control flow — the idioms
 
@@ -1024,16 +1058,80 @@ differs per cut. Each cut states its own witnesses. That obligation is
 the honest price — the type between the halves is a fact about the cut,
 not about the program, so someone has to say it.
 
-Deferring the *run* costs the result's *type*: what boxed code returns
-is only discovered when it runs. To use a splice's result at a known
-type, splice it where that type is statically known.
-Splices nested inside spliced code share the same discipline. A stamp
-variable that also appears in the definition's input is rejected outright
-— *"a splice's result type shares a0 with this definition's input"* — to
-prevent a caller from choosing the runtime-built code's type by choosing
-an argument.
+The code runs in the *witness's* scope — the words it may call are the
+ones the witness could — so a prelude word that splices on your behalf
+(`box`, `lift2`) still runs your code among your defs.
 
 See `examples/cuts.braid` for splices in context.
+
+### Functors, and the ones known to type
+
+A **functor** (§8) is a pure `Code ⇒ Code` word applied to a scope's
+wiring by `use`. `reflect` forgets types — it goes from typed programs
+down to `Code` — so a functor works on the untyped floor, and typing
+its output is a *lifting* problem: does a typing exist over this
+rewritten program? Braid answers it the only honest way, by
+re-inferring the expansion at the splice (principal types; nothing is
+trusted), and when no typing exists the error is reported inside code
+you did not write — every such message carries the expansion. That is
+the design's one real fragility, and the answer to it is a short list
+of functors whose lifts are **guaranteed**, checked once rather than
+per use:
+
+| functor | what it is | checked by |
+|---|---|---|
+| a quotation transformer `Fn⟨a ⇒ b⟩ ⇒ Fn⟨…⟩` (`lift`, `logged`, `compose`) | level 1: never leaves the typed world | ordinary inference, at the def |
+| `use E` for a resource `E` | tensoring, `E ⋉ –` — and a binder's parameter block is the same functor, `P ⋉ –` (§12 above) | the elaborator's routing |
+| `interpose [η]` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `interpose` itself, by subsumption |
+| `use Inst` for an instance | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
+| a local rewrite `p ↦ q` with `scheme(q) ≥ scheme(p)` | a typed generator image | `subsumes` — the `rule` declaration, not yet shipped |
+| `lift2 [m]` on any `Code ⇒ Code` `m` | the runtime lift | per program, at run time; never fails — it falls back |
+
+Everything not in the table — delete a stage, reorder, reverse,
+choose by neighbour — is re-inferred and may fail. Such functors are
+not wrong; they are **audited** rather than **guaranteed** (laws over
+`Code`, `sameCode` on expansions, §12).
+
+**Why `interpose` checks what it checks.** The stage it inserts must
+type at *every* cut, and the cuts have different widths. A stage that
+touches no wire is `∀ρ. ρ ⇒ ρ` — an endomorphism of the unit, whiskered
+by whatever the cut carries; with a resource routed deepest, `E ρ ⇒ E
+ρ` (`burn : • =Fuel> •` is literally one). The check is **subsumption**
+against `ρ ⇒ ρ` with `ρ` rigid, not unification: unifying would bless
+`Int ρ ⇒ Int ρ` at `ρ := Int ρ'`, a stage that needs a wire and dies
+at the first empty cut. Refusals name the stage and its real type:
+
+```text
+interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a
+wire; a stage inserted at every cut must be ρ ⇒ ρ, or E ρ ⇒ E ρ for
+resource wires E routed beneath the whole scope
+```
+
+And that refusal is the whole story of the tracer: the tempting trace
+`dup ... ; print ...` reads a wire, so it cannot go everywhere (and on
+a binder body it prints the parameter block, which is the true deepest
+wire). The tracer that lifts at every cut reads nothing — `"after dup"
+pass ; print pass` — and gets its content from the functor, which has
+the stage in hand (`examples/traced.braid`). This is possible because
+`Code` carries **names**, not closures: `.burn` re-instantiates its
+scheme at each splice site, which is where width-polymorphism comes
+from; a `Fn⟨ρ ⇒ ρ⟩` value would be fixed at one `ρ`.
+
+**The ladder, from the user's side.** Every functor is `Fn⟨a ⇒ b⟩ ⇒
+something better` (`examples/lifting.braid`), and a `Code ⇒ Code`
+functor becomes one of those two ways: `use F` at elaboration (the
+expansion is re-inferred, and its arrow is the receipt) or `lift2 [F]`
+at run time, where the program is its own witness — the result has the
+program's arrow *by construction* and a rewrite the witness refuses
+leaves the original running (`examples/metered.braid`). The type
+system blesses exactly that and nothing weaker: it cannot say "this
+rewrite preserves every program's type" as a rank-1 `Fn` type, because
+*unification blesses a call; subsumption blesses a rule* — and a rule
+is a declaration, checked once.
+
+`stagewise`/`atomwise` are `flatMap` on the spine: functorial by
+construction (a stage's image depends on that stage alone), which is a
+law that comes free, not a promise that the result types.
 
 ### Deciding a law: `sameCode`
 

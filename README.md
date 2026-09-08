@@ -219,6 +219,15 @@ bare `use` leaves.
     `unparse`/`parse` and `readFile`/`writeFile` round-trip code
     through disk. The graphical-linear-algebra transpose is
     `reverse >> map dualize`.
+14. **Elaboration is a library.** A `functor` is any pure `Code ⇒
+    Code` word, and `use Traced` applies it to a scope's wiring at
+    elaboration; the expansion is re-inferred, never trusted. One
+    functor is *checked* rather than re-inferred: `interpose` inserts a
+    stage after every cut and admits only stages that read no wire
+    (`ρ ⇒ ρ`, or `E ρ ⇒ E ρ` over a resource) — so metering a resource
+    is one line, and the tracer that lifts everywhere is a marker, not
+    a probe. `lift2` applies any such functor at run time with the
+    program as its own witness and fallback.
 
 ## Examples
 
@@ -237,8 +246,11 @@ the logged version of a function, game rules as lifted moves),
 `payroll` (a whole small program: a resource, a theory and a grade
 meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
-`code`, `transpose`, `io` — and finish with `registrar`, which uses
-most of the language in forty lines about grade school.
+`code`, `transpose`, `io`, `witness` (the program as its own witness),
+`traced` and `metered` (functors: a tracer that lifts at every cut,
+a resource metered by one checked interposition) — and finish with
+`registrar`, which uses most of the language in forty lines about
+grade school.
 
 ## Extending it
 
@@ -254,7 +266,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 706-case test suite, a full
+(typechecker, interpreter, REPL), a 721-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

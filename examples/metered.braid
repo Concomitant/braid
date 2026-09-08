@@ -1,0 +1,44 @@
+# Metering: a resource, one word on it, and one interposition.
+#
+# `burn : • =Fuel> •` is an endomorphism of the Fuel wire and nothing
+# else — under the display, `Fuel ρ ⇒ Fuel ρ`.  Routing keeps the
+# resource deepest for the whole scope, so `burn pass` fits after every
+# routed stage, and `interpose` checks exactly that before inserting it.
+
+resource Fuel = Int
+def burn = unFuel ; _ 1 ; - ; Fuel
+
+def metered = ([burn ...] ; getCode) ... ; interpose
+functor Metered = metered
+
+# the header says it all: thread Fuel, then meter every stage
+def poly =
+    use Fuel Metered
+    dup ; *
+    dup ; +
+    _ 1 ; +
+
+# Every stage of the ELABORATED program burns one unit: six stages of
+# arithmetic (each `;` is a cut) and the claim stage `use Fuel` writes
+# first — see what the functor saw:
+"-- the metered wiring --" ; print
+[use Fuel ; dup ; * ; dup ; + ; _ 1 ; +] ; getCode ; metered ; unparse ; print
+
+"-- seven stages, seven units of fuel --" ; print
+(10 ; Fuel) 5 ; poly ; _ print ; unFuel ; print          # 51, then 3
+
+# The receipt is on the arrow: poly is `Int =Fuel> Int`.  Nothing
+# about the arrow says every stage was metered — that is provenance,
+# not a resource, and lands with the functor labels of the next stage.
+
+# The same functor at RUNTIME, lifted to Fn ⇒ Fn by lift2: the program
+# is its own witness, so the result has the program's arrow whatever
+# the functor did.  A program that threads Fuel is metered …
+"-- lift2: metered where it types --" ; print
+([metered] [use Fuel ; dup ; *] ; lift2) (10 ; Fuel) 5 ; apply ; _ print ; unFuel ; print   # 25, then 7
+
+# … and one that does not thread Fuel is left alone: the metered code
+# needs a wire the program never had, the witness refuses it, and the
+# original runs.
+"-- lift2: the original where it does not --" ; print
+([metered] [dup ; *] ; lift2) 5 ; apply ; print          # 25
