@@ -1,11 +1,16 @@
 # Codata. A Stream is defined by how it is OBSERVED, not how it is
 # built — an infinite object, forced one cell at a time. The tail is a
-# THUNK (Fn⟨• ⇒ Stream(a)⟩), so the recursion is guarded and
+# THUNK (Fn⟨• =Rec> Stream(a)⟩), so the recursion is guarded and
 # productive. Fn inside a `data` declaration is exactly what makes this
 # expressible; the generated fold is (correctly) withheld — a structural
 # fold through the thunk would never terminate.
+#
+# The thunk is written `=Rec>` because a `fix`-built producer fills it,
+# and a written arrow means its manifest: an unlabelled `Fn⟨• ⇒ …⟩`
+# would refuse `from` below. Productive, but unbounded — `Rec` claims
+# the second thing, not divergence.
 
-data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)
+data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)
 
 def headS = unStream >> (h t -> h)               # observe the first cell
 def tailS = unStream >> (h t -> t) >> apply       # force one step

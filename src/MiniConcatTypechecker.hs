@@ -15,7 +15,7 @@ import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
-import Data.Char (isAlphaNum, isDigit, isLower, isSpace)
+import Data.Char (isAlphaNum, isDigit, isLower, isSpace, isUpper)
 import Data.Bifunctor (first)
 import System.Directory (doesFileExist, canonicalizePath)
 import System.FilePath (takeDirectory, takeFileName, isAbsolute, (</>))
@@ -78,6 +78,16 @@ data EffRow = Eff { eLabels :: Set String, eTail :: Maybe EVar }
 -- io is a label like any other; it is spelled out here exactly once
 ioLabel :: String
 ioLabel = "IO"
+
+-- The second built-in label (2026-09-09).  `Rec` is minted by `fix` and
+-- `loop`, the only two words that can run unbounded now that a def is
+-- not in scope in its own body: it reads "may recurse without bound",
+-- NOT "diverges" — a labelled word can still be total, and an
+-- unlabelled one is fix-free, hence terminating by construction.
+-- Structural recursors (`foldList`, `foldTree`, … — emitted per `data`
+-- declaration) mint nothing: they are bounded by the value they eat.
+recLabel :: String
+recLabel = "Rec"
 
 eIO :: EffRow -> Bool
 eIO = S.member ioLabel . eLabels
@@ -654,7 +664,19 @@ unifyEff s e1 e2 =
              bindEffVar s' w (Eff d2 (Just u))
   where
     clash x y = Left $ "Cannot unify effects: " ++ showEff x
-                    ++ " vs " ++ showEff y
+                    ++ " vs " ++ showEff y ++ hint x y
+    -- One side unlabelled is the common shape and it has a fix worth
+    -- naming: an unlabelled manifest is one that was WRITTEN (inference
+    -- always leaves a tail to absorb into), so the repair is to write
+    -- the label there — `Fn⟨Int ⇒ Int⟩` refusing a `fix`/`while` body
+    -- wants `Fn⟨Int =Rec> Int⟩`.
+    hint (Eff l1 _) (Eff l2 _)
+      | S.null l1, not (S.null l2) = repair l2
+      | S.null l2, not (S.null l1) = repair l1
+      | otherwise                  = ""
+    repair ls = " (the unlabelled side's manifest is written and fixed: "
+             ++ "write =" ++ unwords (S.toList ls) ++ "> on that arrow, "
+             ++ "or keep this code label-free)"
     -- The residual tail of a pair, named from the pair itself: `solve`
     -- is a pure fold with no fresh-name supply, and a pair can be
     -- bridged only once (both its variables are bound by that step, so
@@ -1033,7 +1055,10 @@ data Token
   | TokLAngle     -- ⟨ (open a Fn type: Fn⟨Σ ⇒ Θ⟩)
   | TokRAngle     -- ⟩ (close a Fn type)
   | TokFatArrow   -- ⇒ (the arrow inside a Fn type)
-  | TokBangArrow  -- =IO> (and the older ⇒! / ->!): an IO arrow in a Fn type
+  | TokEffArrow [String]
+      -- =IO>, =Rec>, =IO Rec>, … (and the older ⇒! / ->!, which mean
+      -- =IO>): a LABELLED arrow inside a Fn type.  The labels are the
+      -- written manifest, in any order; display sorts them.
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
@@ -1063,11 +1088,15 @@ tokenize = go
     go ('(':cs)         = (TokLParen :) <$> go cs
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
-    -- `=IO>`: what the manifest DISPLAYS, so also what you write.  (The
-    -- older `⇒!`/`->!` spellings still lex, for source that predates
-    -- the 2026-09-06 move of io into the manifest.)
-    go ('=':'I':'O':'>':cs) = (TokBangArrow :) <$> go cs
-    go ('-':'>':'!':cs) = (TokBangArrow :) <$> go cs
+    -- `=IO Rec>`: what the manifest DISPLAYS, so also what you write.
+    -- Any label set, in any order, on one line; `=` that is not the
+    -- head of such an arrow (a `def`'s `=`) falls through to an
+    -- identifier.  (The older `⇒!`/`->!` spellings still lex as `=IO>`,
+    -- for source that predates the 2026-09-06 move of io into the
+    -- manifest.)
+    go ('=':cs)
+      | Just (labels, rest) <- lexEffArrow cs = (TokEffArrow labels :) <$> go rest
+    go ('-':'>':'!':cs) = (TokEffArrow [ioLabel] :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
     go ('-':cs)
       | (ds@(_:_), rest) <- span isDigit cs =
@@ -1078,7 +1107,7 @@ tokenize = go
     go (';':cs)         = (TokSeq :) <$> go cs   -- ; is a synonym for >>
     go ('⟨':cs)         = (TokLAngle :) <$> go cs     -- Fn⟨…⟩ type brackets
     go ('⟩':cs)         = (TokRAngle :) <$> go cs
-    go ('⇒':'!':cs)     = (TokBangArrow :) <$> go cs
+    go ('⇒':'!':cs)     = (TokEffArrow [ioLabel] :) <$> go cs
     go ('⇒':cs)         = (TokFatArrow :) <$> go cs
 
     go (c:cs)
@@ -1104,6 +1133,25 @@ tokenize = go
     isIdentChar ch =
       not (isSpace ch) && isNothing (unSup ch)
         && ch `notElem` (">.[](),-|#\"^;\8230\10216\10217\8658" :: String)
+
+    -- After a `=`: is this the head of a written manifest arrow?  It is
+    -- iff what follows is one or more capitalized label names separated
+    -- by blanks and closed by a single `>` on the same line.  The tests
+    -- are deliberately narrow so that `def f = A >> b` and `def f = g`
+    -- keep lexing as they always did: a label must start uppercase, and
+    -- the closing `>` must not be the first half of `>>`.
+    lexEffArrow cs =
+      let (body, rest) = span (\ch -> ch /= '>' && ch /= '\n') cs
+          labels = words body
+      in case rest of
+           ('>' : '>' : _) -> Nothing
+           ('>' : more)
+             | not (null labels)
+             , all isLabelName labels -> Just (labels, more)
+           _ -> Nothing
+
+    isLabelName (c : rest) = isUpper c && all isIdentChar rest
+    isLabelName []         = False
 
     -- string literal body: minimal escapes \" \\ \n
     lexStr ('\\':'"':cs)  = first ('"' :)  <$> lexStr cs
@@ -2294,7 +2342,7 @@ parseTyElem aliases dataSigs params toks = case toks of
       (TokRParen : _)   -> pure (SEnd, rest)
       (TokComma : _)    -> pure (SEnd, rest)
       (TokFatArrow : _) -> pure (SEnd, rest)   -- Fn⟨Σ ⇒ …⟩ boundary
-      (TokBangArrow : _) -> pure (SEnd, rest)  -- Fn⟨Σ ⇒! …⟩ boundary
+      (TokEffArrow _ : _) -> pure (SEnd, rest) -- Fn⟨Σ =IO> …⟩ boundary
       (TokArrow : _)    -> pure (SEnd, rest)   -- Fn(Σ -> …) boundary
       (TokRAngle : _)   -> pure (SEnd, rest)   -- Fn⟨… ⇒ Θ⟩ close
       []                -> pure (SEnd, [])
@@ -2308,8 +2356,9 @@ parseTyElem aliases dataSigs params toks = case toks of
       (rest2, grade) <- case rest1 of
                  (TokFatArrow : r)  -> Right (r, effPure)
                  (TokArrow : r)     -> Right (r, effPure)
-                 (TokBangArrow : r) -> Right (r, effIO)
-                 _ -> Left "Expected '⇒' (or '->', '⇒!') inside a Fn type"
+                 (TokEffArrow ls : r) -> Right (r, Eff (S.fromList ls) Nothing)
+                 _ -> Left "Expected '⇒' (or '->', '=IO>', '=Rec>') \
+                           \inside a Fn type"
       (outSt, rest3) <- goStack rest2
       case rest3 of
         (t : r) | t == close -> Right (TFn (Arrow inSt outSt grade), r)
@@ -2387,7 +2436,11 @@ substParams tmap m nmap = goT
     goT TInt         = TInt
     goT TStr         = TStr
     goT TSym         = TSym
-    goT (TFn (Arrow i o _)) = TFn (arrPure (goS i) (goS o))  -- substitute inside Fn
+    -- substitute inside Fn, KEEPING its grade: a nested written arrow
+    -- (`Fn⟨a =Rec> b⟩` in a theory slot, `Fn⟨a =IO> •⟩` in an alias)
+    -- carries a manifest, and dropping it here silently turned every
+    -- parameterized Fn pure (found 2026-09-09 by the Rec label).
+    goT (TFn (Arrow i o e)) = TFn (Arrow (goS i) (goS o) e)
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goS as)
     goT (TFin e)     = TFin (goE e)
@@ -2915,6 +2968,11 @@ primEnv =
       epsV = EV "ε"
       epsR = Eff S.empty (Just epsV)
       arrEps i o = Arrow i o epsR
+      -- `{Rec} ∪ ε`: the same passed-through grade, plus the receipt
+      -- that this arrow may recurse without bound.  Open, like an io
+      -- prim's row after `openEff`, so a pure neighbour absorbs it.
+      recR = Eff (S.singleton recLabel) (Just epsV)
+      arrRec i o = Arrow i o recR
       fnGD = TFn (arrEps (STail gam) (STail del))
       applyTy = Forall [] [gam, del] [] [] [epsV]
         (arrEps (SCons fnGD (STail gam)) (STail del))
@@ -2928,15 +2986,18 @@ primEnv =
       thereTy = Forall [] [SV "Δ"] [RV "σ"] [] []
         (arrPure (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
-      -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ ⇒ Θ — Elgot iteration: the body routes
-      -- to continue (re-enter) or done (exit)
+      -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ =Rec> Θ — Elgot iteration: the body
+      -- routes to continue (re-enter) or done (exit).  The ITERATION is
+      -- what may run unbounded, so `Rec` sits on loop's own arrow; the
+      -- body is an ordinary step and keeps its own grade (ε), which
+      -- passes through and unions with the label.
       loopTy =
         let sg = SV "Σ"; th = SV "Θ"
             body = TFn (arrEps (STail sg)
                      (one (TSum (RCons (STail sg)
                            (RCons (STail th) RNil)))))
         in Forall [] [sg, th] [] [] [epsV]
-             (arrEps (SCons body (STail sg)) (STail th))
+             (arrRec (SCons body (STail sg)) (STail th))
       -- fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
       -- fixpoint operator on Fn.  The body receives the knotted function
       -- DEEPEST, then its own arguments, so a recursive call is spelled
@@ -2947,12 +3008,19 @@ primEnv =
       -- the ONE place a program may be unbounded now that a definition
       -- is not in scope in its own body.  ε is shared with the inner
       -- Fn, like `apply`/`loop`: a pure body ties a pure knot.
+      --
+      -- The `Rec` label (2026-09-09) rides on the KNOT, not on `fix`:
+      -- tying it runs nothing, so fix's own arrow is pure and openEff
+      -- freshens it, while the self handed in and the Fn handed back
+      -- are `{Rec} ∪ ε`.  A body that never calls self is asked for no
+      -- grade at all; one that does absorbs Rec through ε, which is the
+      -- fixpoint of the grade and settles in one step.
       fixTy =
         let sgF = SV "Σf"; thF = SV "Θf"
-            selfF = TFn (arrEps (STail sgF) (STail thF))
+            selfF = TFn (arrRec (STail sgF) (STail thF))
             bodyF = TFn (arrEps (SCons selfF (STail sgF)) (STail thF))
         in Forall [] [sgF, thF] [] [] [epsV]
-             (arrEps (one bodyF) (one selfF))
+             (arrPure (one bodyF) (one selfF))
       int2 = SCons TInt (one TInt)
       codeStructTy = codeTy
       int2Router = Forall [] [] [] [] []

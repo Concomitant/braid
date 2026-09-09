@@ -1,8 +1,11 @@
 # Recursion is written with `fix`, at a typed boundary. A definition is
 # NOT in scope in its own body, so the knot is tied by a word with a
-# type — `fix : Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` — and the body
-# receives the recursive call DEEPEST, as an ordinary quoted function.
-# The three stages read: quote the body, tie the knot, apply it.
+# type — `fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — and the
+# body receives the recursive call DEEPEST, as an ordinary quoted
+# function. The three stages read: quote the body, tie the knot, apply
+# it. `Rec` is the receipt: `fix` and `loop` are the only words that can
+# run unbounded, so everything built from them says so on its arrow, and
+# a word with no `Rec` is fix-free and terminates by construction.
 
 def decr = _ 1 >> -
 def lt2? = _ 2 >> lt? >> (_ drop | _ drop)

@@ -118,8 +118,9 @@ bare `use` leaves.
 7. **Loops are values, and so is the knot.** `loop` is Elgot
    iteration; `while` and `until` are three-line prelude defs. A
    definition is *not* in scope in its own body: general recursion is
-   `fix : Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩`, which hands the body
-   its own knot as an ordinary argument.
+   `fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩`, which hands
+   the body its own knot as an ordinary argument — labelled `Rec`,
+   since `fix` and `loop` are now the only unbounded words (item 12).
 8. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
    Tree(a))` — the name rolls, `unTree` unrolls (both free at
    runtime), and `foldTree` is *generated*: elimination by points — a
@@ -203,7 +204,11 @@ bare `use` leaves.
     `=IO>`, a pure one `⇒`, and the label sits on the arrow just like
     resource names do. The manifest is a SET, though: a functor scope
     mints its own label onto everything it rewrote (item 14), and
-    `=IO Traced>` is an ordinary type. Which labels you get is
+    `=IO Traced>` is an ordinary type. `Rec` is the second built-in
+    member: `fix` and `loop` mint it, structural recursors (and so
+    `fold`, `map`, `filter`) do not — so **fix-free pure code
+    terminates by construction**, and an unlabelled written type
+    refuses recursive code exactly as it refuses io. Which labels you get is
     **inferred, never annotated**: four prims are marked
     (`print`, `readLine`, `readFile`, `writeFile`) and every
     other grade follows from composition — `def shout = toStr >> print : a0 =IO> •`.
@@ -304,7 +309,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 791-case test suite, a full
+(typechecker, interpreter, REPL), a 815-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

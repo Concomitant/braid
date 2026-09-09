@@ -30,14 +30,19 @@
 # nothing is inferred or dispatched. Slots also carry their OWN
 # variables now (`a b c` below), each generalized per slot.
 
-data Circuit(a, b) = Fn⟨a ⇒ b Circuit(a, b)⟩
+data Circuit(a, b) = Fn⟨a =Rec> b Circuit(a, b)⟩
 data Pair(a, b) = a b
+
+# The step function is `=Rec>`: every circuit below is built with `fix`,
+# and a written arrow means its manifest (MANUAL §14). The slots say so
+# too — a slot declares the MOST a model may do, and the pure model
+# below passes under a `=Rec>` slot by absorption.
 
 # `Fn` itself cannot fill `k`: it is built in, it takes an ARROW rather
 # than two wires, and a constructor parameter must name a declared data
 # type. One line of wrapping buys it — and gives the theory a second,
 # deliberately boring model to be audited against.
-data Arr(a, b) = Fn⟨a ⇒ b⟩
+data Arr(a, b) = Fn⟨a =Rec> b⟩
 
 # ---- the theory ------------------------------------------------------
 # A category with hom-objects, plus strength. `thenP` is composition,
@@ -50,11 +55,11 @@ data Arr(a, b) = Fn⟨a ⇒ b⟩
 # observation, which is what keeps the laws honest about being finite
 # tests of an infinite object.
 theory Arrow(k(_, _)) =
-    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-    thenP   : k(a, b) k(b, c) ⇒ k(a, c)
-    firstP  : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
-    observe : k(Int, Int) ⇒ Int
-    sample  : • ⇒ k(Int, Int)
+    arrP    : Fn⟨a =Rec> b⟩ =Rec> k(a, b)
+    thenP   : k(a, b) k(b, c) =Rec> k(a, c)
+    firstP  : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
+    observe : k(Int, Int) =Rec> Int
+    sample  : • =Rec> k(Int, Int)
     # The five laws. A leftmost atom in a stage is the DEEPEST wire, so
     # `X ...` slides X UNDER the stack and `_ X` puts it ON TOP; that is
     # how each law picks which side of `thenP` the other circuit goes on.

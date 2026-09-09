@@ -247,7 +247,11 @@ passTests =
   , ("toStr",         "a0 ⇒ Str")
   , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
-  , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 ⇒ ρ1")
+    -- STAGE 5a½: `loop` and `fix` are the two words that may run
+    -- unbounded, so they MINT the `Rec` label the way `print` mints IO.
+    -- `loop`'s body is an ordinary step (its own grade passes through
+    -- ε); the ITERATION is what carries Rec.
+  , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
     -- loop protocol aliases: again ≡ in1 (continue), done ≡ in2 (exit)
   , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
   , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
@@ -338,6 +342,15 @@ moduleTypeTests =
     -- the Unicode (Fn⟨…⟩) and ASCII (Fn(… -> …)) spellings
   , ("type Endo(a) = Fn⟨a ⇒ a⟩\n[dup >> *]",     "• ⇒ Endo(Int)")
   , ("type Endo(a) = Fn(a -> a)\n[dup >> *]",     "• ⇒ Endo(Int)")
+    -- a written label set is read in a `type` alias too, and the older
+    -- io spellings still mean `=IO>`
+  , ("type Sink(a) = Fn⟨a =IO> •⟩\n[print]",       "• ⇒ Sink(a0)")
+  , ("type Sink(a) = Fn(a ->! •)\n[print]",        "• ⇒ Sink(a0)")
+  , ("type Rep(a) = Fn⟨a =Rec> a⟩\n[[_ 100 >> less?] [2 _ >> *] ... >> while]",
+     "• ⇒ Rep(Int)")
+    -- and a nested Fn keeps its grade through alias instantiation
+  , ("type Run(a) = Fn⟨Fn⟨a =Rec> a⟩ a =Rec> a⟩\ndata W = (Run(Int))\nunW",
+     "W ⇒ Run(Int)")
   , ("type Pred(a) = Fn⟨a ⇒ (a | a)⟩\n[odd?]",    "• ⇒ Pred(Int)")
     -- a param substituted INSIDE the Fn (substStackVars into TFn), and
     -- folded back on display
@@ -356,6 +369,13 @@ moduleTypeTests =
     -- constructor carries the thunked tail
   , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\nStream",
         "a0 Fn⟨• ⇒ Stream(a0)⟩ ⇒ Stream(a0)")
+    -- …and a written label set is read back sorted, in a `data`
+    -- declaration like anywhere else: this is the thunk a `fix`-built
+    -- producer actually fills (examples/stream.braid)
+  , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\nStream",
+        "a0 Fn⟨• =Rec> Stream(a0)⟩ ⇒ Stream(a0)")
+  , ("data S2(a) = (a Fn⟨• =Rec IO> S2(a)⟩)\nS2",
+        "a0 Fn⟨• =IO Rec> S2(a0)⟩ ⇒ S2(a0)")
     -- pack: list introduction from a bundle — (elements ; pack) replaces
     -- the list(…) special form; elements are full programs, groups delimit
   , ("(1 2 3 >> pack)",          "• ⇒ List(Int)")
@@ -402,7 +422,7 @@ moduleTypeTests =
   , ("uncons",  "List(a0) ⇒ (• | a0 List(a0))")
   , ("cons",    "a0 List(a0) ⇒ List(a0)")
     -- stack-kinded parameters: zip without Pair
-  , ("zip",     "List(a0) List(a1) ⇒ List(Box(a0 a1))")
+  , ("zip",     "List(a0) List(a1) =Rec> List(Box(a0 a1))")
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
     -- STRENGTH as an ordinary word: run a program one wire deeper.
     -- Composing it once per context wire is exactly what threads a
@@ -433,9 +453,30 @@ moduleTypeTests =
     -- STAGE 5a½: recursion is a word with a type.  `fix` is the
     -- parameterized fixpoint on Fn: the body takes the knot DEEPEST and
     -- then its own arguments, and fix hands back the knotted Fn.
-  , ("fix", "Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
+  , ("fix", "Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩")
+    -- `fix` itself runs nothing — tying the knot is pure — so the label
+    -- sits on the knot it hands out and on the self it hands in, not on
+    -- its own arrow.  The body is asked for no grade of its own.
+  , ("while",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2")
+  , ("until",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ2 ⇒ ρ0⟩ ρ0 =Rec> ρ1")
+    -- structural recursors mint NOTHING: they are bounded by the value
+    -- they eat, so the whole derived library stays unlabelled
+  , ("foldList", "Fn⟨• ⇒ a0⟩ Fn⟨a0 a1 ⇒ a0⟩ List(a1) ⇒ a0")
+  , ("fold",   "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
+  , ("map",    "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
+  , ("filter", "Fn⟨a0 ⇒ (a1 | a2)⟩ List(a0) ⇒ List(a1)")
+  , ("reverse", "List(a0) ⇒ List(a0)")
+    -- absorption: a recursive word beside a pure one is Rec, not an
+    -- error — the union is what composition computes
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\ndef twice = fac >> dup >> +\ntwice", "Int =Rec> Int")
+    -- and the union with IO sorts: labels are a SET, displayed in order
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\ndef shout = fac >> toStr >> print\nshout", "Int =IO Rec> •")
+    -- a WRITTEN `=Rec>` takes recursive code AND pure code (the pure
+    -- quotation's row is open, so it absorbs the label)
+  , ("data Step = (Fn⟨Int =Rec> Int⟩)\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\n[fac] >> Step", "• ⇒ Step")
+  , ("data Step = (Fn⟨Int =Rec> Int⟩)\n[dup >> *] >> Step", "• ⇒ Step")
     -- a def built with fix keeps the arity its binder gives it
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\nfac", "Int ⇒ Int")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\nfac", "Int =Rec> Int")
     -- the generated STRUCTURAL RECURSOR is a builtin now, and its
     -- scheme is derived from the declaration rather than inferred from
     -- generated source.  Four shapes pin the derivation: a recursive
@@ -486,7 +527,7 @@ moduleTypeTests =
     -- one def used at two different types = let-polymorphism
   , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
     -- recursive defs (monomorphic self-reference)
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\nfib", "Int ⇒ Int")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\nfib", "Int =Rec> Int")
     -- a def body may leave a bracket open: the lines that close it
     -- belong to the body, so a blank line does not end the block and a
     -- `def`-looking line inside the bracket is code, not a declaration
@@ -635,6 +676,12 @@ moduleTypeTests =
     -- a functor's own word is UNLABELLED — it is called at elaboration,
     -- not elaborated under anything
   , (idF ++ "idF", "a0 ⇒ a0")
+    -- STAGE 5a½: `Rec` joins that same set.  A receipt, io and
+    -- recursion union in one manifest and display sorted.
+  , (idF ++ "def q = use Same >> [_ 100 >> less?] [2 _ >> *] ... >> while\nq",
+     "Int =Rec Same> Int")
+  , (idF ++ "def p = use Same >> [_ 100 >> less?] [2 _ >> *] ... >> while >> toStr >> print\np",
+     "Int =IO Rec Same> •")
     -- TEMPLATES: one body, two instantiations, two PRINCIPAL types.
     -- Nothing is dispatched and nothing is passed; the expansion is
     -- re-inferred where it lands, so there is no rank-1 wall.
@@ -842,6 +889,15 @@ evalTests =
     -- an index literal is a closed point, so it reflects like any
     -- other literal (not an open-arity word)
   , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> [10] c >> evalAs >> print) | print) >> forget", ["in1(20)"], "")
+    -- STAGE 5a½: an `evalAs` WITNESS is a written type, so an
+    -- unlabelled one refuses recursive code — the sandbox reads `Rec`
+    -- exactly as it reads io, and the refusal rides the miss track
+  , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget",
+     ["in2(Cannot unify effects: Rec vs pure (the expected type fixes the grade; this code must stay pure), 7)"], "")
+    -- a witness that itself recurses is `=Rec>`, and then the same
+    -- code is admitted
+  , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [[_ 200 >> less?] [3 _ >> *] ... >> while] c (7) >> evalAs >> print) | print) >> forget",
+     ["in1(112)"], "")
   , ("1 >> sumN _",                                 [],     "0 1")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
@@ -1288,7 +1344,7 @@ evalTests =
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
-  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
+  , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
     -- vertical track-columns: flat 3-sum via inject-and-collapse, then
     -- bare rows each touching one track (empty arms pass)
   , ("def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
@@ -1480,6 +1536,20 @@ moduleFailTests =
     -- is not decoration
   , ("data Quiet = (Fn⟨Str ⇒ •⟩)\n[print] >> Quiet >> drop",
      "Cannot unify effects")
+    -- STAGE 5a½: …and it refuses a RECURSIVE one for the same reason.
+    -- A codata thunk built by `fix` must be declared `=Rec>`; the
+    -- message says which label to write.
+  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply\n0 >> from >> drop",
+     "Cannot unify effects: pure vs Rec (the unlabelled side's manifest is written and fixed: write =Rec> on that arrow, or keep this code label-free)")
+    -- a NESTED written Fn keeps its grade through the `k := <data>`
+    -- substitution: substituting theory parameters used to rebuild every
+    -- nested Fn pure, which silently dropped the declared manifest
+  , ("theory Emb(k(_, _)) =\n    arrP : Fn⟨a =Rec> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\ninstance A : Emb(Arr) =\n    arrP = Arr\n\ndef go = use A ; arrP\n[dup >> *] >> go >> drop",
+     "slot 'arrP' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Rec> a1⟩ ⇒ Arr(a0, a1)")
+    -- a theory slot declared pure refuses a `fix`-built body — the same
+    -- rule that already refused an io body under a pure slot
+  , ("theory Stepper =\n    step : Int ⇒ Int\n\ninstance Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> apply)) >> merge)] ... >> fix ... >> apply\n\ndef go = use Fixed ; step\n5 >> go >> drop",
+     "slot 'step' is Int =Rec> Int but theory Stepper declares Int ⇒ Int (Cannot unify effects: Rec vs pure")
     -- the bound must agree with the bundle's actual width
   , ("fin0 >> 1 2 >> at",             "Cannot unify")
     -- a closed non-final open word that doesn't cover its wires is an

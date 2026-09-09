@@ -45,7 +45,8 @@ the current stack is rejected with a message naming the stack.
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
 | `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
-| `=IO>` , `⇒!` , `->!` | the io manifest label on an arrow (§3); legacy spellings still lex |
+| `=IO>` , `⇒!` , `->!` | the io manifest label on an arrow (§3); the last two are legacy spellings |
+| `=Rec>` , `=IO Rec>` | any written label set, in any order — displayed sorted (§3) |
 | `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, manifest included (§3, §8) |
 | `=Traced>` | a functor's receipt: minted by `use Traced`, never written (§3, §12) |
 | `import "f.braid"` | include another file's declarations (§8) |
@@ -122,8 +123,10 @@ every other arrow's grade follows from composition. Higher-order words
 quotation they run, so one `apply` serves pure and effectful quotes
 alike. Effect tails are invisible in display, the same hiding a `ρ`
 tail already gets inside `Fn⟨…⟩`. Writing a grade in a type: §5 and
-§8. The two edges: §14. The `=IO>` spelling is writable in declarations;
-the older `⇒!` and `->!` spellings still lex for old source.
+§8. The two edges: §14. A label set is **writable** wherever a type is
+written — `=IO>`, `=Rec>`, `=IO Rec>`, in any order, displayed sorted;
+the older `⇒!` and `->!` spellings still lex for old source and mean
+`=IO>`.
 
 **A threaded resource folds onto the arrow too.** A `resource` (§8) is
 a nominal wire you thread rather than consume; resource wires ride
@@ -160,6 +163,38 @@ Only a `use` mints. The label is not written, cannot be written
 threaded — which is what makes it evidence rather than a comment. It
 is also part of the type: a declaration that says `Fn⟨Int ⇒ Int⟩`
 refuses instrumented code exactly as it refuses io (§12, §14).
+
+**And recursion leaves one too — `Rec`** (2026-09-09). `Rec` says *may
+recurse without bound*, not *diverges*: it records that the word went
+through the one operator that can iterate forever, which is a fact
+about provenance and not a termination proof. A definition is not in
+scope in its own body (§8), so `fix` and `loop` are the only two words
+that can run unbounded — and they are the only two that mint `Rec`:
+
+```text
+fac    : Int =Rec> Int              -- built with `fix`
+while  : Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2
+fold   : Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0    -- a structural recursor: bare
+map    : Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)    -- derived from it: bare
+report : Int =IO Rec> •             -- unions like any other label
+```
+
+The generated structural recursors (`foldList`, `foldTree`, `foldNat`,
+§8) descend on a smaller value and mint nothing, so the whole derived
+library — `fold`, `map`, `filter`, `reverse`, `append`, `concat` —
+stays bare. The reading that buys: **an unlabelled word is `fix`-free,
+and therefore terminates by construction.**
+
+The built-in labels, then:
+
+| label | minted by | says |
+|---|---|---|
+| `IO` | the four io prims (`print`, `readLine`, `readFile`, `writeFile`) | touched the world |
+| `Rec` | `fix` and `loop` | may recurse without bound |
+| `F` (any functor) | `use F` on a `functor` (§12) | was rewritten by `F` |
+| `R` (any resource) | `use R` on a `resource` (§8) | threads the `R` wire |
+
+One mechanism, four readings; union along composition for all of them.
 
 ## 4. The remainder discipline
 
@@ -220,7 +255,9 @@ Type formers:
   hom: `apply` is modus ponens. The arrow inside carries its grade, and
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
   (*Cannot unify effects: IO vs pure*); `Fn⟨Str =IO> •⟩` is the io form
-  (§8).
+  (§8). The same holds for every other label — `Fn⟨Int ⇒ Int⟩` refuses
+  a quotation that uses `while` or `fix`; write `Fn⟨Int =Rec> Int⟩`
+  (§14).
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
   match exactly (`:t!` shows raw).
@@ -586,8 +623,13 @@ def name =                    # block body — `=` ends the line,
 - **Recursion is `fix`**, a word with a type:
 
   ```braid
-  fix : Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩
+  fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩
   ```
+
+  Tying the knot is itself pure — `fix` runs nothing — so the `Rec`
+  label (§3) sits on the knot it hands *out* and on the `self` it hands
+  *in*, never on `fix`'s own arrow. The body is asked for no grade of
+  its own; it acquires `Rec` the moment it calls `self`.
 
   The body receives the knotted function **deepest**, then its own
   arguments, so the recursive call is an ordinary quoted call —
@@ -599,7 +641,7 @@ def name =                    # block body — `=` ends the line,
       [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ...
       fix ...
       apply
-  # fac : Int ⇒ Int      5 >> fac  →  120
+  # fac : Int =Rec> Int      5 >> fac  →  120
   ```
 
   `... ` carries the arguments over the quote (a stage's leftmost atom
@@ -619,7 +661,8 @@ def name =                    # block body — `=` ends the line,
   recursion is a tail call — it is one word and needs no knot — and
   prefer the **generated structural recursor** (`foldTree`, `foldNat`,
   the prelude's `fold`) when the recursion is structural, since those
-  descend on a smaller value and terminate by construction.
+  descend on a smaller value and terminate by construction — and, being
+  bounded, mint no `Rec`.
 - **Limit** (unchanged from stage 3⅞): the knot arrives as a binder
   parameter, so a self-call inside a row component or a quotation is a
   closure, and closures do not `reflect` yet. A `use F` functor over
@@ -640,7 +683,7 @@ type Pred(a) = Fn(a -> (a | a))       # …Unicode Fn⟨Σ ⇒ Θ⟩ or ASCII Fn
 type Sink(a) = Fn⟨a =IO> •⟩           # an io program: =IO> (writable; ASCII `->!` or old `⇒!` still lex)
 data List(a) = (• | a List(a))        # recursive nominal type
 data Tree(a) = (a | Tree(a) Tree(a))
-data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # codata: recursion THROUGH a Fn
+data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)  # codata: recursion THROUGH a Fn
 ```
 
 **Parameters are kinded**, three ways. A bare name stands for exactly
@@ -797,13 +840,13 @@ readings are already taken (a name is a wire, `...` is a stack), and a
 kind that is invisible is a kind that is guessed. Slots then apply it:
 
 ```braid
-data Circuit(a, b) = Fn⟨a ⇒ b Circuit(a, b)⟩
+data Circuit(a, b) = Fn⟨a =Rec> b Circuit(a, b)⟩
 data Pair(a, b) = a b
 
 theory Arrow(k(_, _)) =
-    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-    thenP   : k(a, b) k(b, c) ⇒ k(a, c)
-    firstP  : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
+    arrP    : Fn⟨a =Rec> b⟩ =Rec> k(a, b)
+    thenP   : k(a, b) k(b, c) =Rec> k(a, c)
+    firstP  : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
     …
 
 instance Circuits : Arrow(Circuit) =
@@ -822,16 +865,21 @@ ordinary types:
 braid> use Circuits
 ambient: use Circuits   (:clear or a bare `use` to leave)
 braid> :t arrP
-arrP : Fn⟨a0 ⇒ a1⟩ ⇒ Circuit(a0, a1)
+arrP : Fn⟨a0 =Rec> a1⟩ =Rec> Circuit(a0, a1)
 braid> :t thenP
-thenP : Circuit(a0, a1) Circuit(a1, a2) ⇒ Circuit(a0, a2)
+thenP : Circuit(a0, a1) Circuit(a1, a2) =Rec> Circuit(a0, a2)
 braid> :t firstP
-firstP : Circuit(a0, a1) ⇒ Circuit(Pair(a0, a2), Pair(a1, a2))
+firstP : Circuit(a0, a1) =Rec> Circuit(Pair(a0, a2), Pair(a1, a2))
 braid> use Funcs
 ambient: use Funcs   (:clear or a bare `use` to leave)
 braid> :t firstP
 firstP : Arr(a0, a1) ⇒ Arr(Pair(a0, a2), Pair(a1, a2))
 ```
+
+The slots carry `=Rec>` because the `Circuit` model builds every
+circuit with `fix`; the function model does not, and a pure body under
+a `=Rec>` slot passes by absorption — which is why `Funcs`'s `firstP`
+comes back bare. A slot declares the *most* a model may do, as ever.
 
 A slot is reached **through its scope, or not at all**: the compiler's
 own spelling for the generated def is `Circuits@arrP`, and writing an
@@ -998,14 +1046,22 @@ carriers — and, when the recursion runs *through* the `Fn`, gives
 **codata**:
 
 ```braid
-data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)   # head + a THUNKED tail
+data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)   # head + a THUNKED tail
 ```
+
+The thunk is declared `=Rec>` because a stream producer is built with
+`fix` (below), and a written arrow means what it says: an unlabelled
+`Fn⟨• ⇒ Stream(a)⟩` refuses the very thunk the producer makes. `Rec`
+is the honest word for it — the object is **productive** (every force
+returns one cell) but **unbounded** (there is no last cell), and `Rec`
+claims exactly the second thing.
 
 A codata type gets constructor/unroll as usual but **no `foldName`** —
 a structural fold through the thunk would diverge, so it is withheld by
 construction; you observe instead (`unStream`, then `apply` to force
-one cell). Productive corecursion guards its self-call under a quote
-(`def from = (n -> n [n 1 >> + >> from] >> Stream)`). See
+one cell). Productive corecursion guards its self-call under a quote —
+`def from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply`,
+whose self-call still sits under the thunk. See
 `examples/stream.braid`. Caveat: a `Fn` type whose stacks carry two
 open stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands, but won't
 display-fold back (the leading-splice match is ambiguous — pin one
@@ -1126,8 +1182,8 @@ Sums & control:
 | `there` | `(σ0) ⇒ (ρ0 \| σ0)` |
 | `merge` | `(ρ0 \| ρ0) ⇒ ρ0` |
 | `apply` | `Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1` |
-| `loop` | `Fn⟨Σ ⇒ (Σ\|Θ)⟩ Σ ⇒ Θ` — Elgot iteration (`again`/`done`) |
-| `fix` | `Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` — the knot; body takes it deepest (§8) |
+| `loop` | `Fn⟨Σ ⇒ (Σ\|Θ)⟩ Σ =Rec> Θ` — Elgot iteration (`again`/`done`); mints `Rec` (§3) |
+| `fix` | `Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — the knot; body takes it deepest, and the knot carries `Rec` (§8) |
 
 Metaprogramming & IO (railway-typed edges):
 
@@ -1236,7 +1292,8 @@ validation mirror). See `examples/settle.braid`.
 `firstTrue` `matchWith` `choose` `ifRoute` `elifRoute`.
 
 **Loops**: `while` `until` (+ `whileFn`/`untilFn`) — three-line defs
-over `loop`.
+over `loop`, and so `=Rec>`:
+`while : Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2`.
 
 **Bundles**: `sumN : Intⁿ ⇒ Int`; `pack : aⁿ ⇒ List(a)` and `pack2`
 (derived from their own eliminators — `foldExp` + `cons`/`reverse`,
@@ -1589,6 +1646,28 @@ holds for them too: final atom of their stage (§9).
   (`use Traced ; […]` as the witness), or elaborate the word outside
   the functor. Inferred types never hit this: they just carry the
   label onward.
+- **And a written type with no `Rec` refuses recursive code.** This is
+  the same rule a third time, and it is the one you will meet without
+  ever writing a functor: `Fn⟨Int ⇒ Int⟩` will not take a quotation
+  that uses `while` (or `until`, or `fix`, or any word built from
+  them). Write `Fn⟨Int =Rec> Int⟩`.
+
+  ```text
+  data Sink = (Fn⟨Int ⇒ Int⟩)
+  [[_ 100 >> less?] [2 _ >> *] ... >> while] >> Sink >> drop
+
+  error: Cannot unify effects: Rec vs pure (the unlabelled side's
+  manifest is written and fixed: write =Rec> on that arrow, or keep
+  this code label-free)
+  ```
+
+  It reaches three places in particular: a codata declaration's thunk
+  (`data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)` — §8), a theory slot a
+  `fix`-built body will fill (`examples/circuits.braid`), and an
+  `evalAs` witness over runtime-loaded code that loops. A `=Rec>`
+  arrow still accepts *non*-recursive code — an inferred row is open
+  and absorbs the label — so the labelled spelling is the permissive
+  one, and the bare spelling is the promise.
 - Several effectful atoms in one tensor stage are **legal**, and run
   left to right — deepest wire first, the order they are written in
   (`print print : a0 a1 =IO> •`). That order is decreed, not checked, so

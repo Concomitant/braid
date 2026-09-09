@@ -98,6 +98,24 @@ types as io. Let-generalization at `def` boundaries restores per-use
 freshness; inside one expression nothing does. (ASCII `->!` and the old
 `⇒!` spelling still lex for backward compatibility.)
 
+**Amendment (2026-09-09) — the label set has a second built-in member,
+and the written spelling generalizes.** Stage 5a½ took a definition out
+of scope in its own body, leaving `fix` and `loop` as the only words
+that can run unbounded; both now mint `Rec` the way the four io prims
+mint `IO`. `Rec` says *may recurse without bound*, not *diverges* — it
+is provenance, like every other label, and it unions along composition
+(`Int =IO Rec> •`). Generated structural recursors mint nothing, since
+they descend on a smaller value, so `fold`, `map`, `filter` and the
+rest of the derived library stay bare; the reading that buys is that an
+unlabelled word is `fix`-free and therefore terminates by construction.
+`fix`'s own arrow stays pure — tying the knot runs nothing — and the
+label rides on the knot it returns and the `self` it passes in. The
+written spelling widened to match: `=L1 L2>` is read wherever `=IO>`
+was, in any order, displayed sorted, so `Fn⟨• =Rec> Stream(a)⟩` and
+`Fn⟨a =IO Rec> b⟩` are ordinary written types. And the strictness above
+now bites in one more place, which is the honest cost: an unlabelled
+written `Fn⟨Int ⇒ Int⟩` refuses a quotation that uses `while`.
+
 ## Stages 2 and 4 as shipped (2026-08-26)
 
 **A `resource` is a `data` declaration under another keyword.**
