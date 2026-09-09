@@ -736,6 +736,94 @@ structural rules (linearity as a mode). The ladder, complete:
 specialization of the next; markers survive at every rung; inference
 guaranteed at 1–2½, open at 3.
 
+## Amendment (2026-09-09): the manifest, stated once — and modes as carrier labels
+
+*Written because every remaining stage adds a kind of label and this
+record had never said what a label IS. Supersedes the "mode field" of
+the rung-2½ amendment above; keeps its objects-shared/composition-owned
+reading.*
+
+**What a manifest is.** Every arrow is `Σ =L> Θ` for a finite set `L`
+of labels; the pure arrow is `L = ∅` and prints `⇒`. Braid is a
+category graded by the join-semilattice `(P(Labels), ∪, ∅)` —
+Katsumata's grades from an ordered monoid, with the monoid idempotent,
+so a grade is a set and not a count. Composition: `Σ =L> Θ` then
+`Θ =M> Ξ` is `Σ =L∪M> Ξ`.
+
+Every label names a functor that a WRITTEN `use` applied to code — the
+four io prims being the one pre-applied case — and the fibre over `L`
+is the image of the composite of those functors. Union is the right
+monoid because a label is *provenance* ("this code went through F"),
+and provenance is monotone under composition. That is invariant five
+in one sentence: markers are written, receipts are inferred, and only
+a `use` can mint.
+
+A label's **carrier** is what its functor adds to the objects:
+
+| label | its functor | carrier | the fibre over it |
+|---|---|---|---|
+| resource `E` (stage 7) | `E ⊗ –`, routing | a wire of type `E` | `C(E⊗Σ, E⊗Θ)`, Power–Robinson's state construction |
+| `IO` | `World ⊗ –`, pre-applied to four prims | the linear World, abstract | the same, with a carrier you cannot touch |
+| functor receipt `F` | the declared `Code ⇒ Code` word | none | the base category, marked |
+| mode `K` | `;` ↦ `thenP`, atoms ↦ `arrP`, from an instance of `Arrow(k)` | the hom-object `K(a, b)` | the category the instance presents, embedded as its hom-objects |
+
+The order `L ≤ L ∪ M` induces a functor between fibres: for carriered
+labels, whiskering by the extra carriers — what absorption does in the
+solver and what `use` routing writes as `_` padding; for carrier-less
+labels, the identity on homs, the fibre being a marked copy of the
+base. One mechanism, four readings; every difference is in the carrier
+column.
+
+**Display** is where label and carrier meet: a carrier shared by both
+sides folds away and the label stands for it. `Log Str ⇒ Log` prints
+`Str =Log> •` today; `• ⇒ K(a, b)` carrying `K` will print `a =K> b`.
+The label and the carrier are one thing said two ways — which is why a
+mode receipt and a functor receipt look alike: they are alike.
+
+**Inference** is design-effects.md's: label-absorbing row unification
+with tails, an inferred manifest meaning "at least `L`", composition
+unifying tails rather than joining sets (principal, single pass), the
+join recovered by absorption. Written types are compared by
+subsumption with the tail skolemized, so an unlabelled written type
+refuses labelled code — the sandbox reads provenance exactly as it
+reads io.
+
+**Not a coeffect** (labels union; "every stage is in the image" is the
+intersection half, still open), **not a rewrite trigger** (receipts are
+inference's output), **not a count** (idempotent; cost is another arc).
+
+**Modes, restated (Daniel, 2026-09-09).** The rung-2½ amendment above
+gave `Arrow` a nominal mode field and made a K-word outside its scope
+"the reified `K(a,b)` value" — two views of one word, and a rule that
+composing two of them outside `use K` is a type error. Both go. A mode
+is a label with a carrier, and nothing else on the arrow is new:
+
+- `mode K = Inst` declares a functor (`;` ↦ `thenP`, atoms ↦ `arrP`)
+  whose receipt is `K` and whose carrier is `k(a, b)`. `use K` applies
+  it and mints `K`, like any functor scope.
+- A K-word is, at the base, `• ⇒ K(a, b)` carrying `K`, displayed
+  `a =K> b` by the fold. There is one view: the carrier.
+- Outside `use K`, `f ; g` is base composition of two carrier-producing
+  words — two circuits side by side, displayed UNFOLDED because the
+  fold wants one carrier. Well-typed, honest, visibly not composition
+  in K. Composition in K is written under the marker. No error, because
+  there is no second kind of arrow to protect.
+- Inside `use K` the elaborator leaves an atom alone iff it is a
+  K-word — declared under `use K`, syntactic knowledge in the same
+  table as functors — and `arrP`s everything else. The table is exact
+  because **exits are the only way out**: a mode's eliminators
+  (`observe`, step/run, `reify`) are theory slots, legal only outside
+  `use K` and refused by name inside it, so every K-scoped word
+  produces a carrier. Entering is a marker; leaving is a model.
+
+**Templates, restated (same day; no `@`).** A def whose `use` names a
+THEORY is a template — its body waits for an instance; a def whose
+`use` names an INSTANCE instantiates every template it calls, the body
+expanded there, renamed by that instance, re-inferred (no rank-1
+wall). ML-functor application by the renaming that already exists;
+`def f(C)` and `f@C` are withdrawn. And `@`-names are the compiler's
+spelling only: `use@F` cannot be written, and `Inst@slot` joins it.
+
 ## Surface decisions (2026-08-29)
 
 - **Declaration layer, direction 3**: fixed name-first surface

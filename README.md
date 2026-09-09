@@ -85,7 +85,7 @@ bare `use` leaves.
    principal.
 2. **Sums are alternate flows.** `(Int | Str)` is one wire carrying
    either. Rows `(f | g)` run one branch; `merge` rejoins; `assocL` /
-   `assocR` re-nest; `case(a, b, c)` folds a whole nested sum at once.
+   `assocR` re-nest; `case3` folds a whole nested sum at once.
    Bool is just `(• | •)`.
 3. **Predicates are routers.** `odd? : Int ⇒ (Int | Int)` *routes*
    its input instead of returning a detached boolean — branches
@@ -250,7 +250,7 @@ bare `use` leaves.
 `examples/` is the guided tour: start with `fizzbuzz`, `validate`
 (railway), `ladder` (every guard idiom), `iterate` (while), then `nat`
 and `tree` (data types and folds), `lists`, `conditionals` and `case`
-(rows, deferred sums, `case(…)`), `tag` (naming wires in passing),
+(rows, deferred sums, `case3`), `tag` (naming wires in passing),
 `resources` (threaded wires and `use`),
 `lifting` (every functor is `Fn⟨a ⇒ b⟩ ⇒ something better`:
 the logged version of a function, game rules as lifted moves),
