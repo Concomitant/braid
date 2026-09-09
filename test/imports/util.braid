@@ -1,0 +1,18 @@
+## a library file: its declarations travel, its main does not
+type Celsius = Int
+
+resource Tally = Int
+def bump = unTally >> _ 1 >> + >> Tally
+
+def double = dup >> +
+
+theory Sink(a) =
+    emit : a ⇒ a
+
+instance Loud : Sink(Int) =
+    emit = dup >> *
+
+def idF = (c -> c)
+functor Same = idF
+
+"util.braid's own main — NOT run when imported" >> print

@@ -1,0 +1,2 @@
+import "util.braid"
+def rightSide = double >> _ 2 >> +

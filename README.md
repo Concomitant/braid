@@ -76,7 +76,7 @@ bare `use Log` line opens an ambient scope over the rest of the
 session — the resource threads itself through every later line, and a
 bare `use` leaves.
 
-## A tour, in thirteen ideas
+## A tour, in fifteen ideas
 
 1. **Everything exact.** Constants are maps from nothing (`1 : • ⇒
    Int`), operations consume exactly their inputs (`+ : Int Int ⇒
@@ -236,6 +236,14 @@ bare `use` leaves.
     which functors built a word and every caller inherits it. Only a
     `use` can mint one — written by hand it is an error — which is what
     makes it evidence.
+15. **A file is a presentation, an import is the inclusion.**
+    `import "geometry.braid"` puts one file's declarations — defs,
+    types, resources, theories, instances, functors — in another file's
+    scope. Objects are added, never merged: a clash is an error naming
+    both files, a diamond includes the shared file once, a cycle is
+    reported. What does not travel is the imported file's main program,
+    so a library keeps its own demo. Nothing needed machinery of its
+    own; the composite is checked as a single module.
 
 ## Examples
 
@@ -256,7 +264,8 @@ meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
 `code`, `transpose`, `io`, `witness` (the program as its own witness),
 `traced` and `metered` (functors: a tracer that lifts at every cut,
-a resource metered by one checked interposition) — and finish with
+a resource metered by one checked interposition),
+`imports` (one file's declarations in another file's scope) — and finish with
 `registrar`, which uses most of the language in forty lines about
 grade school.
 
@@ -274,7 +283,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 733-case test suite, a full
+(typechecker, interpreter, REPL), a 742-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

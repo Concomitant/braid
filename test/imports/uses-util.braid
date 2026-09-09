@@ -1,0 +1,11 @@
+import "util.braid"
+
+def quadruple = double >> double
+
+def scored =
+    use Tally Loud Same
+    emit
+    double
+
+7 >> quadruple >> print
+(0 >> Tally) 5 >> scored >> _ print >> unTally >> print

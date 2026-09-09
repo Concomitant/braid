@@ -28,7 +28,15 @@ main = do
 
 runFile :: FilePath -> IO ()
 runFile path = do
-  src <- readFile path
+  loaded <- loadSource path
+  case loaded of
+    Left err -> do
+      hPutStrLn stderr $ "error: " ++ err
+      exitFailure
+    Right src -> runLoaded src
+
+runLoaded :: String -> IO ()
+runLoaded src = do
   res <- runModule src
   case res of
     Left err -> do
@@ -54,6 +62,10 @@ data ReplState = ReplState
   , rsStackTy  :: SType      -- type of the current stack (internal names)
   , rsStack    :: [Value]    -- the current stack, front wire first
   , rsUse      :: [String]   -- ambient `use` scope: a session-wide body
+  , rsSlots    :: [(String, [String])]  -- instance name -> its theory's slots
+  , rsFuncs    :: [(String, String)]    -- functor name -> its word
+    -- a session cannot DECLARE a theory or a functor, but `:import` can
+    -- bring them in, and then `use` must know them
   }
 
 initialState :: ReplState
@@ -63,13 +75,13 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] []
+            [] SEnd [] [] [] []
 
 repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :s stack, :defs, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :import \"f.braid\", :s stack, :defs, :clear, :q quit"
   runInputT defaultSettings (loop initialState)
 
 -- haskeline supplies line editing, history (up-arrow), and ctrl-d;
@@ -112,6 +124,8 @@ loop st = do
           | ":doc " `isPrefixOf` l -> do
               liftIO (docOf st (trim (drop 5 l)))
               loop st
+          | ":import " `isPrefixOf` l ->
+              liftIO (importLine st (trim (drop 8 l))) >>= loop
           | ":" `isPrefixOf` l -> do
               liftIO (putStrLn ("unknown command: " ++ l))
               loop st
@@ -129,6 +143,13 @@ continueOpen line = go (lineDepth line) line
           case mnext of
             Nothing   -> pure Nothing
             Just next -> go (d + lineDepth next) (acc ++ "\n" ++ next)
+
+-- what a session's lines are checked on top of: everything it has
+-- accumulated, including the instances and functors `:import` brought in
+baseOf :: ReplState -> ModuleBase
+baseOf st =
+  (moduleBase (rsEnv st) (rsRun st) preludeNames (rsAliases st) (rsDatas st))
+    { mbSlots = rsSlots st, mbFuncs = rsFuncs st }
 
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
@@ -226,6 +247,55 @@ typeOfWith render st src =
     Left err  -> putStrLn $ "error: " ++ err
     Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
 
+-- `:import "path.braid"` — the file's DECLARATIONS, in this session's
+-- scope.  Its main program is not run (a library's demo is its own
+-- business), and its own imports are resolved first, exactly as in a
+-- file.  This is also the only way a session gets a theory, an instance
+-- or a functor, since it cannot declare one.
+importLine :: ReplState -> String -> IO ReplState
+importLine st arg =
+  case parseImportLine ("import " ++ arg) of
+    Left err -> putStrLn ("error: " ++ err) >> pure st
+    Right path -> do
+      loaded <- loadDecls path
+      case loaded of
+        Left err -> putStrLn ("error: " ++ err) >> pure st
+        Right src ->
+          case checkModuleWith (baseOf st) src
+                 >>= \m -> (,) m <$> moduleSlotTable m of
+            Left err -> putStrLn ("error: in " ++ path ++ ": " ++ err)
+                          >> pure st
+            Right (m, slots) -> do
+              let names = [ n | (n, _, _) <- modDefs m ]
+                  shadowed = map aName (modAliases m) ++ map dName (modDatas m)
+                  st' = st
+                    { rsEnv      = modEnv m
+                    , rsRun      = buildRunDefs (rsRun st) m
+                    , rsAliases  = modAliases m
+                                     ++ filter ((`notElem` shadowed) . aName)
+                                               (rsAliases st)
+                    , rsDatas    = modDatas m
+                                     ++ filter ((`notElem` shadowed) . dName)
+                                               (rsDatas st)
+                    , rsDocs     = modDocs m `M.union` rsDocs st
+                    , rsUserDefs = rsUserDefs st
+                                     ++ [ n | n <- names
+                                            , n `notElem` rsUserDefs st ]
+                    , rsSlots    = slots ++ rsSlots st
+                    , rsFuncs    = modFunctors m ++ rsFuncs st
+                    }
+              putStrLn $ "imported " ++ path ++ "   ("
+                       ++ intercalate ", " (filter (not . null)
+                            [ count (length names) "def"
+                            , count (length (modDatas m) + length (modAliases m)) "type"
+                            , count (length (modInstances m)) "instance"
+                            , count (length (modFunctors m)) "functor" ])
+                       ++ ")"
+              pure st'
+  where
+    count 0 _    = ""
+    count n what = show n ++ " " ++ what ++ (if n == 1 then "" else "s")
+
 handleLine :: ReplState -> String -> IO ReplState
 handleLine st line
   -- `use` at the top level.  In a file the body is the rest of the
@@ -238,9 +308,10 @@ handleLine st line
           putStrLn "left the ambient scope"
           pure st { rsUse = [] }
         _ | Just bad <- firstUnknown names -> do
-              putStrLn $ "error: `use`: " ++ bad ++ " is not a resource \
-                         \(a session cannot declare theories or functors, \
-                         \so instances and functors are file-only)"
+              putStrLn $ "error: `use`: " ++ bad ++ " is not a resource, \
+                         \instance or functor in scope (a session cannot \
+                         \declare theories or functors — `:import` a file \
+                         \that does)"
               pure st
           | otherwise -> do
               putStrLn ("ambient: use " ++ unwords names
@@ -250,22 +321,27 @@ handleLine st line
     plainName n = not (null n) && all (\c -> isAlphaNum c || c == '_') n
     firstUnknown ns =
       case [ n | n <- ns
-               , not (any (\d -> dName d == n && dResource d) (rsDatas st)) ] of
+               , not (any (\d -> dName d == n && dResource d) (rsDatas st))
+               , n `notElem` map fst (rsSlots st)
+               , n `notElem` map fst (rsFuncs st) ] of
         (n : _) -> Just n
         []      -> Nothing
 
 handleLine st line =
   case splitDefs line of
     Left err -> report err
-    Right ([(name, _, _)], [], [], rest)
+    Right ([(name, _, _)], [], [], [], rest)
       | all isSpace rest -> defLine name
-    Right ([], [(tyLine, _)], [], rest)
+    Right ([], [(tyLine, _)], [], [], rest)
       | all isSpace rest -> typeLine tyLine
-    Right ([], [], [], _) -> programLine
+    Right ([], [], [], [], _) -> programLine
     -- theory/instance are block declarations: they need a whole module
-    Right (_, _, (_ : _), _) ->
+    Right (_, _, (_ : _), _, _) ->
       report "theory and instance are file declarations — put them in a \
              \.braid file rather than a REPL line"
+    Right (_, _, _, (_ : _), _) ->
+      report "import is a file declaration — `:import \"path.braid\"` brings \
+             \one into a session"
     Right _           -> report "one definition per line, please"
   where
     report err = putStrLn ("error: " ++ err) >> pure st
@@ -308,8 +384,8 @@ handleLine st line =
               case dataFoldSrc dd of
                 Nothing -> pure st1
                 Just (fn, body) ->
-                  case checkModuleWith (M.delete fn (rsEnv st1)) (rsRun st1) preludeNames
-                         (rsAliases st1) (rsDatas st1)
+                  case checkModuleWith
+                         (baseOf st1) { mbEnv = M.delete fn (rsEnv st1) }
                          ("def " ++ fn ++ " = " ++ body) of
                     Left err -> do
                       putStrLn $ "warning: could not derive " ++ fn
@@ -328,8 +404,7 @@ handleLine st line =
       let envBase
             | name `elem` rsUserDefs st = M.delete name (rsEnv st)
             | otherwise                 = rsEnv st
-      case checkModuleWith envBase (rsRun st) preludeNames
-                           (rsAliases st) (rsDatas st) line of
+      case checkModuleWith (baseOf st) { mbEnv = envBase } line of
         Left err -> report err
         Right m  ->
           case modDefs m of
@@ -367,7 +442,7 @@ handleLine st line =
     -- `use` on a program line reached inference unelaborated.
     elabLine src = do
       term0 <- parseProgram src
-      elabUseWith (elabCtx0 (rsEnv st) [])
+      elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st))
         (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
     -- The CHECKED term is the term that runs: elaborating twice would

@@ -1,0 +1,5 @@
+import "left.braid"
+import "right.braid"
+3 >> leftSide >> print
+3 >> rightSide >> print
+5 >> double >> print

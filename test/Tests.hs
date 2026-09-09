@@ -11,11 +11,76 @@ import System.Directory (listDirectory)
 -- is a future enhancement; "runs clean" is the high-value signal.
 runExample :: String -> IO (Maybe String)
 runExample name = do
-  src <- readFile ("examples/" ++ name)
-  r   <- runModule src
-  pure $ case r of
-    Right _  -> Nothing
-    Left err -> Just ("examples/" ++ name ++ ": " ++ err)
+  loaded <- loadSource ("examples/" ++ name)
+  case loaded of
+    Left err  -> pure (Just ("examples/" ++ name ++ ": " ++ err))
+    Right src -> do
+      r <- runModule src
+      pure $ case r of
+        Right _  -> Nothing
+        Left err -> Just ("examples/" ++ name ++ ": " ++ err)
+
+-- IMPORTS (stage 4¾).  A file's declarations in another file's scope:
+-- textual inclusion, so a type, a resource, a theory, an instance and a
+-- functor all cross the boundary with no machinery of their own.
+-- Fixtures live in test/imports/ and are loaded from disk, since the
+-- whole point is the file context.
+-- (path, expected print log, expected final stack rendering)
+importTests :: [(String, [String], String)]
+importTests =
+    -- defs, a resource, an instance and a functor, all imported; the
+    -- imported file's own main does NOT run
+  [ ("uses-util.braid", ["28", "50", "0"], "")
+    -- a diamond includes the shared file once
+  , ("diamond.braid",   ["7", "8", "10"], "")
+    -- a library file still runs as a program, main and all
+  , ("util.braid",      ["util.braid's own main — NOT run when imported"], "")
+  ]
+
+-- (path, expected error fragment)
+importFailTests :: [(String, String)]
+importFailTests =
+  [ ("cycle-a.braid", "import cycle: cycle-a.braid → cycle-b.braid → cycle-a.braid")
+    -- the inclusion is injective on names or it is an error, and the
+    -- error names both files
+  , ("clash.braid",   "`double` is already defined in test/imports/util.braid")
+  , ("missing.braid", "import: no such file: nope.braid (looked in \
+                      \test/imports/nope.braid and in the current directory)")
+    -- a module checked without a file context cannot import
+  , ("bad-syntax.braid", "Malformed import")
+  ]
+
+runImport :: (String, [String], String) -> IO (Maybe String)
+runImport (name, wantLog, wantStack) = do
+  loaded <- loadSource ("test/imports/" ++ name)
+  case loaded of
+    Left err  -> pure (Just (name ++ ": " ++ err))
+    Right src -> do
+      r <- runModule src
+      pure $ case r of
+        Left err -> Just (name ++ ": " ++ err)
+        Right (stack, logs)
+          | logs /= wantLog ->
+              Just (name ++ ": expected log " ++ show wantLog
+                         ++ ", got " ++ show logs)
+          | unwords (map show stack) /= wantStack ->
+              Just (name ++ ": expected stack " ++ show wantStack
+                         ++ ", got " ++ show (unwords (map show stack)))
+          | otherwise -> Nothing
+
+runImportFail :: (String, String) -> IO (Maybe String)
+runImportFail (name, frag) = do
+  loaded <- loadSource ("test/imports/" ++ name)
+  err <- case loaded of
+    Left e    -> pure (Just e)
+    Right src -> do
+      r <- runModule src
+      pure (either Just (const Nothing) r)
+  pure $ case err of
+    Nothing -> Just (name ++ ": expected failure containing " ++ show frag)
+    Just e
+      | frag `isInfixOf` e -> Nothing
+      | otherwise -> Just (name ++ ": expected " ++ show frag ++ ", got: " ++ e)
 
 -- (source, expected alpha-normalized type)
 passTests :: [(String, String)]
@@ -1164,6 +1229,11 @@ moduleFailTests =
     -- arrow that carries the label), so the source is checked for it.
   , (idF ++ "def forged = use@Same >> dup >> *\n5 >> forged >> print",
      "not a word: a label is minted by a scope, never written by hand")
+    -- STAGE 4¾: an import names a FILE, and a file read is the loader's
+    -- IO — so a module checked from a string has nothing to resolve it
+    -- against, and says so rather than ignoring the line
+  , ("import \"util.braid\"\ndef f = dup >> +\n2 >> f >> print",
+     "a module can only import when it is loaded from a file")
     -- `interpose` (stage 4) admits only unit endomorphisms — `ρ ⇒ ρ`,
     -- or `E ρ ⇒ E ρ` over resource wires — and refuses by name, with
     -- the stage's actual type, before inserting it anywhere.  Checked
@@ -1410,6 +1480,8 @@ main = do
   mfailFs <- mapM runModuleFail moduleFailTests
   exNames <- sort . filter (".braid" `isSuffixOf`) <$> listDirectory "examples"
   exFs <- mapM runExample exNames
+  impFs  <- mapM runImport importTests
+  impFFs <- mapM runImportFail importFailTests
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
         ++ map runFail failTests
@@ -1419,10 +1491,13 @@ main = do
         ++ map runUnif unifTests
         ++ map runPureE pureEvalTests
         ++ exFs
+        ++ impFs
+        ++ impFFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
             + length unifTests + length pureEvalTests + length exNames
+            + length importTests + length importFailTests
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

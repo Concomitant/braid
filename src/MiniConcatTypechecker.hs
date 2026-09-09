@@ -17,6 +17,8 @@ import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
 import Data.Char (isDigit, isSpace)
 import Data.Bifunctor (first)
+import System.Directory (doesFileExist, canonicalizePath)
+import System.FilePath (takeDirectory, takeFileName, isAbsolute, (</>))
 
 --------------------------------------------------------------------------------
 -- 1. Element types, stack types, and arrow types
@@ -3421,6 +3423,7 @@ data Module = Module
   , modMain    :: Maybe (Term, Arrow)
   , modTheories  :: [Theory]
   , modInstances :: [Instance]
+  , modFunctors  :: [(String, String)]  -- `functor Name = word`
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -3428,38 +3431,46 @@ data Module = Module
 -- by newline-sequencing).  A `## text` line is a doc comment: it binds
 -- to the next def or type line (consecutive doc lines join); doc text
 -- preceding a plain program line is dropped.
--- Returns (defs, type/data/resource lines, BLOCK declarations, main).
--- A block declaration is `theory`/`instance`: a header line plus the
--- indented lines under it, kept raw for the declaration parser.
+-- Returns (defs, type/data/resource lines, BLOCK declarations, IMPORT
+-- lines, main).  A block declaration is `theory`/`instance`: a header
+-- line plus the indented lines under it, kept raw for the declaration
+-- parser.  Import lines come back RAW so the loader can strip exactly
+-- the lines it consumed (see `stripLines`); every other keyword branch
+-- is checked before the fall-through, so a line inside a block or a
+-- continuation is never mistaken for one.
 splitDefs :: String
           -> Either String ( [(String, String, Maybe String)]
                            , [(String, Maybe String)]
                            , [(String, [String], Maybe String)]
+                           , [String]
                            , String )
 splitDefs src = do
-  (defs, tys, decls, progLines) <- go Nothing (lines src)
-  pure (defs, tys, decls, intercalate "\n" progLines)
+  (defs, tys, decls, imps, progLines) <- go Nothing (lines src)
+  pure (defs, tys, decls, imps, intercalate "\n" progLines)
   where
-    go _ [] = Right ([], [], [], [])
+    go _ [] = Right ([], [], [], [], [])
     go doc (l : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
+      | ("import" : _) <- words l = do
+          (ds, ts, bs, is, ps) <- go Nothing rest
+          pure (ds, ts, bs, l : is, ps)
       | (kw : _) <- words l, kw `elem` ["type", "data", "resource"] = do
-          (ds, ts, bs, ps) <- go Nothing rest
-          pure (ds, (l, doc) : ts, bs, ps)
+          (ds, ts, bs, is, ps) <- go Nothing rest
+          pure (ds, (l, doc) : ts, bs, is, ps)
       -- `theory` / `instance`: a header plus its indented block, raw
       -- `functor F = word`: a declaration line with no block, so it
       -- rides the block bucket with an empty body
       | ("functor" : _) <- words l = do
-          (ds, ts, bs, ps) <- go Nothing rest
-          pure (ds, ts, (l, [], doc) : bs, ps)
+          (ds, ts, bs, is, ps) <- go Nothing rest
+          pure (ds, ts, (l, [], doc) : bs, is, ps)
       | (kw : _) <- words l, kw `elem` ["theory", "instance"] = do
           let (block, rest') = spanBlock 0 rest
           if null block
             then Left $ "Empty " ++ kw ++ " body: " ++ l
             else do
-              (ds, ts, bs, ps) <- go Nothing rest'
-              pure (ds, ts, (l, block, doc) : bs, ps)
+              (ds, ts, bs, is, ps) <- go Nothing rest'
+              pure (ds, ts, (l, block, doc) : bs, is, ps)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
           -- a `#` comment on the `=` line is not code: treat a
@@ -3473,21 +3484,21 @@ splitDefs src = do
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
-                  (ds, ts, bs, ps) <- go Nothing rest'
-                  pure ((name, intercalate "\n" block, doc) : ds, ts, bs, ps)
+                  (ds, ts, bs, is, ps) <- go Nothing rest'
+                  pure ((name, intercalate "\n" block, doc) : ds, ts, bs, is, ps)
             else do
               -- inline body: it may leave a bracket open, in which case
               -- the following lines belong to it, not to the module
               let (cont, rest') = spanOpen l rest
-              (ds, ts, bs, ps) <- go Nothing rest'
-              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, bs, ps)
+              (ds, ts, bs, is, ps) <- go Nothing rest'
+              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, bs, is, ps)
       | otherwise = do
           -- a program line may leave a bracket open; the lines that
           -- close it are part of it, so `def`/`type`/`##` inside an open
           -- bracket is code, not a declaration
           let (cont, rest') = spanOpen l rest
-          (ds, ts, bs, ps) <- go Nothing rest'
-          pure (ds, ts, bs, l : cont ++ ps)
+          (ds, ts, bs, is, ps) <- go Nothing rest'
+          pure (ds, ts, bs, is, l : cont ++ ps)
 
     indented ln = not (all isSpace ln) && isSpace (head ln)
 
@@ -3535,15 +3546,183 @@ parseFunctorLine l =
     _ -> Left $ "Malformed functor declaration (want `functor Name = word`): "
              ++ dropWhile isSpace l
 
+--------------------------------------------------------------------------------
+-- 10.4 Imports: one file's declarations, in another file's scope
+--
+-- An import is a morphism of presentations — the INCLUSION.  Objects are
+-- added, never merged (a name clash is an error, exactly as a duplicate
+-- def is), and the composite presentation is checked as one module,
+-- which is why a `type`, a `resource`, a `theory`, an `instance` and a
+-- `functor` all cross a file boundary with no machinery of their own.
+--
+-- Mechanically it is textual: the imported file's DECLARATIONS are
+-- placed above the importing file's source, so the ordering rule (a
+-- functor is runnable before its first `use`) extends across files
+-- unchanged.  An imported file's main program is not included and does
+-- not run — a library's demo is its own business — though it is still
+-- typechecked when that file is checked, since a file must be a module
+-- before it can be a dependency.
+--
+-- This is the LOADER's IO, at the same boundary that reads the main
+-- file.  Elaboration still sees only parsed declarations and stays
+-- pure: invariant two is untouched.
+--------------------------------------------------------------------------------
+
+isDocLine :: String -> Bool
+isDocLine l = case dropWhile isSpace l of
+  '#' : '#' : _ -> True
+  _             -> False
+
+-- `import "path.braid"` — the one declaration the loader handles.
+parseImportLine :: String -> Either String FilePath
+parseImportLine l =
+  case dropWhile isSpace (drop 6 (dropWhile isSpace l)) of
+    '"' : rest ->
+      case break (== '"') rest of
+        (path, '"' : after)
+          | all isSpace (takeWhile (/= '#') after) ->
+              if null path then Left (bad "the path is empty") else Right path
+          | otherwise -> Left (bad "there is text after the path")
+        _ -> Left (bad "the path is not closed")
+    _ -> Left (bad "the path must be a quoted string")
+  where
+    bad why = "Malformed import (want `import \"path.braid\"`): "
+           ++ trimLine l ++ " — " ++ why
+    trimLine = dropWhile isSpace
+
+-- Remove an in-order subsequence of lines, taking the doc-comment run
+-- immediately above each removed line with it (a `##` above a main line
+-- documents nothing, and must not drift onto the next declaration when
+-- the file is included somewhere else).
+stripLines :: [String] -> [String] -> [String]
+stripLines = go []
+  where
+    go acc ls [] = reverse acc ++ ls
+    go acc [] _  = reverse acc
+    go acc (l : ls) rs@(r : rs')
+      | l == r    = go (dropWhile isDocLine acc) ls rs'
+      | otherwise = go (l : acc) ls rs
+
+-- A module's declarations as source: everything but its main program
+-- and its own import lines.  This is what an import includes.
+moduleDecls :: String -> Either String String
+moduleDecls src = do
+  (_, _, _, imps, mainSrc) <- splitDefs src
+  let kept = stripLines (stripLines (lines src) imps) (lines mainSrc)
+  pure (unlines kept)
+
+-- The root file, with its import lines resolved away and its main
+-- program kept.
+moduleSansImports :: String -> Either String String
+moduleSansImports src = do
+  (_, _, _, imps, _) <- splitDefs src
+  pure (unlines (stripLines (lines src) imps))
+
+-- Resolve a file's imports into one source text: depth-first, in file
+-- order, each file included exactly once (a diamond includes it once,
+-- which is what keeps the clash rule meaningful), a cycle reported by
+-- the path that closes it.  Paths are relative to the importing file.
+data Load = Load
+  { lSeen :: [FilePath]           -- canonical paths already included
+  , lDefs :: [(String, FilePath)] -- def names, and the file that declared them
+  , lText :: String               -- the source assembled so far
+  }
+
+emptyLoad :: Load
+emptyLoad = Load [] [] ""
+
+loadSource :: FilePath -> IO (Either String String)
+loadSource = loadWith True
+
+-- the same, as a DEPENDENCY: declarations only, main dropped.  This is
+-- what an `import` line pulls in, and what the REPL's `:import` runs.
+loadDecls :: FilePath -> IO (Either String String)
+loadDecls = loadWith False
+
+loadWith :: Bool -> FilePath -> IO (Either String String)
+loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
+  where
+    -- `path` is already resolved: the root is what the user named, an
+    -- import is what `resolve` found.  The root is never checked for
+    -- existence — it may be /dev/stdin or another thing a program is
+    -- entitled to be — so its read failure reports itself.
+    load stack acc path isRoot = do
+      canon <- canonicalizePath path
+      if canon `elem` stack
+        then pure (Left ("import cycle: "
+                      ++ intercalate " → " (map takeFileName
+                           (reverse (canon : stack)))))
+        else if canon `elem` lSeen acc
+          then pure (Right acc)
+          else do
+            r <- try (readFile path) :: IO (Either IOException String)
+            case r of
+              Left _ -> pure (Left ("cannot read " ++ path))
+              Right src -> loaded stack acc path isRoot canon src
+
+    loaded stack acc path isRoot canon src =
+      case splitDefs src >>= \(defs, _, _, imps, _) ->
+             (,) defs <$> mapM parseImportLine imps of
+        Left e -> pure (Left (inFile path e))
+        Right (defs, rels) -> do
+          kids <- mapM (resolve (takeDirectory path)) rels
+          r <- foldM (child (canon : stack))
+                     (Right acc { lSeen = canon : lSeen acc }) kids
+          pure $ do
+            acc' <- r
+            -- objects are ADDED, never merged: the inclusion is
+            -- injective on names or it is an error naming both files
+            case [ (n, f) | (n, _, _) <- defs
+                          , (m, f) <- lDefs acc', m == n ] of
+              ((n, f) : _) ->
+                Left $ inFile path ("`" ++ n ++ "` is already defined in "
+                                 ++ f)
+              [] -> Right ()
+            own <- first (inFile path)
+                     ((if isRoot then moduleSansImports else moduleDecls) src)
+            pure acc' { lDefs = lDefs acc' ++ [ (n, path) | (n, _, _) <- defs ]
+                      , lText = lText acc' ++ own }
+
+    child _ acc@(Left _) _  = pure acc
+    child _ (Right _) (Left e) = pure (Left e)
+    child stack (Right acc) (Right p) = load stack acc p False
+
+    -- A relative import is resolved against the importing FILE's
+    -- directory, which is what lets a directory of modules move as one.
+    -- Failing that, the current directory is tried, so a program read
+    -- from a pipe (`braid -`, which has no directory of its own) can
+    -- import too.  Found in neither: the error names both places.
+    resolve dir rel
+      | isAbsolute rel = pure (Right rel)
+      | otherwise = do
+          there <- doesFileExist (dir </> rel)
+          if there then pure (Right (dir </> rel)) else do
+            here <- doesFileExist rel
+            pure $ if here
+              then Right rel
+              else Left ("import: no such file: " ++ rel ++ " (looked in "
+                      ++ dir </> rel ++ " and in the current directory)")
+
+    inFile path e = "in " ++ path ++ ": " ++ e
+
+-- Which slots each of a module's instances carries — the table `use`
+-- consults to rename an instance's operations.  A session builds it
+-- from an imported module, since it cannot declare one itself.
+moduleSlotTable :: Module -> Either String [(String, [String])]
+moduleSlotTable m =
+  sequence [ (,) (inName i) . map fst . thSlots
+                 <$> theoryOf (modTheories m) (inTheory i)
+           | i <- modInstances m ]
+
 -- Check a module against the prelude: user defs and type aliases may
 -- shadow prelude ones (once each); the prelude's defs, aliases, and
 -- docs are folded into the result so the runtime and printer see them.
 checkModule :: String -> Either String Module
 checkModule src = do
-  m <- checkModuleWith (modEnv preludeModule)
-                       (moduleRunDefs preludeModule) preludeNames
-                       (modAliases preludeModule)
-                       (modDatas preludeModule) src
+  m <- checkModuleWith (moduleBase (modEnv preludeModule)
+                                   (moduleRunDefs preludeModule) preludeNames
+                                   (modAliases preludeModule)
+                                   (modDatas preludeModule)) src
   let shadowed = map aName (modAliases m) ++ map dName (modDatas m)
       keptPreludeAl =
         [ al | al <- modAliases preludeModule, aName al `notElem` shadowed ]
@@ -3568,10 +3747,40 @@ checkModule src = do
 -- knotted mutual scope `buildRunDefs` gives the finished module does
 -- not exist mid-fold, and "a functor is runnable before its first use"
 -- is exactly the ordering rule (design-macros.md).
-checkModuleWith :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl]
-                -> String -> Either String Module
-checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
-  (defSrcs, tyLines, declLines, mainSrc) <- splitDefs src
+-- What a module is checked ON TOP of: the prelude, a REPL session's
+-- accumulated definitions, or (for `use`) the instances and functors an
+-- imported file declared.  A file's own imports need none of this —
+-- they are textual, so their declarations are simply part of the module
+-- — but a session has no text to include into, so it carries the tables.
+data ModuleBase = ModuleBase
+  { mbEnv     :: Env
+  , mbRun     :: RunDefs
+  , mbShadow  :: [String]             -- names a def may redefine (once)
+  , mbAliases :: [Alias]
+  , mbDatas   :: [DataDecl]
+  , mbSlots   :: [(String, [String])] -- instance -> its theory's slots
+  , mbFuncs   :: [(String, String)]   -- functor -> its word
+  }
+
+moduleBase :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl] -> ModuleBase
+moduleBase env run shadow aliases datas =
+  ModuleBase env run shadow aliases datas [] []
+
+checkModuleWith :: ModuleBase -> String -> Either String Module
+checkModuleWith base src = do
+  let env0     = mbEnv base
+      run0     = mbRun base
+      shadow0  = mbShadow base
+      aliases0 = mbAliases base
+      datas0   = mbDatas base
+  (defSrcs, tyLines, declLines, importLines, mainSrc) <- splitDefs src
+  -- the loader resolves imports into the source it hands over, so one
+  -- reaching here means there was no file to resolve it against
+  case importLines of
+    (l : _) -> Left $ "import: a module can only import when it is loaded "
+                   ++ "from a file, and this one was checked without a file "
+                   ++ "context: " ++ dropWhile isSpace l
+    []      -> Right ()
   (env1, runTy, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
     foldM addType (env0, run0, aliases0, datas0, [], [], M.empty) tyLines
   -- theory and instance heads name types, and the type they name is
@@ -3586,16 +3795,18 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
                        | (h, b, _) <- declLines, take 6 h == "theory" ]
   insts    <- sequence [ parseInstance allAliases sigs h b
                        | (h, b, _) <- declLines, take 8 h == "instance" ]
-  funcs    <- sequence [ parseFunctorLine h
+  ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]
+  let funcs = ownFuncs ++ mbFuncs base
   case [ n | (n, i) <- zip (map fst funcs) [0 :: Int ..]
            , n `elem` take i (map fst funcs) ] of
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories) insts
-  slotTable <- sequence [ (,) (inName i) . map fst . thSlots
-                            <$> theoryOf theories (inTheory i)
-                        | i <- insts ]
+  slotTable <- (++ mbSlots base)
+                 <$> sequence [ (,) (inName i) . map fst . thSlots
+                                  <$> theoryOf theories (inTheory i)
+                              | i <- insts ]
   let genDefs =
         [ (fn, body, Just ("definition by points: one quoted case per "
                            ++ "constructor of " ++ dName dd
@@ -3626,9 +3837,9 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
-                theories insts)
+                theories insts funcs)
   where
-    preludeTypeNames = map aName aliases0 ++ map dName datas0
+    preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
     addType (env, run, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
       decl <- parseTypeLine aliasesIn (map dataSig datasIn) line
@@ -3938,7 +4149,7 @@ preludeSrc = unlines
 
 preludeModule :: Module
 preludeModule =
-  case checkModuleWith primEnv M.empty [] [] [] preludeSrc of
+  case checkModuleWith (moduleBase primEnv M.empty [] [] []) preludeSrc of
     Left err -> error ("prelude failed to check: " ++ err)
     Right m  -> m
 

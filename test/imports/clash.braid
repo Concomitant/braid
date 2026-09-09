@@ -1,0 +1,3 @@
+import "util.braid"
+def double = dup >> *
+4 >> double >> print

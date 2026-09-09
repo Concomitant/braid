@@ -48,6 +48,7 @@ the current stack is rejected with a message naming the stack.
 | `=IO>` , `⇒!` , `->!` | the io manifest label on an arrow (§3); legacy spellings still lex |
 | `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, manifest included (§3, §8) |
 | `=Traced>` | a functor's receipt: minted by `use Traced`, never written (§3, §12) |
+| `import "f.braid"` | include another file's declarations (§8) |
 
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
@@ -775,6 +776,65 @@ one cell). Productive corecursion guards its self-call under a quote
 open stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands, but won't
 display-fold back (the leading-splice match is ambiguous — pin one
 arity if you need the fold).
+
+### Modules: `import "path.braid"`
+
+One file's declarations in another file's scope, written as a
+declaration line and resolved before anything is checked:
+
+```braid
+import "geometry.braid"
+import "lib/shapes.braid"      # relative to THIS file's directory
+```
+
+What travels is **declarations** — defs, `type`/`data`, `resource`,
+`theory`, `instance`, `functor`, and their `##` docs. What does not is
+the imported file's **main program**: a library's demo is its own
+business, and the file still runs it when you run that file directly.
+An imported file is checked as part of the composite module, so it has
+to be a valid module on its own.
+
+The rules, all of which are one rule — an import is the **inclusion**
+of one module's presentation into another, so objects are added and
+never merged:
+
+- **A clash is an error**, naming both files: *in `b.braid`: `poly` is
+  already defined in `a.braid`*. There is no namespacing and no `as` in
+  this version; two files that both want the name have to settle it.
+- **A file is included once**, however many routes reach it. A diamond
+  (`a` imports `b` and `c`, both of which import `util`) is not a
+  duplicate-definition error.
+- **A cycle is an error** naming the path that closes it: *import
+  cycle: a.braid → b.braid → a.braid*.
+- **Imports are resolved first**, depth-first in file order, so the
+  ordering rule (a functor is runnable before its first `use`, §6)
+  extends across files unchanged.
+- **A relative path is relative to the importing file**, which is what
+  lets a directory of modules move as one; failing that, the current
+  directory is tried, so a program read from a pipe (`braid -`) can
+  import too. Found in neither, the error names both places.
+
+Nothing above needed machinery of its own: inclusion is textual, and
+the composite is checked as a single module. That is also why a
+`theory` declared in one file and its `instance` in another simply
+work. See `examples/imports.braid`.
+
+Reading the file is the **loader's** IO, at the same boundary that
+reads the program you ran; elaboration still sees only parsed
+declarations and stays pure. A module checked without a file context —
+a REPL line, an embedded source string — has nothing to resolve an
+import against and says so.
+
+In a session, `:import "path.braid"` does the same thing, and is the
+only way a session gets a `theory`, an `instance` or a `functor`, since
+it cannot declare one:
+
+```text
+braid> :import "examples/traced.braid"
+imported examples/traced.braid   (9 defs, 2 functors)
+braid> def poly2 = use Traced >> dup >> *
+def poly2 : ∀ . Int =IO Traced> Int
+```
 
 ## 9. Primitive reference
 

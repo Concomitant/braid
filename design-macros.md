@@ -488,6 +488,52 @@ problem below, and it is still open — this stage makes the *union*
 half exact, which is the half a type system with an effect row can
 carry.
 
+## Amendment (2026-09-09): imports, and why they needed no machinery
+
+Shipped as stage 4¾. A module is a presentation (generators plus
+defined words); an import is a morphism of presentations, and Braid's
+kind is the **inclusion**: objects added, never merged (a clash is an
+error naming both files), injective on names, the standing mono policy.
+
+The implementation is the argument for the framing. Inclusion is
+TEXTUAL — the imported file's declaration lines are placed above the
+importing file's source and the composite is checked as one module — so
+`type`, `resource`, `theory`, `instance` and `functor` all cross a file
+boundary with nothing added to the checker. The alternative considered
+and rejected was chaining checked modules as bases (the way the prelude
+is threaded in): it works for defs, but a theory declared in one file
+and instantiated in another would then need base theory/instance tables
+threaded through `checkModuleWith`, own-vs-inherited handling in the
+instance path, and a merge for every field of `Module`. Textual
+inclusion has none of that, and it is what the presentation reading
+predicts: a presentation has no notion of "checked already", only of
+generators in scope.
+
+What the loader owns, and why it is not elaboration: the file READ.
+That is IO, at the same boundary that reads the program you ran, and
+it is the reason `import` is not a Braid `functor` — those are `Code ⇒
+Code`, per-def and pure. Import acts on the DICTIONARY (stage 8's
+declaration-word class, `Str =Dict> •`). Elaboration still sees only
+parsed declarations; invariant two is untouched. A module checked
+without a file context — a REPL line, an embedded string — has nothing
+to resolve an import against and says so rather than ignoring it.
+
+Two continuations are left as continuations, not redesigns:
+- *Qualified import is the inclusion composed with a renaming functor*
+  (`import "g.braid" as G` sends `f ↦ G.f`). The renaming functor
+  already exists — it is what `use Inst` does to slot names — so
+  namespacing is instance renaming at file scope, never a second
+  implementation. Deliberately not in v1.
+- *Importing through a functor* (`import "rules.braid" use Traced`) is
+  a functor applied to a whole presentation, which is file-scope `use`.
+
+One thing did have to be added, and it was for the REPL, not for
+files: `ModuleBase`, carrying the instance and functor tables a session
+has accumulated. A file needs none of it (its imports are textually
+present), but a session has no text to include into, so `:import` is
+the only way a session gets a theory, an instance or a functor — it
+cannot declare one.
+
 ## OPEN: coeffects, and tagging the non-idempotent image
 
 The concern (2026-08-31): a maintained program drifts out of a

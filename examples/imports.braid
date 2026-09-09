@@ -1,0 +1,34 @@
+# One file's declarations, in another file's scope.
+#
+# An import is the INCLUSION of one presentation into another: objects
+# are added, never merged.  A clash is an error naming both files —
+# importing `metered.braid` here as well would say
+#   in examples/metered.braid: `poly` is already defined in
+#   examples/traced.braid
+# — and a file included twice by two different routes is included once.
+#
+# What travels is DECLARATIONS: defs, types, resources, theories,
+# instances, functors.  What does not is the imported file's main
+# program; a library's demo is its own business.  Nothing here needed
+# machinery of its own, because an import is textual: the composite is
+# checked as one module.
+
+import "traced.braid"
+
+"-- traced.braid's own main did not run: no markers above this line --" ; print
+
+# its functor is ours now
+def counted =
+    use Ticked
+    dup ; *
+    _ 1 ; +
+
+6 ; counted ; print                     # tick after every stage, then 37
+
+# so is the word behind it, and every other def in that file
+[dup ; +] ; getCode ; ticked ; unparse ; print
+
+# an imported def keeps the elaboration it was given: `poly` was written
+# under `use Traced` there, so it still announces every stage here, and
+# its type still carries the receipt `Int =Traced> Int`
+5 ; poly ; print
