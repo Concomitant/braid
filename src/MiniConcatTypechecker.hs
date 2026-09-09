@@ -5,6 +5,8 @@ module MiniConcatTypechecker where
 
 import qualified Data.Map as M
 import Data.Map (Map)
+import qualified Data.Set as S
+import Data.Set (Set)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, stripPrefix, partition, (\\))
 import Control.Monad.State
@@ -55,21 +57,38 @@ newtype EVar = EV String
 instance Show EVar where
   show (EV s) = s
 
--- An arrow's GRADE: the set of resource wires it touches.  Stage 1 has
--- one label, `io` — the irreducible one (everything else in the effect
--- zoo is already an ordinary wire) — plus an optional tail for effect
--- polymorphism.  Composition UNIFIES two grades rather than joining
--- them: label-absorbing row unification, Koka-style, which keeps the
--- solver a single pass and inference principal.  Stage 2 widens the
--- Bool to a label set; the shape survives.
-data EffRow = Eff { eIO :: Bool, eTail :: Maybe EVar }
+-- An arrow's MANIFEST: the set of labels its elaborated code carries,
+-- plus an optional tail for effect polymorphism.  Composition UNIFIES
+-- two manifests rather than joining them: label-absorbing row
+-- unification, Koka-style, which keeps the solver a single pass and
+-- inference principal.
+--
+-- The set was a Bool until 2026-09-08 (`io` was the only label, being
+-- the irreducible one — everything else in the effect zoo is already an
+-- ordinary wire).  It widened when functors started minting PROVENANCE
+-- labels: `use Traced` leaves `Traced` on everything elaborated under
+-- it, so the manifest records not only what a program touches but what
+-- rewrote it.  Markers are written, receipts are inferred; a label may
+-- only be minted by a `use`, which is what makes it evidence.
+data EffRow = Eff { eLabels :: Set String, eTail :: Maybe EVar }
   deriving (Eq, Ord, Show)
 
+-- io is a label like any other; it is spelled out here exactly once
+ioLabel :: String
+ioLabel = "IO"
+
+eIO :: EffRow -> Bool
+eIO = S.member ioLabel . eLabels
+
 effPure :: EffRow
-effPure = Eff False Nothing
+effPure = Eff S.empty Nothing
 
 effIO :: EffRow
-effIO = Eff True Nothing
+effIO = effLabel ioLabel
+
+-- the closed row carrying one label: `print`'s io, `use F`'s receipt
+effLabel :: String -> EffRow
+effLabel l = Eff (S.singleton l) Nothing
 
 -- Exponent variables (n): type-level widths, kind Nat.  Unary naturals
 -- only — zero and successor, no arithmetic (design-exponents.md).
@@ -218,7 +237,9 @@ arrIO i o = Arrow i o effIO
 -- glyph; with functors and modes minting labels beside it, one
 -- spelling for all of them is the honest one (2026-09-06).
 arrowGlyph :: EffRow -> String
-arrowGlyph e = if eIO e then " =IO> " else " ⇒ "
+arrowGlyph e
+  | S.null (eLabels e) = " ⇒ "
+  | otherwise          = " =" ++ unwords (S.toList (eLabels e)) ++ "> "
 
 instance Show Arrow where
   show (Arrow s1 s2 e) = show s1 ++ arrowGlyph e ++ show s2
@@ -256,16 +277,6 @@ data Subst = Subst
 
 emptySubst :: Subst
 emptySubst = Subst M.empty M.empty M.empty M.empty M.empty
-
--- composeSubst s2 s1 = apply s2 after s1
-composeSubst :: Subst -> Subst -> Subst
-composeSubst s2 s1 =
-  Subst
-    { tySub  = M.map (apply s2) (tySub s1) `M.union` tySub s2
-    , stSub  = M.map (apply s2) (stSub s1) `M.union` stSub s2
-    , rowSub = M.map (apply s2) (rowSub s1) `M.union` rowSub s2
-    , expSub = M.map (apply s2) (expSub s1) `M.union` expSub s2
-    }
 
 class Substitutable a where
   apply :: Subst -> a -> a
@@ -310,13 +321,13 @@ instance Substitutable SumRow where
   apply s (RCons st rest) = RCons (apply s st) (apply s rest)
 
 instance Substitutable EffRow where
-  apply s e@(Eff i mv) = case mv of
+  apply s e@(Eff ls mv) = case mv of
     Nothing -> e
     Just v  -> case M.lookup v (effSub s) of
       Nothing -> e
       -- the tail's own labels UNION in; that is what makes absorption
       -- (⟨io|ε⟩ ~ ⟨|ω⟩ ⟹ ω := ⟨io|υ⟩) come out right on both sides
-      Just r  -> let Eff i' mv' = apply s r in Eff (i || i') mv'
+      Just r  -> let Eff ls' mv' = apply s r in Eff (ls `S.union` ls') mv'
 
 instance Substitutable Arrow where
   apply s (Arrow i o e) = Arrow (apply s i) (apply s o) (apply s e)
@@ -597,55 +608,75 @@ unifyRow s r1 r2 =
     _ -> Left $ "Cannot unify sum alternatives: (" ++ show r1'
               ++ ") vs (" ++ show r2' ++ ")"
 
--- Grades unify; they do not join.  Composition therefore FORCES two
--- arrows' effect rows equal, and the "join" people expect falls out of
--- label absorption into an open tail: ⟨io|ε⟩ ~ ⟨|ω⟩ binds ω := ⟨io|υ⟩.
--- Tail-only, one label, so this is the whole algebra (design-effects.md;
--- the same discipline that keeps stacks, sums and widths principal).
+-- Manifests unify; they do not join.  Composition therefore FORCES two
+-- arrows' rows equal, and the "join" people expect falls out of label
+-- absorption into an open tail: ⟨IO|ε⟩ ~ ⟨|ω⟩ binds ω := ⟨IO|υ⟩.
+-- Labels are idempotent (a SET, not a multiset), so a tail may absorb a
+-- label the other side already carries, and unifying ⟨A|ε⟩ with ⟨B|ε⟩
+-- is satisfiable at ε := ⟨A B|υ⟩ (design-effects.md; the same discipline
+-- that keeps stacks, sums and widths principal).
 unifyEff :: Subst -> EffRow -> EffRow -> Either String Subst
 unifyEff s e1 e2 =
   case (apply s e1, apply s e2) of
     (a, b) | a == b -> Right s
     -- both closed: the label sets must already agree
-    (a@(Eff i1 Nothing), b@(Eff i2 Nothing))
-      | i1 == i2  -> Right s
+    (a@(Eff l1 Nothing), b@(Eff l2 Nothing))
+      | l1 == l2  -> Right s
       | otherwise -> clash a b
     -- one open, one closed: the tail supplies the missing labels.  It
-    -- can only ADD them, so an io on the open side with none on the
-    -- closed side is unsatisfiable.
-    (a@(Eff i1 (Just v)), b@(Eff i2 Nothing))
-      | i1 && not i2 -> clash a b
-      | otherwise    -> bindEffVar s v (Eff (i2 && not i1) Nothing)
-    (a@(Eff i1 Nothing), b@(Eff i2 (Just w)))
-      | i2 && not i1 -> clash a b
-      | otherwise    -> bindEffVar s w (Eff (i1 && not i2) Nothing)
-    -- both open: bridge the tails.  Equal labels ⇒ share one tail;
-    -- otherwise the label-poorer side's tail takes on the difference
-    -- AND the other tail, which is what makes `1 >> print` io without
-    -- needing a fresh variable here (solve is a pure fold).
-    (Eff i1 (Just v), Eff i2 (Just w))
-      | i1 == i2  -> bindEffVar s v (Eff False (Just w))
-      | i1        -> bindEffVar s w (Eff True (Just v))
-      | otherwise -> bindEffVar s v (Eff True (Just w))
+    -- can only ADD them, so a label on the open side that the closed
+    -- side lacks is unsatisfiable.
+    (a@(Eff l1 (Just v)), b@(Eff l2 Nothing))
+      | not (S.null (l1 S.\\ l2)) -> clash a b
+      | otherwise                 -> bindEffVar s v (Eff (l2 S.\\ l1) Nothing)
+    (a@(Eff l1 Nothing), b@(Eff l2 (Just w)))
+      | not (S.null (l2 S.\\ l1)) -> clash a b
+      | otherwise                 -> bindEffVar s w (Eff (l1 S.\\ l2) Nothing)
+    -- both open: each tail takes on what the other side has and it
+    -- lacks, and the two share a residual.  When only one side is
+    -- poorer the other's tail IS the residual and no variable is minted
+    -- — which is what kept `1 >> print` free of one while io was the
+    -- only label (solve is a pure fold with no fresh supply).
+    (Eff l1 (Just v), Eff l2 (Just w)) ->
+      let d1 = l2 S.\\ l1
+          d2 = l1 S.\\ l2
+          u  = bridge v w
+      in case (S.null d1, S.null d2, v == w) of
+           (True,  True,  _)     -> bindEffVar s v (Eff S.empty (Just w))
+           (_,     _,     True)  -> bindEffVar s v
+                                      (Eff (d1 `S.union` d2) (Just u))
+           (_,     True,  False) -> bindEffVar s v (Eff d1 (Just w))
+           (True,  _,     False) -> bindEffVar s w (Eff d2 (Just v))
+           _                     -> do
+             s' <- bindEffVar s v (Eff d1 (Just u))
+             bindEffVar s' w (Eff d2 (Just u))
   where
     clash x y = Left $ "Cannot unify effects: " ++ showEff x
                     ++ " vs " ++ showEff y
+    -- The residual tail of a pair, named from the pair itself: `solve`
+    -- is a pure fold with no fresh-name supply, and a pair can be
+    -- bridged only once (both its variables are bound by that step, so
+    -- `apply` never presents them again).  Never rigid — the tag is a
+    -- prefix, and this name starts with ε.
+    bridge (EV a) (EV b) = EV ("ε<" ++ a ++ "|" ++ b ++ ">")
 
 showEff :: EffRow -> String
-showEff e = if eIO e then "io" else "pure"
+showEff e
+  | S.null (eLabels e) = "pure"
+  | otherwise          = unwords (S.toList (eLabels e))
 
 bindEffVar :: Subst -> EVar -> EffRow -> Either String Subst
 bindEffVar s v row
-  | eTail row == Just v, not (eIO row) = Right s
+  | eTail row == Just v, S.null (eLabels row) = Right s
   | eTail row == Just v =
       Left $ "Occurs check failed on effect: " ++ show v
   -- a skolem tail may only be renamed to a flexible one, never raised:
-  -- the expected grade is fixed, and code that needs io under a pure
-  -- expectation is exactly what the check exists to refuse
+  -- the expected manifest is fixed, and code carrying a label the
+  -- expectation does not is exactly what the check exists to refuse
   | isRigidE v =
       case row of
-        Eff False (Just w) | not (isRigidE w) ->
-          Right s { effSub = M.insert w (Eff False (Just v)) (effSub s) }
+        Eff ls (Just w) | S.null ls, not (isRigidE w) ->
+          Right s { effSub = M.insert w (Eff S.empty (Just v)) (effSub s) }
         _ -> Left $ "Cannot unify effects: " ++ showEff row
                  ++ " vs pure (the expected type fixes the grade; "
                  ++ "this code must stay pure)"
@@ -773,8 +804,9 @@ substOnce s (Arrow i o e) = Arrow (goS i) (goS o) (goE' e)
       Just n | Just (Exp k' mv') <- M.lookup n (expSub s) -> Exp (k + k') mv'
       _ -> e
 
-    goE' e@(Eff i mv) = case mv of
-      Just v | Just (Eff i' mv') <- M.lookup v (effSub s) -> Eff (i || i') mv'
+    goE' e@(Eff ls mv) = case mv of
+      Just v | Just (Eff ls' mv') <- M.lookup v (effSub s) ->
+                 Eff (ls `S.union` ls') mv'
       _ -> e
 
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
@@ -804,7 +836,7 @@ instantiate (Forall tvars svars rvars nvars evars arr) = do
       sSub = M.fromList (zip svars (map STail newSVs))
       rSub = M.fromList (zip rvars (map RTail newRVs))
       nSub = M.fromList (zip nvars (map (Exp 0 . Just) newNVs))
-      eSub = M.fromList (zip evars [ Eff False (Just v) | v <- newEVs ])
+      eSub = M.fromList (zip evars [ Eff S.empty (Just v) | v <- newEVs ])
   openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
 
 -- Every use of a scheme whose grade is CLOSED gets a fresh tail, so
@@ -847,7 +879,7 @@ instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
       rSub = M.fromList (zip rvars (map RTail newRVs))
       nSub = M.fromList [ (v, maybe (Exp 0 Nothing) (Exp 0 . Just) mn)
                         | (v, mn) <- zip nvars newNVs ]
-      eSub = M.fromList (zip evars [ Eff False (Just v) | v <- newEVs ])
+      eSub = M.fromList (zip evars [ Eff S.empty (Just v) | v <- newEVs ])
   -- effect variables are FRESHENED, never closed: closing ε for a
   -- non-final atom would let `1 print` typecheck as pure.
   openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
@@ -871,8 +903,19 @@ instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
 -- expectation admits only pure code, an io expectation admits both
 -- grades by absorption.
 subsumes :: Scheme -> Arrow -> Either String ()
-subsumes sc expected =
-  let want = skolemizeArrow expected
+subsumes = subsumesWith skolemizeArrow
+
+-- The same question about the WIRES only, with the manifest left free:
+-- `interpose` asks whether a stage fits at every cut, which is a
+-- question about shape.  A stage that prints, or that carries a
+-- functor's receipt, still fits; enumerating the labels it may carry
+-- would be a list to keep up to date, and an open tail is that list.
+subsumesShape :: Scheme -> Arrow -> Either String ()
+subsumesShape = subsumesWith skolemizeStacks
+
+subsumesWith :: (Arrow -> Arrow) -> Scheme -> Arrow -> Either String ()
+subsumesWith skolemize sc expected =
+  let want = skolemize expected
       got  = runInfer0 (instantiate sc)
   in () <$ solve [ CEqStack (arrowIn got)  (arrowIn want)
                  , CEqStack (arrowOut got) (arrowOut want)
@@ -903,8 +946,20 @@ skolemizeArrow arr =
       sSub = M.fromList [ (v, STail  (SV (sk n)))       | v@(SV n) <- svs ]
       rSub = M.fromList [ (v, RTail  (RV (sk n)))       | v@(RV n) <- rvs ]
       nSub = M.fromList [ (v, Exp 0 (Just (NV (sk n)))) | v@(NV n) <- nvs ]
-      eSub = M.fromList [ (v, Eff False (Just (EV (sk n)))) | v@(EV n) <- evs ]
+      eSub = M.fromList [ (v, Eff S.empty (Just (EV (sk n)))) | v@(EV n) <- evs ]
   in substOnce (Subst tSub sSub rSub nSub eSub) arr
+
+-- Freeze the wires but not the manifest: the labels stay free to absorb
+-- whatever the checked code carries.  (`skolemizeArrow` minus eSub.)
+skolemizeStacks :: Arrow -> Arrow
+skolemizeStacks arr =
+  let (tvs, svs, rvs, nvs, _) = varsOfArrow arr
+      sk s = rigidTag ++ s
+      tSub = M.fromList [ (v, TVarTy (TV (sk n)))       | v@(TV n) <- tvs ]
+      sSub = M.fromList [ (v, STail  (SV (sk n)))       | v@(SV n) <- svs ]
+      rSub = M.fromList [ (v, RTail  (RV (sk n)))       | v@(RV n) <- rvs ]
+      nSub = M.fromList [ (v, Exp 0 (Just (NV (sk n)))) | v@(NV n) <- nvs ]
+  in substOnce (Subst tSub sSub rSub nSub M.empty) arr
 
 -- exponent variables on a stack's spine (not inside element types)
 spineExpVars :: SType -> [NVar]
@@ -2288,7 +2343,7 @@ resPrefix rs ts =
 -- resources it degrades to the plain glyph.
 arrowBetween :: EffRow -> [String] -> String
 arrowBetween e [] = arrowGlyph e
-arrowBetween e ns = " =" ++ unwords ([ "IO" | eIO e ] ++ ns) ++ "> "
+arrowBetween e ns = " =" ++ unwords (S.toList (eLabels e) ++ ns) ++ "> "
 
 showArrowA :: Disp -> Arrow -> String
 showArrowA as (Arrow s1 s2 e)
@@ -2652,7 +2707,7 @@ primEnv =
       -- running a pure quote is pure and running an io one is io — one
       -- prim, both readings (design-effects.md's shared variable sort).
       epsV = EV "ε"
-      epsR = Eff False (Just epsV)
+      epsR = Eff S.empty (Just epsV)
       arrEps i o = Arrow i o epsR
       fnGD = TFn (arrEps (STail gam) (STail del))
       applyTy = Forall [] [gam, del] [] [] [epsV]
@@ -2977,7 +3032,7 @@ normalizeArrow arr =
       -- effect tails are invisible in display, but normalizing them
       -- keeps `:t!` deterministic
       em = M.fromList
-             (zip evs [ Eff False (Just (EV ("ε" ++ show n)))
+             (zip evs [ Eff S.empty (Just (EV ("ε" ++ show n)))
                       | n <- [0 :: Int ..] ])
   in substOnce (Subst tm sm rm nm em) arr
 
@@ -3039,6 +3094,33 @@ runFunctor ctx (fname, word) body = do
     pre  = "`use " ++ fname ++ "`: "
     inF  = either (Left . (pre ++)) Right
 
+-- The RECEIPT of a functor: a stage that does nothing and says so.
+--
+-- `use F` mints `F` onto the manifest of everything it elaborated, and
+-- the only way to put a label on an inferred arrow is to compose with
+-- an arrow that carries it — which is how `print` has always minted io.
+-- So the receipt is `pass` with a label: `∀ρ. ρ =F> ρ`, a unit
+-- endomorphism (stage 4's fragment again), prepended to the expansion.
+-- It costs nothing at runtime, it whiskers at any width, and it cannot
+-- be written by hand — only `use` mints, which is what makes a label
+-- evidence rather than an annotation.
+receiptName :: String -> String
+receiptName f = "use@" ++ f
+
+receiptLabel :: String -> Maybe String
+receiptLabel = stripPrefix "use@"
+
+receiptScheme :: String -> Scheme
+receiptScheme f =
+  Forall [] [rho] [] [] [] (Arrow (STail rho) (STail rho) (effLabel f))
+  where rho = SV "ρ"
+
+-- every declared functor's receipt, ready for the environment defs and
+-- main are inferred in
+receiptEnv :: [(String, String)] -> Env -> Env
+receiptEnv funcs env =
+  foldr (\(f, _) e -> M.insert (receiptName f) (receiptScheme f) e) env funcs
+
 -- A functor's word must be a pure `Code ⇒ Code`: pure because it runs
 -- at elaboration (the io grade IS the phase distinction), and
 -- Code ⇒ Code because it rewrites a program's spine.
@@ -3082,12 +3164,24 @@ elabUseWith ctx = go
       -- so `use F G` is sugar for one composed functor
       -- Code cannot encode a `use`, so a functor's output never contains
       -- one: no re-walk needed
-      foldM (flip (runFunctor ctx)) routed fs
+      expanded <- foldM (flip (runFunctor ctx)) routed fs
+      -- and each functor leaves its receipt on the expansion.  A label
+      -- is minted here or nowhere: unconditionally, because a functor
+      -- that leaves no receipt is a functor that cannot be audited.
+      pure (foldr (Seq . Prim . receiptName . fst) expanded fs)
     go (Seq a b)       = Seq <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
     go (Quote t)       = Quote <$> go t
     go (Alts cs r)     = Alts <$> mapM go cs <*> pure r
     go (OpenAbs sl h b) = OpenAbs sl h <$> go b
+    -- a receipt is not a word anyone may write: this walk sees the
+    -- SOURCE (expansions are spliced after it and never re-walked), so
+    -- rejecting the name here is what makes a minted label evidence
+    go (Prim n)
+      | Just f <- receiptLabel n =
+          Left $ n ++ " is the receipt of `use " ++ f
+              ++ "`, not a word: a label is minted by a scope, never "
+              ++ "written by hand"
     go t               = Right t
 
 -- the Term-level twin of renameSlots: within a `use Inst` scope every
@@ -3508,7 +3602,10 @@ checkModuleWith env0 run0 shadow0 aliases0 datas0 src = do
                            ++ ", recursive slots pre-folded"))
         | dd <- reverse ownDatas, Just (fn, body) <- [dataFoldSrc dd] ]
   slotSigs <- concat <$> mapM (declaredSlots theories) insts
-  let envSig = foldr (\(n, sc) e -> M.insert n sc e) env1 slotSigs
+  -- a functor's receipt is a word in the environment from here on: defs,
+  -- instance bodies and main are all inferred with it in scope
+  let envSig = foldr (\(n, sc) e -> M.insert n sc e) (receiptEnv funcs env1)
+                     slotSigs
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs) <-
@@ -4529,6 +4626,8 @@ evalTerm env defs vars term st =
                ++ " (unreachable on typechecked programs)"
 
 builtinArity :: String -> Either String Int
+builtinArity name
+  | isJust (receiptLabel name) = Right 0
 builtinArity name =
   case M.lookup name primEnv of
     Just (Forall _ _ _ _ _ (Arrow i _ _)) -> Right (closedArity i)
@@ -4547,6 +4646,10 @@ runBuiltin _ _ "drop"  [_]              = Right ([], [])
 runBuiltin _ _ "weaken" [v]             = Right ([v], [])
 runBuiltin _ _ "finInt" [v]             = Right ([v], [])
 runBuiltin _ _ "pass"  []               = Right ([], [])
+-- a receipt is `pass` that a type can see: nothing happens here, and
+-- the whole content is in the manifest (like weaken's bound)
+runBuiltin _ _ name    []
+  | isJust (receiptLabel name)          = Right ([], [])
 runBuiltin _ _ "+"     [VInt x, VInt y] = Right ([VInt (x + y)], [])
 runBuiltin _ _ "*"     [VInt x, VInt y] = Right ([VInt (x * y)], [])
 runBuiltin _ _ "print" [v]              = Right ([], [show v])
@@ -4632,8 +4735,10 @@ runBuiltin _ _ name args =
 -- then the stage's SCHEME must be at least as general as `E ρ ⇒ E ρ`
 -- with ρ rigid.  Subsumption, not unification: unifying with `ρ ⇒ ρ`
 -- would bless `Int ρ' ⇒ Int ρ'` at ρ := Int ρ', a stage that needs a
--- wire and fails at any empty cut.  The expected grade is io, so a
--- marker that prints passes and a pure stage passes by absorption.
+-- wire and fails at any empty cut.  Only the WIRES are skolemized
+-- (`subsumesShape`): a marker prints, a metered stage carries `Fuel`,
+-- an instrumented one carries its functor's receipt — the manifest is
+-- not what makes a stage fit at a cut.
 checkInterposed :: Env -> Term -> Either String ()
 checkInterposed env t = do
   arr@(Arrow i o _) <- inferTermIn env t
@@ -4649,9 +4754,9 @@ checkInterposed env t = do
   e <- maybe (Left (shown ++ ", which reads a wire; " ++ rule))
              Right (whisk (apply s i))
   let side = foldr SCons (STail (SV "ρ")) e
-      want = Arrow side side (Eff True (Just (EV "ε")))
+      want = Arrow side side (Eff S.empty (Just (EV "ε")))
   either (\err -> Left (shown ++ "; " ++ rule ++ " (" ++ err ++ ")"))
-         Right (subsumes (generalize M.empty arr) want)
+         Right (subsumesShape (generalize M.empty arr) want)
 
 encodeListV :: [Value] -> Value
 encodeListV = foldr (\v r -> VSum 1 [v, r]) (VSum 0 [])

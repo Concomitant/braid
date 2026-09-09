@@ -19,6 +19,18 @@ inherently special, it is the label whose carrier you cannot touch. The
 the label rides on the arrow. The old `⇒!` and `->!` spellings still lex
 for source compatibility. See stage 1 below for detail.
 
+**Amendment (2026-09-08): the grade is a label SET.** "Exactly one
+label, io" below is stage 1's shape, not the language's. `EffRow` now
+carries `Set String`; `unifyEff` is the same label-absorbing algorithm
+on sets, with one case the Bool never had — two open rows each
+carrying a label the other lacks, which bridge through a shared
+residual tail. What made it necessary was provenance: `use F` for a
+functor mints `F` onto the manifest of the code it rewrote
+(`design-macros.md`, the 2026-09-08 amendment), so a manifest records
+what a program *touches* AND what built it, and `=IO Traced>` is an
+ordinary type. Nothing else about the discipline changed: unify rather
+than join, absorption into an open tail, no annotations.
+
 ## Stage 1 as shipped (2026-08-25)
 
 Every arrow carries a **grade** — the set of resource wires it
@@ -27,7 +39,7 @@ it always did (`⇒`); one marked io prints `=IO>`. The label rides on
 the arrow like resource names do. Effect tails never display: the same
 information hiding `ρ` already gets inside `Fn⟨…⟩`.
 
-**Five prims are marked; everything else is inferred.** There is no
+**Four prims are marked; everything else is inferred.** There is no
 effect annotation anywhere — not in the prelude, the examples, or the
 tests.
 
@@ -80,7 +92,7 @@ print print                   : a0 a1 =IO> •          legal; left-to-right
 **A declared `Fn` type MEANS its grade.** The `=IO>` spelling writes
 the io form writable in declarations: `Fn⟨Str =IO> •⟩`. A declaration
 that says `Fn⟨Str ⇒ •⟩` refuses an io quotation — *Cannot unify effects:
-io vs pure*. That strictness is the point, and it is also the limit:
+IO vs pure*. That strictness is the point, and it is also the limit:
 there is no subeffecting, so a pure quote unified into an io context
 types as io. Let-generalization at `def` boundaries restores per-use
 freshness; inside one expression nothing does. (ASCII `->!` and the old

@@ -3,6 +3,7 @@ module Main (main) where
 import MiniConcatTypechecker
 import Control.Monad.Except (runExceptT, liftEither)
 import qualified Data.Map as M
+import qualified Data.Set as S
 import Data.Char (isSpace, isAlphaNum)
 import Data.List (isPrefixOf, intercalate)
 import System.Environment (getArgs)
@@ -410,7 +411,7 @@ freshenStackTy sty =
       nm = M.fromList
              (zip nvs [ Exp 0 (Just (NV ("_n" ++ show n))) | n <- [0 :: Int ..] ])
       em = M.fromList
-             (zip evs [ Eff False (Just (EV ("_e" ++ show n)))
+             (zip evs [ Eff S.empty (Just (EV ("_e" ++ show n)))
                       | n <- [0 :: Int ..] ])
       Arrow sty' _ _ = substOnce (Subst tm sm rm nm em) (arrPure sty SEnd)
   in sty'

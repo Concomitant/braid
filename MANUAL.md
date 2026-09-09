@@ -46,7 +46,8 @@ the current stack is rejected with a message naming the stack.
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
 | `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
 | `=IO>` , `⇒!` , `->!` | the io manifest label on an arrow (§3); legacy spellings still lex |
-| `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, grade included (§3, §8) |
+| `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, manifest included (§3, §8) |
+| `=Traced>` | a functor's receipt: minted by `use Traced`, never written (§3, §12) |
 
 Identifiers are any run of characters not in the punctuation set —
 `odd?`, `f'`, `+`, `*` are all ordinary names. Blank lines collapse.
@@ -98,9 +99,11 @@ Each atom in a stage covers exactly its own wires; every incoming wire
 must be covered by some atom. `1 2 >> +` works (two made, two used);
 `1 >> +` is a type error (one made, two needed).
 
-**Every arrow carries a grade** — the set of resource wires it touches.
-There is one label today, `io`: a pure arrow prints `⇒`, one marked io
-prints `=IO>`. The label rides on the arrow just like resource names do.
+**Every arrow carries a manifest** — a set of labels. A pure arrow
+prints `⇒`; an arrow carrying labels prints them between `=` and `>`,
+sorted, and the labels ride on the arrow just as resource names do.
+`IO` is one label among them, minted by the four prims that touch the
+world; a functor scope mints its own (below, and §12).
 
 ```braid
 1 >> print                  # • =IO> •          composition propagates it
@@ -111,7 +114,7 @@ def quiet = toStr >> drop   # a0 ⇒ •            pure stays bare
 [dup >> *] 5 >> apply       # • ⇒ Int           same apply, pure quote
 ```
 
-Grades are **inferred, never annotated**: four prims are marked io
+Manifests are **inferred, never annotated**: four prims are marked io
 (`print`, `readLine`, `readFile`, `writeFile` — §9) and
 every other arrow's grade follows from composition. Higher-order words
 (`apply`, `loop`, `map`, `foldExp`, `mapN`) share the grade of the
@@ -139,6 +142,23 @@ The fold is display, not inference: it fires when the prefixes match
 exactly, and a resource anywhere but the bottom prints as an ordinary
 wire (`_ bump ... : a0 Counter ρ0 ⇒ a0 Counter ρ0`). Threading them by
 hand is `_`/`...` as usual; `use` (§6) writes that padding for you.
+
+**And a functor leaves a receipt.** `use F` for a functor (§6, §12)
+rewrites the code under it, and mints `F` onto the manifest of what it
+rewrote — so the arrow records not only what a word touches but what
+built it, and every caller inherits the label by composition:
+
+```text
+poly    : Int =Traced> Int          -- elaborated under `use Traced`
+caller  : Int =Traced> Int          -- calls poly; the receipt travels
+report  : Int =IO Traced> •         -- and unions with any other label
+```
+
+Only a `use` mints. The label is not written, cannot be written
+(`use@Traced` in your own source is an error), and does not have to be
+threaded — which is what makes it evidence rather than a comment. It
+is also part of the type: a declaration that says `Fn⟨Int ⇒ Int⟩`
+refuses instrumented code exactly as it refuses io (§12, §14).
 
 ## 4. The remainder discipline
 
@@ -199,7 +219,7 @@ Type formers:
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
   hom: `apply` is modus ponens. The arrow inside carries its grade, and
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
-  (*Cannot unify effects: io vs pure*); `Fn⟨Str =IO> •⟩` is the io form
+  (*Cannot unify effects: IO vs pure*); `Fn⟨Str =IO> •⟩` is the io form
   (§8).
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
@@ -350,7 +370,8 @@ A resource contributes a wire the elaborator threads; an instance
 contributes no wire at all and disappears at elaboration, leaving its
 slots renamed.
 
-`use` names resources and instances (§8) and opens a scope over them,
+`use` names resources, instances and functors (§8) and opens a scope
+over them,
 taking the **rest of the enclosing scope as its body** — the same scope-taking
 shape as the binders `x y ->` and `-> x y`, and the same rule about
 needing a rest to reach. An elaborator running between parse and
@@ -419,7 +440,8 @@ One header, three kinds, applied in a fixed order: instances rename,
 resources route, functors rewrite (left to right), so a functor always
 sees finished wiring. `functor Both = metered ; traced` then `use Both`
 is the recommended spelling whenever the order carries meaning:
-functor composition IS `;`.
+functor composition IS `;`.  A functor scope also leaves its RECEIPT —
+the label `Metered` on the manifest of everything it rewrote (§3, §12).
 
 **What `use` does to a pure stage is `lift`** (§10), an ordinary
 prelude word: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a program
@@ -721,8 +743,8 @@ means "run `marked` on this scope's wiring, at elaboration, and splice
 the result". The word is checked at the first `use` (declarations are
 hoisted, so that is where the prefix scope is what it will be at run
 time): *must be Code ⇒ Code*, *must be pure* (it runs while the module
-is being checked, so it cannot do IO — the grade IS the phase
-distinction), *not defined at this point* (a functor is runnable
+is being checked, so it cannot do IO — the `IO` label IS the phase
+distinction; other labels on it are harmless), *not defined at this point* (a functor is runnable
 before its first use: the one place source order is semantic), and a
 looping functor exhausts a step budget rather than hanging the
 compiler. Not Haskell's `Functor`: nothing is dispatched on a type;
@@ -832,7 +854,7 @@ pure — `reflect` READS a quotation, it never runs it — and so does
 only pure code and stays pure, an io witness permits io. That is the
 sandbox — what runtime-loaded code may do is bounded by the type you
 were willing to write for it. Handing a pure witness io code rides the
-miss track: `Cannot unify effects: io vs pure (the expected type fixes
+miss track: `Cannot unify effects: IO vs pure (the expected type fixes
 the grade; this code must stay pure)`. See `examples/witness.braid`.
 
 Exponent tier (widths erased; see §13):
@@ -1133,6 +1155,32 @@ is a declaration, checked once.
 construction (a stage's image depends on that stage alone), which is a
 law that comes free, not a promise that the result types.
 
+**The receipt.** `use F` mints `F` onto the manifest of everything it
+elaborated (§3), so a rewrite that changes no requirement — a tracer,
+an optimizer — is still recorded, and the record travels to every
+caller by composition. Mechanically the receipt is a *word*: `use@F :
+∀ρ. ρ =F> ρ`, `pass` with a label, prepended to the expansion — the
+same unit endomorphism `interpose` inserts, doing nothing but being
+typed. Three consequences, in rising order of usefulness:
+
+- it is a stage, so it survives `reflect`: a reflected traced program
+  reads `use@Traced >> dup >> …`, and splicing it somewhere else
+  carries the label rather than losing it;
+- it cannot be forged. Writing `use@Traced` yourself is an error — *a
+  label is minted by a scope, never written by hand* — which is the
+  difference between provenance and a comment;
+- it is part of the type, so every place that compares a written type
+  to code checks it: an `evalAs` witness, a theory's declared slot, a
+  `Fn⟨…⟩` in a declaration. `Fn⟨Int ⇒ Int⟩` refuses instrumented code
+  with *Cannot unify effects: IO Traced vs pure*. An unlabelled type
+  is a claim that no functor touched the code.
+
+What a label does *not* say: that every stage of the word is in the
+functor's image. Labels union along composition, so adding one
+unmetered stage to a `=Metered>` word keeps the label; "wholly in the
+image" is the dual (intersecting) question, and Braid does not answer
+it yet (`design-macros.md`, the coeffect section).
+
 ### Deciding a law: `sameCode`
 
 `sameCode : Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` answers whether two programs
@@ -1226,11 +1274,19 @@ holds for them too: final atom of their stage (§9).
   spliced code against the live environment — priced by its railway.)
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
-- Effects don't sub-effect: composing forces two arrows' grades EQUAL
-  (the join you expect comes from absorption into an open tail), so a
-  pure quote unified into an io context types as io for that use.
+- Effects don't sub-effect: composing forces two arrows' manifests
+  EQUAL (the join you expect comes from absorption into an open tail),
+  so a pure quote unified into an io context types as io for that use.
   Let-generalization at a `def` boundary restores per-use freshness;
   inside one expression nothing does.
+- The same goes for a functor's receipt, and it surprises people once:
+  a *written* type with no labels refuses labelled code. An `evalAs`
+  witness `Fn⟨Int ⇒ Int⟩`, or a theory slot declared `a ⇒ a`, will not
+  take a word elaborated under `use Traced` — *Cannot unify effects:
+  Traced vs pure*. Write the label where you mean it
+  (`use Traced ; […]` as the witness), or elaborate the word outside
+  the functor. Inferred types never hit this: they just carry the
+  label onward.
 - Several effectful atoms in one tensor stage are **legal**, and run
   left to right — deepest wire first, the order they are written in
   (`print print : a0 a1 =IO> •`). That order is decreed, not checked, so

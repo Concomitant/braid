@@ -178,10 +178,13 @@ bare `use` leaves.
 12. **Effects are wires.** State, logs, readers, exceptions,
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
-    railway sum, a list. Only IO is irreducible, so `io` is the one
-    label a grade ever needs. An arrow marked io prints `=IO>`, a pure one
-    `⇒` — the label sits on the arrow just like resource names do — and
-    which you get is **inferred, never annotated**: four prims are marked
+    railway sum, a list. Only IO is irreducible, so `IO` is the one
+    label the effect zoo ever needs — an arrow carrying it prints
+    `=IO>`, a pure one `⇒`, and the label sits on the arrow just like
+    resource names do. The manifest is a SET, though: a functor scope
+    mints its own label onto everything it rewrote (item 14), and
+    `=IO Traced>` is an ordinary type. Which labels you get is
+    **inferred, never annotated**: four prims are marked
     (`print`, `readLine`, `readFile`, `writeFile`) and every
     other grade follows from composition — `def shout = toStr >> print : a0 =IO> •`.
     Quoting stays pure, since pushing an action isn't doing it:
@@ -227,7 +230,12 @@ bare `use` leaves.
     (`ρ ⇒ ρ`, or `E ρ ⇒ E ρ` over a resource) — so metering a resource
     is one line, and the tracer that lifts everywhere is a marker, not
     a probe. `lift2` applies any such functor at run time with the
-    program as its own witness and fallback.
+    program as its own witness and fallback. And a functor leaves a
+    **receipt**: `use Traced` mints `Traced` onto the manifest of
+    everything it rewrote (`poly : Int =Traced> Int`), so the type says
+    which functors built a word and every caller inherits it. Only a
+    `use` can mint one — written by hand it is an error — which is what
+    makes it evidence.
 
 ## Examples
 
@@ -266,7 +274,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 721-case test suite, a full
+(typechecker, interpreter, REPL), a 733-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

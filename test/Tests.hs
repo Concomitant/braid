@@ -505,7 +505,37 @@ moduleTypeTests =
     -- still sees whatever else was passing through
   , ("def tagged =\n    -> h m f\n    sumN\n    h ... >> +\ntagged",
      "Int Int Int Intⁿ⁰ ⇒ Int")
+    -- STAGE 4½: PROVENANCE.  `use F` mints F onto everything it
+    -- elaborated, and the manifest carries it to every caller.
+  , (idF ++ "def p = use Same >> dup >> *\np",          "Int =Same> Int")
+  , (idF ++ "def p = use Same >> dup >> *\ndef q = p >> p\nq",
+     "Int =Same> Int")
+    -- labels are a SET: two functors union, io is one member among
+    -- them, and a resource name joins them in the same manifest
+  , (idF ++ "def idG = (c -> c)\nfunctor Twice = idG\n"
+         ++ "def p = use Same Twice >> dup >> *\np", "Int =Same Twice> Int")
+  , (idF ++ "def p = use Same >> dup >> * >> print\np", "Int =IO Same> •")
+  , (idF ++ "resource Fuel = Int\ndef p =\n    use Fuel Same\n    dup >> *\np",
+     "Int ρ0 =Same Fuel> Int ρ0")
+    -- a labelled word composes with an unlabelled one and with an io
+    -- one: unification absorbs into the open tail, exactly as io always
+    -- did.  Nothing about `=Same>` makes a word less composable.
+  , (idF ++ "def p = use Same >> dup >> *\ndef q = p >> toStr >> print\nq",
+     "Int =IO Same> •")
+    -- two DIFFERENT labels meeting at a cut: neither tail is poorer, so
+    -- the rows bridge through a shared residual
+  , (idF ++ "def idG = (c -> c)\nfunctor Twice = idG\n"
+         ++ "def p = use Same >> dup >> *\ndef q = use Twice >> _ 1 >> +\n"
+         ++ "def both = p >> q\nboth", "Int =Same Twice> Int")
+    -- a functor's own word is UNLABELLED — it is called at elaboration,
+    -- not elaborated under anything
+  , (idF ++ "idF", "a0 ⇒ a0")
   ]
+
+-- a trivial functor: the identity on Code.  Enough to ask what `use`
+-- leaves behind, without a rewrite getting in the way.
+idF :: String
+idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
@@ -878,7 +908,7 @@ evalTests =
     -- effect tail, not by accident (before that, absorption let io
     -- code raise the tail, and the refusal only happened when the two
     -- inference runs reused a tail name and tripped the occurs check)
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[_] ([dup >> print ...] >> getCode) (5) >> evalAs >> (print | print forget) >> merge", ["Cannot unify effects: io vs pure (the expected type fixes the grade; this code must stay pure)"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[_] ([dup >> print ...] >> getCode) (5) >> evalAs >> (print | print forget) >> merge", ["Cannot unify effects: IO vs pure (the expected type fixes the grade; this code must stay pure)"], "")
     -- ...an io witness permits io, and admits pure code too
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[dup >> print ...] ([dup >> print ...] >> getCode) (5) >> evalAs >> (print | print forget) >> merge\n[dup >> print ...] ([_] >> getCode) (6) >> evalAs >> (print | print forget) >> merge", ["5", "5", "6"], "")
     -- GLA: transpose of add is copy; linearity checked over reflected code
@@ -1066,6 +1096,16 @@ evalTests =
     -- vertical track-columns: flat 3-sum via inject-and-collapse, then
     -- bare rows each touching one track (empty arms pass)
   , ("def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
+    -- STAGE 4½: the receipt is a STAGE, so it reflects with the code it
+    -- was minted onto, and code that carries a label needs a witness
+    -- that carries it too — the sandbox reads provenance exactly as it
+    -- reads io
+  , (idF ++ "def q = [use Same >> dup >> *]\nq >> getCode >> unparse >> print",
+     ["use@Same >> dup >> *"], "")
+  , (idF ++ "def q = [use Same >> dup >> *]\n[use Same >> dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
+     ["36"], "")
+  , (idF ++ "def q = [use Same >> dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
+     ["Cannot unify effects: Same vs pure (the expected type fixes the grade; this code must stay pure)"], "")
   ]
 
 -- (module source, substring expected in the error)
@@ -1088,7 +1128,7 @@ moduleFailTests =
     -- stack-only check, and `functor F = <that slot>` then carried IO
     -- into elaboration, breaking the phase invariant.
   , ("theory Rewriter =\n    rw : Code ⇒ Code\n\ninstance Loud : Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud = use Loud ; rw\n1",
-     "Cannot unify effects: io vs pure")
+     "Cannot unify effects: IO vs pure")
     -- a witness is not optional: `evalAs` without one is an arity error
     -- (there is no longer any way to splice without stating the type)
   , ("def bad = (cd x -> (cd) ... >> evalAs >> ((y -> y x >> pack) | forget >> nil) >> merge)\n1",
@@ -1119,6 +1159,11 @@ moduleFailTests =
      "step budget exhausted")
   , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
      "Duplicate functor declaration")
+    -- STAGE 4½: a label is minted by a scope or not at all.  The
+    -- receipt is a word in the environment (it has to be — it is the
+    -- arrow that carries the label), so the source is checked for it.
+  , (idF ++ "def forged = use@Same >> dup >> *\n5 >> forged >> print",
+     "not a word: a label is minted by a scope, never written by hand")
     -- `interpose` (stage 4) admits only unit endomorphisms — `ρ ⇒ ρ`,
     -- or `E ρ ⇒ E ρ` over resource wires — and refuses by name, with
     -- the stage's actual type, before inserting it anywhere.  Checked

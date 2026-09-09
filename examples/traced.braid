@@ -51,6 +51,25 @@ def twice =
 "-- interpose: one marker after every stage --" ; print
 21 ; twice ; print                     # tick, tick, 42
 
+# THE RECEIPT.  `use Traced` leaves `Traced` on the manifest of
+# everything it elaborated: `poly : Int =Traced> Int`, and every caller
+# of `poly` inherits it by row unification.  The label is minted by the
+# scope and by nothing else — `use@Traced` written by hand is refused —
+# so a manifest is evidence about how a word was built, not a claim its
+# author made.  Two ways to see it from inside a program:
+def quoted = [use Ticked ; dup ; +]
+
+"-- the receipt is a stage, so it reflects with the code --" ; print
+quoted ; getCode ; unparse ; print      # use@Ticked >> dup >> "tick" pass …
+
+# and it is part of the type, so a witness must carry it too: an
+# unlabelled `Fn` refuses instrumented code exactly as a pure one
+# refuses io.
+"-- a witness that carries the label runs the code --" ; print
+[use Ticked ; dup ; +] (quoted ; getCode) (20) ; evalAs ; (print | print forget) ; merge
+"-- an unlabelled witness refuses it --" ; print
+[dup ; +] (quoted ; getCode) (20) ; evalAs ; (print | print forget) ; merge
+
 # Uncomment to see the refusal:
 #   def peek = [dup ... ; print ...] ; getCode
 #   def peeked = peek ... ; interpose

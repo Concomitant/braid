@@ -43,8 +43,8 @@ able to see, in the text, which category a block is in.
 1. **Inference never sees a functor.** Everything that reaches `infer`
    is a plain Term; the type system is untouched and principality
    undisturbed.
-2. **Elaboration never performs IO.** A functor's arrow must be `⇒`,
-   not `⇒!` — the io grade doing double duty as the phase distinction
+2. **Elaboration never performs IO.** A functor's arrow must carry no
+   `IO` — the io label doing double duty as the phase distinction
    (Harper–Mitchell–Moggi, enforced by machinery that already ships).
    Purity here does not mean totality: a functor can loop, so
    elaboration-time evaluation is fuel-bounded.
@@ -59,9 +59,12 @@ able to see, in the text, which category a block is in.
    the degenerate case where there is nothing to capture.
 5. **Markers are written, receipts are inferred.** A scope *names* the
    labels whose elaboration rules apply (`use K …` — one line,
-   refactor-stable). The arrow's manifest (`=K>`, `⇒!`) is inference's
+   refactor-stable). The arrow's manifest (`=K>`) is inference's
    *record* of what the elaborated code needs, propagating by
    unification. Rewriting is never triggered by inferred types.
+   (Since 2026-09-08 the manifest also records what REWROTE the code:
+   `use F` mints `F`. Minting is still a consequence of a written
+   marker, never of an inferred type — see the provenance amendment.)
 
    **Amendment (2026-08-31, the Lean question).** "Type-triggered
    rewriting is circular" is true of *this* language, not of languages
@@ -200,7 +203,7 @@ Recorded because the vocabulary keeps earning its keep:
   structure from lambdas, is free here).
 - The manifest records a transport's **consequences**, never the
   transport itself: a functor that adds effects shows up as those
-  effects (`=Fuel>`, `⇒!`); a functor that moves to a non-representable
+  effects (`=Fuel>`, `=IO>`); a functor that moves to a non-representable
   category shows up as different types (`Circuit(Int,Int)`); the cause
   is the `use` line, one line up. Only representable structure can be a
   label, because only it leaves a wire there is anything to fold.
@@ -422,6 +425,68 @@ by the language's own normalizer at module start sit between GHC
 RULES (user rules, trusted, silently miscompile when wrong) and
 Alive-style external verification — in-language, zero-infrastructure,
 refusing rather than guessing outside the decidable fragment.
+
+## Amendment (2026-09-08): provenance labels — the receipt is a stage
+
+Shipped as stage 4½. Invariant five said receipts are inferred; until
+now the only receipt a functor left was whatever its rewrite happened
+to make the code *need* (`interpose [burn]` moves the spine into the
+Fuel fiber, and `=Fuel>` is the record). A functor that changes no
+requirement — a tracer, an optimizer, a twinning transport — left
+nothing at all, and "which functors built this word" was not a
+question the type could answer. Now it is:
+
+- `EffRow` widens from `Bool` to `Set String`. io is one label among
+  many, spelled `IO` in exactly one place in the source; unification is
+  the same label-absorbing row algorithm, now on sets. Two open rows
+  with each side carrying a label the other lacks bridge through a
+  shared residual tail, named from the pair (`solve` is a pure fold
+  with no fresh-name supply, and a pair can be bridged only once —
+  both its variables are bound by that step). Labels are **idempotent**:
+  a set, not a multiset, which is why `⟨A|ε⟩ ~ ⟨B|ε⟩` is satisfiable
+  at `ε := ⟨A B|υ⟩` and why a tail may absorb a label the other side
+  already carries.
+- `use F` **mints** `F`, unconditionally, onto everything it
+  elaborated. Composition carries it to every caller by row
+  unification, so `=Traced>` on a word two calls away is a fact about
+  how that word was built.
+
+**The mechanism is the fragment.** The only way to put a label on an
+inferred arrow is to compose with an arrow that carries it — that is
+how `print` has always minted io. So the receipt is a WORD:
+`use@F : ∀ρ. ρ =F> ρ`, `pass` with a label, prepended to the
+expansion. A unit endomorphism whiskered by whatever the cut carries:
+stage 4's `K(I,I)` again, at zero cost, doing nothing but being
+typed. Consequences worth stating, all verified:
+
+- It is a stage, so it **reflects with the code** it was minted onto
+  (`use@Ticked >> dup >> "tick" pass >> …`) and re-inference at a
+  splice site recovers the label rather than losing it.
+- It cannot be written by hand. The elaborator walks the source before
+  any expansion is spliced in, and refuses the name there: *a label is
+  minted by a scope, never written by hand*. Without that check the
+  label would be an annotation, and provenance that the author can
+  forge is not provenance.
+- The **sandbox generalizes for free**. `evalAs`'s witness, a theory's
+  declared slot arrow, and any `Fn⟨…⟩` written in a declaration all
+  compare manifests by subsumption, so an unlabelled `Fn` type now
+  refuses instrumented code exactly as a pure one refuses io: *Cannot
+  unify effects: IO Ticked vs pure*. An unlabelled type is a claim
+  that no functor touched the code.
+- `interpose` had to give up the reverse. Its check skolemized the
+  effect tail along with the wires, which would refuse any stage
+  carrying a receipt; the question it asks is about SHAPE, so it now
+  skolemizes the stacks only (`subsumesShape`) and lets the manifest
+  absorb. Enumerating the labels a stage may carry would be a list to
+  keep up to date; an open tail is that list.
+
+**What this does NOT do**, restated so the next stage does not
+over-claim it: a label says the functor ran over this code, not that
+every stage of it is in the functor's image. Adding one unmetered
+stage to a `=Metered>` word keeps the label. That is the intersection
+problem below, and it is still open — this stage makes the *union*
+half exact, which is the half a type system with an effect row can
+carry.
 
 ## OPEN: coeffects, and tagging the non-idempotent image
 
