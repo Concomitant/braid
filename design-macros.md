@@ -882,6 +882,55 @@ object; premonoidal categories (Power–Robinson) for the state fibers
 and the ordering decree; the existential cut-type obstruction for why
 `Code` is the quotient of typed code.
 
+## Amendment (2026-09-09): constructor parameters, and what a slot may name
+
+*Stage 5a items 0 and 1. Two changes to `theory`, no change to
+inference, and one renaming the record should carry: what this document
+calls `theory Pipeline` — the one-object category `circuits.braid` could
+express before this — is now `theory Arrow(k(_, _))`, and its `observe`
+slot survives unchanged.*
+
+**Slot-local variables.** A slot may name type variables the theory does
+not declare; each slot is generalized over its own. Any lowercase name
+that is neither a theory parameter nor a type in scope is such a
+variable, and a `...` in a slot of a theory with no stack parameter is a
+slot-local stack. This needed nothing from the checker: `declaredSlots`
+already generalized a slot's arrow, and `checkInstance` already compared
+a body to it by `subsumes`, so the variables only had to survive the
+parser. The refusal is the parametricity message, naming the slot.
+
+**Constructor parameters.** A theory parameter may be a type
+constructor, its arity written as underscores — `theory Arrow(k(_, _))`.
+The kind is visible because the two bare readings are already spoken
+for: a name is a wire, `...` is a stack. The instance head names a
+**declared data type**, not a type expression, and `slotArrowAt`
+substitutes the NAME into the slot's arrow before any slot is
+forward-declared. So this is the ML-functor move and not higher kinds:
+`Ty` gains nothing, `TyParam` gains `PCon String Int`, and inference
+never meets a constructor variable. `k(a, b)` is recorded as
+`TData "k" [a, b]` inside the slot signature only, and the rename runs
+before the wire/stack substitution so it cannot reach into a type the
+instance supplied.
+
+**Two consequences worth naming.**
+- *Strength is what forced it.* `firstP : k(a, b) ⇒ k(Pair(a, c),
+  Pair(b, c))` mentions `k` at three different pairs of wires. A `PWire`
+  parameter can only name ONE hom-object, which is why the old theory
+  was a monoid — a category with one object — rather than a category.
+- *`Fn` cannot fill a constructor parameter.* It is built in and takes
+  an arrow rather than wires. The refusal says so and names the one-line
+  wrapper (`data Arr(a, b) = Fn⟨a ⇒ b⟩`), which is how
+  `circuits.braid` gets its second, deliberately boring model.
+
+**What stage 5c can rely on.** An instance of `Arrow(k)` is nothing but
+a table of generated defs `Inst@arrP`, `Inst@thenP`, `Inst@firstP`, …
+whose types are ordinary: `Inst@thenP : K(a, b) K(b, c) ⇒ K(a, c)` for
+the concrete `K` the head named. `mode K = Inst` therefore has
+everything it needs syntactically — the carrier's data name is
+`inArgs`' `IACon`, and the hom-object is `TData K [a, b]` — with no
+inference change and no new sort of arrow, exactly as "the manifest,
+stated once" predicted.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and

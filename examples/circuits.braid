@@ -1,4 +1,4 @@
-# Processes as data — the arrows that are NOT already Braid's arrow.
+# Processes as data — and the Arrow interface, said once.
 #
 # `examples/arrows.braid` shows that Control.Arrow's INTERFACE is just
 # Braid's syntax: `arr f` is any pure program, `f >>> g` is `f ; g`,
@@ -14,58 +14,109 @@
 # What is genuinely left over is arrows that are PROCESSES: Yampa's
 # signal functions, Hughes' stream transducers, circuits. Those really
 # are a different category — and in Braid they are an ordinary
-# recursive data type whose composition is an ordinary word. Nothing
-# abstracts over the category; there is no `Arrow` class here, because
-# Braid has no higher kinds to write one with.
+# recursive data type whose composition is an ordinary word.
+#
+# ---- what changed (2026-09-09) --------------------------------------
+# This file used to end "nothing abstracts over the category; there is
+# no `Arrow` class here, because Braid has no higher kinds to write one
+# with." The second half was wrong, and the theory below is the
+# correction. A theory parameter may now be a type CONSTRUCTOR —
+# `theory Arrow(k(_, _))`, the arity written as underscores because a
+# bare name already means a wire and `...` already means a stack. `k`
+# is not a type and never reaches inference: it lives in the slot
+# signatures, and the instance head names a declared data type that is
+# substituted for it before any slot is checked. That is the ML-functor
+# move, not higher kinds — `Ty` still has no constructor variable, and
+# nothing is inferred or dispatched. Slots also carry their OWN
+# variables now (`a b c` below), each generalized per slot.
 
+data Circuit(a, b) = Fn⟨a ⇒ b Circuit(a, b)⟩
+data Pair(a, b) = a b
+
+# `Fn` itself cannot fill `k`: it is built in, it takes an ARROW rather
+# than two wires, and a constructor parameter must name a declared data
+# type. One line of wrapping buys it — and gives the theory a second,
+# deliberately boring model to be audited against.
+data Arr(a, b) = Fn⟨a ⇒ b⟩
+
+# ---- the theory ------------------------------------------------------
+# A category with hom-objects, plus strength. `thenP` is composition,
+# `arrP` is the embedding of ordinary Braid programs, `firstP` is
+# `first` — and it is the slot that made constructor parameters
+# necessary: its type mentions `k` at three different pairs of wires.
+#
+# `observe` and `sample` are the audit's evidence. A circuit is codata,
+# so it cannot be compared, only OBSERVED; the theory asks for the
+# observation, which is what keeps the laws honest about being finite
+# tests of an infinite object.
+theory Arrow(k(_, _)) =
+    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    thenP   : k(a, b) k(b, c) ⇒ k(a, c)
+    firstP  : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
+    observe : k(Int, Int) ⇒ Int
+    sample  : • ⇒ k(Int, Int)
+    # The five laws. A leftmost atom in a stage is the DEEPEST wire, so
+    # `X ...` slides X UNDER the stack and `_ X` puts it ON TOP; that is
+    # how each law picks which side of `thenP` the other circuit goes on.
+    law leftId  = ([_] ... ; arrP ... ; _ sample ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+    law rightId = (sample ; _ [_] ; _ arrP ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+    law assoc   = (sample sample sample ; thenP _ ; thenP ; observe) (sample sample sample ; _ thenP ; thenP ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+    law arrFunctor = ([_ 1 ; + ; _ 2 ; *] ... ; arrP ... ; observe) ([_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+    law firstFst = ([dup ; Pair] ... ; arrP ... ; _ sample ; _ firstP ; thenP ; _ [unPair ; _ drop] ; _ arrP ; thenP ; observe) ([dup ; Pair] ... ; arrP ... ; _ [unPair ; _ drop] ; _ arrP ; thenP ; _ sample ; thenP ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
+
+# ---- model one: circuits ---------------------------------------------
 # A circuit consumes an input and returns an output AND ITS SUCCESSOR.
 # Recursion through Fn is what makes it codata (cf. examples/stream.braid).
-data Circuit(a, b) = Fn⟨a ⇒ b Circuit(a, b)⟩
-
 def stepC = (c x -> c ; unCircuit ; _ x ; apply)
 
-# the identity circuit, and `>>>`: run f, feed g, pair the successors
-def idC   = [(x -> x idC)] ; Circuit
-def compC = (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
+# the identity circuit, `arr`, `>>>`, and `first`
+def idC    = [(x -> x idC)] ; Circuit
+def arrC   = (g -> [(x -> g x ; apply ; (y -> y (g ; arrC)))] ; Circuit)
+def compC  = (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
+def firstC = (f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; firstC))))] ; Circuit)
 
 # A circuit that CANNOT be a pure function: its output depends on every
 # input it has already seen. This is the whole reason Arrows exist.
 def sumFrom = (n -> [(x -> n x ; + ; dup ; _ sumFrom)] ; Circuit)
 def scale   = (n -> [(x -> (n x ; *) (n ; scale))] ; Circuit)
 
-# ---- the theory ------------------------------------------------------
-# `thenP : a a ⇒ a` with a two-sided identity is a MONOID, and that is
-# all a category with one object is. The subtlety is equality: a circuit
-# is codata, so it cannot be compared — only OBSERVED. The theory asks
-# for the observation, which makes the laws honest about being finite
-# tests of an infinite object.
-theory Pipeline(a) =
-    idP     : • ⇒ a
-    thenP   : a a ⇒ a
-    observe : a ⇒ Int
-    sample  : • ⇒ a
-    law leftId  = (sample ; idP ... ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
-    law rightId = (sample ; _ idP ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
-
 # feed 3 then 4, and report both outputs summed — two steps, because one
 # step cannot tell a stateful circuit from a stateless one
 def probe = (c -> c 3 ; stepC ; (y c2 -> c2 4 ; stepC ; (z c3 -> (y z ; +) (c3 ; drop))))
 
-instance CircuitPipe : Pipeline(Circuit(Int, Int)) =
-    idP     = idC
+instance Circuits : Arrow(Circuit) =
+    arrP    = arrC
     thenP   = compC
+    firstP  = firstC
     observe = probe
     sample  = 0 ; sumFrom
 
-# The carrier is a PARAMETERIZED type and the slots are the module's own
-# recursive words: both are ordinary, and both are what a theory over a
-# real structure needs.
+# ---- model two: plain functions --------------------------------------
+# The boring model, and the point of having one: the same five laws run
+# again over a carrier with no state at all.
+def arrA     = Arr
+def thenA    = (f g -> [(x -> f ; unArr ; _ x ; apply ; (y -> g ; unArr ; _ y ; apply))] ; Arr)
+def firstA   = (f -> [(p -> p ; unPair ; (x d -> f ; unArr ; _ x ; apply ; (y -> y d ; Pair)))] ; Arr)
+def runA     = (f x -> f ; unArr ; _ x ; apply)
+def observeA = (f -> (f 3 ; runA) (f 4 ; runA) ; +)
 
-def solo   = use CircuitPipe ; sample ; observe
-def paired = use CircuitPipe ; sample idP ; thenP ; observe
+instance Funcs : Arrow(Arr) =
+    arrP    = arrA
+    thenP   = thenA
+    firstP  = firstA
+    observe = observeA
+    sample  = [dup ; +] ; Arr
 
-solo   ; print              # 10  — running sum: 3, then 3+4
-paired ; print              # 10  — composing with the identity changes nothing
+# ---- generic code, written once --------------------------------------
+# The body is the same twice; only the scope differs. `use` is a
+# renaming, so `thenP` here IS this instance's word — resolution once
+# per scope, never a dictionary per call.
+def twiceC = use Circuits ; sample sample ; thenP ; observe
+def twiceA = use Funcs    ; sample sample ; thenP ; observe
+
+twiceC ; print              # 13  — a running sum fed into a running sum:
+                            #       3 ⇒ 3 ⇒ 3, then 4 ⇒ 7 ⇒ 10
+twiceA ; print              # 28  — doubling twice: 3⋅4 + 4⋅4
 
 # and the composite really is stateful: sum, then double
 (0 ; sumFrom) (2 ; scale) ; compC
@@ -73,3 +124,11 @@ _ 3  ; stepC ; (y c -> (y ; print) c)      # 6
 _ 4  ; stepC ; (y c -> (y ; print) c)      # 14
 _ 10 ; stepC ; (y c -> (y ; print) c)      # 34
 drop
+
+# The laws ran before any of this printed. `firstFst` is the one worth
+# a second look: `first f ; arr fst = arr fst ; f` is a naturality
+# square, and stating it needed `k` at THREE different pairs of wires —
+# `k(Int, Pair(Int, Int))`, `k(Pair(Int, Int), Pair(Int, Int))`,
+# `k(Pair(Int, Int), Int)`. A wire parameter could not have said it,
+# which is why `theory Pipeline(a)` (what this file used to hold) was a
+# category with ONE object and this one is not.

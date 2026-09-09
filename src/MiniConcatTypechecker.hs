@@ -15,7 +15,7 @@ import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
-import Data.Char (isDigit, isSpace)
+import Data.Char (isAlphaNum, isDigit, isLower, isSpace)
 import Data.Bifunctor (first)
 import System.Directory (doesFileExist, canonicalizePath)
 import System.FilePath (takeDirectory, takeFileName, isAbsolute, (</>))
@@ -1522,13 +1522,30 @@ parseDelimited = parseProgramToks
 -- position can decide without an annotation.  Width parameters are
 -- supported on `type` aliases only for now (a `data` type would need
 -- TData to carry width arguments).
-data TyParam = PWire TVar | PStack SVar | PWidth NVar
+-- A fourth kind, and the only one a THEORY may declare: `PCon`, a type
+-- CONSTRUCTOR parameter, written with its kind visible as underscores —
+-- `theory Arrow(k(_, _))`.  A bare name is a wire and `...` is a stack,
+-- so a constructor cannot be spelled bare without stealing one of those
+-- readings; the underscores are the arity, checked at the instance.
+-- `k` is not a type: it never reaches inference.  It exists inside the
+-- theory's slot signatures only, and `slotArrowAt` substitutes the
+-- instance's declared constructor NAME for it before any slot is
+-- forward-declared or checked (the ML-functor move).
+data TyParam = PWire TVar | PStack SVar | PWidth NVar | PCon String Int
   deriving (Eq, Show)
 
 pName :: TyParam -> String
 pName (PWire (TV n))  = n
 pName (PStack (SV n)) = n
 pName (PWidth (NV n)) = n
+pName (PCon n _)      = n
+
+-- how a parameter's kind reads back in an error message
+pKind :: TyParam -> String
+pKind (PWire _)    = "a wire"
+pKind (PStack _)   = "a stack (`...`)"
+pKind (PWidth _)   = "a width"
+pKind (PCon _ k)   = "a type constructor of arity " ++ show k
 
 isStackParam :: TyParam -> Bool
 isStackParam (PStack _) = True
@@ -1537,6 +1554,10 @@ isStackParam _          = False
 isWidthParam :: TyParam -> Bool
 isWidthParam (PWidth _) = True
 isWidthParam _          = False
+
+isWireParam :: TyParam -> Bool
+isWireParam (PWire _) = True
+isWireParam _         = False
 
 -- the stack a parameter stands for when the declaration is instantiated
 paramStack :: TyParam -> SType
@@ -1547,6 +1568,11 @@ paramStack (PWidth nv) =
   -- declaration time, and only they build a TData spine from params
   error ("paramStack: width parameter " ++ show nv
          ++ " (data declarations reject these)")
+paramStack (PCon n _) =
+  -- unreachable: only a `theory` head can declare a constructor
+  -- parameter, and a theory builds no TData spine from its parameters
+  error ("paramStack: constructor parameter " ++ n
+         ++ " (only theories declare these)")
 
 -- An argument at a use site: a stack for wire/`...` parameters, a
 -- width for `^`-parameters.  TData still carries only stacks (data
@@ -1595,9 +1621,17 @@ data Theory = Theory
 data Instance = Instance
   { inName     :: String
   , inTheory   :: String
-  , inArgs     :: [SType]
+  , inArgs     :: [InstArg]
   , inBindings :: [(String, String)]  -- slot, program source
   } deriving (Eq, Show)
+
+-- An instance's argument, read at the KIND the theory's parameter
+-- declares.  A wire or `...` parameter takes a type expression; a
+-- constructor parameter takes the NAME of a declared data type — a
+-- name, never a type, because `k(a, b)` is applied inside the slot and
+-- the application is performed by substitution at the instance.
+data InstArg = IAStack SType | IACon String
+  deriving (Eq, Show)
 
 -- NOT `#`: that starts a comment, so a generated name using it would be
 -- eaten by the lexer the moment it appeared in emitted source.
@@ -1759,6 +1793,10 @@ lookupAlias n = go
     go (al : rest) | aName al == n = Just al
                    | otherwise     = go rest
 
+-- the type names that are always in scope and are never variables
+builtinTyNames :: [String]
+builtinTyNames = ["Int", "Str", "Sym", "Fn", "Fin", "•"]
+
 -- Parse a whole `type …` declaration line (aliases and data types in
 -- scope are needed to resolve references in the RHS; the declared name
 -- itself is in scope for self-reference, which makes the declaration a
@@ -1785,10 +1823,26 @@ parseTheory aliases dataSigs header body = do
         (TokIdent "theory" : TokIdent n : TokLParen : rest) ->
           (,) n <$> theoryParams rest
         _ -> Left $ "Malformed theory declaration: " ++ header
+    -- A bare name is a WIRE, `...` a STACK, and `k(_, _)` a type
+    -- CONSTRUCTOR — the arity written as underscores, because the two
+    -- bare readings are already taken and a kind that is invisible is a
+    -- kind that is guessed.
+    theoryParams (TokIdent p : TokLParen : r) = do
+      (ar, r1) <- conArity 0 r
+      case r1 of
+        (TokComma : r2) -> (PCon p ar :) <$> theoryParams r2
+        [TokRParen]     -> Right [PCon p ar]
+        _ -> Left "Malformed theory parameter list"
     theoryParams (TokIdent p : TokComma : r) = (PWire (TV p) :) <$> theoryParams r
     theoryParams [TokIdent p, TokRParen]     = Right [PWire (TV p)]
     theoryParams [TokEllipsis, TokRParen]    = Right [PStack (SV "s")]
     theoryParams _ = Left "Malformed theory parameter list"
+
+    -- `_`, `_, _`, … : the arity of a constructor parameter
+    conArity n (TokIdent "_" : TokComma : r)  = conArity (n + 1) r
+    conArity n (TokIdent "_" : TokRParen : r) = Right (n + 1 :: Int, r)
+    conArity _ _ = Left ("A constructor parameter's kind is written with "
+                      ++ "underscores, one per argument: k(_, _)")
 
     -- `law nm = program` | `slot : Σ ⇒ Θ`
     parseEntry params l =
@@ -1798,13 +1852,44 @@ parseTheory aliases dataSigs header body = do
         _ -> case break (== ':') l of
           (lhs, ':' : sig)
             | [nm] <- words lhs -> do
-                -- a slot signature is an arrow; reuse the Fn parser
-                ty <- parseTyBody aliases dataSigs params ("Fn⟨" ++ sig ++ "⟩")
+                -- SLOT-LOCAL VARIABLES.  A slot may name variables the
+                -- theory does not declare (`thenP : k(a,b) k(b,c) ⇒
+                -- k(a,c)` needs `a b c`), and each is local to its own
+                -- slot: the slot's arrow is generalized over them, which
+                -- `declaredSlots` already does and which `checkInstance`
+                -- already reads by subsumption.  Generalize-at-parse,
+                -- not a checker change.  Any lowercase name that is not
+                -- a theory parameter and not a type in scope is such a
+                -- variable; a `...` with no stack parameter to attach to
+                -- is a slot-local stack.
+                locals <- slotLocals params sig
+                ty <- parseTyBody aliases dataSigs (params ++ locals)
+                                  ("Fn⟨" ++ sig ++ "⟩")
                 case ty of
                   TFn arr -> Right (Left (nm, arr))
                   _ -> Left $ "theory: slot '" ++ nm
                            ++ "' needs a signature like `Σ ⇒ Θ`"
           _ -> Left $ "Malformed theory entry: " ++ dropWhile isSpace l
+
+    -- the variables a slot introduces on its own, in order of first use
+    slotLocals params sig = do
+      toks <- tokenize sig
+      let known n = isJust (lookupParam n params)
+                 || isJust (lookup n dataSigs)
+                 || isJust (lookupAlias n aliases)
+                 || n `elem` builtinTyNames
+          fresh acc (TokIdent n : rest)
+            | not (null n), isLower (head n), not (known n)
+            , n `notElem` acc = fresh (acc ++ [n]) rest
+          fresh acc (_ : rest) = fresh acc rest
+          fresh acc []         = acc
+          wires = [ PWire (TV n) | n <- fresh [] toks ]
+          -- one slot-local stack for the whole slot, named so that no
+          -- source identifier can shadow it (`…` lexes as `...`)
+          stk = [ PStack (SV "…")
+                | TokEllipsis `elem` toks
+                , not (any isStackParam params) ]
+      pure (wires ++ stk)
 
 -- `instance Name : Theory(args)` + indented `slot = program`
 -- Split a type-argument list on commas that are not nested inside
@@ -1822,9 +1907,9 @@ splitTopCommas = go 0 ""
       | otherwise                   = go d (c : acc) cs
     blankStr = all isSpace
 
-parseInstance :: [Alias] -> [(String, [TyParam])] -> String -> [String]
-              -> Either String Instance
-parseInstance aliases dataSigs header body = do
+parseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
+              -> [String] -> Either String Instance
+parseInstance aliases dataSigs theories header body = do
   (nm, th, args) <- parseHead
   binds <- mapM parseBind (filter (not . blank) body)
   pure (Instance nm th args binds)
@@ -1840,14 +1925,59 @@ parseInstance aliases dataSigs header body = do
       case break (== ':') (takeWhile (/= '=') header) of
         (lhs, ':' : rhs) | ["instance", nm] <- words lhs ->
           case break (== '(') (dropWhile isSpace rhs) of
-            (th, "")        | [t] <- words th -> Right (nm, t, [])
+            (th, "")        | [t] <- words th ->
+              (,,) nm t <$> args nm t []
             (th, _ : inner) | [t] <- words th ->
-              (,,) nm t <$> mapM one (splitTopCommas inner)
+              (,,) nm t <$> args nm t (splitTopCommas inner)
             _ -> Left $ "Malformed instance head: " ++ header
         _ -> Left $ "Malformed instance declaration: " ++ header
-    one n = do
-      t <- parseTyBody aliases dataSigs [] n
-      Right (SCons t SEnd)
+    -- Arguments are read AT THE THEORY'S KINDS: a constructor parameter
+    -- takes a bare name, everything else a type expression.  The theory
+    -- is looked up leniently — an unknown one is reported by
+    -- `instanceDefs`, and a count mismatch by the same message
+    -- `checkInstance` uses.
+    args nm t srcs =
+      case [ thParams x | x <- theories, thName x == t ] of
+        (ps : _)
+          | length ps /= length srcs ->
+              Left $ "instance " ++ nm ++ ": theory " ++ t ++ " expects "
+                  ++ show (length ps) ++ " argument(s)"
+          | otherwise -> sequence (zipWith (one nm t) (map Just ps) srcs)
+        [] -> mapM (one nm t Nothing) srcs
+    one nm t (Just q@(PCon _ ar)) src =
+      case words (takeWhile (/= '#') src) of
+        [c] | all isIdentish c -> do
+          ps <- case lookup c dataSigs of
+            Just ps -> Right ps
+            Nothing -> Left $ "instance " ++ nm ++ ": theory " ++ t
+                    ++ " declares '" ++ pName q ++ "' as " ++ pKind q
+                    ++ ", so its argument names a declared data type; '"
+                    ++ c ++ "' is not one" ++ conHint c
+          if length ps /= ar
+            then Left $ "instance " ++ nm ++ ": theory " ++ t
+                     ++ " declares '" ++ pName q ++ "' with arity "
+                     ++ show ar ++ ", but " ++ c ++ " takes "
+                     ++ show (length ps) ++ " argument(s)"
+            else if not (all isWireParam ps)
+              then Left $ "instance " ++ nm ++ ": " ++ c
+                       ++ " cannot fill the constructor parameter '"
+                       ++ pName q ++ "' — every parameter of "
+                       ++ "a constructor argument must be a wire"
+              else Right (IACon c)
+        _ -> Left $ "instance " ++ nm ++ ": theory " ++ t ++ " declares '"
+                 ++ pName q ++ "' as " ++ pKind q ++ ", so its argument "
+                 ++ "must be a bare constructor name, not '"
+                 ++ dropWhile isSpace src ++ "'"
+    one _ _ _ src = do
+      ty <- parseTyBody aliases dataSigs [] src
+      Right (IAStack (SCons ty SEnd))
+    isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!" :: String)
+    conHint "Fn" = " (`Fn` is built in and takes an arrow, not wires; "
+                ++ "wrap it — `data Arr(a, b) = Fn⟨a ⇒ b⟩` — to name it here)"
+    conHint c | isJust (lookupAlias c aliases) =
+      " (it is a transparent `type` alias; a constructor parameter needs "
+      ++ "a `data` declaration, which is nominal)"
+    conHint _ = ""
     parseBind l =
       case break (== '=') l of
         (lhs, '=' : rhs) | [nm] <- words lhs -> Right (nm, rhs)
@@ -1877,6 +2007,9 @@ parseTypeLine aliases dataSigs line =
       let occurs (PWire tv)  = tv `elem` bodyTVs
           occurs (PStack sv) = sv `elem` bodySVs
           occurs (PWidth nv) = nv `elem` bodyNVs
+          -- unreachable: only a `theory` head parses a constructor
+          -- parameter; `paramList` below never builds one
+          occurs (PCon _ _)  = True
       if all occurs params
         then Right ()
         else Left $ "Type alias " ++ name
@@ -1989,6 +2122,26 @@ parseTyElem aliases dataSigs params toks = case toks of
   (TokIdent "Int" : rest) -> pure (TInt, rest)
   (TokIdent "Str" : rest) -> pure (TStr, rest)
   (TokIdent "Sym" : rest) -> pure (TSym, rest)
+  -- A theory's CONSTRUCTOR parameter, applied: `k(a, b)`.  It shadows
+  -- any type of the same name for the length of the slot signature, and
+  -- it is recorded as a TData under the parameter's own name — which
+  -- `slotArrowAt` renames to the instance's constructor before the slot
+  -- is ever forward-declared, so no constructor variable reaches
+  -- inference.
+  (TokIdent name : TokLParen : rest)
+    | Just (PCon _ ar) <- lookupParam name params -> do
+        (args, rest') <- goArgs (replicate ar (PWire (TV "_"))) rest
+        if length args /= ar
+          then Left $ "Type constructor parameter '" ++ name
+                   ++ "' takes " ++ show ar ++ " argument(s), but was "
+                   ++ "given " ++ show (length args)
+          else do
+            sts <- mapM (stackArg name) args
+            case [ a | a <- sts, closedArity a /= 1 || openTailedS a ] of
+              (a : _) -> Left $ "Type constructor parameter '" ++ name
+                             ++ "': every argument is one wire, but was "
+                             ++ "given '" ++ show a ++ "'"
+              [] -> pure (TData name sts, rest')
   (TokIdent name : TokLParen : rest)
     | Just ps <- lookup name dataSigs -> do
         (args, rest') <- goArgs ps rest
@@ -2018,6 +2171,11 @@ parseTyElem aliases dataSigs params toks = case toks of
     | Just (PWidth _) <- lookupParam name params ->
         Left $ "Type parameter " ++ name
              ++ " is a width: write it as an exponent (T^" ++ name ++ ")"
+    | Just (PCon _ ar) <- lookupParam name params ->
+        Left $ "Type parameter " ++ name ++ " is a type constructor of "
+             ++ "arity " ++ show ar ++ ": it is not a wire, write it "
+             ++ "applied — " ++ name ++ "("
+             ++ intercalate ", " (replicate ar "_") ++ ")"
     | Just [] <- lookup name dataSigs -> pure (TData name [], rest)
     | Just _ <- lookup name dataSigs ->
         Left $ "Type " ++ name ++ " expects arguments"
@@ -3349,14 +3507,23 @@ checkInstance env theories inst = do
 -- instance's arguments.
 slotArrowAt :: Instance -> Theory -> Arrow -> Either String Arrow
 slotArrowAt inst th (Arrow i o e) = do
-  let bind (PWire tv, SCons t SEnd) = Right (Left (tv, t))
-      bind (PStack sv, st)          = Right (Right (sv, st))
-      bind (q, st) = Left $ "instance " ++ inName inst ++ ": parameter '"
-                         ++ pName q ++ "' takes one wire, given " ++ show st
-  bs <- mapM bind (zip (thParams th) (inArgs inst))
-  let tm = M.fromList [ b | Left  b <- bs ]
-      sm = M.fromList [ b | Right b <- bs ]
-  pure (Arrow (substParamsS tm sm i) (substParamsS tm sm o) e)
+  (tm, sm, cm) <- foldM bind (M.empty, M.empty, M.empty)
+                        (zip (thParams th) (inArgs inst))
+  pure (Arrow (substParamsS tm sm cm i) (substParamsS tm sm cm o) e)
+  where
+    bind (tm, sm, cm) (PWire tv, IAStack (SCons t SEnd)) =
+      Right (M.insert tv t tm, sm, cm)
+    bind (tm, sm, cm) (PStack sv, IAStack st) =
+      Right (tm, M.insert sv st sm, cm)
+    -- the ML-functor move: `k` becomes the instance's constructor NAME,
+    -- and every `k(a, b)` in the slot is already a TData under that name
+    bind (tm, sm, cm) (PCon n _, IACon c) =
+      Right (tm, sm, M.insert n c cm)
+    bind _ (q, a) =
+      Left $ "instance " ++ inName inst ++ ": parameter '" ++ pName q
+          ++ "' is " ++ pKind q ++ ", given " ++ showArg a
+    showArg (IAStack st) = show st
+    showArg (IACon c)    = "the constructor " ++ c
 
 -- A theory declaration IS a signature, so every slot can be
 -- FORWARD-DECLARED at its declared type.  That is what lets a slot body
@@ -3370,14 +3537,38 @@ declaredSlots theories inst = do
                <$> slotArrowAt inst th declared
            | (nm, declared) <- thSlots th ]
 
--- substitute theory parameters through a stack
-substParamsS :: Map TVar Ty -> Map SVar SType -> SType -> SType
-substParamsS tm sm = go
+-- substitute theory parameters through a stack: wires and stacks by the
+-- ordinary parameter substitution, constructor parameters by renaming
+-- the data name.  The rename runs FIRST, so it cannot reach inside a
+-- type the instance supplied.
+substParamsS :: Map TVar Ty -> Map SVar SType -> Map String String
+             -> SType -> SType
+substParamsS tm sm cm = go . substConNamesS cm
   where
     go SEnd          = SEnd
     go t@(STail v)   = M.findWithDefault t v sm
     go (SCons t r)   = SCons (substParams tm sm M.empty t) (go r)
     go (SExp b e r)  = sexp (go b) e (go r)
+
+-- rename data-type NAMES through a stack.  Only theories use it: a
+-- constructor parameter is a name, applied by substitution, so nothing
+-- downstream of this ever sees a constructor variable.
+substConNamesS :: Map String String -> SType -> SType
+substConNamesS cm
+  | M.null cm = id
+  | otherwise = goS
+  where
+    goT (TFn (Arrow i o e)) = TFn (Arrow (goS i) (goS o) e)
+    goT (TSum r)     = TSum (goR r)
+    goT (TData n as) = TData (M.findWithDefault n n cm) (map goS as)
+    goT t            = t
+    goR RNil         = RNil
+    goR t@(RTail _)  = t
+    goR (RCons st r) = RCons (goS st) (goR r)
+    goS SEnd         = SEnd
+    goS t@(STail _)  = t
+    goS (SCons t r)  = SCons (goT t) (goS r)
+    goS (SExp b e r) = SExp (goS b) e (goS r)
 
 -- Infer and alpha-normalize; the workhorse for tests.
 inferNormalized :: String -> Either String Arrow
@@ -3793,7 +3984,7 @@ checkModuleWith base src = do
   -- what gives them file-wide scope.
   theories <- sequence [ parseTheory allAliases sigs h b
                        | (h, b, _) <- declLines, take 6 h == "theory" ]
-  insts    <- sequence [ parseInstance allAliases sigs h b
+  insts    <- sequence [ parseInstance allAliases sigs theories h b
                        | (h, b, _) <- declLines, take 8 h == "instance" ]
   ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]

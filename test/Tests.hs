@@ -545,6 +545,26 @@ moduleTypeTests =
     -- directions (def calls slot, slot calls def) both work
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\ninstance S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\ntotal",
      "Intⁿ⁰ ⇒ Int")
+    -- STAGE 5a, item 0: SLOT-LOCAL VARIABLES.  A slot may name variables
+    -- the theory does not declare, and is generalized over its own —
+    -- `box : b ⇒ a` under `theory Wrap(a)` is `∀b. b ⇒ a`.  Nothing in
+    -- the checker changed: `declaredSlots` already generalized the slot
+    -- and `checkInstance` already compared bodies by subsumption.
+  , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = toStr\ndef w = use W ; box\nw",
+     "a0 ⇒ Str")
+    -- a `...` in a slot of a theory with no stack parameter is a
+    -- slot-local STACK, so a theory can ask for `∀ρ. ρ ⇒ ρ`
+  , ("theory Endo =\n    around : ... ⇒ ...\ninstance E : Endo =\n    around = ...\ndef a2 = use E ; around\na2",
+     "ρ0 ⇒ ρ0")
+    -- STAGE 5a, item 1: CONSTRUCTOR PARAMETERS.  `k` is written with its
+    -- arity visible (`k(_, _)`), applied in the slots, and substituted
+    -- away at the instance — so what comes out is an ordinary type and
+    -- inference never meets a constructor variable.
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; apply ; (y -> g ; unK ; _ y ; apply))] ; K)\ndef t = use P ; thenP\nt",
+     "K(a0, a1) K(a1, a2) ⇒ K(a0, a2)")
+    -- the substitution reaches inside an Fn type in a slot too
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; apply ; (y -> g ; unK ; _ y ; apply))] ; K)\ndef ar = use P ; arrP\nar",
+     "Fn⟨a0 ⇒ a1⟩ ⇒ K(a0, a1)")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ ⇒ Str")
     -- the grade is inferred through defs, not read off a name
@@ -716,6 +736,15 @@ evalTests =
   , ("1 2 3 >> print print print",        ["1","2","3"], "")
     -- laws RUN at module start; a passing instance is transparent
   , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance Good : M(Int) =\n    unit = 0\n    op = +\n    sample = 7\ndef t = use Good ; [op] unit ... ; foldExp\n1 2 3 >> t >> print", ["6"], "")
+    -- STAGE 5a: a LAW that uses a slot-local variable.  `box : b ⇒ a`
+    -- is polymorphic in b, so the law may call it at Int while the
+    -- theory's own parameter is Str — which is the point of the
+    -- variable being local to the slot rather than to the theory.
+  , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance W : Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w = use W ; box\n5 >> w >> print",
+     ["5"], "")
+    -- STAGE 5a: a theory over a type CONSTRUCTOR, composed and run
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; apply ; (y -> g ; unK ; _ y ; apply))] ; K)\ndef run2 = use P ; [_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; unK ; _ 5 ; apply\nrun2 >> print",
+     ["12"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
   , ("fin1 10 20 30 >> at >> print",      ["20"], "")
@@ -1281,6 +1310,33 @@ moduleFailTests =
     -- signatures, read at the instance's own argument
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Bad : Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
      "slot 'unit' is • ⇒ Str but theory Monoid declares • ⇒ Int")
+    -- STAGE 5a, item 0: a slot-local variable is UNIVERSALLY quantified,
+    -- so an instance body that is too specific for it is refused, and
+    -- the refusal names the slot
+  , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
+     "slot 'box' is Int ⇒ Str but theory Wrap declares a0 ⇒ Str")
+  , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
+     "must stay parametric in it")
+    -- STAGE 5a, item 1: the four ways a constructor parameter goes wrong
+  , ("theory Arrow(k(_, _)) =\n    thenP : k ⇒ k\n1",
+     "Type parameter k is a type constructor of arity 2: it is not a wire, write it applied — k(_, _)")
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a) ⇒ k(a)\n1",
+     "Type constructor parameter 'k' takes 2 argument(s), but was given 1")
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(Nope) =\n    thenP = _\n1",
+     "declares 'k' as a type constructor of arity 2, so its argument names a declared data type; 'Nope' is not one")
+  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(One) =\n    thenP = _\n1",
+     "declares 'k' with arity 2, but One takes 1 argument(s)")
+    -- `Fn` is built in and takes an arrow, not wires: the refusal says
+    -- so, and names the one-line wrapper that works
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance F : Arrow(Fn) =\n    thenP = _\n1",
+     "`Fn` is built in and takes an arrow, not wires")
+    -- a constructor argument is a NAME, not a type expression
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(List(Int)) =\n    thenP = _\n1",
+     "must be a bare constructor name")
+    -- and every parameter of the named constructor must be a wire, or
+    -- the substitution would not be sound
+  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(T) =\n    thenP = _\n1",
+     "every parameter of a constructor argument must be a wire")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Partial : Monoid(Int) =\n    unit = 0\n1",
      "no binding for 'op'")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Extra : Monoid(Int) =\n    unit = 0\n    op   = +\n    huh  = 1\n1",

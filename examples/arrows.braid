@@ -31,3 +31,21 @@ def pair = (a b -> (a ; toStr) " " (b ; toStr) ; cat ... ; cat ; print)
 # ArrowChoice and ArrowApply
 5 ; in1 ; (sq | db) ; merge ; print    # 25 — f ||| g on the left track
 [sq] 6 ; apply ; print                # 36 — app
+
+# ---- and the interface itself (2026-09-09) ---------------------------
+# Everything above spells the Arrow OPERATIONS out of Braid's syntax, at
+# Braid's own category. `examples/circuits.braid` now declares the
+# INTERFACE once, as `theory Arrow(k(_, _))` — a theory parameter that
+# is a type constructor — and audits two models against it: circuits,
+# and plain functions. `k` is not a higher-kinded type variable: it
+# never reaches inference, and the instance head substitutes a declared
+# data type for it before any slot is checked.
+#
+# `Fn` cannot be that data type. It is built in and it takes an ARROW,
+# not two wires, so `instance F : Arrow(Fn)` is refused —
+#   instance F: theory Arrow declares 'k' as a type constructor of
+#   arity 2, so its argument names a declared data type; 'Fn' is not
+#   one (`Fn` is built in and takes an arrow, not wires; wrap it —
+#   `data Arr(a, b) = Fn⟨a ⇒ b⟩` — to name it here)
+# — and the wrapper the message suggests is exactly what circuits.braid
+# uses for its second model.

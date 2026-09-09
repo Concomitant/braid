@@ -685,8 +685,9 @@ Threading a resource by hand is `_` and `...` like anything else; `use`
 Both are **block** declarations: a header line ending in `=`, then
 indented lines, the same shape as `def name =` with an indented body. A
 theory's entries are `slot : Σ ⇒ Θ` and `law name = <program>`; an
-instance's are `slot = <program>`. Theory parameters are kinded exactly
-like a type declaration's (a bare name is one wire, `...` a stack).
+instance's are `slot = <program>`. Theory parameters are kinded: a bare
+name is one wire, `...` a stack, and `k(_, _)` a type **constructor**
+(below).
 
 ```braid
 theory Monoid(a) =
@@ -716,6 +717,93 @@ generated def, so resolution costs nothing per call, once per scope.
 The trade is deliberate (`design-effects.md`): you give up inferring
 *which* instance, and get annotation-freeness, coherence in a
 structural type system, and no need for higher kinds.
+
+**Slot-local variables** (2026-09-09). A slot may name type variables
+the theory does not declare, and each slot is **generalized over its
+own**: they are quantified per slot, not shared between slots, and the
+instance's body must be at least as general as the result. Any
+lowercase name that is neither a theory parameter nor a type in scope
+is such a variable, and a `...` in a slot of a theory with no stack
+parameter is a slot-local *stack*. So `box : b ⇒ a` in `theory
+Wrap(a)` declares `∀b. b ⇒ a`, and an instance filling it with
+`_ 1 ; + ; toStr` is refused:
+
+```text
+instance W: slot 'box' is Int ⇒ Str but theory Wrap declares a0 ⇒ Str
+('b' is universally quantified in the expected type but this code
+requires it to be Int — the expected type promises the code works for
+every choice of 'b', so it must stay parametric in it)
+```
+
+Nothing in the checker changed for this: `declaredSlots` already
+generalized a slot's arrow and `checkInstance` already compared bodies
+to it by **subsumption**, so the variables only had to survive the
+parser.
+
+**Constructor parameters** (2026-09-09). A theory parameter may be a
+type constructor, written with its arity visible as underscores —
+`theory Arrow(k(_, _))`. The kind must be visible because the two bare
+readings are already taken (a name is a wire, `...` is a stack), and a
+kind that is invisible is a kind that is guessed. Slots then apply it:
+
+```braid
+data Circuit(a, b) = Fn⟨a ⇒ b Circuit(a, b)⟩
+data Pair(a, b) = a b
+
+theory Arrow(k(_, _)) =
+    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    thenP   : k(a, b) k(b, c) ⇒ k(a, c)
+    firstP  : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
+    …
+
+instance Circuits : Arrow(Circuit) =
+    arrP    = arrC
+    …
+```
+
+The instance head names a **declared data type**, not a type
+expression, and that name is substituted for `k` before any slot is
+forward-declared or checked. So `k` is not a higher-kinded type
+variable and inference never meets one — this is the ML-functor move,
+and `Ty` still has no constructor variable. The slots come out as
+ordinary types:
+
+```text
+braid> :t Circuits@arrP
+Circuits@arrP : Fn⟨a0 ⇒ a1⟩ ⇒ Circuit(a0, a1)
+braid> :t Circuits@thenP
+Circuits@thenP : Circuit(a0, a1) Circuit(a1, a2) ⇒ Circuit(a0, a2)
+braid> :t Circuits@firstP
+Circuits@firstP : Circuit(a0, a1) ⇒ Circuit(Pair(a0, a2), Pair(a1, a2))
+braid> :t Funcs@firstP
+Funcs@firstP : Arr(a0, a1) ⇒ Arr(Pair(a0, a2), Pair(a1, a2))
+```
+
+Four things are refused, each naming what is wrong:
+
+```text
+theory T(k(_, _)) =  op : k ⇒ k
+  Type parameter k is a type constructor of arity 2: it is not a wire,
+  write it applied — k(_, _)
+
+theory T(k(_, _)) =  op : k(a) ⇒ k(a)
+  Type constructor parameter 'k' takes 2 argument(s), but was given 1
+
+instance Bad : Arrow(Nope)
+  instance Bad: theory Arrow declares 'k' as a type constructor of
+  arity 2, so its argument names a declared data type; 'Nope' is not one
+
+instance Bad : Arrow(One)          # data One(a) = a
+  instance Bad: theory Arrow declares 'k' with arity 2, but One takes
+  1 argument(s)
+```
+
+`Fn` cannot fill a constructor parameter: it is built in and takes an
+arrow rather than wires, and the refusal says so and suggests the
+one-line wrapper (`data Arr(a, b) = Fn⟨a ⇒ b⟩`) that makes plain
+functions an instance. `examples/circuits.braid` declares the Arrow
+interface once and audits both models — circuits and functions —
+against five runnable laws.
 
 **An instance is audited, three ways**, each with its own message:
 
@@ -1378,12 +1466,14 @@ holds for them too: final atom of their stage (§9).
   ends its scope"*)
   — like a binder, its body is the rest of the scope, so there has to
   be a rest.
-- An instance's carrier is a full type **expression**, so a theory may
-  be instantiated at a parameterized type (`Pipeline(Circuit(Int,
-  Int))`, `Wrap(List(Int))`, `Wrap(Fn⟨Int ⇒ Int⟩)`) — which is what
-  every structure worth having a theory of actually looks like. Theory
-  and instance heads are read against every type in scope, the
-  prelude's included.
+- An instance's argument for a **wire** parameter is a full type
+  **expression**, so a theory may be instantiated at a parameterized
+  type (`Wrap(List(Int))`, `Wrap(Fn⟨Int ⇒ Int⟩)`) — which is what every
+  structure worth having a theory of actually looks like. Its argument
+  for a **constructor** parameter is a bare declared name instead
+  (`Arrow(Circuit)`), because that name is substituted into the slots
+  rather than being a type. Theory and instance heads are read against
+  every type in scope, the prelude's included.
 - A slot body may call **the module's own defs**, and a def may call the
   slot: a theory declaration is a signature, so slots are
   forward-declared at their declared types and neither direction has to
@@ -1437,7 +1527,9 @@ function, game rules as lifted moves), then `examples/tree.braid` and
 (a resource, and a whole program using one), `ladder.braid` (control
 flow that is all ordinary defs), `theories.braid` (theories and
 instances), `circuits.braid` (a stream transducer — a genuinely
-different category — as data plus a composition word plus a theory).
+different category — as data plus a composition word plus
+`theory Arrow(k(_, _))`, the Arrow interface stated once over a
+constructor parameter and audited against two models).
 
 **What not to reach for.** Effects do not need new machinery: state is a
 `resource`, failure is the railway sum track, writer is a `resource`,

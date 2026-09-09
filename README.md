@@ -174,7 +174,13 @@ bare `use` leaves.
     limit is that a law runs on the samples it names — property
     testing's poor cousin, minus generation and shrinking, plus being
     part of what it *means* to be an instance
-    (`examples/theories.braid`).
+    (`examples/theories.braid`). A theory parameter may also be a type
+    **constructor** — `theory Arrow(k(_, _))`, with slots like
+    `thenP : k(a, b) k(b, c) ⇒ k(a, c)` — which is enough to state the
+    Arrow interface once and audit circuits and functions against it
+    (`examples/circuits.braid`). That is still not higher kinds: `k`
+    lives in the signature, the instance head names a declared data
+    type, and the substitution happens before inference ever runs.
 12. **Effects are wires.** State, logs, readers, exceptions,
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
@@ -283,7 +289,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 742-case test suite, a full
+(typechecker, interpreter, REPL), a 757-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
