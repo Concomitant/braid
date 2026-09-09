@@ -1,19 +1,36 @@
+# Recursion is written with `fix`, at a typed boundary. A definition is
+# NOT in scope in its own body, so the knot is tied by a word with a
+# type — `fix : Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` — and the body
+# receives the recursive call DEEPEST, as an ordinary quoted function.
+# The three stages read: quote the body, tie the knot, apply it.
+
 def decr = _ 1 >> -
 def lt2? = _ 2 >> lt? >> (_ drop | _ drop)
 def lt100? = _ 100 >> lt? >> (_ drop | _ drop)
 def double = 2 _ >> *
 
+# point-free: an OPEN binder (`self ... ->`) names only the knot and
+# lets the wire flow through, so the body reads exactly as before
 def until100 =
-  lt100?
-  double >> recurse | _
-  merge
+  [ self ... ->
+    lt100?
+    double >> self ... >> apply | _
+    merge ] ...
+  fix ...
+  apply
 
-def sumTo = (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> recurse)) >> merge)
+def sumTo =
+  [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> apply)) >> merge)] ...
+  fix ...
+  apply
 
 def fib =
-  lt2?
-  _ | (n -> n >> decr >> recurse >> _ (n 2 >> - >> recurse) >> +)
-  merge
+  [ self ... ->
+    lt2?
+    _ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)
+    merge ] ...
+  fix ...
+  apply
 
 7 >> until100 >> print
 0 5 >> sumTo >> print

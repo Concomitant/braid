@@ -10,12 +10,20 @@ data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)
 def headS = unStream >> (h t -> h)               # observe the first cell
 def tailS = unStream >> (h t -> t) >> apply       # force one step
 
-# the integers upward from n — recursion lives UNDER the quote, so the
-# stream is produced lazily, one cell per force
-def from = (n -> n [n 1 >> + >> from] >> Stream)
+# the integers upward from n — the self-call still sits UNDER the
+# quote, so the stream is produced lazily, one cell per force.  `fix`
+# only moves the knot to a typed boundary; guardedness (and so
+# productivity) is unchanged.
+def from =
+  [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ...
+  fix ...
+  apply
 
 # a constant stream — same shape, different generator
-def repeat = (x -> x [x >> repeat] >> Stream)
+def repeat =
+  [(self x -> x [x >> self ... >> apply] >> Stream)] ...
+  fix ...
+  apply
 
 def nats = 0 >> from                             # 0, 1, 2, 3, …  (infinite)
 

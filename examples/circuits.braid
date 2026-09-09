@@ -70,15 +70,15 @@ theory Arrow(k(_, _)) =
 def stepC = (c x -> c ; unCircuit ; _ x ; apply)
 
 # the identity circuit, `arr`, `>>>`, and `first`
-def idC    = [(x -> x idC)] ; Circuit
-def arrC   = (g -> [(x -> g x ; apply ; (y -> y (g ; arrC)))] ; Circuit)
-def compC  = (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
-def firstC = (f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; firstC))))] ; Circuit)
+def idC    = [(self ... -> [(x -> x (self ... ; apply))] ; Circuit)] ... ; fix ... ; apply
+def arrC   = [(self g -> [(x -> g x ; apply ; (y -> y (g ; self ... ; apply)))] ; Circuit)] ... ; fix ... ; apply
+def compC  = [(self f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; self ... ; apply))))] ; Circuit)] ... ; fix ... ; apply
+def firstC = [(self f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; self ... ; apply))))] ; Circuit)] ... ; fix ... ; apply
 
 # A circuit that CANNOT be a pure function: its output depends on every
 # input it has already seen. This is the whole reason Arrows exist.
-def sumFrom = (n -> [(x -> n x ; + ; dup ; _ sumFrom)] ; Circuit)
-def scale   = (n -> [(x -> (n x ; *) (n ; scale))] ; Circuit)
+def sumFrom = [(self n -> [(x -> n x ; + ; dup ; _ (self ... ; apply))] ; Circuit)] ... ; fix ... ; apply
+def scale   = [(self n -> [(x -> (n x ; *) (n ; self ... ; apply))] ; Circuit)] ... ; fix ... ; apply
 
 # feed 3 then 4, and report both outputs summed — two steps, because one
 # step cannot tell a stateful circuit from a stateless one

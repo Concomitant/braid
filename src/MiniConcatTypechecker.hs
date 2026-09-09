@@ -1665,11 +1665,15 @@ dataDeclArtifacts :: DataDecl
 dataDeclArtifacts d =
   ( [ (dName d,          Forall tvs svs [] nvs [] (Arrow bodyStack namedStack effPure))
     , ("un" ++ dName d,  Forall tvs svs [] nvs [] (Arrow namedStack bodyStack effPure)) ]
-      ++ mergeSchemes
+      ++ mergeSchemes ++ foldSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
-      ++ mergeRuns )
+      ++ mergeRuns ++ foldRuns )
   where
+    (foldSchemes, foldRuns) =
+      case dataFoldArtifact d of
+        Just (fn, fsc, frun, _) -> ([(fn, fsc)], [(fn, frun)])
+        Nothing                 -> ([], [])
     ps         = dParams d
     tvs        = [ tv | PWire tv  <- ps ]
     svs        = [ sv | PStack sv <- ps ]
@@ -1705,74 +1709,116 @@ dataDeclArtifacts d =
           (SCons (dBody d) SEnd, 1, Prim "id", Prim "id")
     -- (rollOpen marks splice-shaped field stacks segment-consuming)
 
--- Generated eliminator: definition by points.  For
+-- Generated eliminator: definition by points — and, since 5a½, a
+-- STRUCTURAL RECURSOR rather than a definition that called itself.  For
 --   type Name(ps) = (alt1 | … | altk)
--- emit (as ordinary Braid source, name and body):
---   foldName = (f1 … fk t -> t >> unName >> (C1 | … | Ck) >> merge)
--- where Ci applies fi to alternative i's payload with every recursive
--- slot (an element exactly Name(ps)) already folded.  Bodies that are
--- not sums get no fold; recursion nested under other constructors
--- (e.g. List(Rose(a))) is passed to the case untransformed.
-dataFoldSrc :: DataDecl -> Maybe (String, String)
-dataFoldSrc d | dResource d = Nothing   -- a resource is unrolled, not
-                                        -- eliminated by points
-dataFoldSrc d =
-  case dBody d of
-    TSum row -> do
-      alts <- rowAlts row
-      let k      = length alts
-          fs     = [ "f" ++ show i | i <- [1 .. k] ]
-          selfTy = TData (dName d) (map paramStack (dParams d))
-          fname  = "fold" ++ dName d
-
-          -- closed alternative: recursive slots at known positions,
-          -- pre-fold in place (classic; cases see payload order)
-          compClosed fi payload
-            | null payload = Just (fi ++ " ... >> apply")
-            | otherwise =
-                let xs = [ "x" ++ show j | j <- [1 .. length payload] ]
-                    slot (x, ty)
-                      | ty == selfTy =
-                          "(" ++ unwords (fs ++ [x]) ++ " >> " ++ fname ++ ")"
-                      | otherwise = "(" ++ x ++ ")"
-                    -- recursive slots are pushed FIRST, so a case sees
-                    -- FOLDED-then-payload however the alternative was
-                    -- written.  (The splice generator did this with
-                    -- rotLast; doing it here makes the convention one
-                    -- rule instead of two, and keeps `foldList`'s
-                    -- accumulator-first step.)
-                    tagged = zip xs payload
-                    slots  = map slot ([ q | q <- tagged, snd q == selfTy ]
-                                       ++ [ q | q <- tagged, snd q /= selfTy ])
-                    stages =
-                      head slots
-                        : [ unwords (replicate n "_") ++ " " ++ sl
-                          | (n, sl) <- zip [1 :: Int ..] (tail slots) ]
-                    body = intercalate " >> " stages
-                             ++ " >> " ++ fi ++ " ... >> apply"
-                in Just ("(" ++ unwords xs ++ " -> " ++ body ++ ")")
-
-          comp (fi, st) = compClosed fi (stackElems st)
-
-      cs <- mapM comp (zip fs alts)
-      let src = case cs of
-            [c] -> "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un"
-                     ++ dName d ++ " >> " ++ c ++ ")"
-            _   -> "(" ++ unwords (fs ++ ["t"]) ++ " -> t >> un"
-                     ++ dName d ++ " >> ("
-                     ++ intercalate " | " cs ++ ") >> merge"
-                     ++ dName d ++ ")"
-      pure (fname, src)
-    _ -> Nothing
+-- the declaration contributes
+--   foldName : Fn⟨Σ1 ⇒ R⟩ … Fn⟨Σk ⇒ R⟩ Name(ps) ⇒ R
+-- where Σi is alternative i's payload with every recursive slot (an
+-- element whose type is exactly Name(ps)) already folded and moved to
+-- the FRONT, so a case sees FOLDED-then-payload however the alternative
+-- was written.  Recursion nested under another constructor (List(Rose(a)))
+-- is not a slot and is passed to the case untransformed; a resource is
+-- unrolled, not eliminated by points, and gets no recursor.
+--
+-- The recursor is a BUILTIN — a runtime primitive carrying the shape it
+-- was derived from — not a def and not a `fix` term.  That is the whole
+-- point: it descends on a strictly smaller value at every step, so it
+-- terminates by construction on finite data, and `foldName` (hence the
+-- prelude's `fold`, `map`, `filter`, …) is not an unbounded site.
+--
+-- A payload of no closed elements (`•`, or an alternative that is a bare
+-- stack parameter as in `data Box(…) = (…)`) hands the case the whole
+-- bundle; that is what `fi … >> apply` did in the source generator.
+dataFoldArtifact :: DataDecl
+                 -> Maybe (String, Scheme, (Int, Bool, Term), String)
+dataFoldArtifact d
+  | dResource d = Nothing
+  | otherwise =
+      case dBody d of
+        TSum row -> do
+          alts <- rowAlts row
+          if null alts then Nothing else Just ()   -- no alternatives, no points
+          let fname    = "fold" ++ dName d
+              selfTy   = TData (dName d) (map paramStack (dParams d))
+              tvs0     = [ tv | PWire tv  <- dParams d ]
+              svs0     = [ sv | PStack sv <- dParams d ]
+              nvs0     = [ nv | PWidth nv <- dParams d ]
+              payloads = map stackElems alts
+              flagsOf  = map (== selfTy)
+              specs    = [ if null pl then Nothing else Just (flagsOf pl)
+                         | pl <- payloads ]
+              -- reordered: recursive slots first, source order within
+              slotsOf pl = [ t | t <- pl, t == selfTy ]
+                             ++ [ t | t <- pl, t /= selfTy ]
+              -- every slot but the last is passed over by a `_` in the
+              -- generated spine, so it must be exactly one wire.  The
+              -- result is therefore a WIRE as soon as some alternative
+              -- has a recursive slot that is not its only slot; with no
+              -- such alternative the fold may return a whole stack.
+              oneWire = or [ any (== selfTy) pl && length pl >= 2
+                           | pl <- payloads ]
+              resTy    = TVarTy resTV
+              -- the fold's own result variable, named apart from the
+              -- declaration's parameters so a raw scheme reads cleanly
+              fresh b used = head [ c | c <- b : [ b ++ show i
+                                                 | i <- [1 :: Int ..] ]
+                                      , c `notElem` used ]
+              resTV    = TV (fresh "β" [ n | PWire  (TV n) <- dParams d ])
+              resSV    = SV (fresh "ρ" [ n | PStack (SV n) <- dParams d ])
+              resStack | oneWire   = SCons resTy SEnd
+                       | otherwise = STail resSV
+              eps      = EV "ε"
+              arrE i o = Arrow i o (Eff S.empty (Just eps))
+              sigma (alt, pl)
+                | null pl   = alt
+                | otherwise = go (slotsOf pl)
+                where
+                  go []       = SEnd            -- unreachable (pl non-null)
+                  go [t] | t == selfTy = resStack
+                         | otherwise   = SCons t SEnd
+                  go (t : ts) = SCons (if t == selfTy then resTy else t)
+                                      (go ts)
+              sigmas  = map sigma (zip alts payloads)
+              inStack = foldr (\sg rest -> SCons (TFn (arrE sg resStack)) rest)
+                              (SCons selfTy SEnd) sigmas
+              sc = Forall (tvs0 ++ [ resTV | oneWire ])
+                          (svs0 ++ [ resSV | not oneWire ])
+                          [] nvs0 [eps]
+                          (arrE inStack resStack)
+              doc = "definition by points: one quoted case per constructor of "
+                      ++ dName d ++ ", recursive slots pre-folded"
+          pure ( fname, sc
+               , (length specs + 1, False, Prim (foldPrimName specs))
+               , doc )
+        _ -> Nothing
   where
-    rowAlts RNil          = Just []
-    rowAlts (RTail _)     = Nothing
-    rowAlts (RCons st r)  = (st :) <$> rowAlts r
-    hasSplice (SCons _ r)   = hasSplice r
-    hasSplice _             = False
-    stackElems SEnd          = []
-    stackElems (STail _)     = []
-    stackElems (SCons t st)  = t : stackElems st
+    rowAlts RNil         = Just []
+    rowAlts (RTail _)    = Nothing
+    rowAlts (RCons st r) = (st :) <$> rowAlts r
+    stackElems (SCons t st) = t : stackElems st
+    stackElems _            = []
+
+-- The recursor's shape, carried in the name of the prim that runs it:
+-- one entry per alternative, `*` for "hand the case the whole bundle",
+-- otherwise one character per payload slot, `r` for a recursive slot.
+foldPrimName :: [Maybe [Bool]] -> String
+foldPrimName specs = "#fold:" ++ intercalate "," (map enc specs)
+  where
+    enc Nothing   = "*"
+    enc (Just fs) = [ if f then 'r' else 'x' | f <- fs ]
+
+foldPrimSpec :: String -> Maybe [Maybe [Bool]]
+foldPrimSpec nm
+  | ("#fold:", rest) <- splitAt 6 nm = mapM dec (commaParts rest)
+  | otherwise                        = Nothing
+  where
+    dec "*" = Just Nothing
+    dec cs | not (null cs), all (`elem` "rx") cs = Just (Just (map (== 'r') cs))
+           | otherwise                           = Nothing
+    commaParts str = case break (== ',') str of
+      (a, [])       -> [a]
+      (a, _ : rest) -> a : commaParts rest
 
 occursData :: String -> Ty -> Bool
 occursData n = goT
@@ -2610,7 +2656,7 @@ infer env (Tensor ts) = do
           else ( [ if ix == n - 1 || not (openTailedS i || openTailedS o)
                      then a else arrPure SEnd SEnd
                  | (a@(Arrow i o _), ix) <- zip arrows0 [0 :: Int ..] ]
-               , CFail ("A recursive call (or other open-arity atom) must \
+               , CFail ("An open-arity atom must \
                         \be the final atom of its tensor stage") : cs0 )
       inS    = foldr1 appendStack [ i | Arrow i _ _ <- arrows ]
       outS   = foldr1 appendStack [ o | Arrow _ o _ <- arrows ]
@@ -2891,6 +2937,22 @@ primEnv =
                            (RCons (STail th) RNil)))))
         in Forall [] [sg, th] [] [] [epsV]
              (arrEps (SCons body (STail sg)) (STail th))
+      -- fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
+      -- fixpoint operator on Fn.  The body receives the knotted function
+      -- DEEPEST, then its own arguments, so a recursive call is spelled
+      -- `… >> self >> apply` exactly like any other quoted call; `fix`
+      -- itself runs nothing, it ties the knot and hands back the Fn.
+      -- This is to recursion what `loop` is to iteration: the operator
+      -- that carries the laws (fixpoint, dinaturality, parameter), and
+      -- the ONE place a program may be unbounded now that a definition
+      -- is not in scope in its own body.  ε is shared with the inner
+      -- Fn, like `apply`/`loop`: a pure body ties a pure knot.
+      fixTy =
+        let sgF = SV "Σf"; thF = SV "Θf"
+            selfF = TFn (arrEps (STail sgF) (STail thF))
+            bodyF = TFn (arrEps (SCons selfF (STail sgF)) (STail thF))
+        in Forall [] [sgF, thF] [] [] [epsV]
+             (arrEps (one bodyF) (one selfF))
       int2 = SCons TInt (one TInt)
       codeStructTy = codeTy
       int2Router = Forall [] [] [] [] []
@@ -3052,6 +3114,7 @@ primEnv =
        , ("there",     thereTy)
        , ("merge",     mergeTy)
        , ("loop",      loopTy)
+       , ("fix",       fixTy)
        , ("foldExp",   foldExpTy)
        , ("foldExp2",  foldExp2Ty)
        , ("at",        atTy)
@@ -3080,22 +3143,6 @@ primsIn (OpenAbs slots _ t) =
 primsIn (Alts comps _)  = concatMap primsIn comps
 primsIn (Use _ b)      = primsIn b
 
--- Replace the def-local keyword `recurse` with the def's own name
--- (parse-time, shadow-aware) — anonymous self-reference in def bodies.
-substRecurse :: String -> Term -> Term
-substRecurse nm = go
-  where
-    go (Prim "recurse") = Prim nm
-    go t@(Prim _)       = t
-    go (Tensor ts)      = Tensor (map go ts)
-    go (Seq a b)        = Seq (go a) (go b)
-    go (Quote t)        = Quote (go t)
-    go (Alts cs r)      = Alts (map go cs) r
-    go (Use rs b)       = Use rs (go b)
-    go t@(OpenAbs slots hasRest b)
-      | Just "recurse" `elem` slots = t
-      | otherwise                   = OpenAbs slots hasRest (go b)
-
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
 inferTermIn env term =
@@ -3112,36 +3159,18 @@ inferTermIn env term =
       s <- solve cs
       pure (apply s arr)
 
--- Infer a definition body, allowing MONOMORPHIC self-reference: the
--- name is bound at a fresh monomorphic arrow while inferring, the
--- recursive uses share its metavariables (like abstraction parameters),
--- and two constraints tie the knot.  Generalization happens afterwards
--- in the caller.  (Polymorphic recursion is undecidable — not offered.)
-inferDefTermIn :: String -> Env -> Term -> Either String Arrow
-inferDefTermIn name env term
-  | name `notElem` primsIn term = inferTermIn env term
-  | otherwise =
-      case nub [ n | n <- primsIn term
-                   , n /= name
-                   , not (isIntLiteral n)
-                   , not (isStrLiteral n)
-                   , not (isSymLiteral n)
-                   , not (M.member n env)
-                   , Nothing <- [injIndex n]
-                   , Nothing <- [finIndex n] ] of
-        (n : _) -> Left $ "Unknown primitive: " ++ n
-        [] -> do
-          let (arr, cs) = runInfer0 $ do
-                fi <- freshSVarName
-                fo <- freshSVarName
-                let mono = Forall [] [] [] [] []
-                             (arrPure (STail fi) (STail fo))
-                (a@(Arrow bi bo _), cs') <-
-                  infer (M.insert name mono env) term
-                pure (a, cs' ++ [ CEqStack bi (STail fi)
-                                , CEqStack bo (STail fo) ])
-          s <- solve cs
-          pure (apply s arr)
+-- A definition is not in scope in its own body (5a½): recursion is
+-- written with `fix`, at a typed boundary, so every def is a CLOSED
+-- SPINE over its prefix scope -- every stage's scheme is computable
+-- without knowing the def's own type, and a functor out of it is total.
+selfReferenceError :: String -> Bool -> String
+selfReferenceError name viaRecurse =
+  "`" ++ name ++ "` refers to itself"
+    ++ (if viaRecurse then " (`recurse` named the definition being written)"
+                      else "")
+    ++ ": a definition is not in scope in its own body \
+       \— write the recursion with `fix` (MANUAL §8)"
+
 
 inferProgram :: String -> Either String Arrow
 inferProgram src = do
@@ -3996,7 +4025,7 @@ moduleSlotTable m =
 checkModule :: String -> Either String Module
 checkModule src = do
   m <- checkModuleWith (moduleBase (modEnv preludeModule)
-                                   (moduleRunDefs preludeModule) preludeNames
+                                   (moduleRunDefs preludeModule) preludeShadowNames
                                    (modAliases preludeModule)
                                    (modDatas preludeModule)) src
   let shadowed = map aName (modAliases m) ++ map dName (modDatas m)
@@ -4089,11 +4118,6 @@ checkModuleWith base src = do
                  <$> sequence [ (\th -> (inName i, (thName th, map fst (thSlots th))))
                                   <$> theoryOf theories (inTheory i)
                               | i <- insts ]
-  let genDefs =
-        [ (fn, body, Just ("definition by points: one quoted case per "
-                           ++ "constructor of " ++ dName dd
-                           ++ ", recursive slots pre-folded"))
-        | dd <- reverse ownDatas, Just (fn, body) <- [dataFoldSrc dd] ]
   slotSigs <- concat <$> mapM (declaredSlots theories) insts
   -- a functor's receipt is a word in the environment from here on: defs,
   -- instance bodies and main are all inferred with it in scope
@@ -4105,7 +4129,7 @@ checkModuleWith base src = do
     foldM (addDef slotTable funcs thNames)
           (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0,
            mbTemplates base)
-          (genDefs ++ defSrcs ++ instDefs)
+          (defSrcs ++ instDefs)
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
   mapM_ (checkInstance env' theories) insts
@@ -4146,7 +4170,8 @@ checkModuleWith base src = do
           -- shadowing a prelude data type replaces its constructors
           let envC
                 | n `elem` preludeTypeNames =
-                    foldr M.delete env [n, "un" ++ n, "merge" ++ n]
+                    foldr M.delete env
+                          [n, "un" ++ n, "merge" ++ n, "fold" ++ n]
                 | otherwise = env
           if M.member n envC || M.member ("un" ++ n) envC
                || M.member ("merge" ++ n) envC
@@ -4156,12 +4181,15 @@ checkModuleWith base src = do
           -- constructors/unrollers must be CALLABLE by a functor, so the
           -- data artifacts join the elaboration-time scope too
           let (scs, runs) = dataDeclArtifacts dd
+              docs'' = case dataFoldArtifact dd of
+                         Just (fn, _, _, fdoc) -> M.insert fn fdoc docs'
+                         Nothing               -> docs'
           pure ( foldr (uncurry M.insert) envC scs
                , extendRunDefs run [ (nm, ar, op, t)
                                    | (nm, (ar, op, t)) <- runs ]
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
-               , ownAl, dd : ownDt, docs' )
+               , ownAl, dd : ownDt, docs'' )
     addDef slotTable funcs thNames
            (env, run, shadow, acc, docs, tmpls) (name, bodySrc, doc) = do
       if (M.member name env && name `notElem` shadow)
@@ -4181,14 +4209,22 @@ checkModuleWith base src = do
                , (name, (th, tbody)) : tmpls )
         Nothing -> do
           let env1 = M.delete name env   -- a shadowed def must not leak in
-          -- `use` scopes are written out here, between parse and infer, the
-          -- same slot substRecurse occupies: a syntactic Term rewrite with
-          -- the Env available for arities and resource signatures.
-          term1 <- either (Left . inDef) Right
-                     (elabUseWith (ElabCtx env1 run slotTable funcs tmpls thNames)
-                                  term0)
-          let term = substRecurse name term1
-          arr <- either (Left . inDef) Right (inferDefTermIn name env1 term)
+          -- `use` scopes are written out here, between parse and infer: a
+          -- syntactic Term rewrite with the Env available for arities and
+          -- resource signatures.
+          term <- either (Left . inDef) Right
+                    (elabUseWith (ElabCtx env1 run slotTable funcs tmpls thNames)
+                                 term0)
+          -- self-reference is refused AFTER expansion, so a functor that
+          -- splices the name in is caught too
+          let mentions = primsIn term
+          if name `elem` mentions
+            then Left (selfReferenceError name False)
+            else Right ()
+          if "recurse" `elem` mentions && not (M.member "recurse" env1)
+            then Left (selfReferenceError name True)
+            else Right ()
+          arr <- either (Left . inDef) Right (inferTermIn env1 term)
           let sc = generalize env1 arr
           pure ( M.insert name sc env
                , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
@@ -4221,8 +4257,13 @@ preludeSrc = unlines
   , "def cons = in2 >> List"
   , "## open one layer: the asymmetric list router"
   , "def uncons = unList"
-  , "## left fold: step sees [acc, elem], list consumed left to right"
-  , "def fold = (f b l -> l >> unList >> (b | (x r -> f b x >> apply >> f _ r >> fold)) >> merge)"
+  , "## left fold: step sees [acc, elem], list consumed left to right."
+  , "## Derived from the STRUCTURAL recursor rather than written"
+  , "## recursively: fold the list up into an endofunction of the"
+  , "## accumulator (Church-style, as pack2 does), then apply it to the"
+  , "## seed.  So `fold` — and map/filter/reverse/append/concat with it —"
+  , "## terminates by construction and needs no `fix`."
+  , "def fold = (f b l -> l >> [[pass]] [(g x -> [(acc -> f acc x >> apply >> g ... >> apply)])] ... >> foldList >> _ b >> apply)"
   , "## a reflected atom: prim | int | str | sym | quote | row | group"
   , "data Atom = (Sym | Int | Str | Sym | List(List(Atom)) | List(List(List(Atom))) Bool | List(List(Atom)))"
   , "## code is a chain of tensor stages of atoms (spine normal form)"
@@ -4337,7 +4378,7 @@ preludeSrc = unlines
   , "## sum and product of an Int list"
   , "def sum = [+] 0 ... >> fold"
   , "def product = [*] 1 ... >> fold"
-  , "def downFrom = (n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> downFrom >> (m 1 >> -) ... >> cons)) >> merge)"
+  , "def downFrom = [(self n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> self ... >> apply >> (m 1 >> -) ... >> cons)) >> merge)] ... >> fix ... >> apply"
   , "## list(0, 1, …, n-1)"
   , "def range = downFrom >> reverse"
   , "## conditionally swap two wires (the Fredkin gate): reversible routing"
@@ -4351,16 +4392,16 @@ preludeSrc = unlines
   , "def xor = (a b -> a [b >> not] [b] ... >> cond)"
   , "def implies = (a b -> a [b] [true] ... >> cond)"
   , "## take the first n elements; skip drops them instead"
-  , "def take = (n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> take >> x ... >> cons)) >> merge)) >> merge)"
-  , "def skip = (n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> skip)) >> merge)) >> merge)"
+  , "def take = [(self n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> apply >> x ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> apply"
+  , "def skip = [(self n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> apply)) >> merge)) >> merge)] ... >> fix ... >> apply"
   , "## zip two lists into flat two-wire elements: List(a) List(b) => List(a b)"
-  , "def zip = (l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> zip >> (x y >> Box) ... >> cons)) >> merge)) >> merge)"
+  , "def zip = [(self l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> self ... >> apply >> (x y >> Box) ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> apply"
   , "## conjunction / disjunction over a Bool list"
   , "def all = [true] [and] ... >> foldList"
   , "def any = [false] [or] ... >> foldList"
   , "## split a list of sums into two lists (hits, misses) — two wires,"
   , "## no bundling: our products are the stack itself"
-  , "def partitionSum = (l -> l >> unList >> ((nil) (nil) | (x r -> r >> partitionSum >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)"
+  , "def partitionSum = [(self l -> l >> unList >> ((nil) (nil) | (x r -> r >> self ... >> apply >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)] ... >> fix ... >> apply"
   , "## print every element, front to back"
   , "def printAll = [(b x -> x >> print >> b)] 0 ... >> fold >> drop"
   , "## guard ladders as first-class words, one guard per line.  A lane"
@@ -4455,6 +4496,16 @@ preludeModule =
 preludeNames :: [String]
 preludeNames = [ n | (n, _, _) <- modDefs preludeModule ]
 
+-- Names a user definition is allowed to shadow: every prelude def, plus
+-- the structural recursors the prelude's own data declarations generate
+-- (foldList and friends were ordinary prelude defs until 5a½, and
+-- shadowing one has to keep working).
+preludeShadowNames :: [String]
+preludeShadowNames =
+  preludeNames
+    ++ [ fn | d <- modDatas preludeModule
+            , Just (fn, _, _, _) <- [dataFoldArtifact d] ]
+
 --------------------------------------------------------------------------------
 -- 11. Interpreter
 --
@@ -4545,7 +4596,8 @@ normTerm env defs seen term s0 = case term of
           in Right (if isFinal then (st, (fr, [])) else ([], s))
       -- a def in the fragment is INLINED, which decides strictly more;
       -- one already being expanded is recursive, so treat it as opaque
-      | Just de <- M.lookup n defs, not (deOpen de), n `notElem` seen =
+      | Just de <- M.lookup n defs, not (deOpen de), n `notElem` seen
+      , not (isRecursorEntry de) =
           let (args, (fr, st)) = takeSym (deArity de) s
           in do (fr', outs) <- normTerm env defs (n : seen) (deBody de) (fr, args)
                 Right (outs, (fr', st))
@@ -4564,6 +4616,12 @@ normTerm env defs seen term s0 = case term of
       | otherwise = Left ("outside the structural fragment: `" ++ n
                           ++ "` has no closed arity")
     atom _ t _ = Left ("outside the structural fragment: " ++ renderTerm t)
+
+    -- a structural recursor has no body to inline; it has a closed
+    -- scheme, so it decides as an uninterpreted word instead
+    isRecursorEntry de = case deBody de of
+      Prim p -> isJust (foldPrimSpec p)
+      _      -> False
 
     wire k f (fr, st) =
       let (args, s') = takeSym k (fr, st) in (f args, s')
@@ -4668,9 +4726,20 @@ data DefEntry = DefEntry
   , deOpen  :: !Bool
   , deBody  :: Term
   , deScope :: RunDefs
+    -- binder values the entry closed over.  Empty for every ordinary
+    -- def (a def body has no free binder names); `fix` uses it to hang
+    -- its self-knot on the very machinery that early binding already
+    -- provides, WITHOUT putting the knot in a VarEnv — VarEnvs are
+    -- compared by `eq?`, and a self-referential one would not terminate.
+  , deVars  :: VarEnv
   }
 
 type RunDefs = Map String DefEntry
+
+-- The name `fix` binds its knot to.  `#` cannot start an identifier, so
+-- no source program and no reflected atom can name or shadow it.
+selfKnotName :: String
+selfKnotName = "#self"
 
 -- Extend `base` with defs in definition order; each body snapshots
 -- base + all-earlier-defs + itself.  Braid has no forward references
@@ -4679,10 +4748,12 @@ type RunDefs = Map String DefEntry
 extendRunDefs :: RunDefs -> [(String, Int, Bool, Term)] -> RunDefs
 extendRunDefs = foldl step
   where
+    -- PREFIX scope, with no self-knot: since 5a½ a definition is not in
+    -- scope in its own body, so `acc` (everything strictly earlier) is
+    -- exactly what the body may mention.  Recursion is `fix`, which ties
+    -- its own knot at the value.
     step acc (name, ar, op, body) =
-      let scope = M.insert name entry acc   -- self-knot: recursion sees `entry`
-          entry = DefEntry ar op body scope
-      in scope
+      M.insert name (DefEntry ar op body acc emptyVarEnv) acc
 
 moduleRunDefs :: Module -> RunDefs
 moduleRunDefs = buildRunDefs M.empty
@@ -4718,7 +4789,7 @@ buildRunDefs base m =
       base' = extendRunDefs base (arts ++ map entryOf preDefs)
       final = foldl step base' (map entryOf ownDefs)
       step acc (name, ar, op, body) =
-        M.insert name (DefEntry ar op body final) acc
+        M.insert name (DefEntry ar op body final emptyVarEnv) acc
   in final
   where
 
@@ -4877,6 +4948,37 @@ evalTerm env defs vars term st =
               (result, logs) <- go seg0 []
               pure (result, if isFinal then [] else stk', logs)
             _ -> throwError "Runtime type error in loop: expected a body quotation"
+    -- fix: tie the knot.  The quoted body is handed a self-reference
+    -- DEEPEST and then its own arguments.  The knot is a DefEntry whose
+    -- scope contains itself — the same lazy early-binding cycle
+    -- `buildRunDefs` builds for a module — under a name (`#self`) the
+    -- parser cannot produce, so nothing can capture it.  Every re-entry
+    -- goes through `goAtoms`, so a fix under pure elaboration is
+    -- fuel-bounded exactly like a def call or a `loop`.
+    applyAtom _ (Prim "fix") stk
+      | not (M.member "fix" vars), not (M.member "fix" defs) = do
+          (args, stk') <- takeWires "fix" 1 stk
+          case args of
+            [VFn scope cv body] -> do
+              let knotted = Seq (Prim selfKnotName) body
+                  scope'  = M.insert selfKnotName
+                              (DefEntry 0 False (Quote knotted) scope' cv)
+                              scope
+              pure ([VFn scope' cv knotted], stk', [])
+            _ -> throwError "Runtime type error in fix: expected a body quotation"
+    -- a generated structural recursor: dispatch on the tag, fold every
+    -- recursive slot FIRST (moving it to the front), then run that
+    -- alternative's case on folded-then-payload.  Terminating by
+    -- construction: every recursive call is on a proper sub-value.
+    applyAtom _ (Prim nm) stk
+      | Just spec <- foldPrimSpec nm = do
+          (args, stk') <- takeWires nm (length spec + 1) stk
+          case splitAt (length spec) args of
+            (fns, [v]) -> do
+              (out, logs) <- foldPoints fns spec v
+              pure (out, stk', logs)
+            _ -> throwError (recErr "expected one case per constructor \
+                                    \and a value")
     -- foldExp: eliminate an exponent bundle aⁿ.  n is erased, so the
     -- bundle is the final segment and its runtime width is the witness
     -- (the forget convention).  Non-final was typed at n := 0.
@@ -5022,13 +5124,14 @@ evalTerm env defs vars term st =
               open  = deOpen  entry
               body  = deBody  entry
               scope = deScope entry
+              cvars = deVars  entry
           in if open && isFinal
             then do
-              (out, logs) <- evalTerm env scope M.empty body stk
+              (out, logs) <- evalTerm env scope cvars body stk
               pure (out, [], logs)
             else do
               (args, stk') <- takeWires name k stk
-              (out, logs) <- evalTerm env scope M.empty body args
+              (out, logs) <- evalTerm env scope cvars body args
               pure (out, stk', logs)
       | otherwise = do
           k <- liftEither (builtinArity name)
@@ -5128,6 +5231,30 @@ evalTerm env defs vars term st =
     checkAgainst term want = do
       got <- inferTermIn env term
       subsumes (generalize M.empty got) want
+
+    recErr what = "Runtime type error in a structural recursor: " ++ what
+
+    foldPoints fns spec = go
+      where
+        go (VSum tag bundle)
+          | tag < length spec, (fn : _) <- drop tag fns = do
+              (seg, logs) <- case spec !! tag of
+                Nothing -> pure (bundle, [])
+                Just flags
+                  | length flags == length bundle -> do
+                      rs <- mapM go [ v | (True, v) <- zip flags bundle ]
+                      pure ( concatMap fst rs
+                               ++ [ v | (False, v) <- zip flags bundle ]
+                           , concatMap snd rs )
+                  | otherwise ->
+                      throwError (recErr "an alternative's payload does \
+                                         \not match its declared width")
+              case fn of
+                VFn scope cv body -> do
+                  (out, lg) <- evalTerm env scope cv body seg
+                  pure (out, logs ++ lg)
+                _ -> throwError (recErr "a case must be a quotation")
+        go _ = throwError (recErr "expected a value of the declared type")
 
     takeWires name k stk
       | length stk >= k = pure (take k stk, drop k stk)

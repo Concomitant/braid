@@ -3,27 +3,35 @@
 # the same shape: a router picks base-vs-step, then one router row
 # (base | step) >> merge, and postfix binders name the wires.
 
-# --- recursive (recurse: self-call in final atom position) ------------
+# --- recursive (fix: the knot is tied at a typed boundary, and the
+# body names the recursive call `self` — a definition is not in scope
+# in its own body) -----------------------------------------------------
 def fac =
-    n ->
-    n
-    zero?
-    ( (z -> 1) | (m -> m (m 1 >> - >> fac) >> *) )
-    merge
+    [ self n ->
+      n
+      zero?
+      ( (z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *) )
+      merge ] ...
+    fix ...
+    apply
 
 def fib =
-    n ->
-    n 2
-    lt?
-    ( (x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +) )
-    merge
+    [ self n ->
+      n 2
+      lt?
+      ( (x y -> x) | (x y -> (x 1 >> - >> self ... >> apply) >> _ (x 2 >> - >> self ... >> apply) >> +) )
+      merge ] ...
+    fix ...
+    apply
 
 def pow =
-    b e ->
-    e
-    zero?
-    ( (z -> 1) | (m -> b (b (m 1 >> -) >> pow) >> *) )
-    merge
+    [ self b e ->
+      e
+      zero?
+      ( (z -> 1) | (m -> b (b (m 1 >> -) >> self ... >> apply) >> *) )
+      merge ] ...
+    fix ...
+    apply
 
 # --- iterative (loop: state is a stack, again re-enters / done exits) --
 def facL =

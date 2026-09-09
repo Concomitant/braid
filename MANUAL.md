@@ -180,7 +180,6 @@ pile bottom-up — the `decide` ladder exploits this (§11).
 last so the runtime segment can be its witness):
 - an open-arity word must be the final atom of its stage (§13);
 - an open binder (`x ... -> …`) must be the final atom of its stage;
-- a recursive call must be the final atom of its stage;
 - `...` must be the final atom of its stage;
 - the naming binder `-> x y z` ends the stage it follows, and its body
   is the rest of the scope;
@@ -579,9 +578,52 @@ def name =                    # block body — `=` ends the line,
 - `## doc` lines immediately before a `def`/`type`/`data` attach to it.
 - Defs may **shadow** prims and prelude words; duplicate defs of the
   same name are an error.
-- **Recursion**: a def may call itself by name, or as `recurse`
-  (def-local alias). Self-reference is monomorphic; the recursive call
-  must be the final atom of its tensor stage.
+- **No self-reference**: a definition is **not in scope in its own
+  body**. `def f = … f …` is refused — "`f` refers to itself: a
+  definition is not in scope in its own body — write the recursion with
+  `fix` (MANUAL §8)" — and so is the old `recurse` spelling, which is
+  gone. Every def is a closed spine over its prefix scope.
+- **Recursion is `fix`**, a word with a type:
+
+  ```braid
+  fix : Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩
+  ```
+
+  The body receives the knotted function **deepest**, then its own
+  arguments, so the recursive call is an ordinary quoted call —
+  `… >> self ... >> apply`. Three stages: quote the body, tie the knot,
+  apply it.
+
+  ```braid
+  def fac =
+      [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ...
+      fix ...
+      apply
+  # fac : Int ⇒ Int      5 >> fac  →  120
+  ```
+
+  `... ` carries the arguments over the quote (a stage's leftmost atom
+  is its deepest wire, so `[body] ...` pushes the quote *under* them).
+  An **open** binder (`self ... -> …`) names only the knot and lets the
+  wire flow through, which keeps a point-free body point-free:
+
+  ```braid
+  def until100 =
+    [(self ... -> lt100? >> (double >> self ... >> apply | _) >> merge)] ...
+    fix ...
+    apply
+  ```
+
+  `fix` is to recursion what `loop` (§9) is to iteration: an operator
+  with laws, at a typed boundary. Prefer `loop`/`while`/`until` when the
+  recursion is a tail call — it is one word and needs no knot — and
+  prefer the **generated structural recursor** (`foldTree`, `foldNat`,
+  the prelude's `fold`) when the recursion is structural, since those
+  descend on a smaller value and terminate by construction.
+- **Limit** (unchanged from stage 3⅞): the knot arrives as a binder
+  parameter, so a self-call inside a row component or a quotation is a
+  closure, and closures do not `reflect` yet. A `use F` functor over
+  such a body is refused rather than silently mis-elaborated.
 - Let-polymorphism: defs generalize over all four variable sorts.
 - The prelude is auto-loaded user code; `:defs` lists it.
 
@@ -1085,6 +1127,7 @@ Sums & control:
 | `merge` | `(ρ0 \| ρ0) ⇒ ρ0` |
 | `apply` | `Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1` |
 | `loop` | `Fn⟨Σ ⇒ (Σ\|Θ)⟩ Σ ⇒ Θ` — Elgot iteration (`again`/`done`) |
+| `fix` | `Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` — the knot; body takes it deepest (§8) |
 
 Metaprogramming & IO (railway-typed edges):
 
@@ -1256,6 +1299,9 @@ x [default] ([p?] [action] … >> pack2) >> matchWith
 
 # loops
 7 >> [_ 100 >> less?] [2 _ >> *] ... >> while      # → 112
+
+# general recursion: quote the body, tie the knot, apply (§8)
+[(self ... -> _ 100 >> less? >> (2 _ >> * >> self ... >> apply | _) >> merge)] ... >> fix ... >> apply
 ```
 
 There is **no guard syntax in the parser** — every idiom above is

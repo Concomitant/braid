@@ -6,12 +6,17 @@ type Nat = (• | Nat)
 def z = in1 >> Nat
 def s = in2 >> Nat
 
-def fromInt = zero? >> (drop >> z | _ 1 >> - >> fromInt >> s) >> merge
+def fromInt =
+  [(self ... -> zero? >> (drop >> z | _ 1 >> - >> self ... >> apply >> s) >> merge)] ...
+  fix ...
+  apply
 ## toInt by points: zero maps to 0, successor to +1 on the result
 def toInt = [0] [1 ... >> +] ... >> foldNat
 
-## addition by structural recursion on the second argument
-def add = (m n -> n >> unNat >> (m | m ... >> add >> s) >> merge)
+## addition by structural recursion on the second argument: that is
+## what foldNat IS, so add needs no knot — zero maps to m, successor
+## to s on the result
+def add = (m n -> n >> [m] [s] ... >> foldNat)
 
 3 >> fromInt >> toInt >> print                             # 3
 2 >> fromInt >> _ (3 >> fromInt) >> add >> toInt >> print  # 5

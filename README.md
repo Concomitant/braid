@@ -115,12 +115,16 @@ bare `use` leaves.
    Guards-as-data variants (`firstTrue`, clause ladders + `choose`,
    `if`/`elif`/`else` fold-as-you-go) are all prelude defs. No guard
    syntax exists in the parser.
-7. **Loops are values.** `loop` is Elgot iteration; `while` and
-   `until` are three-line prelude defs; general recursion uses
-   `recurse` with a placement discipline.
+7. **Loops are values, and so is the knot.** `loop` is Elgot
+   iteration; `while` and `until` are three-line prelude defs. A
+   definition is *not* in scope in its own body: general recursion is
+   `fix : Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩`, which hands the body
+   its own knot as an ordinary argument.
 8. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
    Tree(a))` — the name rolls, `unTree` unrolls (both free at
-   runtime), and `foldTree` is *generated*: elimination by points.
+   runtime), and `foldTree` is *generated*: elimination by points — a
+   structural recursor, so it terminates by construction and needs no
+   knot.
 9. **The list defines itself.** `type List(a) = (• | a List(a))` in
    the prelude; literals, `map`, `fold`, `filter` are all derived. A
    cell is one wire — declaration parameters are kinded, a bare name
@@ -300,7 +304,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 779-case test suite, a full
+(typechecker, interpreter, REPL), a 791-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

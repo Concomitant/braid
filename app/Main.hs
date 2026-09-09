@@ -153,7 +153,8 @@ continueOpen line = go (lineDepth line) line
 -- accumulated, including the instances and functors `:import` brought in
 baseOf :: ReplState -> ModuleBase
 baseOf st =
-  (moduleBase (rsEnv st) (rsRun st) preludeNames (rsAliases st) (rsDatas st))
+  (moduleBase (rsEnv st) (rsRun st) preludeShadowNames (rsAliases st)
+              (rsDatas st))
     { mbSlots = rsSlots st, mbFuncs = rsFuncs st
     , mbTheories = rsTheories st, mbTemplates = rsTmpls st }
 
@@ -183,6 +184,10 @@ renderData st d =
       case M.lookup (dName d) (rsDocs st) of
         Just doc -> "\n  ## " ++ doc
         Nothing  -> ""
+      ++ case dataFoldArtifact d of
+           Just (fn, sc, _, _) ->
+             "\n  " ++ fn ++ " : " ++ showSchemeA (dispOf st) sc
+           Nothing -> ""
 
 renderAlias :: ReplState -> Alias -> String
 renderAlias st al =
@@ -410,22 +415,13 @@ handleLine st line =
                                                 (rsAliases st) }
               putStrLn $ "type " ++ n ++ "   (" ++ n ++ " rolls, un"
                        ++ n ++ " unrolls)"
-              case dataFoldSrc dd of
+              -- the structural recursor is one of the declaration's
+              -- artifacts now, so it needs no derivation step here
+              case dataFoldArtifact dd of
                 Nothing -> pure st1
-                Just (fn, body) ->
-                  case checkModuleWith
-                         (baseOf st1) { mbEnv = M.delete fn (rsEnv st1) }
-                         ("def " ++ fn ++ " = " ++ body) of
-                    Left err -> do
-                      putStrLn $ "warning: could not derive " ++ fn
-                               ++ ": " ++ err
-                      pure st1
-                    Right m -> do
-                      putStrLn $ "def " ++ fn ++ " : "
-                               ++ maybe "?" (showSchemeA (dispOf st1))
-                                    (M.lookup fn (modEnv m))
-                      pure st1 { rsEnv = modEnv m
-                               , rsRun = buildRunDefs (rsRun st1) m }
+                Just (fn, fsc, _, fdoc) -> do
+                  putStrLn $ "def " ++ fn ++ " : " ++ showSchemeA (dispOf st1) fsc
+                  pure st1 { rsDocs = M.insert fn fdoc (rsDocs st1) }
 
     -- def name = program : extend (or replace) a user definition;
     -- prelude names may always be shadowed

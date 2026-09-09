@@ -430,6 +430,23 @@ moduleTypeTests =
   , ("[dup >> *] 5 >> apply", "• ⇒ Int")
     -- reflect READS a program without running it: pure, any grade
   , ("reflect",   "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)")
+    -- STAGE 5a½: recursion is a word with a type.  `fix` is the
+    -- parameterized fixpoint on Fn: the body takes the knot DEEPEST and
+    -- then its own arguments, and fix hands back the knotted Fn.
+  , ("fix", "Fn⟨Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
+    -- a def built with fix keeps the arity its binder gives it
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\nfac", "Int ⇒ Int")
+    -- the generated STRUCTURAL RECURSOR is a builtin now, and its
+    -- scheme is derived from the declaration rather than inferred from
+    -- generated source.  Four shapes pin the derivation: a recursive
+    -- slot sharing its alternative (the result is then one wire), a
+    -- recursive slot that is its alternative's only slot (the result
+    -- may be a whole stack), a payload-free alternative, and an
+    -- alternative that is a bare stack parameter.
+  , ("foldList", "Fn⟨• ⇒ a0⟩ Fn⟨a0 a1 ⇒ a0⟩ List(a1) ⇒ a0")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\nfoldTree", "Fn⟨a0 ⇒ a1⟩ Fn⟨a1 a1 ⇒ a1⟩ Tree(a0) ⇒ a1")
+  , ("type Nat = (• | Nat)\nfoldNat", "Fn⟨• ⇒ ρ0⟩ Fn⟨ρ0 ⇒ ρ0⟩ Nat ⇒ ρ0")
+  , ("foldBox", "Fn⟨ρ0 ⇒ ρ1⟩ Box(ρ0) ⇒ ρ1")
     -- composition propagates
   , ("1 >> print", "• =IO> •")
   , ("dup >> *",   "Int ⇒ Int")        -- and pure stays bare
@@ -469,7 +486,7 @@ moduleTypeTests =
     -- one def used at two different types = let-polymorphism
   , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
     -- recursive defs (monomorphic self-reference)
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge\nfib", "Int ⇒ Int")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\nfib", "Int ⇒ Int")
     -- a def body may leave a bracket open: the lines that close it
     -- belong to the body, so a blank line does not end the block and a
     -- `def`-looking line inside the bracket is code, not a declaration
@@ -878,9 +895,10 @@ evalTests =
   , ("0 3 >> [(a n -> n >> zero? >> ((z -> a >> done) | (m -> (a m >> +) (m 1 >> -) >> again)) >> merge)] ... >> loop >> print", ["6"], "")
   , ("5 3 >> - >> print",                  ["2"],  "")
   , ("7 >> (2 _ >> *) >> print",           ["14"], "")
-    -- multi-line def bodies + recurse (anonymous self-reference)
-  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 =\n  lt100?\n  double >> recurse | _\n  merge\n7 >> until100 >> print", ["112"], "")
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib =\n  lt2?\n  _ | (n -> n >> decr >> recurse >> _ (n 2 >> - >> recurse) >> +)\n  merge\n10 >> fib >> print", ["55"], "")
+    -- multi-line def bodies + `fix`: the knot is a word, and an OPEN
+    -- binder (`self ... ->`) keeps the body point-free
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 =\n  [ self ... ->\n    lt100?\n    double >> self ... >> apply | _\n    merge ] ...\n  fix ...\n  apply\n7 >> until100 >> print", ["112"], "")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib =\n  [ self ... ->\n    lt2?\n    _ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)\n    merge ] ...\n  fix ...\n  apply\n10 >> fib >> print", ["55"], "")
     -- while, DERIVED in-language: whileFn assembles the loop body
     -- from closures; while = whileFn ... >> loop fuses in the knot
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double] ... >> while >> print", ["112"], "")
@@ -893,11 +911,11 @@ evalTests =
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> _ drop >> print", ["ada"], "")
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> drop ... >> print", ["36"], "")
     -- Peano round-trip: folds by ordinary recursion through unNat
-  , ("type Nat = (• | Nat)\ndef fromInt = zero? >> (drop >> in1 >> Nat | _ 1 >> - >> fromInt >> in2 >> Nat) >> merge\ndef toInt = unNat >> (0 | toInt >> 1 ... >> +) >> merge\n3 >> fromInt >> toInt >> print", ["3"], "")
+  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> apply >> in2 >> Nat) >> merge)] ... >> fix ... >> apply\ndef toInt = [(self ... -> unNat >> (0 | self ... >> apply >> 1 ... >> +) >> merge)] ... >> fix ... >> apply\n3 >> fromInt >> toInt >> print", ["3"], "")
     -- trees: build with rolled injections, fold with recursion
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\ndef total = unTree >> (_ | _ total >> swap >> _ total >> +) >> merge\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\ndef total = [(self ... -> unTree >> (_ | _ (self ... >> apply) >> swap >> _ (self ... >> apply) >> +) >> merge)] ... >> fix ... >> apply\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
     -- same folds, by points: [case1] [case2] ... >> foldName
-  , ("type Nat = (• | Nat)\ndef fromInt = zero? >> (drop >> in1 >> Nat | _ 1 >> - >> fromInt >> in2 >> Nat) >> merge\n3 >> fromInt >> [0] [1 ... >> +] ... >> foldNat >> print", ["3"], "")
+  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> apply >> in2 >> Nat) >> merge)] ... >> fix ... >> apply\n3 >> fromInt >> [0] [1 ... >> +] ... >> foldNat >> print", ["3"], "")
   , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [_] [+] ... >> foldTree >> print", ["7"], "")
   , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [drop >> 1] [+] ... >> foldTree >> print", ["3"], "")
     -- prelude defs available with no local definition
@@ -979,9 +997,25 @@ evalTests =
     -- no >>, aligned-pipe track columns
   , ("def label =\n odd?\n drop | pass\n \"odd\" | pass\n pass | drop\n pass | \"even\"\n merge\n5 >> label >> print\n4 >> label >> print", ["odd", "even"], "")
     -- factorial / fibonacci / exponentiation, recursive and iterative
-  , ("def fac = n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> fac) >> *)) >> merge\n5 >> fac >> print", ["120"], "")
-  , ("def fib = n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> fib) >> _ (x 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")
-  , ("def pow = b e -> e >> zero? >> ((z -> 1) | (m -> b (b (m 1 >> -) >> pow) >> *)) >> merge\n2 8 >> pow >> print", ["256"], "")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\n5 >> fac >> print", ["120"], "")
+    -- fix over a TWO-WIRE function: Σ and Θ are stacks, not wires, so
+    -- the knotted function may take and return any width
+  , ("def sums = [(self n -> n >> zero? >> ((z -> 0 0) | (m -> (m 1 >> -) >> self ... >> apply >> (a b -> (a m >> +) (b 1 >> +)))) >> merge)] ... >> fix ... >> apply\n4 >> sums >> pack >> print", ["list(10, 4)"], "")
+    -- a fix-using program REIFIES: `fix` is an ordinary atom with an
+    -- ordinary scheme, so reflect returns real Code where a `.recurse`
+    -- atom used to have no type at all
+  , ("[[(self n -> n 1 >> - >> self ... >> apply)] ... >> fix ... >> apply] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
+     ["[_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ apply >> drop drop pass] pass >> fix pass >> apply"], "")
+    -- HONEST LIMIT (stage 3⅞'s parked gate, unchanged by 5a½): the knot
+    -- arrives as a binder PARAMETER, so a self-call inside a row
+    -- component is a closure, and closures do not reflect yet.  A
+    -- functor over such a body therefore still cannot elaborate — it
+    -- could not before either (a `.recurse` atom had no scheme); the
+    -- reason moved, the limit did not.
+  , ("[(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] >> reflect >> ((c -> \"reflected\" >> print) | print) >> merge",
+     ["Unknown primitive: self"], "")
+  , ("def fib = [(self n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> self ... >> apply) >> _ (x 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\n10 >> fib >> print", ["55"], "")
+  , ("def pow = [(self b e -> e >> zero? >> ((z -> 1) | (m -> b (b (m 1 >> -) >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\n2 8 >> pow >> print", ["256"], "")
   , ("def fibL = n -> 0 1 n >> [(a b k -> k >> zero? >> ((z -> a >> done) | (m -> b (a b >> +) (m 1 >> -) >> again)) >> merge)] ... >> loop\n20 >> fibL >> print", ["6765"], "")
     -- postfix binder: `x y ->` names the top wires, rest of scope is the
     -- body (same OpenAbs as (x y -> …), now usable bare / as a stage)
@@ -1130,9 +1164,9 @@ evalTests =
   , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["6"], "")
   , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["21"], "")
     -- recursion: tail recursion replaces the loop harness; tree recursion is new
-  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = lt100? >> (double >> until100 | _) >> merge\n7 >> until100 >> print", ["112"], "")
-  , ("def decr = _ 1 >> -\ndef sumTo = (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)\n0 5 >> sumTo >> print", ["15"], "")
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = lt2? >> (_ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)) >> merge\n10 >> fib >> print", ["55"], "")
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = [(self ... -> lt100? >> (double >> self ... >> apply | _) >> merge)] ... >> fix ... >> apply\n7 >> until100 >> print", ["112"], "")
+  , ("def decr = _ 1 >> -\ndef sumTo = [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> apply)) >> merge)] ... >> fix ... >> apply\n0 5 >> sumTo >> print", ["15"], "")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\n10 >> fib >> print", ["55"], "")
   , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
@@ -1254,7 +1288,7 @@ evalTests =
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
-  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = (n -> n [n 1 >> + >> from] >> Stream)\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
+  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
     -- vertical track-columns: flat 3-sum via inject-and-collapse, then
     -- bare rows each touching one track (empty arms pass)
   , ("def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
@@ -1340,7 +1374,7 @@ moduleFailTests =
      "not defined at this point")
     -- purity is not totality: the budget is what stands between a
     -- looping functor and a hung compiler
-  , ("def w = (c -> c >> w)\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+  , ("def w = [(self c -> c >> self ... >> apply)] ... >> fix ... >> apply\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
      "step budget exhausted")
   , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
      "Duplicate functor declaration")
@@ -1456,9 +1490,19 @@ moduleFailTests =
   , ("type Bad(a) = Fn⟨a ⇒ a\n1",                "close the Fn type")
   , ("type Fn(a) = (• | a)\n1",                  "Malformed type declaration")
   , ("type Bad = Fn\n1",                         "Fn must be written")
-    -- a non-final recursive call must report the placement rule, not
-    -- panic in appendStack (regression: was a Haskell error)
-  , ("def x = x x ... >> +\n1",                  "final atom of its tensor stage")
+    -- STAGE 5a½: a definition is not in scope in its own body, under
+    -- either spelling.  Recursion is `fix`, at a typed boundary.
+  , ("def f = 1 ... >> + >> f\n1",
+     "`f` refers to itself: a definition is not in scope in its own body")
+  , ("def f = 1 ... >> + >> recurse\n1",
+     "`f` refers to itself (`recurse` named the definition being written)")
+    -- and the refusal names the way out
+  , ("def f = 1 ... >> + >> f\n1",              "write the recursion with `fix` (MANUAL §8)")
+    -- a non-final open-arity atom must report the placement rule, not
+    -- panic in appendStack (regression: was a Haskell error).  Until
+    -- 5a½ the shortest way to write one was a non-final recursive call
+    -- (`def x = x x ... >> +`); an open binder is the shortest now.
+  , ("1 2 3 >> (x ... -> x x ... >> + >> +) 4",   "final atom of its tensor stage")
     -- nominal rigidity: a data type is NOT its unfolding
   , ("type Nat = (• | Nat)\nin1 >> Nat >> unNat >> unNat", "Cannot unify types")
   , ("type dup = (• | dup)\n1",                  "collides")
