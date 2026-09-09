@@ -38,6 +38,30 @@ copies where they exist.
   — a handler is a model; Braid's instances already are models, so
   discharge is a wrapping functor, not a new construct.
 
+## Recursion and iteration
+
+- Bloom & Ésik, *Iteration Theories: The Equational Logic of Iterative
+  Processes* (Springer EATCS Monographs, 1993) — the equational theory
+  of the iteration operator; the laws `loop`'s Elgot signature
+  (`C(X, X + Y) → C(X, Y)`) is supposed to satisfy, and the source of
+  "recursion is an operator with laws" as a checkable claim rather
+  than a slogan. No open copy.
+- Hasegawa, [*Recursion from cyclic sharing: traced monoidal
+  categories and models of cyclic lambda
+  calculi*](https://www.kurims.kyoto-u.ac.jp/~hassei/papers/tlca97.html)
+  (TLCA'97), and his thesis [*Models of Sharing
+  Graphs*](https://www.kurims.kyoto-u.ac.jp/~hassei/papers/thesis.html)
+  (Edinburgh, 1997) — a Conway fixpoint operator on a cartesian closed
+  category is exactly a trace on it (independently Hyland). That
+  identification is why `fix` and `loop` are one operator in two types
+  here, and it is the same trace the premonoidal reading above already
+  needs.
+- Simpson & Plotkin, [*Complete axioms for categorical fixed-point
+  operators*](https://homepages.inf.ed.ac.uk/gdp/publications/fixpoints.pdf)
+  (LICS 2000) — completeness for those axioms, via a syntactic
+  characterization of the free iteration theory; the standard to hold
+  a future runnable law block for `fix` against.
+
 ## Grading, coeffects, cost
 
 - Katsumata, *Parametric effect monads and semantics of effect

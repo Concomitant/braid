@@ -593,6 +593,13 @@ counterpoint is the standing argument for eventually paying that
 arc's price); the termination half closes only with totality
 checking, i.e. never, here.
 
+[Superseded on the termination half — see the 2026-09-09 amendment
+"recursion at a typed boundary" below. `recurse` is gone, and
+divergence now types `ρ0 =Rec> ρ1`, so a bare `a ⇒ a` is no longer
+inhabited by it: the half that was to close "never, here" closed by
+subtraction rather than by totality checking, modulo an unfinished
+audit of the primitive set. The cost half stands exactly as written.]
+
 ## Amendment (2026-09-04): representability demoted — the multimodal direction
 
 The claim "a label can decorate composition but not change it; a
@@ -1016,6 +1023,279 @@ shape (K ↦ its instance), and the K-word table 4b needs is the same
 kind of syntactic, prefix-scoped record. `ecThs` (theory names) is
 already threaded, which is what let `use` tell a theory from a
 resource; a mode name will want the same.
+
+## Amendment (2026-09-09): recursion at a typed boundary
+
+*Stage 5a½, two commits: `a02e635` (no self-reference; recursion is
+`fix`) and `a188dd0` (totality as a label). Written after both landed;
+every type quoted below was read back from the checker, and every
+refusal was reproduced.*
+
+**The change.** A definition is no longer in scope in its own body.
+`def f = … f …` is refused — *"`f` refers to itself: a definition is
+not in scope in its own body — write the recursion with `fix` (MANUAL
+§8)"* — and the older `recurse` spelling is gone, together with
+`inferDefTermIn`'s monomorphic self-reference path and the self-knot
+`extendRunDefs` used to add (a prefix scope is now exact at inference
+and at run time alike). Recursion is a word with a type:
+
+```text
+fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩
+```
+
+written `[(self args -> …)] ... >> fix ... >> apply` — quote the body,
+tie the knot, apply it. The knot arrives **deepest**, so the recursive
+call is an ordinary quoted call (`… >> self ... >> apply`); tying it is
+pure, and the `Rec` label sits on the arrow `fix` hands out and on the
+`self` it hands in, never on `fix`'s own arrow. At run time the knot is
+tied by the module's own lazy early-binding cycle, under a name the
+parser cannot produce — the machinery that already knotted defs, kept
+and made unreachable from source.
+
+Structural recursion did **not** move to `fix`. `dataDeclArtifacts`
+emits a structural recursor beside roll/unroll/merge, with the scheme
+the old generated fold had, byte for byte; the prelude's `fold` derives
+from `foldList`, so `map`, `filter`, `reverse`, `append` and `concat`
+are recursor-only and unlabelled (`reverse : List(a0) ⇒ List(a0)` —
+checked). `downFrom`, `take`, `skip`, `zip` and `partitionSum` are
+`fix`-built and carry `Rec` (`zip : List(a0) List(a1) =Rec>
+List(Box(a0 a1))`); codata — `from` and `repeat` in
+`examples/stream.braid`, the circuits in `examples/circuits.braid` —
+keeps its self-call under the quote, through `fix`, and stays
+productive.
+
+### The three payoffs, each with its current truth
+
+**(1) Every def is a closed spine — delivered for inference, not yet
+for `reflect`.** Every stage of a def now has a principal scheme
+computable from the prefix scope alone, because there is no atom
+without one: the `.recurse` atom that named the def being inferred is
+gone, and nothing replaced it. For *inference* the fibration picture of
+the 09-08 amendment holds with no exception, and `principal : Free(G) ⇢
+Sch` is total on typeable code — a def is literally a morphism of the
+free category over its vocabulary.
+
+For *functors* it is not yet true, and the obstruction is stage 3⅞'s
+parked gate rather than anything recursion added. `fix` hands the knot
+in as a **binder parameter**, so a self-call inside a row component or
+a quotation is a captured parameter — a true closure — and `reflect`
+refuses those. Reproduced:
+
+```text
+def tr =
+    use Traced
+    [(self n -> … self ... >> apply …)] ...
+    fix ...
+    apply
+
+error: in def tr: `use Traced`: Unknown primitive: self
+```
+
+`self` is a binder-bound name, and Code's vocabulary has no such
+generator, so the reflection stops there. What lifting the gate needs
+is named in row 2 of the functors-known-to-type table: abstraction
+elimination is `P ⋉ –`, tensoring with the parameter block, and it does
+not yet **distribute the parameter block over a sum or under a quote**.
+Until it does, `P` cannot follow the self-call into the row arm where
+the self-call lives. Pinned as a limit, not worked around.
+
+The gate is narrower than "functors and recursion don't mix". A functor
+over a *call* to an already-recursive word is fine — the functor sees
+one atom, the def having been elaborated outside the scope — and the
+labels union as they should. Verified:
+
+```text
+def fac2 = [(self n -> …)] ... >> fix ... >> apply
+def tr = use Traced ; fac2 ; _ 1 ; +
+tr : Int =IO Rec Traced> Int
+```
+
+**(2) Recursion is an operator with laws — statable now, not yet run.**
+Two operators, and the literature names both. `fix` is the fixpoint
+operator at the exponential: read `Fn⟨A ⇒ B⟩` as `B^A`, and the body
+`Fn⟨Fn⟨A =Rec> B⟩ A ⇒ B⟩` is `B^A × A → B`, i.e. `B^A → B^A` after
+currying, of which `fix` takes the fixpoint. The *parameterized* form `C(P × X, X) →
+C(P, X)` is what actually runs — the parameters enter through the
+quote's closure — but `P` is invisible in the type, which is worth
+saying out loud: Braid's `fix` is a Conway/parameterized fixpoint whose
+parameter object is the quote's environment. `loop` is Elgot iteration,
+and its type is that signature and nothing else:
+
+```text
+loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1        C(X, X + Y) → C(X, Y)
+```
+
+The laws that become **statable**: fixpoint (unrolling), parameter
+(naturality in the argument), dinaturality/rolling, and Bekič for two
+knots; for `loop`, Elgot's fixpoint, uniformity and codiagonal. Bloom &
+Ésik axiomatize the equational theory; Hasegawa (and Hyland
+independently) identify a Conway fixpoint operator on a cartesian
+closed category with a trace on it, which is why `fix` and `loop` are
+the same operator wearing two types here; Simpson & Plotkin give the
+completeness result for those axioms. All three are now in `READING.md`.
+
+What is **true today**: the fixpoint law is an ordinary Braid program
+and it runs, at sample points —
+
+```text
+def facBody = (self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)
+def fac    = [facBody] ... >> fix ... >> apply
+def unroll = [fac] ... >> facBody
+5 >> fac  →  120        5 >> unroll  →  120
+6 >> fac  →  720        6 >> unroll  →  720
+```
+
+— and both sides type `Int =Rec> Int`, which is the law's statement in
+the type as well as in the values. What is **not** true: nothing in the
+repo runs these laws, and nothing decides them. `sameCode` refuses the
+pair outright (*sameCode: outside the structural fragment: [facBody]*),
+as it must: one unrolling is not a structural rewrite. Running them the
+way `theory` law blocks run associativity — extensionally, at sample
+points, audited — would need `fix` to be reachable as a theory slot,
+which nobody has tried. And the payoff the plan wanted from this —
+"does this functor preserve the trace?" as a *checkable* statement —
+needs (1) first: a functor cannot yet see inside a `fix` body at all,
+so it cannot yet be asked whether it transports the knot.
+
+**(3) The precondition for interleaving inference and elaboration.**
+With every def a closed spine, a left-to-right pass along one def can
+carry schemes plus the left context and never consult a caller — which
+is what would let a functor read the cut (width-aware tracers, rules
+with type side-conditions, 5c's K-word table by type, routing by type,
+errors at the cut). **Not in this stage, and nothing was built toward
+it.** Recorded because the reason for the change should outlive the
+change.
+
+### Totality, and exactly what `Rec` says
+
+`Rec` is a label like any other: minted by `fix` and `loop`, union
+along composition, written wherever a type is written (`=Rec>`, `=IO
+Rec>`, sorted on display), never annotated onto inferred code. It says
+*may recurse without bound*. It is **provenance, not a proof** — the
+same sentence the manifest amendment above makes about `IO` and about
+functor receipts, said a fourth time.
+
+The reading it buys is the one worth having: **fix-free pure code
+terminates by construction**, so the `a ⇒ a` counterpoint's "free
+theorems hold only up to termination and cost" closes on the
+termination half for unlabelled words. Divergence used to inhabit every
+type; it now inhabits every `=Rec>` type and — modulo the audit two
+paragraphs down — no bare one. Verified:
+
+```text
+[(self ... -> self ... >> apply)] ... >> fix ... >> apply : ρ0 =Rec> ρ1
+(x -> 1000 >> (n -> n) >> drop >> x)                      : a0 ⇒ a0
+```
+
+The cost half is untouched, and remains the standing argument for the
+quantitative-grade arc; `fix` and `loop` being the only unbounded sites
+is where that arc now starts.
+
+**Modulo the prim audit.** "Fix-free ⟹ terminates" is *believed*, not
+proved. Nobody has audited the whole primitive set for another
+unbounded construct, and until someone does, the claim is a design
+intent with strong evidence, not a theorem.
+
+**What `Rec` does not do**, stated beside what it does:
+
+- It **bounds nothing.** Grades are idempotent, so `Rec` ∪ `Rec` is
+  `Rec`; a word that recurses once and a word that recurses forever
+  have the same type. Counting is the cost arc.
+- It **unions**, so it inherits the intersection gap `=Metered>` has:
+  a `=Rec>` word is one *some* of whose stages may recurse, never one
+  *all* of whose stages do. "Wholly in the image" is still the open
+  dual question (the coeffect section above).
+- **Elaboration-time recursion escapes it entirely.** `checkFunctorWord`
+  rejects a functor word that is not `Code ⇒ Code`, and rejects one
+  that is io — the io grade *is* the phase distinction — but it tests
+  `eIO` alone and never looks at the rest of the label set. A
+  `Rec`-labelled functor word is therefore accepted, runs while the
+  module is being elaborated, and leaves **no `Rec` on what it
+  elaborated**: the recursion happened in the other phase, and the type
+  says nothing about it. Verified end to end, and the receipt is the
+  tell:
+
+  ```text
+  def shrink = (c -> (c >> unparse >> drop) 0 c ... >> skip)   -- Code =Rec> Code
+  functor Shrink = shrink
+  def p = use Shrink ; dup ; * ; _ 1 ; +
+  p : Int =Shrink> Int            -- no Rec anywhere: the recursion ran at elaboration
+  ```
+
+  What catches a *diverging* one is not `Rec` but the elaboration step
+  budget, which was already there and still fires: *elaboration step
+  budget exhausted: a functor did not terminate (or needs a larger
+  budget)* (verified against a `fix`-built spinner). So the compiler
+  does not hang — but fuel is a bound and not a proof, and that gap is
+  unchanged by this stage. Template expansion is the same story from a
+  third direction, bounded by a third mechanism: a template that calls
+  itself is refused at the call (*template loopy calls itself*),
+  because expansion is inlining rather than linking.
+- A functor **cannot yet claim "I do not transport recursion"** and be
+  checked. That claim was the R2 note's most interesting item and it is
+  the one thing R2 did not deliver: it needs (1), for the reason given
+  there.
+
+### The functors-known-to-type table gains no row
+
+Deliberate. `fix` is not a functor; it is a word, and a stage that
+**calls** a `fix`-built word is an ordinary stage — it reflects as one
+atom, and the marker tracer whiskers after it like any other cut
+(`after fac2`, printed, in the run above). No row in the table needs
+amending to say so. What changed is not the class of liftable functors
+but the vocabulary they act on, and it changed by *subtraction*: the
+one atom with no scheme is gone. `Rec` likewise adds no row; it is a
+label, and the rows checked by subsumption read label sets already.
+
+The `fix` **idiom** is the exception, and it is (1)'s gate rather than
+a missing row: while the knot is a live binder parameter the spine is
+not closed over the environment, so there is nothing for a functor to
+act on yet.
+
+That gate is a limit on the base, not on any row, so the MANUAL states
+it **beside** the table (§12) and again as a sharp edge (§14) rather
+than as a seventh row.
+
+### The honest cost
+
+Two prices, both paid in written types, both the sandbox rule reaching
+one level further than it used to.
+
+**Eight declarations across two example files** had to gain `=Rec>`:
+`data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)` and, in
+`examples/circuits.braid`, `data Circuit(a, b) = Fn⟨a =Rec> b
+Circuit(a, b)⟩`, `data Arr(a, b) = Fn⟨a =Rec> b⟩`, and all five slots
+of `theory Arrow(k(_,_))`.
+
+**The label reaches into codata bodies' written types**, which is the
+part that surprised. `theory Arrow`'s `arrP` needed `=Rec>` on its
+*nested argument* as well as its own arrow —
+`arrP : Fn⟨a =Rec> b⟩ =Rec> k(a, b)` — because composition **unifies**
+rows rather than joining them. A closed `=Rec>` codata field propagates
+the label to the written type of every function its body applies. This
+is not new machinery; it is the no-subeffecting rule (`design-effects.md`,
+stage 1 as shipped) meeting a label that more code carries than `IO`
+ever did. The labelled spelling is the permissive one — a `=Rec>` arrow
+still accepts non-recursive code, since an inferred row is open and
+absorbs — and the bare spelling is the promise. That asymmetry is the
+whole design, and the eight declarations are what it costs.
+
+One latent bug surfaced and was fixed on the way: `substParams` rebuilt
+a nested `Fn` with `arrPure`, discarding the declared manifest — it had
+been silently wiping `=IO>` too, wherever a parameterized declaration
+substituted into one.
+
+### Correction to "What a functor can silently change"
+
+That section's `a ⇒ a` counterpoint cites `def dvg = recurse` as typing
+`ρ0 ⇒ ρ1`. Both halves are now false: `recurse` does not exist, and
+divergence is no longer bare. The current reading is
+`[(self ... -> self ... >> apply)] ... >> fix ... >> apply : ρ0 =Rec>
+ρ1`, and the conclusion drawn there — that `a ⇒ a` is inhabited by
+divergence, so the receipt is not the mark — **no longer holds for
+unlabelled words**, modulo the prim audit above. What survives of it is
+the cost half, unchanged and still unaddressed: the identity-at-a-cost
+still types `a0 ⇒ a0`.
 
 ## Honest gaps
 

@@ -114,7 +114,17 @@ written spelling widened to match: `=L1 L2>` is read wherever `=IO>`
 was, in any order, displayed sorted, so `Fn⟨• =Rec> Stream(a)⟩` and
 `Fn⟨a =IO Rec> b⟩` are ordinary written types. And the strictness above
 now bites in one more place, which is the honest cost: an unlabelled
-written `Fn⟨Int ⇒ Int⟩` refuses a quotation that uses `while`.
+written `Fn⟨Int ⇒ Int⟩` refuses a quotation that uses `while`. Eight
+declarations across `examples/stream.braid` and
+`examples/circuits.braid` had to gain `=Rec>` for that reason,
+including a theory slot's *nested* argument
+(`arrP : Fn⟨a =Rec> b⟩ =Rec> k(a, b)`) — composition unifies rows
+rather than joining them, so a closed `=Rec>` codata field propagates
+the label to the written type of every function its body applies. The
+full accounting, together with what `Rec` does *not* promise (it bounds
+nothing, it unions rather than intersects, and elaboration-time
+recursion never meets it), is in `design-macros.md`, the 2026-09-09
+amendment "recursion at a typed boundary".
 
 ## Stages 2 and 4 as shipped (2026-08-26)
 

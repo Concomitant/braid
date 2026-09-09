@@ -183,7 +183,12 @@ The generated structural recursors (`foldList`, `foldTree`, `foldNat`,
 §8) descend on a smaller value and mint nothing, so the whole derived
 library — `fold`, `map`, `filter`, `reverse`, `append`, `concat` —
 stays bare. The reading that buys: **an unlabelled word is `fix`-free,
-and therefore terminates by construction.**
+and therefore terminates by construction.** Two honest edges on that
+sentence: it is *run-time* code it speaks about — a functor word runs
+in the other phase, where a step budget rather than `Rec` is the bound
+(§8) — and "fix-free ⟹ terminates" rests on the primitive set holding
+no other unbounded construct, which is believed and has not been
+audited end to end.
 
 The built-in labels, then:
 
@@ -1003,6 +1008,11 @@ def loopy = use Monoid ; dup ; op ; loopy
   cannot recurse
 ```
 
+The last of those is reported where the template is *instantiated*, not
+where it is written: a template's body is stored unexpanded, so the
+no-self-reference rule above meets it only when a `use <instance>`
+scope inlines it.
+
 The rest of the header survives, so `use Monoid Log` is a template that
 also threads a resource; the resource is routed where the template
 *lands*, not where it was written.
@@ -1469,6 +1479,18 @@ choose by neighbour — is re-inferred and may fail. Such functors are
 not wrong; they are **audited** rather than **guaranteed** (laws over
 `Code`, `sameCode` on expansions, §12).
 
+**One limit is on the floor, not on any row.** `reflect` does not yet
+see a binder parameter that was **captured in a quotation or a row
+component** — a true closure. `fix` (§8) hands the knot in as exactly
+such a parameter, so a `use F` scope that contains the `fix` idiom
+*itself* is refused before any functor runs: *`use Traced`: Unknown
+primitive: self*. A `use F` scope that merely **calls** an
+already-recursive word is fine — the functor sees one atom, and the
+labels union (`Int =IO Rec Traced> Int`). Lifting the limit means
+distributing the parameter block over a sum and under a quote, which
+is table row 2 (`P ⋉ –`) doing more than it does today
+(`design-macros.md`, the 2026-09-09 amendment).
+
 **Why `interpose` checks what it checks.** The stage it inserts must
 type at *every* cut, and the cuts have different widths. A stage that
 touches no wire is `∀ρ. ρ ⇒ ρ` — an endomorphism of the unit, whiskered
@@ -1621,7 +1643,10 @@ holds for them too: final atom of their stage (§9).
   `(x -> …) ...` — the latter routes the rest *around* the binder.
 - Sums never flatten; use `assocL`/`assocR`/`caseN` to manage
   nesting, and one `merge` per level to collapse.
-- Recursive calls and open-arity words: final atom of their stage.
+- Open-arity words, open binders and `...`: final atom of their
+  stage (§4, §13). Recursion is no longer on that list — the
+  recursive call is `self ... >> apply`, an ordinary quoted call,
+  and it is `...` and `apply` that carry the rule.
 - Short names are yours: `f`, `g`, `x`, `succ`, `double` are all free
   (there are no placeholder prims — every primitive earns its name).
 - Shadowing is lexical and safe: name resolution is EARLY-bound. A def
@@ -1668,6 +1693,13 @@ holds for them too: final atom of their stage (§9).
   arrow still accepts *non*-recursive code — an inferred row is open
   and absorbs the label — so the labelled spelling is the permissive
   one, and the bare spelling is the promise.
+- **A `use F` scope may not contain the `fix` idiom itself** —
+  *`use Traced`: Unknown primitive: self*. `fix` hands the knot in as a
+  binder parameter, and a parameter captured under a quote or in a row
+  arm is a closure, which `reflect` does not see yet (§12). Define the
+  recursive word *outside* the scope and call it from inside: the
+  functor then sees one atom, and the labels union
+  (`Int =IO Rec Traced> Int`).
 - Several effectful atoms in one tensor stage are **legal**, and run
   left to right — deepest wire first, the order they are written in
   (`print print : a0 a1 =IO> •`). That order is decreed, not checked, so
@@ -1823,6 +1855,11 @@ trade `theory` makes everywhere, and it is deliberate.
   theories/instances with runnable laws — have shipped**, including the
   amendment that flipped the resource wires from the top of the stack
   to the bottom. Only stage 5 (the linear `World`) is position only.
+- `design-macros.md` — elaboration as a library: functors over `Code`,
+  the five invariants, the fibration picture and the functors known to
+  type, the manifest stated once, and the 2026-09-09 amendment
+  "recursion at a typed boundary" (why `fix` replaced self-reference,
+  what `Rec` does and does not promise, and what it cost).
 - `design-metaprogramming.md` — typed code as the free category
   (`Path`), Forth's compiler lifted from a monoid; position taken.
 - `guide-open-arity.md` — practical rules for open words.

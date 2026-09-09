@@ -119,13 +119,15 @@ bare `use` leaves.
    iteration; `while` and `until` are three-line prelude defs. A
    definition is *not* in scope in its own body: general recursion is
    `fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩`, which hands
-   the body its own knot as an ordinary argument — labelled `Rec`,
-   since `fix` and `loop` are now the only unbounded words (item 12).
+   the body its own knot as an ordinary argument. `fix` and `loop` are
+   the only two words that can run unbounded, and both mint `Rec` on
+   the arrow — *may recurse without bound*, a receipt rather than a
+   termination proof (item 12).
 8. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
    Tree(a))` — the name rolls, `unTree` unrolls (both free at
    runtime), and `foldTree` is *generated*: elimination by points — a
-   structural recursor, so it terminates by construction and needs no
-   knot.
+   structural recursor: it descends on a smaller value, so it
+   terminates by construction, needs no knot, and mints no `Rec`.
 9. **The list defines itself.** `type List(a) = (• | a List(a))` in
    the prelude; literals, `map`, `fold`, `filter` are all derived. A
    cell is one wire — declaration parameters are kinded, a bare name
@@ -204,9 +206,9 @@ bare `use` leaves.
     `=IO>`, a pure one `⇒`, and the label sits on the arrow just like
     resource names do. The manifest is a SET, though: a functor scope
     mints its own label onto everything it rewrote (item 14), and
-    `=IO Traced>` is an ordinary type. `Rec` is the second built-in
-    member: `fix` and `loop` mint it, structural recursors (and so
-    `fold`, `map`, `filter`) do not — so **fix-free pure code
+    `=IO Traced>` is an ordinary type. `Rec` (item 7) is the second
+    built-in member: `fix` and `loop` mint it, structural recursors
+    (and so `fold`, `map`, `filter`) do not — so **fix-free pure code
     terminates by construction**, and an unlabelled written type
     refuses recursive code exactly as it refuses io. Which labels you get is
     **inferred, never annotated**: four prims are marked
@@ -321,8 +323,9 @@ the eliminator is a fold and not an unroll), and `design-macros.md`
 (elaboration as a library: functors over `Code`, the five invariants,
 and the transport of `⇒` into other categories). `READING.md` is the
 annotated bibliography behind all of them. Deliberately absent so
-far: floats, modules beyond the auto-loaded prelude, labeled record
-fields, and the last stage of the effects staging —
+far: floats, labeled record fields, totality checking (`Rec` marks
+what *may* recurse without bound — provenance, not a proof), and the
+last stage of the effects staging —
 `resource` wires, `use` scopes, and theories/instances with runnable
 laws have shipped, but there is no resource mark, no linear `World`
 and no handlers (`design-effects.md` has the position, the staging,
