@@ -371,8 +371,8 @@ A resource contributes a wire the elaborator threads; an instance
 contributes no wire at all and disappears at elaboration, leaving its
 slots renamed.
 
-`use` names resources, instances and functors (§8) and opens a scope
-over them,
+`use` names resources, instances, functors and — in a def's own
+header — theories (§8), and opens a scope over them,
 taking the **rest of the enclosing scope as its body** — the same scope-taking
 shape as the binders `x y ->` and `-> x y`, and the same rule about
 needing a rest to reach. An elaborator running between parse and
@@ -434,12 +434,20 @@ for the rest of the scope. Unlike a resource, an instance claims no
 wire and asserts nothing about the incoming stack: the selection is a
 renaming at elaboration (§8), so it disappears before inference.
 
+**The fourth kind of name is a theory** (§8) — and it may appear only
+in a *def's own header*, where it makes the def a **template**: a body
+that waits for an instance. `use Monoid` inside a body, or in a REPL
+session, is refused, because there is no def for it to be the header
+of.
+
 **The third kind of name is a functor** (§8, §12): `use Fuel Metered`
 threads the resource and then hands the routed, renamed body — as
 `Code` — to the word `Metered` names, splicing back what it returns.
-One header, three kinds, applied in a fixed order: instances rename,
-resources route, functors rewrite (left to right), so a functor always
-sees finished wiring. `functor Both = metered ; traced` then `use Both`
+One header, four kinds, applied in a fixed order: templates expand,
+instances rename, resources route, functors rewrite (left to right),
+so a functor always sees finished wiring — and an expanded template
+body is routed by every scope it landed in, exactly as if it had been
+written there. `functor Both = metered ; traced` then `use Both`
 is the recommended spelling whenever the order carries meaning:
 functor composition IS `;`.  A functor scope also leaves its RECEIPT —
 the label `Metered` on the manifest of everything it rewrote (§3, §12).
@@ -769,15 +777,24 @@ and `Ty` still has no constructor variable. The slots come out as
 ordinary types:
 
 ```text
-braid> :t Circuits@arrP
-Circuits@arrP : Fn⟨a0 ⇒ a1⟩ ⇒ Circuit(a0, a1)
-braid> :t Circuits@thenP
-Circuits@thenP : Circuit(a0, a1) Circuit(a1, a2) ⇒ Circuit(a0, a2)
-braid> :t Circuits@firstP
-Circuits@firstP : Circuit(a0, a1) ⇒ Circuit(Pair(a0, a2), Pair(a1, a2))
-braid> :t Funcs@firstP
-Funcs@firstP : Arr(a0, a1) ⇒ Arr(Pair(a0, a2), Pair(a1, a2))
+braid> use Circuits
+ambient: use Circuits   (:clear or a bare `use` to leave)
+braid> :t arrP
+arrP : Fn⟨a0 ⇒ a1⟩ ⇒ Circuit(a0, a1)
+braid> :t thenP
+thenP : Circuit(a0, a1) Circuit(a1, a2) ⇒ Circuit(a0, a2)
+braid> :t firstP
+firstP : Circuit(a0, a1) ⇒ Circuit(Pair(a0, a2), Pair(a1, a2))
+braid> use Funcs
+ambient: use Funcs   (:clear or a bare `use` to leave)
+braid> :t firstP
+firstP : Arr(a0, a1) ⇒ Arr(Pair(a0, a2), Pair(a1, a2))
 ```
+
+A slot is reached **through its scope, or not at all**: the compiler's
+own spelling for the generated def is `Circuits@arrP`, and writing an
+`@` yourself is an elaboration error (§12).
+
 
 Four things are refused, each naming what is wrong:
 
@@ -824,6 +841,93 @@ audited model of its theory
 `theory` and `instance` are file declarations, not REPL lines (the
 REPL says so). See `examples/theories.braid`, §14 for the limits, and
 `design-effects.md` for the position.
+
+### Templates: a def written over a theory
+
+A def whose `use` header names a **theory** is a *template*: its body
+waits for an instance, and it is not a def at all until one arrives. A
+def whose `use` header names an **instance** supplies one — every
+template it calls is expanded there, renamed by that instance, and
+**re-inferred there**:
+
+```braid
+def fold1 = use Monoid ; [op] unit ... ; foldExp   # a template over Monoid
+
+def total  = use IntSum  ; fold1                   # instantiates it
+def joined = use StrCat  ; fold1                   # and again, elsewhere
+```
+
+Because each instantiation is inferred on its own, each gets its own
+**principal type** — there is no rank-1 wall, and nothing is passed at
+run time:
+
+```text
+braid> :t total
+total : Intⁿ⁰ ⇒ Int
+braid> :t joined
+joined : Strⁿ⁰ ⇒ Str
+braid> use IntSum
+ambient: use IntSum   (:clear or a bare `use` to leave)
+braid> :t fold1
+fold1 : Intⁿ⁰ ⇒ Int
+braid> use StrCat
+ambient: use StrCat   (:clear or a bare `use` to leave)
+braid> :t fold1
+fold1 : Strⁿ⁰ ⇒ Str
+```
+
+This is ML's functor application performed by the mechanism that
+already existed: `use Inst` is a renaming, and a template is a body
+that waits for one. There is no new syntax, no parameter list, and no
+`@`.
+
+**The rules, each with its message.** A template is *recorded*, not
+defined: it never enters the environment or the runtime scope, because
+it has no body that runs before an instance says what its slots mean.
+So calling one outside every instance scope of its theory is an
+elaboration error that names the **theory**, not a missing word:
+
+```text
+fold1 needs an instance of Monoid in scope (`use <instance>` before
+calling it)
+```
+
+An instance of the *wrong* theory in scope gives the same message —
+scope selection is by theory, and nothing is searched for. Templates
+may call templates (`examples/build.braid`), and the instantiating
+scope instantiates the whole chain. Nested scopes resolve
+**innermost-first**, which is what renaming already did. Three more
+refusals:
+
+```text
+def f = 1 ; use Monoid ; op
+  `use Monoid` names a theory, and only a def's own header may: that is
+  what makes the def a template, waiting for an instance
+
+def f = use Monoid Pointed ; op
+  a `use` header may name at most one theory (a template waits for one
+  instance), but this one names Monoid Pointed
+
+def loopy = use Monoid ; dup ; op ; loopy
+  template loopy calls itself: a template is expanded at the call, so it
+  cannot recurse
+```
+
+The rest of the header survives, so `use Monoid Log` is a template that
+also threads a resource; the resource is routed where the template
+*lands*, not where it was written.
+
+**A template is over a theory, never over a resource name.** A resource
+scope is *routing* — the offsets come from the header's arity — so a
+body waiting for a resource would be waiting for an arity rather than
+for a name; and the operations a generic handler needs (a seed, an
+unroller) are per-carrier words, which is exactly what a theory names.
+`examples/resources.braid` writes the generic handler that way, and it
+is two lines per resource.
+
+**Not "functors".** Templates are instance-parameterized *defs*;
+`functor` (below) is the macro keyword, and for Haskell readers neither
+is `Functor`/`fmap`.
 
 **`functor Name = word`** names a **functor**: any def whose type is
 `Code ⇒ Code` at pure grade. There is no `macro` keyword and nothing
@@ -1316,7 +1420,11 @@ typed. Three consequences, in rising order of usefulness:
   carries the label rather than losing it;
 - it cannot be forged. Writing `use@Traced` yourself is an error — *a
   label is minted by a scope, never written by hand* — which is the
-  difference between provenance and a comment;
+  difference between provenance and a comment. The rule is the
+  character, not the word: **`@` is the compiler's**, so an instance's
+  generated slot def is refused in source the same way and points at
+  the scope that reaches it — *`Loud@emit` is the compiler's spelling
+  of a slot: reach it with `use Loud`* (§8);
 - it is part of the type, so every place that compares a written type
   to code checks it: an `evalAs` witness, a theory's declared slot, a
   `Fn⟨…⟩` in a declaration. `Fn⟨Int ⇒ Int⟩` refuses instrumented code
@@ -1459,8 +1567,12 @@ holds for them too: final atom of their stage (§9).
   bare `use Log Counter` line opens a scope over every LATER line and
   every subsequent line is elaborated inside it. A bare `use` (or
   `:clear`) leaves; `:s` shows the ambient scope alongside the stack.
-  Only resources can be named there — a session cannot declare a
-  theory, so instances stay file-only. This is selection, not sugar:
+  `:t` is elaborated the same way, so under `use IntSum` it answers
+  `:t op`. A session cannot *declare* a theory, an instance or a
+  functor, but `:import` brings them in and then they may be named —
+  a theory itself may not, since only a def's header may name one.
+  A template defined in a session is reported as one (*template trip
+  over Monoid*) and listed by `:defs`. This is selection, not sugar:
   it is what ML's `open` does.
 - A `use` with nothing after it **in a file** is an error (*"`use …`
   ends its scope"*)
@@ -1518,6 +1630,7 @@ made of*, not by how exotic it feels.
 | **state** threaded through a region | `resource` + `use` | a threaded wire, with the `_`/`...` written for you |
 | a new **combinator** or control form | an ordinary `def` | loops are values, guards are words, `...` accumulates |
 | a swappable **interface with laws** | `theory` + `instance` | models selected by name, audited by running the laws |
+| one body over **every** model of a theory | a `def` whose `use` names the theory (a *template*) | expanded and re-inferred per instance — its own principal type each time |
 | a category of **processes** | `data` + your own composition word | then present it as a `theory` if it has laws |
 
 Worked examples, in that order: `lifting.braid` first (every functor
@@ -1531,6 +1644,29 @@ different category — as data plus a composition word plus
 `theory Arrow(k(_, _))`, the Arrow interface stated once over a
 constructor parameter and audited against two models).
 
+**An effectful arrow is a resource + a macro + a theory**: the resource
+carries the state, the macro installs and discharges it, and the theory
+says what the operations must satisfy. Declaring and *entering* have
+been ordinary since `use`; **discharging** is the third, and it needs
+no construct either — a wrapping macro seeds the wire, applies the
+program, and unrolls it, and the arrow loses the label across it:
+
+```braid
+resource Log = Str
+def note      = unLog _ ; cat ; Log
+def collectLog = (f -> [f ("" ; Log) ... ; apply ; unLog ...])
+-- collectLog : Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩
+```
+
+That is Plotkin–Pretnar's *handler is a model*, read in a language
+whose instances already are models: discharge is a wrapping functor,
+not a form. It is per-resource **by name**; the generic one is a
+template (§8) over a theory naming the two operations a handler needs
+(`seed : • ⇒ e`, `unwrap : e ⇒ a`), which then reads
+`Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩` under `use Logs` and
+`Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩` under `use Counts` —
+`examples/resources.braid` writes both halves.
+
 **What not to reach for.** Effects do not need new machinery: state is a
 `resource`, failure is the railway sum track, writer is a `resource`,
 nondeterminism is `List`, reader is a `resource` you only read. Only IO
@@ -1542,7 +1678,9 @@ is already the syntax rather than a library.
 **The trade, stated once.** Because instances are selected by name and
 nothing is inferred or dispatched, you cannot write code generic over
 "any monoid" and have the right one found for you; you write `use
-IntSum`. What you get back is annotation-freeness, coherence in a
+IntSum`. What you *can* write once is the body — a template over the
+theory (§8) — and the scope that instantiates it is the one line you
+still have to say. What you get back is annotation-freeness, coherence in a
 structural type system, and no higher kinds to explain. That is the same
 trade `theory` makes everywhere, and it is deliberate.
 

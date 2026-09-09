@@ -56,3 +56,58 @@ print                                  # 2401 — 7 squared, twice
 ([dup ; *] ; lift) ...
 apply
 unLog _ ; print print                  # ":" untouched, 49
+
+# ---- discharging a resource: a handler is a wrapping macro -----------
+# An effectful arrow is a RESOURCE + a MACRO + a THEORY: the resource
+# carries the state, the macro installs and discharges it, the theory
+# says what the operations must satisfy. `use Log` is the entering half;
+# this is the leaving half. It seeds a Log, applies the program, and
+# unrolls the wire — so the arrow LOSES `=Log>` across it, with no
+# language construct at all. (Plotkin–Pretnar: a handler is a model, and
+# Braid's instances already are models, so discharge is a wrapping
+# functor rather than a form.)
+
+def collectLog = (f -> [f ("" ; Log) ... ; apply ; unLog ...])
+# collectLog : Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩
+
+def square =
+    use Log
+    dup ; *
+    "squared "
+    note
+
+[square] ; collectLog ; _ 7 ; apply
+print print                            # "squared " then 49
+
+# ---- and once, for every resource ------------------------------------
+# The handler above is per-resource BY NAME. A template is over a
+# THEORY, never over a resource name — a resource scope is routing, and
+# a body waiting for a resource would be waiting for an arity rather
+# than for a name. Naming the two operations a handler actually needs
+# makes it one theory plus a two-line instance per resource, and the
+# handler is then written once:
+
+theory Collector(e, a) =
+    seed   : • ⇒ e
+    unwrap : e ⇒ a
+
+instance Logs : Collector(Log, Str) =
+    seed   = "" ; Log
+    unwrap = unLog
+
+instance Counts : Collector(Counter, Int) =
+    seed   = 0 ; Counter
+    unwrap = unCounter
+
+def collected = use Collector ; (f -> [f (seed) ... ; apply ; unwrap ...])
+
+def collectCount = use Counts ; collected
+# collectCount : Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩
+
+def tick =
+    use Counter
+    dup ; *
+    bump
+
+[tick] ; collectCount ; _ 7 ; apply
+print print                            # 1 then 49

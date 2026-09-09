@@ -39,11 +39,18 @@ instance StrCat : Monoid(Str) =
     sample = "x"
 
 # ---- generic code, written once --------------------------------------
-# `use IntSum` makes `unit` and `op` mean IntSum's, for the rest of the
-# scope. The body is the same three times; only the scope differs.
-def total  = use IntSum  ; [op] unit ... ; foldExp
-def prod   = use IntProd ; [op] unit ... ; foldExp
-def joined = use StrCat  ; [op] unit ... ; foldExp
+# A def whose `use` names the THEORY is a TEMPLATE: its body waits for an
+# instance, and is not a def at all until one arrives. A def whose `use`
+# names an INSTANCE supplies one — the body is expanded there, renamed by
+# that instance, and re-inferred there.
+def fold1 = use Monoid ; [op] unit ... ; foldExp
+
+# so each instantiation has its OWN principal type — `total` is
+# `Intⁿ⁰ ⇒ Int` and `joined` is `Strⁿ⁰ ⇒ Str` — with no dictionary
+# passed and no rank-1 wall met.
+def total  = use IntSum  ; fold1
+def prod   = use IntProd ; fold1
+def joined = use StrCat  ; fold1
 
 1 2 3 4     ; total  ; print      # 10
 1 2 3 4     ; prod   ; print      # 24
@@ -55,3 +62,10 @@ def joined = use StrCat  ; [op] unit ... ; foldExp
 # and a model that breaks a law is rejected when the module starts:
 #   law 'leftUnit' fails for instance BadUnit: an instance must be an
 #   audited model of its theory
+#
+# `fold1` outside every Monoid scope is an elaboration error that names
+# the theory, not a missing word:
+#   fold1 needs an instance of Monoid in scope (`use <instance>` before
+#   calling it)
+# and `IntSum@op` — the compiler's own spelling of a slot — is refused
+# in source: a slot is reached with `use IntSum`, or not at all.

@@ -181,6 +181,16 @@ bare `use` leaves.
     (`examples/circuits.braid`). That is still not higher kinds: `k`
     lives in the signature, the instance head names a declared data
     type, and the substitution happens before inference ever runs.
+
+    A body can be written **once over the theory**: a def whose `use`
+    names a theory is a **template**, and a def whose `use` names an
+    instance expands it there and re-infers it there — so `def fold1 =
+    use Monoid ; [op] unit ... ; foldExp` becomes `Intⁿ⁰ ⇒ Int` under
+    `use IntSum` and `Strⁿ⁰ ⇒ Str` under `use StrCat`, each with its own
+    principal type and nothing passed at run time. It is ML's functor
+    application spelled as scope: no new syntax, no parameter list, and
+    a template called outside every instance scope is an error naming
+    the theory (`examples/build.braid`).
 12. **Effects are wires.** State, logs, readers, exceptions,
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
@@ -263,6 +273,7 @@ the logged version of a function, game rules as lifted moves),
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `theories` (theories, instances, laws that run),
+`build` (one pipeline as a template, instantiated by two configurations),
 `arrows` (Control.Arrow's interface, as plain syntax) and `circuits`
 (the arrows that aren't: stream transducers as ordinary data),
 `payroll` (a whole small program: a resource, a theory and a grade
@@ -289,7 +300,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 757-case test suite, a full
+(typechecker, interpreter, REPL), a 779-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

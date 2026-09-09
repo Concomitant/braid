@@ -3217,7 +3217,8 @@ elabUse :: Env -> Term -> Either String Term
 elabUse env = elabUseWith (elabCtx0 env [])
 
 -- `use` names RESOURCES (wires to thread) and INSTANCES (slots to
--- resolve).  Both are scoped selection with no inference and no
+-- resolve) — and, in a def's own header, the THEORY whose instance the
+-- def is waiting for.  Both are scoped selection with no inference and no
 -- dispatch: an instance's operations are renamed to that instance's
 -- defs, once, for the rest of the scope.
 -- What a `use` scope needs to know: the environment and the runnable
@@ -3227,12 +3228,28 @@ elabUse env = elabUseWith (elabCtx0 env [])
 data ElabCtx = ElabCtx
   { ecEnv   :: Env
   , ecRun   :: RunDefs
-  , ecSlots :: [(String, [String])]
+  , ecSlots :: SlotTable
   , ecFuncs :: [(String, String)]
+  , ecTmpls :: TemplateTable
+  , ecThs   :: [String]          -- theory names, so `use T` is read right
   }
 
-elabCtx0 :: Env -> [(String, [String])] -> ElabCtx
-elabCtx0 env slots = ElabCtx env M.empty slots []
+-- What a `use` scope needs to know about an instance: the THEORY it
+-- models, and the slot names that rename to it.  The theory is what
+-- makes a template resolvable — a body written over `use Monoid` is
+-- instantiated by whichever `use IntSum` it stands inside.
+type SlotTable = [(String, (String, [String]))]
+
+-- A TEMPLATE: name ↦ (theory, unelaborated body).  It is not a def and
+-- never reaches the environment or the runtime scope — there is no body
+-- that runs before an instance says what its slots mean.  It is
+-- recorded here, expanded at the call inside the instance's scope, and
+-- re-inferred there, so every instantiation gets its own principal type
+-- and the rank-1 wall is never met.
+type TemplateTable = [(String, (String, Term))]
+
+elabCtx0 :: Env -> SlotTable -> ElabCtx
+elabCtx0 env slots = ElabCtx env M.empty slots [] [] []
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -3304,17 +3321,25 @@ checkFunctorWord env fname word =
              | otherwise -> Right ()
 
 elabUseWith :: ElabCtx -> Term -> Either String Term
-elabUseWith ctx = go
+elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
   where
     go (Use ns b) = do
       b' <- go b
-      -- three kinds of name, applied in a fixed order: instances rename,
+      -- four kinds of name, applied in a fixed order: templates expand
+      -- (a phase earlier, in `expandTemplates`), instances rename,
       -- resources route, functors rewrite — so a functor always sees
-      -- fully renamed, fully routed code.
+      -- fully renamed, fully routed code, and an expanded template body
+      -- is routed by the scopes it landed in.
+      case [ n | n <- ns, n `elem` ecThs ctx ] of
+        (n : _) -> Left $ "`use " ++ n ++ "` names a theory, and only a "
+                       ++ "def's own header may: that is what makes the "
+                       ++ "def a template, waiting for an instance"
+        []      -> Right ()
       let fs   = [ (n, w) | n <- ns, Just w <- [lookup n (ecFuncs ctx)] ]
           rest = [ n | n <- ns, isNothing (lookup n (ecFuncs ctx)) ]
           (is, rs) = partitionEithers
-                       [ maybe (Right n) (Left . (,) n) (lookup n (ecSlots ctx))
+                       [ maybe (Right n) (\(_, sl) -> Left (n, sl))
+                               (lookup n (ecSlots ctx))
                        | n <- rest ]
           b'' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' is
       routed <- case rs of
@@ -3334,15 +3359,74 @@ elabUseWith ctx = go
     go (Quote t)       = Quote <$> go t
     go (Alts cs r)     = Alts <$> mapM go cs <*> pure r
     go (OpenAbs sl h b) = OpenAbs sl h <$> go b
-    -- a receipt is not a word anyone may write: this walk sees the
-    -- SOURCE (expansions are spliced after it and never re-walked), so
-    -- rejecting the name here is what makes a minted label evidence
+    -- `@` is the compiler's character.  This walk sees the SOURCE
+    -- (expansions are spliced after it and never re-walked), so
+    -- rejecting the character here is what makes a minted label
+    -- evidence and a slot reachable only through its scope.  One rule
+    -- for both: a receipt gets the sharper message it has always had.
     go (Prim n)
       | Just f <- receiptLabel n =
           Left $ n ++ " is the receipt of `use " ++ f
               ++ "`, not a word: a label is minted by a scope, never "
               ++ "written by hand"
+      | '@' `elem` n =
+          Left $ "`" ++ n ++ "` is the compiler's spelling of a slot: "
+              ++ "reach it with `use " ++ takeWhile (/= '@') n ++ "`"
     go t               = Right t
+
+-- Templates, phase one of elaboration.
+--
+-- A def whose `use` header names a THEORY is a body waiting for an
+-- instance; a `use Inst` scope it stands inside supplies one.  The
+-- expansion runs BEFORE renaming, routing and functors, so an expanded
+-- body is elaborated by every scope it landed in exactly as if it had
+-- been written there — including a resource scope between the
+-- instance and the call.
+--
+-- `scope` is the enclosing instances, innermost first, so nested
+-- scopes resolve innermost-first with no extra rule.  `busy` is the
+-- templates currently being expanded: expansion is inlining, so a
+-- template that calls itself would not terminate, and says so.
+expandTemplates :: ElabCtx -> [(String, String)] -> [String] -> Term
+                -> Either String Term
+expandTemplates ctx scope busy = go
+  where
+    go (Use ns b) =
+      let inner = [ (n, th) | n <- ns, Just (th, _) <- [lookup n (ecSlots ctx)] ]
+      in Use ns <$> expandTemplates ctx (inner ++ scope) busy b
+    go (Prim n)
+      | Just (th, body) <- lookup n (ecTmpls ctx) =
+          if n `elem` busy
+            then Left $ "template " ++ n ++ " calls itself: a template is "
+                     ++ "expanded at the call, so it cannot recurse"
+            else case [ i | (i, t) <- scope, t == th ] of
+              (i : _) -> Use [i]
+                           <$> expandTemplates ctx ((i, th) : scope) (n : busy) body
+              []      -> Left $ n ++ " needs an instance of " ++ th
+                             ++ " in scope (`use <instance>` before calling it)"
+    go (Seq a b)        = Seq <$> go a <*> go b
+    go (Tensor ts)      = Tensor <$> mapM go ts
+    go (Quote t)        = Quote <$> go t
+    go (Alts cs r)      = Alts <$> mapM go cs <*> pure r
+    go (OpenAbs sl h b) = OpenAbs sl h <$> go b
+    go t                = Right t
+
+-- A def whose `use` header names a theory is a TEMPLATE over it.  The
+-- theory name is consumed here; the rest of the header stays, so `use
+-- Monoid Log` is a template that also threads a resource.  The body is
+-- recorded unelaborated — what its slot names mean is not known until a
+-- `use Inst` expands it.
+templateHeader :: [String] -> Term -> Either String (Maybe (String, Term))
+templateHeader thNames (Use ns b) =
+  case [ n | n <- ns, n `elem` thNames ] of
+    []  -> Right Nothing
+    [t] -> Right (Just (t, case [ n | n <- ns, n /= t ] of
+                            [] -> b
+                            r  -> Use r b))
+    ts  -> Left $ "a `use` header may name at most one theory (a template "
+                ++ "waits for one instance), but this one names "
+                ++ unwords ts
+templateHeader _ _ = Right Nothing
 
 -- the Term-level twin of renameSlots: within a `use Inst` scope every
 -- occurrence of one of the theory's operations means THIS instance's
@@ -3615,6 +3699,7 @@ data Module = Module
   , modTheories  :: [Theory]
   , modInstances :: [Instance]
   , modFunctors  :: [(String, String)]  -- `functor Name = word`
+  , modTemplates :: TemplateTable       -- defs over a theory, awaiting one
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -3899,9 +3984,9 @@ loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
 -- Which slots each of a module's instances carries — the table `use`
 -- consults to rename an instance's operations.  A session builds it
 -- from an imported module, since it cannot declare one itself.
-moduleSlotTable :: Module -> Either String [(String, [String])]
+moduleSlotTable :: Module -> Either String SlotTable
 moduleSlotTable m =
-  sequence [ (,) (inName i) . map fst . thSlots
+  sequence [ (\th -> (inName i, (thName th, map fst (thSlots th))))
                  <$> theoryOf (modTheories m) (inTheory i)
            | i <- modInstances m ]
 
@@ -3949,13 +4034,15 @@ data ModuleBase = ModuleBase
   , mbShadow  :: [String]             -- names a def may redefine (once)
   , mbAliases :: [Alias]
   , mbDatas   :: [DataDecl]
-  , mbSlots   :: [(String, [String])] -- instance -> its theory's slots
+  , mbSlots   :: SlotTable            -- instance -> its theory and slots
   , mbFuncs   :: [(String, String)]   -- functor -> its word
+  , mbTheories  :: [Theory]           -- theories a session `:import`ed
+  , mbTemplates :: TemplateTable      -- templates it brought with them
   }
 
 moduleBase :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl] -> ModuleBase
 moduleBase env run shadow aliases datas =
-  ModuleBase env run shadow aliases datas [] []
+  ModuleBase env run shadow aliases datas [] [] [] []
 
 checkModuleWith :: ModuleBase -> String -> Either String Module
 checkModuleWith base src = do
@@ -3982,8 +4069,12 @@ checkModuleWith base src = do
   -- theories first: an instance is checked against its theory, so the
   -- theory must already be known.  Both run before any def, which is
   -- what gives them file-wide scope.
-  theories <- sequence [ parseTheory allAliases sigs h b
-                       | (h, b, _) <- declLines, take 6 h == "theory" ]
+  ownTheories <- sequence [ parseTheory allAliases sigs h b
+                          | (h, b, _) <- declLines, take 6 h == "theory" ]
+  -- a session cannot declare a theory, but `:import` carries one in, and
+  -- an instance or a template checked here may name it
+  let theories = ownTheories ++ mbTheories base
+      thNames  = map thName theories
   insts    <- sequence [ parseInstance allAliases sigs theories h b
                        | (h, b, _) <- declLines, take 8 h == "instance" ]
   ownFuncs <- sequence [ parseFunctorLine h
@@ -3995,7 +4086,7 @@ checkModuleWith base src = do
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories) insts
   slotTable <- (++ mbSlots base)
-                 <$> sequence [ (,) (inName i) . map fst . thSlots
+                 <$> sequence [ (\th -> (inName i, (thName th, map fst (thSlots th))))
                                   <$> theoryOf theories (inTheory i)
                               | i <- insts ]
   let genDefs =
@@ -4010,9 +4101,10 @@ checkModuleWith base src = do
                      slotSigs
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  (env', runFinal, _, defsRev, docs) <-
-    foldM (addDef slotTable funcs)
-          (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0)
+  (env', runFinal, _, defsRev, docs, tmpls) <-
+    foldM (addDef slotTable funcs thNames)
+          (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0,
+           mbTemplates base)
           (genDefs ++ defSrcs ++ instDefs)
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
@@ -4023,12 +4115,13 @@ checkModuleWith base src = do
       then pure Nothing
       else do
         term0 <- parseProgram mainSrc
-        term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs) term0
+        term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls thNames)
+                             term0
         arr <- inferTermIn env' term1
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
-                theories insts funcs)
+                theories insts funcs tmpls)
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
@@ -4069,25 +4162,40 @@ checkModuleWith base src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs' )
-    addDef slotTable funcs (env, run, shadow, acc, docs) (name, bodySrc, doc) = do
-      if M.member name env && name `notElem` shadow
+    addDef slotTable funcs thNames
+           (env, run, shadow, acc, docs, tmpls) (name, bodySrc, doc) = do
+      if (M.member name env && name `notElem` shadow)
+           || isJust (lookup name tmpls)
         then Left $ "Duplicate definition: " ++ name
         else Right ()
       term0 <- either (Left . inDef) Right (parseProgram bodySrc)
-      let env1 = M.delete name env   -- a shadowed def must not leak in
-      -- `use` scopes are written out here, between parse and infer, the
-      -- same slot substRecurse occupies: a syntactic Term rewrite with
-      -- the Env available for arities and resource signatures.
-      term1 <- either (Left . inDef) Right
-                 (elabUseWith (ElabCtx env1 run slotTable funcs) term0)
-      let term = substRecurse name term1
-      arr <- either (Left . inDef) Right (inferDefTermIn name env1 term)
-      let sc = generalize env1 arr
-      pure ( M.insert name sc env
-           , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
-           , filter (/= name) shadow
-           , (name, sc, term) : acc
-           , maybe docs (\d -> M.insert name d docs) doc )
+      tmplHdr <- either (Left . inDef) Right (templateHeader thNames term0)
+      case tmplHdr of
+        -- A TEMPLATE is recorded, not defined.  It has no body that runs
+        -- without an instance, so it enters neither the environment nor
+        -- the runtime scope; the table is the prefix scope templates
+        -- live in, exactly as defs do.
+        Just (th, tbody) ->
+          pure ( env, run, shadow, acc
+               , maybe docs (\d -> M.insert name d docs) doc
+               , (name, (th, tbody)) : tmpls )
+        Nothing -> do
+          let env1 = M.delete name env   -- a shadowed def must not leak in
+          -- `use` scopes are written out here, between parse and infer, the
+          -- same slot substRecurse occupies: a syntactic Term rewrite with
+          -- the Env available for arities and resource signatures.
+          term1 <- either (Left . inDef) Right
+                     (elabUseWith (ElabCtx env1 run slotTable funcs tmpls thNames)
+                                  term0)
+          let term = substRecurse name term1
+          arr <- either (Left . inDef) Right (inferDefTermIn name env1 term)
+          let sc = generalize env1 arr
+          pure ( M.insert name sc env
+               , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
+               , filter (/= name) shadow
+               , (name, sc, term) : acc
+               , maybe docs (\d -> M.insert name d docs) doc
+               , tmpls )
       where inDef e = "in def " ++ name ++ ": " ++ e
 
 --------------------------------------------------------------------------------

@@ -931,6 +931,92 @@ everything it needs syntactically — the carrier's data name is
 inference change and no new sort of arrow, exactly as "the manifest,
 stated once" predicted.
 
+## Amendment (2026-09-09): templates as shipped — four deviations
+
+*The design above ("Templates, restated") shipped as written: a def
+whose `use` names a THEORY is a template, a def whose `use` names an
+INSTANCE expands it there and re-infers it there, and `@` is now
+refused in source by the character rather than by the word. Recorded
+here are only the four places the implementation departed from it, and
+why.*
+
+1. **Template expansion is its own phase, before renaming.** The plan
+   said `elabUseWith` "inlines the template bodies it meets" under
+   `use Inst` — interleaved with the existing walk. That loses a case:
+   with a resource scope *between* the instance and the call
+   (`use IntSum … use Log … total`), the inner scope routes the spine
+   first and an inlined body would arrive after its own routing. So
+   `use` now has FOUR ordered kinds — templates expand, instances
+   rename, resources route, functors rewrite — and expansion walks the
+   whole term carrying a stack of enclosing instances, innermost
+   first. An expanded body is then elaborated by every scope it landed
+   in, exactly as if it had been written there. Innermost-wins costs
+   nothing: it is the head of the stack.
+
+2. **The optional pre-check against the theory's signature was not
+   taken, on a reason worth keeping.** The idea was a `Theory@slot`
+   forward environment analogous to `declaredSlots`, so a broken
+   template failed once rather than per instantiation. It cannot be
+   general: a theory with a CONSTRUCTOR parameter (`theory Arrow(k)`)
+   has no carrier before an instance, so `thenP : k(a,b) k(b,c) ⇒
+   k(a,c)` has no arrow to forward-declare — `k` is substituted at the
+   instance, which is the whole ML-functor move. A check that exists
+   for parameter-free theories and silently does not for the
+   interesting ones is worse than no check: it teaches a rule that is
+   not true. Errors surface at each instantiation, which is where the
+   expansion is, and expansions already render.
+
+3. **Two refusals the plan did not name**, both consequences of
+   expansion being inlining rather than linking: a template may not
+   call itself (*template loopy calls itself: a template is expanded at
+   the call, so it cannot recurse*), and a `use` header may name at
+   most one theory (*a template waits for one instance*). Recursion
+   inside a template is still ordinary — `foldExp` and friends are
+   defs, and the template calls them.
+
+4. **A template is over a theory, never over a resource — decided,
+   with the alternative verified.** Stage 5a item 3 wanted a generic
+   handler. It does not want a resource template: a resource scope is
+   ROUTING, and its offsets come from the header's arity, so a body
+   waiting for a resource waits for an arity rather than for a name.
+   What a handler actually needs is two per-carrier words, and naming
+   words is what a theory is for:
+
+   ```braid
+   theory Collector(e, a) =
+       seed   : • ⇒ e
+       unwrap : e ⇒ a
+
+   def collected = use Collector ; (f -> [f (seed) ... ; apply ; unwrap ...])
+   ```
+
+   which comes out `Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩` under
+   `use Logs` and `Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩` under
+   `use Counts` (verified; `examples/resources.braid`). So the recipe
+   *resource + macro + theory* discharges generically with the pieces
+   already on the table, and the theory is doing the same job it does
+   everywhere: turning "the operation for this carrier" into a name.
+
+**A REPL bug the templates found.** `:t` did not elaborate: it parsed
+and inferred, so an ambient `use IntSum` did not resolve slot names for
+it (`:t op` said *Unknown primitive: op* while `:t IntSum@op` worked),
+and a template — whose entire existence is elaboration-time — could not
+be inspected at all. `:t` now goes through the same door a program line
+does. Note the ordering this forced: the bug had to be fixed *before*
+`@` was sealed, since `Inst@slot` was until then the only way to read a
+slot's type in a session.
+
+**What stage 5c can rely on.** Two tables, both in `ElabCtx` beside
+`ecFuncs` and both carried by `ModuleBase`/`Module` so `:import` and
+the REPL keep them: `ecSlots :: SlotTable` is now instance ↦ (theory,
+slot names) — it gained the theory, which is what makes a template
+resolvable — and `ecTmpls :: TemplateTable` is name ↦ (theory,
+unelaborated body). `mode K = Inst` wants a third of exactly this
+shape (K ↦ its instance), and the K-word table 4b needs is the same
+kind of syntactic, prefix-scoped record. `ecThs` (theory names) is
+already threaded, which is what let `use` tell a theory from a
+resource; a mode name will want the same.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and

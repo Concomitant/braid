@@ -7,5 +7,9 @@ def scored =
     emit
     double
 
+## the imported template, instantiated on this side of the boundary
+def loudTwice = use Loud >> emitTwice
+
 7 >> quadruple >> print
+3 >> loudTwice >> print
 (0 >> Tally) 5 >> scored >> _ print >> unTally >> print

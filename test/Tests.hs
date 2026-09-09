@@ -22,7 +22,8 @@ runExample name = do
 
 -- IMPORTS (stage 4¾).  A file's declarations in another file's scope:
 -- textual inclusion, so a type, a resource, a theory, an instance and a
--- functor all cross the boundary with no machinery of their own.
+-- functor all cross the boundary with no machinery of their own —
+-- and so does a template, since it is a table entry like the rest.
 -- Fixtures live in test/imports/ and are loaded from disk, since the
 -- whole point is the file context.
 -- (path, expected print log, expected final stack rendering)
@@ -30,7 +31,9 @@ importTests :: [(String, [String], String)]
 importTests =
     -- defs, a resource, an instance and a functor, all imported; the
     -- imported file's own main does NOT run
-  [ ("uses-util.braid", ["28", "50", "0"], "")
+    -- …and a TEMPLATE: declared over a theory in one file, instantiated
+    -- by a `use` in another
+  [ ("uses-util.braid", ["28", "81", "50", "0"], "")
     -- a diamond includes the shared file once
   , ("diamond.braid",   ["7", "8", "10"], "")
     -- a library file still runs as a program, main and all
@@ -615,7 +618,72 @@ moduleTypeTests =
     -- a functor's own word is UNLABELLED — it is called at elaboration,
     -- not elaborated under anything
   , (idF ++ "idF", "a0 ⇒ a0")
+    -- TEMPLATES: one body, two instantiations, two PRINCIPAL types.
+    -- Nothing is dispatched and nothing is passed; the expansion is
+    -- re-inferred where it lands, so there is no rank-1 wall.
+  , (tmplMod ++ "use IntSum ; fold1", "Intⁿ⁰ ⇒ Int")
+  , (tmplMod ++ "use StrCat ; fold1", "Strⁿ⁰ ⇒ Str")
+    -- a template calling a template: the instantiating scope
+    -- instantiates the whole chain
+  , (tmplMod ++ "use IntSum ; quad", "Int ⇒ Int")
+  , (tmplMod ++ "use StrCat ; quad", "Str ⇒ Str")
+    -- through a def, and nested scopes resolve innermost-first
+  , (tmplMod ++ "def a = use IntSum ; twice\ndef b = use StrCat ; twice\n\
+     \def c = use IntSum ; use StrCat ; twice\nc", "Str ⇒ Str")
+    -- the handler: an effectful arrow is a resource + a macro + a
+    -- theory, and this is the macro half.  `=Log>` is discharged.
+  , (handlerMod ++ "collectLog", "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
+    -- and generically: a template over a theory naming the two words a
+    -- handler needs, at two different resources
+  , (collectorMod ++ "use Logs ; collected",
+     "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
+  , (collectorMod ++ "use Counts ; collected",
+     "Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩")
   ]
+
+-- TEMPLATES (stage 5a).  A def whose `use` names a THEORY is a body
+-- waiting for an instance; a def whose `use` names an INSTANCE expands
+-- it there, renames it there, and RE-INFERS it there — so every
+-- instantiation has its own principal type.
+tmplMod :: String
+tmplMod =
+  "theory Monoid(a) =\n\
+  \    unit : • ⇒ a\n\
+  \    op   : a a ⇒ a\n\
+  \instance IntSum : Monoid(Int) =\n\
+  \    unit = 0\n\
+  \    op   = +\n\
+  \instance StrCat : Monoid(Str) =\n\
+  \    unit = \"\"\n\
+  \    op   = cat\n\
+  \def fold1 = use Monoid ; [op] unit ... ; foldExp\n\
+  \def twice = use Monoid ; dup ; op\n\
+  \def quad  = use Monoid ; twice ; twice\n"
+
+-- the handler of stage 5a item 3: seed the resource, run the program,
+-- unroll the wire — the arrow loses `=Log>` across it
+handlerMod :: String
+handlerMod =
+  "resource Log = Str\n\
+  \def note = unLog _ ; cat ; Log\n\
+  \def collectLog = (f -> [f (\"\" ; Log) ... ; apply ; unLog ...])\n"
+
+-- the GENERIC handler: a template is over a THEORY, never over a
+-- resource name, so the two words a handler needs become slots
+collectorMod :: String
+collectorMod =
+  "resource Log = Str\n\
+  \resource Counter = Int\n\
+  \theory Collector(e, a) =\n\
+  \    seed   : • ⇒ e\n\
+  \    unwrap : e ⇒ a\n\
+  \instance Logs : Collector(Log, Str) =\n\
+  \    seed   = \"\" ; Log\n\
+  \    unwrap = unLog\n\
+  \instance Counts : Collector(Counter, Int) =\n\
+  \    seed   = 0 ; Counter\n\
+  \    unwrap = unCounter\n\
+  \def collected = use Collector ; (f -> [f (seed) ... ; apply ; unwrap ...])\n"
 
 -- a trivial functor: the identity on Code.  Enough to ask what `use`
 -- leaves behind, without a rewrite getting in the way.
@@ -1200,6 +1268,29 @@ evalTests =
      ["36"], "")
   , (idF ++ "def q = [use Same >> dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
      ["Cannot unify effects: Same vs pure (the expected type fixes the grade; this code must stay pure)"], "")
+
+    -- TEMPLATES run: one body, two instances, two answers
+  , (tmplMod ++ "def total  = use IntSum ; fold1\n\
+     \def joined = use StrCat ; fold1\n\
+     \1 2 3 4 ; total ; print\n\
+     \\"a\" \"b\" \"c\" ; joined ; print", ["10", "abc"], "")
+    -- a template calling a template, at both instances
+  , (tmplMod ++ "def a = use IntSum ; quad\ndef b = use StrCat ; quad\n\
+     \5 ; a ; print\n\"z\" ; b ; print", ["20", "zzzz"], "")
+    -- a template is expanded where it LANDS: a resource scope between
+    -- the instance and the call routes the expanded body too
+  , (tmplMod ++ "resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+     \def p =\n    use IntSum\n    use Log\n    twice\n    \"done\"\n    note\n\
+     \(\"\" ; Log) 3 ; p ; unLog _ ; print ... ; print", ["done", "6"], "")
+    -- the handler discharges the resource and the program runs
+  , (handlerMod ++ "def square =\n    use Log\n    dup ; *\n    \"squared \"\n    note\n\
+     \[square] ; collectLog ; _ 7 ; apply\nprint print",
+     ["squared ", "49"], "")
+    -- the generic handler, at the resource its instance names
+  , (collectorMod ++ "def bump = unCounter ; 1 ... ; + ; Counter\n\
+     \def tick =\n    use Counter\n    dup ; *\n    bump\n\
+     \def collectCount = use Counts ; collected\n\
+     \[tick] ; collectCount ; _ 7 ; apply\nprint print", ["1", "49"], "")
   ]
 
 -- (module source, substring expected in the error)
@@ -1375,6 +1466,39 @@ moduleFailTests =
   , ("list(1, 2) >> len >> print",                  "Unclosed group")
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
+
+    -- TEMPLATES: a template called outside every instance scope of its
+    -- theory names the THEORY, not a missing word
+  , (tmplMod ++ "1 2 ; fold1 ; print",
+     "fold1 needs an instance of Monoid in scope")
+    -- an instance of the WRONG theory in scope is the same error:
+    -- selection is by theory and nothing is searched for
+  , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
+     \instance IntPt : Pointed(Int) =\n    pt = 9\n\
+     \def bad = use IntPt ; fold1\n1 2 ; bad ; print",
+     "fold1 needs an instance of Monoid in scope")
+    -- a theory may be named only in a def's OWN header — that is what
+    -- makes the def a template
+  , (tmplMod ++ "def f =\n    1\n    use Monoid\n    op\n1 ; f ; print",
+     "`use Monoid` names a theory, and only a def's own header may")
+    -- one instance is waited for, so at most one theory is named
+  , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
+     \def f = use Monoid Pointed ; op\n1 ; print",
+     "a `use` header may name at most one theory")
+    -- expansion is inlining, so a template cannot recurse
+  , (tmplMod ++ "def loopy = use Monoid ; dup ; op ; loopy\n\
+     \def go = use IntSum ; loopy\n1 ; go ; print",
+     "template loopy calls itself")
+    -- `@` IS THE COMPILER'S (stage 5a item 2a).  A slot's generated
+    -- name is refused in source exactly as a functor's receipt is, and
+    -- the message names the scope that reaches it.
+  , (tmplMod ++ "def q = IntSum@op\n1 2 ; q ; print",
+     "`IntSum@op` is the compiler's spelling of a slot: reach it with \
+     \`use IntSum`")
+  , (tmplMod ++ "1 2 ; IntSum@op ; print",
+     "is the compiler's spelling of a slot")
+    -- a template shares the def namespace
+  , (tmplMod ++ "def fold1 = dup\n1 ; print", "Duplicate definition: fold1")
   ]
 
 runPass :: (String, String) -> Maybe String

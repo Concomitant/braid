@@ -15,4 +15,8 @@ instance Loud : Sink(Int) =
 def idF = (c -> c)
 functor Same = idF
 
+## a TEMPLATE over Sink: no instance here, so it is not a def yet —
+## it travels as a template and the importer instantiates it
+def emitTwice = use Sink ; emit ; emit
+
 "util.braid's own main — NOT run when imported" >> print

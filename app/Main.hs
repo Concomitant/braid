@@ -62,8 +62,10 @@ data ReplState = ReplState
   , rsStackTy  :: SType      -- type of the current stack (internal names)
   , rsStack    :: [Value]    -- the current stack, front wire first
   , rsUse      :: [String]   -- ambient `use` scope: a session-wide body
-  , rsSlots    :: [(String, [String])]  -- instance name -> its theory's slots
+  , rsSlots    :: SlotTable  -- instance name -> its theory and slots
   , rsFuncs    :: [(String, String)]    -- functor name -> its word
+  , rsTheories :: [Theory]   -- theories `:import` brought in
+  , rsTmpls    :: TemplateTable         -- templates awaiting an instance
     -- a session cannot DECLARE a theory or a functor, but `:import` can
     -- bring them in, and then `use` must know them
   }
@@ -75,7 +77,7 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] [] [] []
+            [] SEnd [] [] [] [] [] []
 
 repl :: IO ()
 repl = do
@@ -114,6 +116,9 @@ loop st = do
             let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
             mapM_ (putStrLn . renderDef st) preludeOnly
             mapM_ (putStrLn . renderDef st) (rsUserDefs st)
+            mapM_ (\(n, (th, _)) ->
+                     putStrLn ("def " ++ n ++ " : template over " ++ th))
+                  (reverse (rsTmpls st))
           loop st
         l | ":t! " `isPrefixOf` l -> do
               liftIO (typeOfWith show st (drop 4 l))
@@ -149,7 +154,8 @@ continueOpen line = go (lineDepth line) line
 baseOf :: ReplState -> ModuleBase
 baseOf st =
   (moduleBase (rsEnv st) (rsRun st) preludeNames (rsAliases st) (rsDatas st))
-    { mbSlots = rsSlots st, mbFuncs = rsFuncs st }
+    { mbSlots = rsSlots st, mbFuncs = rsFuncs st
+    , mbTheories = rsTheories st, mbTemplates = rsTmpls st }
 
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
@@ -241,9 +247,22 @@ renderStack st =
       let Arrow _ o _ = normalizeArrow (arrPure SEnd (rsStackTy st))
       in showStackA (dispOf st) o
 
+-- A session's lines are ELABORATED before they are inferred: `use` is
+-- written out between parse and infer, ambient scope included.  `:t`
+-- goes through exactly the same door as a program line — without it an
+-- ambient `use Inst` did not resolve slot names for `:t` (`use IntSum`
+-- then `:t op` said "Unknown primitive: op"), and a template, whose
+-- whole existence is elaboration-time, could not be inspected at all.
+elabIn :: ReplState -> String -> Either String Term
+elabIn st src = do
+  term0 <- parseProgram src
+  elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
+                       (rsTmpls st) (map thName (rsTheories st)))
+    (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
+
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
 typeOfWith render st src =
-  case parseProgram src >>= inferTermIn (rsEnv st) of
+  case elabIn st src >>= inferTermIn (rsEnv st) of
     Left err  -> putStrLn $ "error: " ++ err
     Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
 
@@ -283,13 +302,17 @@ importLine st arg =
                                             , n `notElem` rsUserDefs st ]
                     , rsSlots    = slots ++ rsSlots st
                     , rsFuncs    = modFunctors m ++ rsFuncs st
+                    , rsTheories = modTheories m
+                    , rsTmpls    = modTemplates m
                     }
               putStrLn $ "imported " ++ path ++ "   ("
                        ++ intercalate ", " (filter (not . null)
                             [ count (length names) "def"
                             , count (length (modDatas m) + length (modAliases m)) "type"
                             , count (length (modInstances m)) "instance"
-                            , count (length (modFunctors m)) "functor" ])
+                            , count (length (modFunctors m)) "functor"
+                            , count (length (modTemplates m)
+                                       - length (rsTmpls st)) "template" ])
                        ++ ")"
               pure st'
   where
@@ -307,7 +330,13 @@ handleLine st line
         [] -> do
           putStrLn "left the ambient scope"
           pure st { rsUse = [] }
-        _ | Just bad <- firstUnknown names -> do
+        _ | (t : _) <- [ n | n <- names
+                              , n `elem` map thName (rsTheories st) ] -> do
+              putStrLn $ "error: `use`: " ++ t ++ " is a theory, and only a \
+                         \def's own header may name one — that is what makes \
+                         \the def a template"
+              pure st
+          | Just bad <- firstUnknown names -> do
               putStrLn $ "error: `use`: " ++ bad ++ " is not a resource, \
                          \instance or functor in scope (a session cannot \
                          \declare theories or functors — `:import` a file \
@@ -404,10 +433,19 @@ handleLine st line =
       let envBase
             | name `elem` rsUserDefs st = M.delete name (rsEnv st)
             | otherwise                 = rsEnv st
-      case checkModuleWith (baseOf st) { mbEnv = envBase } line of
+      case checkModuleWith (baseOf st)
+             { mbEnv = envBase
+             , mbTemplates = filter ((/= name) . fst) (rsTmpls st) } line of
         Left err -> report err
         Right m  ->
           case modDefs m of
+            -- a template is not a def: it never enters the environment,
+            -- so it comes back in the template table instead
+            [] | Just (th, _) <- lookup name (modTemplates m) -> do
+                   putStrLn $ "template " ++ name ++ " over " ++ th
+                            ++ "   (`use <instance>` to call it)"
+                   pure st { rsTmpls = modTemplates m
+                           , rsDocs  = modDocs m `M.union` rsDocs st }
             [(n, sc, _)] -> do
               putStrLn $ "def " ++ n ++ " : " ++ showSchemeA (dispOf st) sc
               pure st
@@ -437,18 +475,10 @@ handleLine st line =
                   putStrLn (renderStack st')
                   pure st'
 
-    -- REPL program lines go through the same elaboration a file's do:
-    -- `use` is written out between parse and infer.  Without this a
-    -- `use` on a program line reached inference unelaborated.
-    elabLine src = do
-      term0 <- parseProgram src
-      elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st))
-        (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
-
     -- The CHECKED term is the term that runs: elaborating twice would
     -- run something other than what was checked.
     checkLine = do
-      term1 <- elabLine line
+      term1 <- elabIn st line
       Arrow i o _ <- inferTermIn (rsEnv st) term1
       case solve [CEqStack i (rsStackTy st)] of
         Right s -> pure (apply s o, term1)

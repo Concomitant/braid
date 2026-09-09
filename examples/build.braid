@@ -1,0 +1,72 @@
+# Two builds, one pipeline: configurations as instances, the pipeline as
+# a TEMPLATE.
+#
+# A def whose `use` names a THEORY is a template: its body waits for an
+# instance.  A def whose `use` names an INSTANCE supplies one — the
+# template's body is expanded there, renamed by that instance, and
+# re-inferred there.  So every instantiation gets its own principal type
+# and nothing is dispatched at run time.  ML's functor application,
+# spelled as scope.
+
+theory Config(v) =
+    name    : • ⇒ Str
+    target  : • ⇒ Str
+    retries : • ⇒ Int
+    version : • ⇒ v
+    flags   : Str ⇒ Str
+
+instance Dev : Config(Int) =
+    name    = "dev"
+    target  = "build/dev/app"
+    retries = 1
+    version = 0
+    flags   = _ " -g -O0" ; cat
+
+instance Prod : Config(Str) =
+    name    = "prod"
+    target  = "build/prod/app"
+    retries = 3
+    version = "2026.09"
+    flags   = _ " -O2 --strip" ; cat
+
+# ---- written once, over the theory ----------------------------------
+# No `@`, no dictionary, no parameter: the header names the theory, and
+# that is the whole of "generic over a Config".
+
+def banner =
+    use Config
+    "== " name ; cat
+    _ " ==" ; cat
+
+## the version and the name it belongs to — one body, two TYPES
+def stamped =
+    use Config
+    version
+    _ name
+
+# a template may call a template: `plan` meets `banner` and `stamped`
+# still waiting, and the instance that instantiates `plan` instantiates
+# them too.
+def plan =
+    use Config
+    banner ; print
+    target ; flags ; print
+    stamped ; print print
+    retries ; print
+
+# ---- instantiated twice, by scope ------------------------------------
+def devBuild  = use Dev  ; plan
+def prodBuild = use Prod ; plan
+
+## the same body at two types: `• ⇒ Int Str` here …
+def devStamp  = use Dev  ; stamped
+## … and `• ⇒ Str Str` here.  Re-inferred per instance, so no rank-1 wall.
+def prodStamp = use Prod ; stamped
+
+devBuild
+prodBuild
+
+# `plan` outside any Config scope is an elaboration error, and it names
+# the theory rather than the missing word:
+#   plan needs an instance of Config in scope (`use <instance>` before
+#   calling it)
