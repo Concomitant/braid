@@ -767,7 +767,8 @@ def name =                    # block body — `=` ends the line,
     ev
   ```
 
-  `fix` is to recursion what `loop` (§9) is to iteration: an operator
+  `fix` is to recursion what `loop` (§10, a prelude def built on `fix`
+  itself since 2026-09-12) is to iteration: an operator
   with laws, at a typed boundary. Prefer `loop`/`while`/`until` when the
   recursion is a tail call — it is one word and needs no knot — and
   prefer the **generated structural recursor** (`foldTree`, `foldNat`,
@@ -1277,7 +1278,7 @@ def poly2 : ∀ . Int =IO Traced> Int
 ## 9. Primitive reference
 
 **The kernel admits three presentations** (each derives the others,
-verified): the single-wire generators `{id, dup, swap, drop}`; binders
+verified): the single-wire generators `{_, dup, swap, drop}`; binders
 (`dup = (x -> x x)` …), which abstraction elimination compiles back
 into the generators; and the segment tier (`dup = (x -> x >> dupN)`,
 `drop = (x -> x >> forget)` — the
@@ -1286,15 +1287,25 @@ single-wire basis stays primitive because it is the normal-form
 alphabet reflected `Code` is written in. `pass` is not merely
 equivalent to `...` — the remainder marker *denotes* `pass`; they are
 one term with two spellings. Derived-but-primitive-looking words
-(`odd?`-family, `pack`/`pack2`, `sumN`, `true`-almost) live in the
-prelude — the design bet ("primitives span everything else in the
-language itself") is proven in both directions.
+(`odd?`-family, `pack`/`pack2`, `sumN`, `id`, `loop`, `gt?`/`gte?`/
+`lte?`) live in the prelude — the design bet ("primitives span
+everything else in the language itself") is proven in both directions.
+
+**There are 46 primitives** *(2026-09-12)*. A word keeps its place here
+only if it is a **structure map** of the doctrine — cartesian
+(`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
+`there`, `merge`), exponential (`ev`), recursion (`fix`), the open
+coproduct (`into`), the exponent eliminators over `Aⁿ` — or if it
+**touches the implementation**: arithmetic and strings, `eq?`, the four
+io edges, reflection (`parse`/`unparse`/`reflect`/`evalAs`/`sameCode`/
+`interpose`), and the type-level `weaken`/`finInt`. Everything else is
+a prelude def with its derivation visible.
 
 Wiring (cartesian structure):
 
 | word | type | note |
 |---|---|---|
-| `id`, `_` | `a0 ⇒ a0` | `_` is the section hole |
+| `_` | `a0 ⇒ a0` | the identity: the section hole, marking where the incoming wire goes. `id` is the WORD for the same morphism and is a **prelude def** (`def id = _`) — one morphism, one prim |
 | `swap` | `a0 a1 ⇒ a1 a0` | |
 | `dup` | `a0 ⇒ a0 a0` | Δ |
 | `drop` | `a0 ⇒ •` | |
@@ -1320,7 +1331,7 @@ now, via `mod`/`equals`/`less` and the `(n | n)` re-routing pattern):
 | word | type |
 |---|---|
 | `eq?` | `a0 a0 ⇒ (a0 a0 \| a0 a0)` — structural equality, any value |
-| `lt?` `lte?` `gt?` `gte?` | `Int Int ⇒ (Int Int \| Int Int)` |
+| `lt?` | `Int Int ⇒ (Int Int \| Int Int)` — the only primitive order. `gt?` `gte?` `lte?` are **prelude defs** derived from it (§10), with identical schemes |
 
 Sums & control:
 
@@ -1331,7 +1342,6 @@ Sums & control:
 | `merge` | `(ρ0 \| ρ0) ⇒ ρ0` |
 | `into` | `Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 \| σ0) ⇒ (σ0)` — the **open** eliminator (§6): the copairing `[h, id]`, handling the first alternative into the remaining row and shifting the rest. Not derivable: over a residual it is the only copairing there is. |
 | `ev` | `Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1` — the exponential's **counit**; spelled `apply` before 2026-09-12, renamed to match `curry` (§10). The only word that consumes an `Fn`, and not derivable: naming a value never runs it. |
-| `loop` | `Fn⟨Σ ⇒ (Σ\|Θ)⟩ Σ =Rec> Θ` — Elgot iteration (`again`/`done`); mints `Rec` (§3) |
 | `fix` | `Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — the knot; body takes it deepest, and the knot carries `Rec` (§8) |
 
 Metaprogramming & IO (railway-typed edges):
@@ -1440,9 +1450,38 @@ validation mirror). See `examples/settle.braid`.
 **Guard ladders** (§11): `if` `elif` `else` `otherwise` `decide`
 `firstTrue` `matchWith` `choose` `ifRoute` `elifRoute`.
 
-**Loops**: `while` `until` (+ `whileFn`/`untilFn`) — three-line defs
-over `loop`, and so `=Rec>`:
-`while : Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2`.
+**Loops** *(all derived since 2026-09-12)*: `loop :
+Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` is the **Elgot dagger**, and it is
+a prelude def over `fix`:
+
+```braid
+def loop = (f ... -> [(self ... -> f ... >> ev >> (self ... >> ev | pass) >> merge)] ... >> fix ... >> ev)
+```
+
+`f† = ∇ ∘ (f† + id) ∘ f`, written out: the body routes into
+`(continue | done)`, the continue track re-enters through the knot, the
+done track falls out, and `merge` — the codiagonal ∇ — joins them. Note
+it needs **no `into`**: the row is closed and two-track, so the
+copairing `[f†, id]` is just `(f† | pass) >> merge`; `into` (§6) is for
+the open case. `Rec` is *inherited* from `fix` rather than declared,
+which is why `loop`'s body type now reads `=Rec>` where the prim said
+`⇒` — the body genuinely does run inside an unbounded knot. An
+*inferred* quote absorbs the label, so every existing use still types;
+a *written* pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` handed to `loop` is now refused, which
+is the honest reading. Cost measured: 100 000 iterations in 3.2 s
+against 1.9 s for the builtin, and no growth in memory.
+
+`while` `until` (+ `whileFn`/`untilFn`) are three-line defs over it:
+`while : Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Rec> ρ0⟩ ρ0 =Rec> ρ2`.
+
+**The identity and the order** *(2026-09-12)*: `def id = _` — `_` is
+the identity prim (the positional spelling), `id` the word for it.
+`def gt? = swap >> lt? >> (swap | swap)`, `def gte? = lt? >> not >>
+(pass | pass)`, `def lte? = gt? >> not >> (pass | pass)` — one
+primitive order, `lt?`, and the other three read off it. The trailing
+closed 2-row is not decoration: `not` is built from injections, which
+are open, so `(pass | pass)` re-closes the row and makes the derived
+schemes **identical** to the prims' (`Int Int ⇒ (Int Int | Int Int)`).
 
 **Bundles**: `sumN : Intⁿ ⇒ Int`; `pack : aⁿ ⇒ List(a)` and `pack2`
 (derived from their own eliminators — `foldExp` + `cons`/`reverse`,

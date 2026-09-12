@@ -1578,6 +1578,98 @@ the family still is.
 
 The word for a sum's tracks, in prose, is **alternative**.
 
+## Amendment 2026-09-12 — the prim-reduction pass (50 → 46)
+
+*Immediately after the row stage, because `fix`, `curry`/`ev` and `into`
+had just made more of the kernel derivable and the design bet — "a tiny
+prim set spans everything else in the language itself" — is only worth
+anything if it is re-tested when the generators change.*
+
+**The criterion.** A word keeps its place in `primEnv` only if it is a
+**structure map** of the doctrine, or if it **touches the
+implementation**:
+
+| kept because it is structure | kept because it touches the implementation |
+|---|---|
+| cartesian: `_` `dup` `swap` `drop` `pass` `forget` | data: `+` `-` `*` `div` `mod` `cat` `toStr` `symStr` `asInt?` `eq?` `lt?` `true` `false` |
+| coproduct: `alt1…altN` (via `injIndex`), `there`, `merge` | io: `print` `readLine` `readFile` `writeFile` |
+| exponential: `ev` | reflection: `parse` `unparse` `reflect` `evalAs` `sameCode` `interpose` |
+| recursion: `fix` | type-level: `weaken` `finInt` |
+| open coproduct: `into` | |
+| exponent tier over `Aⁿ`: `at` `foldExp` `foldExp2` `mapN` `mapN2` `zipN` `unzipN` `dupN` `indicesN` `checkedAt` | |
+
+**What moved, each verified live at the scheme it had as a prim:**
+
+- **`id` → `def id = _`.** `_` is the identity — the positional
+  spelling, a wire this stage does not touch — and `id` is the word for
+  the same morphism. Two prims for one map was the only outright
+  duplicate in the table.
+- **`gt?`, `gte?`, `lte?` → the prelude**, from the one primitive order:
+  ```braid
+  def gt?  = swap >> lt? >> (swap | swap)
+  def gte? = lt? >> not >> (pass | pass)
+  def lte? = gt? >> not >> (pass | pass)
+  ```
+  The trailing `(pass | pass)` is load-bearing. `not` is the track swap
+  and is built from injections, which are **open** (`not :
+  (ρ0 | ρ1) ⇒ (ρ1 | ρ0 | σ0)`), so without a closed 2-row the derived
+  words would carry a residual the prims did not. There is no closed
+  injection to avoid this with: openness is what makes a producer
+  commit only to a prefix, and it is not negotiable.
+- **`loop` → `def loop = (f ... -> [(self ... -> f ... >> ev >>
+  (self ... >> ev | pass) >> merge)] ... >> fix ... >> ev)`** — the
+  Elgot dagger, `f† = ∇ ∘ (f† + id) ∘ f`, over the knot 5a½ shipped.
+  Note that this needs **no `into`**: the row is closed and two-track,
+  so `[f†, id]` is just `(f† | pass) >> merge`. `into` is for the OPEN
+  case, which is exactly the distinction the Elgot law beside it draws.
+
+  **Two costs, both real.** (1) `Rec` is now *inherited* rather than
+  declared, and composition unifies grades, so `loop`'s body type reads
+  `Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩` where the prim said `⇒`. An inferred quote's
+  grade row is open and absorbs the label, so every existing use still
+  types; a **written** pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` handed to `loop` is now
+  refused. That is arguably the honest reading — the body does run
+  inside an unbounded knot — but it is a loss of precision, recorded
+  here rather than hidden. (2) A knot per loop instead of a builtin
+  iteration: 100 000 iterations take 3.2 s against 1.9 s, with no
+  growth in memory (the re-entry goes through `goAtoms`, which is where
+  the fuel counter already lives).
+
+**What was examined and kept, with the reason:**
+
+- **`there : (σ0) ⇒ (ρ0 | σ0)` is not `alt2`.** `alt2 : Δ ⇒ (Δ1 | Δ | σ)`
+  *injects a stack* at position 2; `there` *shifts an existing sum's
+  tags*. `altN ≡ here >> there^(n−1)` — `there` is the successor of the
+  unary numeral the flat family abbreviates, and every attempt to derive
+  it goes through `splice`, which is defined *using* it. (`here` was
+  never a prim: it lives in `injIndex` beside `ok`/`again`.)
+- **`forget : ρ0 ⇒ •`** is the terminal morphism over a segment of
+  *unknown width*. `drop` is its width-1 shadow; going the other way
+  needs a fold over an erased width, which is the thing `forget` is.
+- **`checkedAt`** tests an `Int` against the live segment's **actual**
+  width. Widths are erased, so no Braid word can read one — the check is
+  the implementation showing through, which is exactly the second
+  criterion.
+- **`dupN` / `zipN` / `unzipN` / `indicesN`** are the structure maps of
+  the exponent object: `Aⁿ ⊗ Bⁿ ≅ (A⊗B)ⁿ` (`zipN`/`unzipN`), the
+  diagonal at width n (`dupN`), and `Aⁿ ≅ (Fin n ⇒ A)` made concrete
+  (`indicesN`). None is reachable from `mapN`/`foldExp`: `mapN` is
+  one-wire-in-one-wire-out by construction, so it cannot double an
+  element, and `foldExp` collapses to a scalar. They all need `n`, and
+  `n` is erased.
+- **`true` / `false` stay.** The stated objection — "a prelude `alt1`
+  at `•` has an open residual and nothing closes it" — is *refutable*:
+  `verdict = (forget | forget)` is a closed 2-row and closes it, and
+  `def true = 1 >> drop >> alt1 >> verdict` type-checks at `• ⇒ Bool`
+  and runs correctly (verified). The real obstruction is different and
+  worse: nothing in Braid sources from `•` except a literal, so that
+  "derivation" launders an `Int` into a unit. A prim that is honestly a
+  point beats a def that lies about where it came from.
+
+Count: **50 → 46**, with `into` added in the same session (51 at its
+peak). The prelude gained five words, each with its `##` doc and its
+derivation in the text.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and

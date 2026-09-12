@@ -93,9 +93,9 @@ passTests =
   , ("1 2",           "• ⇒ Int Int")
   , ("1 2 3",         "• ⇒ Int Int Int")
   , ("1 ...",         "ρ0 ⇒ Int ρ0")     -- explicit remainder: push onto any stack
-    -- pushing over existing wires: id covers exactly one, ... covers any
-  , ("2 id",          "a0 ⇒ Int a0")
-  , ("1 >> 2 id",     "• ⇒ Int Int")
+    -- pushing over existing wires: _ covers exactly one, ... covers any
+  , ("2 _",           "a0 ⇒ Int a0")
+  , ("1 >> 2 _",      "• ⇒ Int Int")
   , ("1 >> 2 ...",    "• ⇒ Int Int")
   , ("1 >> 2 \8230",  "• ⇒ Int Int")   -- U+2026 … aliases ...
   , ("+",             "Int Int ⇒ Int")
@@ -105,8 +105,10 @@ passTests =
   , ("swap",          "a0 a1 ⇒ a1 a0")
   , ("dup",           "a0 ⇒ a0 a0")
   , ("drop",          "a0 ⇒ •")
-  , ("id",            "a0 ⇒ a0")
-    -- _ is id: the section hole — marks where the incoming wire goes
+    -- `_` is THE identity prim: the section hole, marking where the
+    -- incoming wire goes.  `id` is the WORD for it and is a prelude def
+    -- (2026-09-12 prim-reduction pass), so it is checked below with the
+    -- rest of the prelude.
   , ("_",             "a0 ⇒ a0")
   , ("2 _ >> *",      "Int ⇒ Int")
   , ("_ 2 >> -",      "Int ⇒ Int")
@@ -137,8 +139,8 @@ passTests =
 
     -- worked schemes from the spec (now exact, matching it verbatim)
   , ("dup >> *",      "Int ⇒ Int")           -- square
-  , ("id drop",       "a0 a1 ⇒ a0")          -- first
-  , ("dup >> id drop","a0 ⇒ a0")             -- counit law
+  , ("_ drop",        "a0 a1 ⇒ a0")          -- first
+  , ("dup >> _ drop", "a0 ⇒ a0")             -- counit law
   , ("dup >> swap",   "a0 ⇒ a0 a0")          -- commutativity law
   , ("swap >> swap",  "a0 a1 ⇒ a0 a1")       -- involution
 
@@ -232,7 +234,7 @@ passTests =
   , ("5 -> n -> n ... >> *",     "• ⇒ Int")   -- explicit body marker
   , ("5\n-> n\nn ... >> *",      "• ⇒ Int")   -- ...or an ordinary stage break
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
-  , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
+  , ("dup | +\n+ | _\nmerge",    "(Int | Int Int) ⇒ Int")
   , ("1 ... >> + | ---",         "(Int | σ0) ⇒ (Int | σ0)")
     -- EVERY empty arm is pass, not just first/last — track-column layout
   , ("(drop | |)",               "(a0 | ρ0 | ρ1) ⇒ (• | ρ0 | ρ1)")
@@ -254,11 +256,9 @@ passTests =
   , ("toStr",         "a0 ⇒ Str")
   , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
-    -- STAGE 5a½: `loop` and `fix` are the two words that may run
-    -- unbounded, so they MINT the `Rec` label the way `print` mints IO.
-    -- `loop`'s body is an ordinary step (its own grade passes through
-    -- ε); the ITERATION is what carries Rec.
-  , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
+    -- STAGE 5a½: `fix` is the word that may run unbounded, so it MINTS
+    -- the `Rec` label the way `print` mints IO.  `loop` is a prelude
+    -- def built on it (2026-09-12) and is checked with the prelude.
     -- loop protocol aliases: again ≡ alt1 (continue), done ≡ alt2 (exit)
   , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
   , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
@@ -370,6 +370,17 @@ moduleTypeTests =
   , ("lift2",     "Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
   , ("interpose", "Code Code ⇒ Code")
   , ("7 >> zero? >> (forget | ---)",            "• ⇒ (• | Int)")
+    -- 2026-09-12 PRIM REDUCTION.  `id` is the WORD for `_`, and `loop`
+    -- is the Elgot dagger built on `fix` — both prelude defs now, with
+    -- the schemes they had as prims (`loop`'s body picks up the knot's
+    -- `Rec`, which it did not carry before: see §9).
+  , ("id",                                      "a0 ⇒ a0")
+  , ("id drop",                                 "a0 a1 ⇒ a0")
+  , ("loop",     "Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
+    -- and the three derived comparators keep the prims' schemes exactly
+  , ("gt?",      "Int Int ⇒ (Int Int | Int Int)")
+  , ("gte?",     "Int Int ⇒ (Int Int | Int Int)")
+  , ("lte?",     "Int Int ⇒ (Int Int | Int Int)")
     -- THE TWO TAILS (5a⅞).  `...` continues WIRES, `---` continues
     -- ALTERNATIVES, and the inferred types already told them apart by
     -- letter: ρ is a track's contents, σ the residual.
@@ -512,8 +523,8 @@ moduleTypeTests =
     -- `fix` itself runs nothing — tying the knot is pure — so the label
     -- sits on the knot it hands out and on the self it hands in, not on
     -- its own arrow.  The body is asked for no grade of its own.
-  , ("while",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2")
-  , ("until",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ2 ⇒ ρ0⟩ ρ0 =Rec> ρ1")
+  , ("while",  "Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Rec> ρ0⟩ ρ0 =Rec> ρ2")
+  , ("until",  "Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ2 =Rec> ρ0⟩ ρ0 =Rec> ρ1")
     -- structural recursors mint NOTHING: they are bounded by the value
     -- they eat, so the whole derived library stays unlabelled
   , ("foldList", "Fn⟨• ⇒ a0⟩ Fn⟨a0 a1 ⇒ a0⟩ List(a1) ⇒ a0")

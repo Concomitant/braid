@@ -6,13 +6,17 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (~40 morphisms) and prove
-it spans everything else **in the language itself**. The entire
-standard library is derived user code: booleans, comparisons, `while`
-and `until`, the list type and its library, the sum monad,
-conditionals and guard ladders, data-type folds — and the
-metaprogramming layer, where reflected code is a list you munge with
-the same library.
+The design bet: keep the primitive set tiny (**46 morphisms**, counted
+2026-09-12) and prove it spans everything else **in the language
+itself**. A word keeps its place in the kernel only if it is a
+structure map of the doctrine — cartesian, coproduct, exponential,
+recursion — or if it touches the implementation (arithmetic, io,
+reflection). The entire standard library is derived user code: `id`,
+booleans, three of the four comparisons, iteration (`loop` is the
+Elgot dagger, built on `fix`), `while` and `until`, the list type and
+its library, the sum monad, conditionals and guard ladders, data-type
+folds — and the metaprogramming layer, where reflected code is a list
+you munge with the same library.
 
 ```text
 # scores travel as a bare bundle; the syllabus is a dot product;
@@ -318,7 +322,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 875-case test suite, a full
+(typechecker, interpreter, REPL), an 879-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

@@ -1793,7 +1793,7 @@ dataDeclArtifacts d =
         TSum (RCons st RNil) ->
           (st, closedArity st, Prim "alt1", Prim "merge")
         _ ->
-          (SCons (dBody d) SEnd, 1, Prim "id", Prim "id")
+          (SCons (dBody d) SEnd, 1, Prim "_", Prim "_")
     -- (rollOpen marks splice-shaped field stacks segment-consuming)
 
 -- Generated eliminator: definition by points — and, since 5a½, a
@@ -3129,18 +3129,6 @@ primEnv =
       thereTy = Forall [] [SV "Δ"] [RV "σ"] [] []
         (arrPure (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
-      -- loop : Fn⟨Σ ⇒ (Σ | Θ)⟩ Σ =Rec> Θ — Elgot iteration: the body
-      -- routes to continue (re-enter) or done (exit).  The ITERATION is
-      -- what may run unbounded, so `Rec` sits on loop's own arrow; the
-      -- body is an ordinary step and keeps its own grade (ε), which
-      -- passes through and unions with the label.
-      loopTy =
-        let sg = SV "Σ"; th = SV "Θ"
-            body = TFn (arrEps (STail sg)
-                     (one (TSum (RCons (STail sg)
-                           (RCons (STail th) RNil)))))
-        in Forall [] [sg, th] [] [] [epsV]
-             (arrRec (SCons body (STail sg)) (STail th))
       -- fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
       -- fixpoint operator on Fn.  The body receives the knotted function
       -- DEEPEST, then its own arguments, so a recursive call is spelled
@@ -3244,8 +3232,11 @@ primEnv =
         (arrPure (SExp (SCons ta (one tb)) nExp SEnd)
                (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
   in M.fromList
-       [ ("id",    Forall [a]    [] [] [] [] (arrPure (one ta) (one ta)))
-       , ("_",     Forall [a]    [] [] [] [] (arrPure (one ta) (one ta)))  -- hole: id
+         -- `_` is the identity: the positional spelling, a wire this
+         -- stage does not touch.  `id` is the WORD for the same
+         -- morphism and is therefore a prelude def (`def id = _`), not
+         -- a second prim.
+       [ ("_",     Forall [a]    [] [] [] [] (arrPure (one ta) (one ta)))
        , ("swap",  Forall [a, b] [] [] [] []
            (arrPure (SCons ta (one tb)) (SCons tb (one ta))))
        , ("dup",   Forall [a]    [] [] [] [] (arrPure (one ta) (SCons ta (one ta))))
@@ -3263,9 +3254,6 @@ primEnv =
        , ("-",         binIntTy)
        , ("div",       binIntTy)
        , ("mod",       binIntTy)
-       , ("gt?",       int2Router)
-       , ("gte?",      int2Router)
-       , ("lte?",      int2Router)
        , ("cat",       Forall [] [] [] [] []
            (arrPure (SCons TStr (one TStr)) (one TStr)))
        , ("toStr",     Forall [a] [] [] [] [] (arrPure (one ta) (one TStr)))
@@ -3325,7 +3313,6 @@ primEnv =
        , ("into",      intoTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
-       , ("loop",      loopTy)
        , ("fix",       fixTy)
        , ("foldExp",   foldExpTy)
        , ("foldExp2",  foldExp2Ty)
@@ -4507,10 +4494,24 @@ preludeSrc = unlines
 
   , "## ev a quoted function to every element"
   , "def map = (f l -> l >> [nil] [(r x -> f x >> ev >> _ r >> cons)] ... >> foldList)"
+  , "## the identity, named.  It IS the `_` of a tensor stage -- `_` is"
+  , "## the positional spelling (a wire this stage does not touch), `id`"
+  , "## the word.  One morphism, so one of them is a def."
+  , "##   id : a0 => a0"
+  , "def id = _"
   , "## invert a router: swap the hit and miss tracks"
   , "def not = (miss | ok) >> merge"
   , "## keep only a router's decision: collapse both payloads to nothing"
   , "def verdict = (forget | forget)"
+  , "## the other three Int comparators, DERIVED from `lt?`.  `gt?` is"
+  , "## `lt?` with its arguments exchanged (and the payload put back);"
+  , "## `gte?`/`lte?` are the track swap of the other two.  `not` opens"
+  , "## the row (injections are open), so a closed 2-row re-closes it --"
+  , "## which is what makes the derived schemes IDENTICAL to the prims'."
+  , "##   gt? gte? lte? : Int Int => (Int Int | Int Int)"
+  , "def gt? = swap >> lt? >> (swap | swap)"
+  , "def gte? = lt? >> not >> (pass | pass)"
+  , "def lte? = gt? >> not >> (pass | pass)"
   , "## long-form comparisons forget their input and answer Bool"
   , "def equals = eq? >> verdict"
   , "def less = lt? >> verdict"
@@ -4742,6 +4743,16 @@ preludeSrc = unlines
   , "## accumulator is (decided | default): a true lane decides once;"
   , "## later lanes leave a decision alone."
   , "def firstTrue = (d -> d >> alt2) ... >> [(acc b f -> acc >> (alt1 | (g -> b [f >> alt1] [g >> alt2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> ev"
+  , "## ELGOT ITERATION, derived: the Elgot dagger f† = ∇ ∘ (f† + id) ∘ f."
+  , "## The body routes into (continue | done): the continue track"
+  , "## re-enters through the knot, the done track falls out, and"
+  , "## `merge` -- the codiagonal -- joins them.  NOTE this needs no"
+  , "## `into`: the row is CLOSED and two-track, so the copairing"
+  , "## [f†, id] is just `(f† | pass) >> merge`.  `into` is for the OPEN"
+  , "## case (a residual, or more than one track left).  `Rec` is"
+  , "## INHERITED from `fix` here, not declared."
+  , "##   loop : Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1"
+  , "def loop = (f ... -> [(self ... -> f ... >> ev >> (self ... >> ev | pass) >> merge)] ... >> fix ... >> ev)"
   , "## assemble a loop body from a quoted predicate and step"
   , "def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
@@ -5258,23 +5269,6 @@ evalTerm env defs vars term st =
           if isFinal
             then pure ([], [], [])
             else pure ([], stk, [])
-    -- loop: Elgot iteration — run the body on the segment; the continue
-    -- track re-enters, the done track exits.
-    applyAtom isFinal (Prim "loop") stk
-      | not (M.member "loop" vars), not (M.member "loop" defs) = do
-          (args, stk') <- takeWires "loop" 1 stk
-          case args of
-            [VFn scope cv body] -> do
-              let seg0 = if isFinal then stk' else []
-                  go seg logs = do
-                    (out, lg) <- evalTerm env scope cv body seg
-                    case out of
-                      [VSum 0 bundle] -> go bundle (logs ++ lg)
-                      [VSum 1 bundle] -> pure (bundle, logs ++ lg)
-                      _ -> throwError "Runtime type error in loop: body must return a (continue | done) decision"
-              (result, logs) <- go seg0 []
-              pure (result, if isFinal then [] else stk', logs)
-            _ -> throwError "Runtime type error in loop: expected a body quotation"
     -- fix: tie the knot.  The quoted body is handed a self-reference
     -- DEEPEST and then its own arguments.  The knot is a DefEntry whose
     -- scope contains itself — the same lazy early-binding cycle
@@ -5600,7 +5594,6 @@ builtinArity name =
 
 runBuiltin :: Env -> RunDefs -> String -> [Value]
            -> Either String ([Value], [String])
-runBuiltin _ _ "id"    [v]              = Right ([v], [])
 runBuiltin _ _ "_"     [v]              = Right ([v], [])
 runBuiltin _ _ "swap"  [x, y]           = Right ([y, x], [])
 runBuiltin _ _ "dup"   [v]              = Right ([v, v], [])
@@ -5641,9 +5634,6 @@ runBuiltin _ _ "div"  [VInt _, VInt 0]  = Left "division by zero"
 runBuiltin _ _ "div"  [VInt x, VInt y]  = Right ([VInt (x `div` y)], [])
 runBuiltin _ _ "mod"  [VInt _, VInt 0]  = Left "modulo by zero"
 runBuiltin _ _ "mod"  [VInt x, VInt y]  = Right ([VInt (x `mod` y)], [])
-runBuiltin _ _ "gt?"  [VInt x, VInt y]  = Right ([VSum (if x > y then 0 else 1) [VInt x, VInt y]], [])
-runBuiltin _ _ "gte?" [VInt x, VInt y]  = Right ([VSum (if x >= y then 0 else 1) [VInt x, VInt y]], [])
-runBuiltin _ _ "lte?" [VInt x, VInt y]  = Right ([VSum (if x <= y then 0 else 1) [VInt x, VInt y]], [])
 runBuiltin _ _ "cat"  [VStr x, VStr y]  = Right ([VStr (x ++ y)], [])
 runBuiltin _ _ "toStr" [v]              = Right ([VStr (show v)], [])
 runBuiltin _ _ "symStr" [VSym t]        = Right ([VStr (drop 1 t)], [])
