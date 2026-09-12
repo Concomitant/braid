@@ -37,12 +37,19 @@ data Pair(a, b) = a b
 # and a written arrow means its manifest (MANUAL §14). The slots say so
 # too — a slot declares the MOST a model may do, and the pure model
 # below passes under a `=Rec>` slot by absorption.
+#
+# What the slots DO NOT say, since 2026-09-12: nothing about the
+# PROGRAM handed to `arrP`. Composition joins grades now, so `arrC`
+# (which is built with `fix`) no longer demands that its argument
+# recurse; `Fn⟨a ⇒ b⟩` is what the embedding takes, and `Arr` wraps the
+# same pure arrow. Both spellings were `=Rec>` while composition
+# unified grades, and both were wrong.
 
 # `Fn` itself cannot fill `k`: it is built in, it takes an ARROW rather
 # than two wires, and a constructor parameter must name a declared data
 # type. One line of wrapping buys it — and gives the theory a second,
 # deliberately boring model to be audited against.
-data Arr(a, b) = Fn⟨a =Rec> b⟩
+data Arr(a, b) = Fn⟨a ⇒ b⟩
 
 # ---- the theory ------------------------------------------------------
 # A category with hom-objects, plus strength. `thenP` is composition,
@@ -55,7 +62,7 @@ data Arr(a, b) = Fn⟨a =Rec> b⟩
 # observation, which is what keeps the laws honest about being finite
 # tests of an infinite object.
 theory Arrow(k(_, _)) =
-    arrP    : Fn⟨a =Rec> b⟩ =Rec> k(a, b)
+    arrP    : Fn⟨a ⇒ b⟩ =Rec> k(a, b)
     thenP   : k(a, b) k(b, c) =Rec> k(a, c)
     firstP  : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
     observe : k(Int, Int) =Rec> Int

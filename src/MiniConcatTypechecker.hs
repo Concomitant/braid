@@ -60,10 +60,19 @@ instance Show EVar where
   show (EV s) = s
 
 -- An arrow's MANIFEST: the set of labels its elaborated code carries,
--- plus an optional tail for effect polymorphism.  Composition UNIFIES
--- two manifests rather than joining them: label-absorbing row
--- unification, Koka-style, which keeps the solver a single pass and
--- inference principal.
+-- plus an optional tail for effect polymorphism.  Composition JOINS two
+-- manifests: grades live in the join-semilattice (P(Labels), ∪, ∅) and
+-- `Σ =L> Θ` then `Θ =M> Ξ` is `Σ =L∪M> Ξ`.  Inference states that as a
+-- SUBEFFECTING constraint `part ⊆ composite` (Talpin–Jouvelot) and
+-- takes the least solution; ∅ is the bottom, so a pure part flows into
+-- any composite.
+--
+-- It used to UNIFY (rows forced equal, the join simulated by absorption
+-- into an open tail).  That is sound only while nothing else shares the
+-- row: `ev` shares its stage's row with the argument's Fn row, so the
+-- composite's labels were pushed INTO the parameter and every derived
+-- higher-order word narrowed its argument (2026-09-12; see
+-- design-effects.md's amendment and `CSubEff`).
 --
 -- The set was a Bool until 2026-09-08 (`io` was the only label, being
 -- the irreducible one — everything else in the effect zoo is already an
@@ -74,6 +83,13 @@ instance Show EVar where
 -- only be minted by a `use`, which is what makes it evidence.
 data EffRow = Eff { eLabels :: Set String, eTail :: Maybe EVar }
   deriving (Eq, Ord, Show)
+
+-- A subeffecting constraint, `part ⊆ composite`, as a scheme carries
+-- it: the link a higher-order word keeps between a parameter's Fn row
+-- and its own outer row.  `ev`'s prim scheme writes that link by hand
+-- as a SHARED ε; a derived word cannot, because its outer row is a join
+-- of several parts, and one tail cannot name a union of several.
+type EffSub = (EffRow, EffRow)
 
 -- io is a label like any other; it is spelled out here exactly once
 ioLabel :: String
@@ -260,18 +276,32 @@ instance Show Arrow where
 -- 2. Schemes and environments (only polymorphism over stack vars & type vars)
 --------------------------------------------------------------------------------
 
-data Scheme = Forall [TVar] [SVar] [RVar] [NVar] [EVar] Arrow
+-- A CONSTRAINED type scheme (Talpin–Jouvelot): the quantifiers, the
+-- surviving `⊆` constraints between effect rows, and the arrow.  The
+-- constraints are what a derived higher-order word needs and a prim's
+-- shared ε expressed by hand — `loop`'s body row flows into `loop`'s
+-- own row, so an io body gives an io loop, without the body being
+-- forced to carry `Rec`.
+data Scheme = Forall [TVar] [SVar] [RVar] [NVar] [EVar] [EffSub] Arrow
   deriving (Eq, Ord)
 
 instance Show Scheme where
   -- effect variables are deliberately NOT listed: at stage 1 every
   -- arrow has a grade, so nearly every scheme would grow an `ε0` the
   -- reader can do nothing with.  The bang carries all the information
-  -- the grade has.
-  show (Forall tvars svars rvars nvars _ arr) =
+  -- the grade has.  This RAW instance DOES show the ⊆ constraints;
+  -- every user-facing renderer (`showSchemeA`, `:t`, `:t!`) hides them
+  -- exactly as it hides the tails they relate.
+  show (Forall tvars svars rvars nvars _ subs arr) =
     "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
                        ++ map show nvars)
-         ++ ". " ++ show arr
+         ++ ". " ++ showSubs subs ++ show arr
+
+-- `{ε0 ⊆ ε1, …} ` — empty when there are none
+showSubs :: [EffSub] -> String
+showSubs [] = ""
+showSubs ss = "{" ++ intercalate ", " [ showEffRaw p ++ " ⊆ " ++ showEffRaw c
+                                      | (p, c) <- ss ] ++ "} "
 
 type Env = Map String Scheme
 
@@ -347,13 +377,14 @@ instance Substitutable Arrow where
 instance Substitutable Scheme where
   -- Bound variables are removed from the substitution before it touches
   -- the arrow, so quantified names are never captured.
-  apply s (Forall tv sv rv nv ev arr) =
+  apply s (Forall tv sv rv nv ev subs arr) =
     let s' = Subst (foldr M.delete (tySub s) tv)
                    (foldr M.delete (stSub s) sv)
                    (foldr M.delete (rowSub s) rv)
                    (foldr M.delete (expSub s) nv)
                    (foldr M.delete (effSub s) ev)
-    in Forall tv sv rv nv ev (apply s' arr)
+    in Forall tv sv rv nv ev [ (apply s' p, apply s' c) | (p, c) <- subs ]
+              (apply s' arr)
 
 instance Substitutable Env where
   apply s = M.map (apply s)
@@ -366,6 +397,12 @@ data Constraint
   = CEqTy Ty Ty
   | CEqStack SType SType
   | CEqEff EffRow EffRow
+  -- `part ⊆ composite`: composition JOINS grades.  Emitted wherever
+  -- several arrows make up one (a `;`, a tensor stage, a code row) and
+  -- by `subsumes` (code's grade ≤ the written grade IS the semilattice
+  -- order).  Equality is kept only where two rows are the SAME row —
+  -- inside a `Fn` type, where a prim's scheme shares ε on purpose.
+  | CSubEff EffRow EffRow
   | CFail String   -- carry a deferred inference error to the solver
   deriving (Eq, Show)
 
@@ -620,13 +657,17 @@ unifyRow s r1 r2 =
     _ -> Left $ "Cannot unify sum alternatives: (" ++ show r1'
               ++ ") vs (" ++ show r2' ++ ")"
 
--- Manifests unify; they do not join.  Composition therefore FORCES two
--- arrows' rows equal, and the "join" people expect falls out of label
--- absorption into an open tail: ⟨IO|ε⟩ ~ ⟨|ω⟩ binds ω := ⟨IO|υ⟩.
--- Labels are idempotent (a SET, not a multiset), so a tail may absorb a
--- label the other side already carries, and unifying ⟨A|ε⟩ with ⟨B|ε⟩
--- is satisfiable at ε := ⟨A B|υ⟩ (design-effects.md; the same discipline
--- that keeps stacks, sums and widths principal).
+-- Unify two rows that genuinely ARE one row.  COMPOSITION no longer
+-- comes here (it joins: see `CSubEff` and `solve`'s second pass) —
+-- what does is a `Fn` type meeting another `Fn` type, and the shared ε
+-- a higher-order prim writes between its inner `Fn` and its own arrow.
+-- `Fn` is invariant in its arrow, so equality is the right question
+-- there, and the answer is label-absorbing row unification:
+-- ⟨IO|ε⟩ ~ ⟨|ω⟩ binds ω := ⟨IO|υ⟩.  Labels are idempotent (a SET, not
+-- a multiset), so a tail may absorb a label the other side already
+-- carries, and unifying ⟨A|ε⟩ with ⟨B|ε⟩ is satisfiable at
+-- ε := ⟨A B|υ⟩ (design-effects.md; the same discipline that keeps
+-- stacks, sums and widths principal).
 unifyEff :: Subst -> EffRow -> EffRow -> Either String Subst
 unifyEff s e1 e2 =
   case (apply s e1, apply s e2) of
@@ -677,17 +718,33 @@ unifyEff s e1 e2 =
     repair ls = " (the unlabelled side's manifest is written and fixed: "
              ++ "write =" ++ unwords (S.toList ls) ++ "> on that arrow, "
              ++ "or keep this code label-free)"
-    -- The residual tail of a pair, named from the pair itself: `solve`
-    -- is a pure fold with no fresh-name supply, and a pair can be
-    -- bridged only once (both its variables are bound by that step, so
-    -- `ev` never presents them again).  Never rigid — the tag is a
-    -- prefix, and this name starts with ε.
+    -- The residual tail of a pair, named from the pair itself: the
+    -- equational pass is a pure fold with no fresh-name supply, and a
+    -- pair can be bridged only once (both its variables are bound by
+    -- that step, so `ev` never presents them again).  Never rigid —
+    -- the tag is a prefix, and this name starts with ε.
+    --
+    -- Stage 5a⁹⁄₁₀ planned to DELETE this case, on the grounds that
+    -- composition no longer unifies parts.  Verified and kept: two
+    -- `Fn` types can still be forced equal while each carries a label
+    -- the other lacks — `[yell] [spin] >> eq?` for an `=IO>` quote and
+    -- a `=Rec>` one — and under join semantics that program must
+    -- type.  A test pins it.
     bridge (EV a) (EV b) = EV ("ε<" ++ a ++ "|" ++ b ++ ">")
 
 showEff :: EffRow -> String
 showEff e
   | S.null (eLabels e) = "pure"
   | otherwise          = unwords (S.toList (eLabels e))
+
+-- The row as the SOLVER sees it — labels and tail.  Used only by the
+-- raw `Show Scheme` instance, where a ⊆ constraint would otherwise be a
+-- relation between two invisible things.
+showEffRaw :: EffRow -> String
+showEffRaw e@(Eff ls mv) = case mv of
+  Nothing -> showEff e
+  Just v | S.null ls -> show v
+         | otherwise -> unwords (S.toList ls) ++ "|" ++ show v
 
 bindEffVar :: Subst -> EVar -> EffRow -> Either String Subst
 bindEffVar s v row
@@ -756,14 +813,93 @@ rigidMsg v what =
 dropRigid :: String -> String
 dropRigid v = fromMaybe v (stripPrefix rigidTag v)
 
--- Solve a list of constraints
+-- Solve a list of constraints, in TWO passes.
+--
+--   1. the EQUATIONAL pass — wires, widths, sums, and the effect rows
+--      that are genuinely the SAME row (a `Fn` type's, a prim scheme's
+--      shared ε).  A fold, exactly as before.
+--   2. the LEAST-FIXPOINT pass over the ⊆ constraints: labels flow
+--      UPWARD out of the parts into the composites' flexible tails.  A
+--      composite whose row is CLOSED (it was written) and that lacks a
+--      label one of its parts carries is the error — that is the
+--      sandbox.  A RIGID (skolem) tail absorbs nothing, which is what
+--      makes a written pure expectation refuse labelled code.
+--
+-- WHY THE LEAST FIXPOINT IS UNIQUE, hence types principal.  Each ⊆
+-- constraint reads `lp ∪ σ(tp) ⊆ lc ∪ σ(tc)` over the join-semilattice
+-- (P(Labels), ∪, ∅) — a Horn clause.  If two assignments σ₁, σ₂ each
+-- satisfy it then so does their pointwise INTERSECTION, because ∪
+-- distributes over ∩ on sets; so the solution set is closed under
+-- intersection, a least element exists, and it is unique.  This pass
+-- computes it by adding only labels some constraint forces and never
+-- one it does not, so it IS that least element.  (Tarski; Talpin &
+-- Jouvelot 1992/94 for the effect reading.)  Termination: the label
+-- universe is finite — every label comes from some constraint — and
+-- each step adds at least one label to some variable's value.
 solve :: [Constraint] -> Either String Subst
-solve = foldM step emptySubst
+solve cs = do
+    s <- foldM step emptySubst eqs
+    fixSubs (0 :: Int) (0 :: Int) s
   where
+    (subs, eqs) = partition isSub cs
+    isSub (CSubEff _ _) = True
+    isSub _             = False
+
     step s (CEqTy t1 t2)      = unifyTy s t1 t2
     step s (CEqStack st1 st2) = unifyStack s st1 st2
     step s (CEqEff e1 e2)     = unifyEff s e1 e2
+    step s (CSubEff _ _)      = Right s            -- pass 2
     step _ (CFail msg)        = Left msg
+
+    -- a generous bound on the number of rounds, from the termination
+    -- argument above: rounds cannot exceed one per (constraint, label).
+    -- Reaching it would be a bug in this pass, not a program error.
+    rounds = (length subs + 1) * (S.size allLabels + 1) + 1
+    allLabels = S.unions [ eLabels p `S.union` eLabels c
+                         | CSubEff p c <- subs ]
+
+    fixSubs r n s
+      | r > rounds = Left "internal: the effect fixpoint did not converge"
+      | otherwise = do
+          (s', n', changed) <- foldM flow (s, n, False) subs
+          if changed then fixSubs (r + 1) n' s' else Right s'
+
+    flow acc@(s, n, _) (CSubEff p0 c0) =
+      let p@(Eff lp _)  = apply s p0
+          c@(Eff lc tc) = apply s c0
+          missing       = lp S.\\ lc
+      in if S.null missing then Right acc else
+         case tc of
+           Nothing -> Left (closedGradeErr p c)
+           Just v
+             | isRigidE v -> Left (fixedGradeErr p c)
+             | otherwise  -> do
+                 -- the composite grows by exactly what it was missing,
+                 -- keeping a fresh tail so it can grow again
+                 s' <- bindEffVar s v (Eff missing (Just (EV ("ε⊔" ++ show n))))
+                 Right (s', n + 1, True)
+    flow acc _ = Right acc
+
+-- The composite's row is CLOSED: it was written, and a written row is
+-- exact.  This is where the sandbox lives.
+closedGradeErr :: EffRow -> EffRow -> String
+closedGradeErr p c =
+  "Cannot unify effects: " ++ showEff p ++ " vs " ++ showEff c
+    ++ " (composition joins grades, and this arrow's manifest is written "
+    ++ "and fixed: write =" ++ unwords (S.toList (eLabels p `S.union` eLabels c))
+    ++ "> on that arrow, or keep this code label-free)"
+
+-- The composite's tail is a SKOLEM: the expectation is someone else's
+-- to choose, so it absorbs nothing.  `subsumes` is the only source.
+fixedGradeErr :: EffRow -> EffRow -> String
+fixedGradeErr p c
+  | S.null (eLabels c) =
+      base ++ " (the expected type fixes the grade; this code must stay pure)"
+  | otherwise =
+      base ++ " (the expected type fixes the grade at ="
+           ++ unwords (S.toList (eLabels c)) ++ ">; this code also carries "
+           ++ unwords (S.toList (eLabels p S.\\ eLabels c)) ++ ")"
+  where base = "Cannot unify effects: " ++ showEff p ++ " vs " ++ showEff c
 
 --------------------------------------------------------------------------------
 -- 5. Inference monad and helpers (for fresh vars and instantiation)
@@ -810,6 +946,13 @@ freshEVarName = Infer $ do
 -- ρ1, …) that textually coincide with this run's fresh names, so using
 -- the solver's chasing `apply` here can chain (a0 → a1 → a2, collapsing
 -- distinct binders) or even cycle (a0 → a0, diverging).
+-- `substOnce` on a bare effect row (a scheme's ⊆ constraints are pairs
+-- of these, and instantiation must rename them with the arrow).
+substOnceEff :: Subst -> EffRow -> EffRow
+substOnceEff s e@(Eff ls mv) = case mv of
+  Just v | Just (Eff ls' mv') <- M.lookup v (effSub s) -> Eff (ls `S.union` ls') mv'
+  _ -> e
+
 substOnce :: Subst -> Arrow -> Arrow
 substOnce s (Arrow i o e) = Arrow (goS i) (goS o) (goE' e)
   where
@@ -828,10 +971,7 @@ substOnce s (Arrow i o e) = Arrow (goS i) (goS o) (goE' e)
       Just n | Just (Exp k' mv') <- M.lookup n (expSub s) -> Exp (k + k') mv'
       _ -> e
 
-    goE' e@(Eff ls mv) = case mv of
-      Just v | Just (Eff ls' mv') <- M.lookup v (effSub s) ->
-                 Eff (ls `S.union` ls') mv'
-      _ -> e
+    goE' = substOnceEff s
 
     goT t@(TVarTy v) = fromMaybe t (M.lookup v (tySub s))
     goT (TFn arr)  = TFn (substOnce s arr)
@@ -850,7 +990,13 @@ substOnce s (Arrow i o e) = Arrow (goS i) (goS o) (goE' e)
 -- variables (used for the final atom of a tensor chain, which may stay
 -- open).
 instantiate :: Scheme -> Infer Arrow
-instantiate (Forall tvars svars rvars nvars evars arr) = do
+instantiate = fmap fst . instantiateC
+
+-- …and the scheme's ⊆ constraints, freshened with it.  Every use site
+-- re-emits them into its own constraint pool: that is how a derived
+-- higher-order word passes its parameter's grade out to its caller.
+instantiateC :: Scheme -> Infer (Arrow, [Constraint])
+instantiateC (Forall tvars svars rvars nvars evars subs arr) = do
   newTVs <- mapM (const freshTyVarName) tvars
   newSVs <- mapM (const freshSVarName) svars
   newRVs <- mapM (const freshRVarName) rvars
@@ -861,7 +1007,10 @@ instantiate (Forall tvars svars rvars nvars evars arr) = do
       rSub = M.fromList (zip rvars (map RTail newRVs))
       nSub = M.fromList (zip nvars (map (Exp 0 . Just) newNVs))
       eSub = M.fromList (zip evars [ Eff S.empty (Just v) | v <- newEVs ])
-  openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
+      sub  = Subst tSub sSub rSub nSub eSub
+  arr' <- openEff (substOnce sub arr)
+  pure (arr', [ CSubEff (substOnceEff sub p) (substOnceEff sub c)
+              | (p, c) <- subs ])
 
 -- Every use of a scheme whose grade is CLOSED gets a fresh tail, so
 -- composition can absorb labels into it: `1 >> print` works because the
@@ -875,6 +1024,13 @@ openEff (Arrow i o e@(Eff _ Nothing)) = do
   pure (Arrow i o e { eTail = Just v })
 openEff arr = pure arr
 
+-- A fresh, wholly unknown grade: the row a COMPOSITE starts with,
+-- before its parts' labels flow into it.  Composition joins, so the
+-- composite is a new variable bounded below by each part — never one
+-- of the parts, which is what used to narrow them.
+freshEffRow :: Infer EffRow
+freshEffRow = Eff S.empty . Just <$> freshEVarName
+
 -- Instantiate a scheme *closed* for a non-final tensor atom: only the
 -- OUTER TAILS of the arrow are closed (ρ := •) — that is all appendStack
 -- needs.  Variables living purely inside element types (Fn⟨…⟩, sums)
@@ -882,7 +1038,10 @@ openEff arr = pure arr
 -- polymorphism, not a remainder.  (Matches the grouped-compound closing
 -- policy.)
 instantiateClosed :: Scheme -> Infer Arrow
-instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
+instantiateClosed = fmap fst . instantiateClosedC
+
+instantiateClosedC :: Scheme -> Infer (Arrow, [Constraint])
+instantiateClosedC (Forall tvars svars rvars nvars evars subs arr@(Arrow i o _)) = do
   newTVs <- mapM (const freshTyVarName) tvars
   let tailVs = openVarsS i ++ openVarsS o
   newSVs <- mapM (\v -> if v `elem` tailVs
@@ -906,7 +1065,10 @@ instantiateClosed (Forall tvars svars rvars nvars evars arr@(Arrow i o _)) = do
       eSub = M.fromList (zip evars [ Eff S.empty (Just v) | v <- newEVs ])
   -- effect variables are FRESHENED, never closed: closing ε for a
   -- non-final atom would let `1 print` typecheck as pure.
-  openEff (substOnce (Subst tSub sSub rSub nSub eSub) arr)
+  let sub = Subst tSub sSub rSub nSub eSub
+  arr' <- openEff (substOnce sub arr)
+  pure (arr', [ CSubEff (substOnceEff sub p) (substOnceEff sub c)
+              | (p, c) <- subs ])
 
 -- Is a scheme AT LEAST AS GENERAL as an expected arrow?
 --
@@ -939,11 +1101,15 @@ subsumesShape = subsumesWith skolemizeStacks
 
 subsumesWith :: (Arrow -> Arrow) -> Scheme -> Arrow -> Either String ()
 subsumesWith skolemize sc expected =
-  let want = skolemize expected
-      got  = runInfer0 (instantiate sc)
-  in () <$ solve [ CEqStack (arrowIn got)  (arrowIn want)
-                 , CEqStack (arrowOut got) (arrowOut want)
-                 , CEqEff   (arrowEff got) (arrowEff want) ]
+  let want       = skolemize expected
+      (got, gcs) = runInfer0 (instantiateC sc)
+  -- The GRADE is compared by ⊆, not by =: "this code's grade is at most
+  -- what the written type allows" IS the semilattice order, and with
+  -- `want`'s tail skolemized it absorbs nothing, so a pure expectation
+  -- still refuses labelled code while an io one accepts pure code.
+  in () <$ solve ( [ CEqStack (arrowIn got)  (arrowIn want)
+                   , CEqStack (arrowOut got) (arrowOut want)
+                   , CSubEff  (arrowEff got) (arrowEff want) ] ++ gcs )
 
 arrowIn :: Arrow -> SType
 arrowIn (Arrow i _ _) = i
@@ -1749,8 +1915,8 @@ dataSig d = (dName d, dParams d)
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall tvs svs rvs nvs [] (Arrow bodyStack namedStack effPure))
-    , ("un" ++ dName d,  Forall tvs svs rvs nvs [] (Arrow namedStack bodyStack effPure)) ]
+  ( [ (dName d,          Forall tvs svs rvs nvs [] [] (Arrow bodyStack namedStack effPure))
+    , ("un" ++ dName d,  Forall tvs svs rvs nvs [] [] (Arrow namedStack bodyStack effPure)) ]
       ++ mergeSchemes ++ foldSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
@@ -1774,7 +1940,7 @@ dataDeclArtifacts d =
       case dBody d of
         TSum row | k >= 2 ->
           ( [ ("merge" ++ dName d
-            , Forall [] [SV "ρ"] [] [] []
+            , Forall [] [SV "ρ"] [] [] [] []
                 (arrPure (SCons (TSum uniformRow) SEnd) (STail (SV "ρ")))) ]
           , [ ("merge" ++ dName d, (1, False, Prim "merge")) ] )
           where
@@ -1872,7 +2038,7 @@ dataFoldArtifact d
                               (SCons selfTy SEnd) sigmas
               sc = Forall (tvs0 ++ [ resTV | oneWire ])
                           (svs0 ++ [ resSV | not oneWire ])
-                          rvs0 nvs0 [eps]
+                          rvs0 nvs0 [eps] []
                           (arrE inStack resStack)
               doc = "definition by points: one quoted case per constructor of "
                       ++ dName d ++ ", recursive slots pre-folded"
@@ -2727,7 +2893,7 @@ dropWires n (SCons _ rest) = dropWires (n - 1) rest
 dropWires _ st            = st
 
 showSchemeA :: Disp -> Scheme -> String
-showSchemeA as (Forall tvars svars rvars nvars evars arr) =
+showSchemeA as (Forall tvars svars rvars nvars evars _ arr) =
   "∀ " ++ unwords (map show tvars ++ map show svars ++ map show rvars
                      ++ map show nvars)
        ++ ". " ++ showArrowA as arr
@@ -2816,12 +2982,16 @@ infer env (Tensor ts) = do
                         \be the final atom of its tensor stage") : cs0 )
       inS    = foldr1 appendStack [ i | Arrow i _ _ <- arrows ]
       outS   = foldr1 appendStack [ o | Arrow _ o _ <- arrows ]
-      -- One stage, one grade: every atom's row unifies with the
-      -- stage's.  A pure atom's row is open (see openEff), so it simply
-      -- absorbs whatever the effectful one carries.
+      -- One stage, one grade: the stage's grade is the JOIN of its
+      -- atoms'.  A single atom IS the stage, so no variable is minted
+      -- for it (and no constraint); otherwise the stage gets a fresh
+      -- row that each atom's row flows into.
       grades = [ g | Arrow _ _ g <- arrows ]
-      stageG = head grades
-      gcs    = [ CEqEff stageG g | g <- drop 1 grades ]
+  (stageG, gcs) <- case grades of
+    [g] -> pure (g, [])
+    _   -> do
+      sg <- freshEffRow
+      pure (sg, [ CSubEff g sg | g <- grades ])
   -- PLACEMENT: several effectful atoms in one stage are LEGAL, and
   -- they run left to right — deepest wire first, the order the atoms
   -- are already written in.  design-effects.md offers this as the
@@ -2842,9 +3012,13 @@ infer env (Seq t u) = do
   (Arrow i1 o1 e1, c1) <- infer env t
   (Arrow i2 o2 e2, c2) <- infer env u
   let c = CEqStack o1 i2
-  -- Grades unify rather than join: the absorption case of unifyEff is
-  -- what makes `1 >> print` come out io while `1 >> 2` stays pure.
-  pure (Arrow i1 o2 e1, c1 ++ c2 ++ [c, CEqEff e1 e2])
+  -- Composition JOINS grades: the composite is a FRESH row that each
+  -- part flows into (`⊆`), never one part forced equal to the other.
+  -- Forcing them equal is what pushed a composite's labels back into a
+  -- parameter's `Fn` row through the row `ev` shares — the bug this
+  -- constraint form exists to fix (design-effects.md, 2026-09-12).
+  e <- freshEffRow
+  pure (Arrow i1 o2 e, c1 ++ c2 ++ [c, CSubEff e1 e, CSubEff e2 e])
 
 -- Infer one operand of a tensor chain.  Only the final operand may keep
 -- its remainder variable open; all earlier operands are closed (ρ := •).
@@ -2852,9 +3026,9 @@ inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
   | isStrLiteral name =
-      pick (Forall [] [] [] [] [] (arrPure SEnd (SCons TStr SEnd)))
+      pick (Forall [] [] [] [] [] [] (arrPure SEnd (SCons TStr SEnd)))
   | isSymLiteral name =
-      pick (Forall [] [] [] [] [] (arrPure SEnd (SCons TSym SEnd)))
+      pick (Forall [] [] [] [] [] [] (arrPure SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
   | Just k <- distPrimArity name = pick (distScheme k)
   | Just k <- finIndex name, not (M.member name env) = pick (finScheme k)
@@ -2871,9 +3045,7 @@ inferOperand env final (Prim name)
           error $ "Unknown primitive: " ++ name
         Just sc -> pick sc
   where
-    pick sc = do
-      arr <- if final then instantiate sc else instantiateClosed sc
-      pure (arr, [])
+    pick sc = if final then instantiateC sc else instantiateClosedC sc
 inferOperand env _ (Quote p) = do
   -- Terminal-source constant: • ⇒ Fn⟨…⟩.  The quoted program is inferred
   -- as a whole; its remainder variables stay as metavariables inside
@@ -2896,12 +3068,15 @@ inferOperand env _ (Alts comps residual) = do
       inRow  = foldr RCons end [ i | Arrow i _ _ <- arrows ]
       outRow = foldr RCons end [ o | Arrow _ o _ <- arrows ]
       grades = [ g | Arrow _ _ g <- arrows ]
-  -- exactly one arm runs, but either might, so the row carries the
-  -- arms' common grade: an io branch grades the whole row
-  rowG <- case grades of
-            (g : _) -> pure g
-            []      -> pure effPure
-  let gcs = [ CEqEff rowG g | g <- drop 1 grades ]
+  -- exactly one arm runs, but either might, so the row's grade is the
+  -- JOIN of the arms': an io branch grades the whole row, and a pure
+  -- arm beside it stays pure
+  (rowG, gcs) <- case grades of
+    []  -> pure (effPure, [])
+    [g] -> pure (g, [])
+    _   -> do
+      rg <- freshEffRow
+      pure (rg, [ CSubEff g rg | g <- grades ])
   r <- openEff (Arrow (SCons (TSum inRow) SEnd)
                       (SCons (TSum outRow) SEnd) rowG)
   pure (r, cs ++ gcs)
@@ -2921,7 +3096,7 @@ inferOperand env _ (OpenAbs slots hasRest body) = do
   -- The remainder is handed TO the body (so it can place it with `...`),
   -- unlike `(x -> body) ...`, which routes it around the binder.
   stys <- mapM (const freshTyVarName) slots
-  let paramScheme av = Forall [] [] [] [] [] (arrPure SEnd (SCons (TVarTy av) SEnd))
+  let paramScheme av = Forall [] [] [] [] [] [] (arrPure SEnd (SCons (TVarTy av) SEnd))
       env' = foldr (\(p, av) -> M.insert p (paramScheme av)) env
                    [ (n, av) | (Just n, av) <- zip slots stys ]
   (Arrow bi bo bg, cs) <- infer env' body
@@ -3013,7 +3188,7 @@ finIndex _ = Nothing
 
 finScheme :: Int -> Scheme
 finScheme k =
-  Forall [] [] [] [NV "n"] []
+  Forall [] [] [] [NV "n"] [] []
     (arrPure SEnd (SCons (TFin (Exp (k + 1) (Just (NV "n")))) SEnd))
 
 -- altN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
@@ -3024,7 +3199,7 @@ injScheme n =
       ps  = [ SV ("Δ" ++ show i) | i <- [1 .. n - 1] ]
       rv  = RV "σ"
       row = foldr (RCons . STail) (RCons (STail d) (RTail rv)) ps
-  in Forall [] (ps ++ [d]) [rv] [] []
+  in Forall [] (ps ++ [d]) [rv] [] [] []
        (arrPure (STail d) (SCons (TSum row) SEnd))
 
 -- #dist:K : a (ρ₁ | … | ρₖ | σ) ⇒ (a ρ₁ | … | a ρₖ | σ) — push one wire
@@ -3041,7 +3216,7 @@ distScheme k =
       sig  = RV "\963"
       inRow  = foldr (RCons . STail) (RTail sig) rhos
       outRow = foldr (\r -> RCons (SCons (TVarTy a) (STail r))) (RTail sig) rhos
-  in Forall [a] rhos [sig] [] []
+  in Forall [a] rhos [sig] [] [] []
        (arrPure (SCons (TVarTy a) (SCons (TSum inRow) SEnd))
                 (SCons (TSum outRow) SEnd))
 
@@ -3049,7 +3224,7 @@ distScheme k =
 -- implicit remainder — pushing onto a nonempty stack requires explicit
 -- `...` (e.g. `1 ...` : ρ ⇒ Int ρ).  See spec-update-exponentials.md.
 intLitScheme :: Scheme
-intLitScheme = Forall [] [] [] [] [] (arrPure SEnd (SCons TInt SEnd))
+intLitScheme = Forall [] [] [] [] [] [] (arrPure SEnd (SCons TInt SEnd))
 
 --------------------------------------------------------------------------------
 -- 7. The primitive environment
@@ -3103,10 +3278,10 @@ primEnv =
       recR = Eff (S.singleton recLabel) (Just epsV)
       arrRec i o = Arrow i o recR
       fnGD = TFn (arrEps (STail gam) (STail del))
-      evTy = Forall [] [gam, del] [] [] [epsV]
+      evTy = Forall [] [gam, del] [] [] [epsV] []
         (arrEps (SCons fnGD (STail gam)) (STail del))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
-      mergeTy = Forall [] [SV "Θ"] [] [] []
+      mergeTy = Forall [] [SV "Θ"] [] [] [] []
         (arrPure (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
@@ -3120,13 +3295,13 @@ primEnv =
       intoTy =
         let sig = RV "σ"
             resSum = one (TSum (RTail sig))
-        in Forall [] [gam] [sig] [] [epsV]
+        in Forall [] [gam] [sig] [] [epsV] []
              (arrEps (SCons (TFn (arrEps (STail gam) resSum))
                             (one (TSum (RCons (STail gam) (RTail sig)))))
                      resSum)
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
       -- (tags shift by one; here ≡ alt1, altN ≡ here >> there^(n-1))
-      thereTy = Forall [] [SV "Δ"] [RV "σ"] [] []
+      thereTy = Forall [] [SV "Δ"] [RV "σ"] [] [] []
         (arrPure (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
       -- fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
@@ -3150,28 +3325,28 @@ primEnv =
         let sgF = SV "Σf"; thF = SV "Θf"
             selfF = TFn (arrRec (STail sgF) (STail thF))
             bodyF = TFn (arrEps (SCons selfF (STail sgF)) (STail thF))
-        in Forall [] [sgF, thF] [] [] [epsV]
+        in Forall [] [sgF, thF] [] [] [epsV] []
              (arrPure (one bodyF) (one selfF))
       int2 = SCons TInt (one TInt)
       codeStructTy = codeTy
-      int2Router = Forall [] [] [] [] []
+      int2Router = Forall [] [] [] [] [] []
         (arrPure int2
                (one (TSum (RCons int2 (RCons int2 RNil)))))
-      eqTy = Forall [a] [] [] [] []
+      eqTy = Forall [a] [] [] [] [] []
         (let aa = SCons ta (one ta)
          in arrPure aa (one (TSum (RCons aa (RCons aa RNil)))))
-      binIntTy = Forall [] [] [] [] []
+      binIntTy = Forall [] [] [] [] [] []
         (arrPure (SCons TInt (one TInt)) (one TInt))
       -- Bool ≡ (• | •): two payload-free tracks; true = alt1, false = alt2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
-      boolLit  = Forall [] [] [] [] [] (arrPure SEnd (one tBool))
+      boolLit  = Forall [] [] [] [] [] [] (arrPure SEnd (one tBool))
       -- foldExp: the eliminator of an exponent bundle aⁿ (the stack-level
       -- foldList).  n is erased; at runtime the bundle is the final
       -- segment and its width is the witness.
       nExp = Exp 0 (Just (NV "n"))
       foldExpTy =
         let stepArr = arrPure (SCons tb (one ta)) (one tb)
-        in Forall [a, b] [] [] [NV "n"] []
+        in Forall [a, b] [] [] [NV "n"] [] []
              (arrPure (SCons (TFn stepArr)
                       (SCons tb (SExp (one ta) nExp SEnd)))
                     (one tb))
@@ -3181,27 +3356,27 @@ primEnv =
         let c  = TV "c"
             tc = TVarTy c
             stepArr = arrPure (SCons tb (SCons ta (one tc))) (one tb)
-        in Forall [a, b, c] [] [] [NV "n"] []
+        in Forall [a, b, c] [] [] [NV "n"] [] []
              (arrPure (SCons (TFn stepArr)
                       (SCons tb (SExp (SCons ta (one tc)) nExp SEnd)))
                     (one tb))
       -- GLA generators, width-polymorphic in n (design-exponents.md)
-      dupNTy = Forall [a] [] [] [NV "n"] []
+      dupNTy = Forall [a] [] [] [NV "n"] [] []
         (arrPure (SExp (one ta) nExp SEnd)
                (SExp (one ta) nExp (SExp (one ta) nExp SEnd)))
-      zipNTy = Forall [a, b] [] [] [NV "n"] []
+      zipNTy = Forall [a, b] [] [] [NV "n"] [] []
         (arrPure (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
                (SExp (SCons ta (one tb)) nExp SEnd))
       -- map a one-wire function across a bundle: the tier's missing
       -- container-preserving word (folds collapse, this one rebuilds)
-      mapNTy = Forall [a, b] [] [] [NV "n"] [epsV]
+      mapNTy = Forall [a, b] [] [] [NV "n"] [epsV] []
         (arrEps (SCons (TFn (arrEps (one ta) (one tb)))
                       (SExp (one ta) nExp SEnd))
                (SExp (one tb) nExp SEnd))
       -- the pair twin, mirroring foldExp/foldExp2.  With zipN this
       -- lifts ANY two-wire word pointwise, so addN and the rest stop
       -- needing to be primitive.
-      mapN2Ty = Forall [a, b, c] [] [] [NV "n"] [epsV]
+      mapN2Ty = Forall [a, b, c] [] [] [NV "n"] [epsV] []
         (arrEps (SCons (TFn (arrEps (SCons ta (one tb)) (one tc)))
                       (SExp (SCons ta (one tb)) nExp SEnd))
                (SExp (one tc) nExp SEnd))
@@ -3211,24 +3386,24 @@ primEnv =
       -- bundle, and the finK literals carry their bound as an offset.
       -- There is deliberately no `tabulate`/`asFin`: an output-only n
       -- has no witness, exactly as for `zeroN`.
-      atTy = Forall [a] [] [] [NV "n"] []
+      atTy = Forall [a] [] [] [NV "n"] [] []
         (arrPure (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
                (one ta))
-      indicesNTy = Forall [a] [] [] [NV "n"] []
+      indicesNTy = Forall [a] [] [] [NV "n"] [] []
         (arrPure (SExp (one ta) nExp SEnd)
                (SExp (SCons (TFin nExp) (one ta)) nExp SEnd))
       -- the dynamic discharge: check an Int against the LIVE width;
       -- the hit track carries the index and the untouched bundle
-      checkedAtTy = Forall [a] [] [] [NV "n"] []
+      checkedAtTy = Forall [a] [] [] [NV "n"] [] []
         (arrPure (SCons TInt (SExp (one ta) nExp SEnd))
                (one (TSum (RCons (SCons (TFin nExp) (SExp (one ta) nExp SEnd))
                           (RCons (SCons TInt (SExp (one ta) nExp SEnd))
                                  RNil)))))
-      weakenTy = Forall [] [] [] [NV "n"] []
+      weakenTy = Forall [] [] [] [NV "n"] [] []
         (arrPure (one (TFin nExp)) (one (TFin (Exp 1 (Just (NV "n"))))))
-      finIntTy = Forall [] [] [] [NV "n"] []
+      finIntTy = Forall [] [] [] [NV "n"] [] []
         (arrPure (one (TFin nExp)) (one TInt))
-      unzipNTy = Forall [a, b] [] [] [NV "n"] []
+      unzipNTy = Forall [a, b] [] [] [NV "n"] [] []
         (arrPure (SExp (SCons ta (one tb)) nExp SEnd)
                (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
   in M.fromList
@@ -3236,17 +3411,17 @@ primEnv =
          -- stage does not touch.  `id` is the WORD for the same
          -- morphism and is therefore a prelude def (`def id = _`), not
          -- a second prim.
-       [ ("_",     Forall [a]    [] [] [] [] (arrPure (one ta) (one ta)))
-       , ("swap",  Forall [a, b] [] [] [] []
+       [ ("_",     Forall [a]    [] [] [] [] [] (arrPure (one ta) (one ta)))
+       , ("swap",  Forall [a, b] [] [] [] [] []
            (arrPure (SCons ta (one tb)) (SCons tb (one ta))))
-       , ("dup",   Forall [a]    [] [] [] [] (arrPure (one ta) (SCons ta (one ta))))
-       , ("drop",  Forall [a]    [] [] [] [] (arrPure (one ta) SEnd))
-       , ("pass",  Forall []     [rho] [] [] [] (arrPure (STail rho) (STail rho)))
+       , ("dup",   Forall [a]    [] [] [] [] [] (arrPure (one ta) (SCons ta (one ta))))
+       , ("drop",  Forall [a]    [] [] [] [] [] (arrPure (one ta) SEnd))
+       , ("pass",  Forall []     [rho] [] [] [] [] (arrPure (STail rho) (STail rho)))
          -- the terminal morphism: forget the whole segment
-       , ("forget", Forall []    [rho] [] [] [] (arrPure (STail rho) SEnd))
+       , ("forget", Forall []    [rho] [] [] [] [] (arrPure (STail rho) SEnd))
        , ("+",     binIntTy)
        , ("*",     binIntTy)
-       , ("print", Forall [a]    [] [] [] [] (arrIO (one ta) SEnd))
+       , ("print", Forall [a]    [] [] [] [] [] (arrIO (one ta) SEnd))
        , ("true",  boolLit)
        , ("false", boolLit)
        , ("eq?",       eqTy)
@@ -3254,17 +3429,17 @@ primEnv =
        , ("-",         binIntTy)
        , ("div",       binIntTy)
        , ("mod",       binIntTy)
-       , ("cat",       Forall [] [] [] [] []
+       , ("cat",       Forall [] [] [] [] [] []
            (arrPure (SCons TStr (one TStr)) (one TStr)))
-       , ("toStr",     Forall [a] [] [] [] [] (arrPure (one ta) (one TStr)))
-       , ("asInt?",    Forall [] [] [] [] []
+       , ("toStr",     Forall [a] [] [] [] [] [] (arrPure (one ta) (one TStr)))
+       , ("asInt?",    Forall [] [] [] [] [] []
            (arrPure (one TStr)
                   (one (TSum (RCons (one TInt)
                         (RCons (one TStr) RNil))))))
-       , ("symStr",    Forall [] [] [] [] [] (arrPure (one TSym) (one TStr)))
-       , ("unparse",   Forall [] [] [] [] []
+       , ("symStr",    Forall [] [] [] [] [] [] (arrPure (one TSym) (one TStr)))
+       , ("unparse",   Forall [] [] [] [] [] []
            (arrPure (SCons codeStructTy SEnd) (one TStr)))
-       , ("parse",     Forall [] [] [] [] []
+       , ("parse",     Forall [] [] [] [] [] []
            (arrPure (one TStr)
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
@@ -3272,17 +3447,17 @@ primEnv =
        -- having CHECKED that η is a unit endomorphism (`ρ ⇒ ρ`, or
        -- `E ρ ⇒ E ρ` over a resource prefix), so the woven program
        -- types whenever c did.  The one checked Code ⇒ Code functor.
-       , ("interpose", Forall [] [] [] [] []
+       , ("interpose", Forall [] [] [] [] [] []
            (arrPure (SCons codeStructTy (SCons codeStructTy SEnd))
                     (one codeStructTy)))
-       , ("readLine",  Forall [] [] [] [] []
+       , ("readLine",  Forall [] [] [] [] [] []
            (arrIO SEnd
                   (one (TSum (RCons (one TStr)
                         (RCons (one TStr) RNil))))))
-       , ("readFile",  Forall [] [] [] [] []
+       , ("readFile",  Forall [] [] [] [] [] []
            (arrIO (one TStr)
                   (one (TSum (RCons (one TStr) (RCons (one TStr) RNil))))))
-       , ("writeFile", Forall [] [] [] [] []
+       , ("writeFile", Forall [] [] [] [] [] []
            (arrIO (SCons TStr (one TStr))
                   (one (TSum (RCons SEnd (RCons (one TStr) RNil))))))
        -- Run code that will only exist at runtime, AGAINST A WITNESS.
@@ -3293,11 +3468,11 @@ primEnv =
        -- the loaded code must SUBSUME the witness (§12).  Sharing ε with
        -- the witness is the sandbox: a pure witness admits only pure
        -- code, and running it stays pure.
-       , ("evalAs",  Forall [] [gam, del] [] [] [epsV]
+       , ("evalAs",  Forall [] [gam, del] [] [] [epsV] []
            (arrEps (SCons fnGD (SCons codeStructTy (STail gam)))
                   (one (TSum (RCons (STail del)
                         (RCons (SCons TStr (STail gam)) RNil))))))
-       , ("reflect",   Forall [] [gam, del] [] [] [epsV]
+       , ("reflect",   Forall [] [gam, del] [] [] [epsV] []
            (arrPure (one (TFn (arrEps (STail gam) (STail del))))
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
@@ -3305,7 +3480,7 @@ primEnv =
        -- than testing them at chosen inputs (§12.9).  Both must lie in
        -- the structural fragment; outside it this is an error, not a
        -- `false`, because "I cannot tell" is not "they differ".
-       , ("sameCode",  Forall [] [gam, del] [] [] [epsV]
+       , ("sameCode",  Forall [] [gam, del] [] [] [epsV] []
            (arrPure (SCons (TFn (arrEps (STail gam) (STail del)))
                           (one (TFn (arrEps (STail gam) (STail del)))))
                     (one tBool)))
@@ -3344,7 +3519,14 @@ primsIn (Use _ b)      = primsIn b
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
-inferTermIn env term =
+inferTermIn env = fmap fst . inferTermSub env
+
+-- …and the ⊆ constraints that survive, for callers about to
+-- GENERALIZE the result (a def, a runtime `evalAs` check).  A caller
+-- that only wants to read the arrow can drop them: they relate rows
+-- the display hides anyway.
+inferTermSub :: Env -> Term -> Either String (Arrow, [EffSub])
+inferTermSub env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
                , not (isStrLiteral n)
@@ -3358,7 +3540,7 @@ inferTermIn env term =
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
       s <- solve cs
-      pure (apply s arr)
+      pure (apply s arr, residualSubs s cs)
 
 -- A definition is not in scope in its own body (5a½): recursion is
 -- written with `fix`, at a typed boundary, so every def is a CLOSED
@@ -3519,7 +3701,7 @@ receiptLabel = stripPrefix "use@"
 
 receiptScheme :: String -> Scheme
 receiptScheme f =
-  Forall [] [rho] [] [] [] (Arrow (STail rho) (STail rho) (effLabel f))
+  Forall [] [rho] [] [] [] [] (Arrow (STail rho) (STail rho) (effLabel f))
   where rho = SV "ρ"
 
 -- every declared functor's receipt, ready for the environment defs and
@@ -3592,7 +3774,7 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
       -- cannot reach here (`checkFunctorWord` refuses it), so in
       -- practice this mints `Rec` and any receipt the word itself wears.
       let wordLabels w = case M.lookup w (ecEnv ctx) of
-            Just (Forall _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
+            Just (Forall _ _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
             Nothing                                        -> []
           marks = nub (concat [ receiptName f : map receiptName (wordLabels w)
                               | (f, w) <- fs ])
@@ -3708,13 +3890,13 @@ elabScope env rs body = do
     schemeOf _        = Nothing
 
     resUse a = case schemeOf a of
-      Just (Forall _ _ _ _ _ (Arrow i _ _)) -> leadingRes rs i
+      Just (Forall _ _ _ _ _ _ (Arrow i _ _)) -> leadingRes rs i
       _                                     -> []
 
     -- an open-arity word must stay final, so it takes the remainder
     -- itself instead of us appending one (§13 rule 1)
     isOpen a = case schemeOf a of
-      Just (Forall _ _ _ _ _ (Arrow i o _)) -> openTailedS i || openTailedS o
+      Just (Forall _ _ _ _ _ _ (Arrow i o _)) -> openTailedS i || openTailedS o
       _                                     -> False
 
     routeStage atoms0 =
@@ -3912,18 +4094,33 @@ freeVarsArrow :: Arrow -> Vars
 freeVarsArrow = varsOfArrow
 
 freeVarsScheme :: Scheme -> Vars
-freeVarsScheme (Forall tv sv rv nv ev arr) =
+freeVarsScheme (Forall tv sv rv nv ev subs arr) =
   let (ft, fs, fr, fn, fe) = freeVarsArrow arr
-  in (ft \\ tv, fs \\ sv, fr \\ rv, fn \\ nv, fe \\ ev)
+      se = nub [ v | (p, c) <- subs, Just v <- [eTail p, eTail c] ]
+  in (ft \\ tv, fs \\ sv, fr \\ rv, fn \\ nv, nub (fe ++ se) \\ ev)
 
 freeVarsEnv :: Env -> Vars
 freeVarsEnv env =
   foldr (catVars . freeVarsScheme) noVars (M.elems env)
 
 -- Generalize all free type, stack, row, and exponent variables not
--- fixed by the environment.
+-- fixed by the environment.  For an arrow with no surviving ⊆
+-- constraints (a written type, a slot signature).
 generalize :: Env -> Arrow -> Scheme
-generalize env arr =
+generalize env = generalizeWith env []
+
+-- …and with them.  The constraints are CLOSED under transitivity first
+-- (an inner composite is a part of the outer one, so a parameter's row
+-- reaches the def's own row through a chain of intermediate rows that
+-- the arrow never mentions), then garbage-collected: a constraint
+-- naming a variable the arrow does not mention is discharged by its
+-- LEAST solution — the part's least value is ∅, which every composite
+-- contains, and an unmentioned composite is free to be as large as it
+-- likes.  That is the standard effect-constraint GC, and it is what
+-- keeps a scheme's constraint set the size of its parameter list
+-- rather than the size of its body.
+generalizeWith :: Env -> [EffSub] -> Arrow -> Scheme
+generalizeWith env subs arr =
   let (ftv, fsv, frv, fnv, fev) = freeVarsArrow arr
       (etv, esv, erv, env', eev) = freeVarsEnv env
       -- existentials are CONSTANTS, not variables: never quantified
@@ -3931,7 +4128,56 @@ generalize env arr =
             (filter (not . isRigidS) (fsv \\ esv))
             (filter (not . isRigidR) (frv \\ erv))
             (filter (not . isRigidN) (fnv \\ env'))
-            (fev \\ eev) arr
+            (fev \\ eev) (keepSubs subs fev) arr
+
+-- Close over transitivity and garbage-collect in ONE walk.  For each
+-- effect variable the ARROW mentions, follow the `⊆` edges out of it
+-- and stop at the first row the arrow also mentions (or at a closed
+-- row): the rows in between are the composites of a def's inner
+-- stages, which the arrow never shows and whose least solution — as
+-- large as they like — discharges them.  What comes back is the
+-- scheme's constraint set: one edge per (parameter row, reachable
+-- composite) pair, which for a real word is the size of its parameter
+-- list.
+--
+-- Linear in the constraint set per source variable, and the sources
+-- are the arrow's own tails: the naive "close then filter" is
+-- quadratic per round and cost the whole suite an order of magnitude.
+keepSubs :: [EffSub] -> [EVar] -> [EffSub]
+keepSubs subs fev =
+  dedup [ (Eff S.empty (Just v), c) | v <- fev, c <- walk v ]
+  where
+    dedup = S.toList . S.fromList
+    inArrow = S.fromList fev
+    edges = M.fromListWith (++) [ (t, [c]) | (p, c) <- subs, Just t <- [eTail p] ]
+    walk v = go (S.singleton v) [(S.empty, v)] []
+      where
+        go _ [] acc = acc
+        go seen ((ls, t) : rest) acc =
+          let step (sn, q, a) (Eff lc mc) =
+                let ls' = ls `S.union` lc
+                in case mc of
+                     Nothing -> (sn, q, Eff ls' Nothing : a)
+                     Just w
+                       | w == v               -> (sn, q, a)
+                       | w `S.member` inArrow -> (sn, q, Eff ls' (Just w) : a)
+                       | w `S.member` sn      -> (sn, q, a)
+                       | otherwise -> (S.insert w sn, q ++ [(ls', w)], a)
+              (seen', rest', acc') =
+                foldl step (seen, rest, acc) (M.findWithDefault [] t edges)
+          in go seen' rest' acc'
+
+-- The ⊆ constraints that SURVIVE a solve: a part whose tail is still a
+-- variable, and which the composite does not already contain.
+residualSubs :: Subst -> [Constraint] -> [EffSub]
+residualSubs s cs =
+  S.toList (S.fromList
+    [ (p, c)
+    | CSubEff p0 c0 <- cs
+    , let p = apply s p0
+    , let c = apply s c0
+    , Just v <- [eTail p]
+    , eTail c /= Just v ])
 
 -- A checked module: definitions in order, plus an optional main program.
 data Module = Module
@@ -4446,8 +4692,8 @@ checkModuleWith base src = do
           if "recurse" `elem` mentions && not (M.member "recurse" env1)
             then Left (selfReferenceError name True)
             else Right ()
-          arr <- either (Left . inDef) Right (inferTermIn env1 term)
-          let sc = generalize env1 arr
+          (arr, dsubs) <- either (Left . inDef) Right (inferTermSub env1 term)
+          let sc = generalizeWith env1 dsubs arr
           pure ( M.insert name sc env
                , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
                , filter (/= name) shadow
@@ -4927,7 +5173,7 @@ normTerm env defs seen term s0 = case term of
           let (fr, st) = s in Right ([SApp n [] 0], (fr, st))
       -- any other word is uninterpreted: it needs a closed arity so we
       -- know how many wires it eats and how many it returns
-      | Just (Forall _ _ _ _ _ (Arrow i o _)) <- M.lookup n env
+      | Just (Forall _ _ _ _ _ _ (Arrow i o _)) <- M.lookup n env
       , Just k <- closedWidth i
       , Just m <- closedWidth o =
           let (args, s') = takeSym k s
@@ -5502,7 +5748,7 @@ evalTerm env defs vars term st =
           -- dummies suffice.
           let dummy = TV "_param"
               dummyScheme =
-                Forall [dummy] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
+                Forall [dummy] [] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
               arityEnv = foldr (\n -> M.insert n dummyScheme)
                                env (M.keys vars)
           Arrow i _ _ <- liftEither (inferTermIn arityEnv t')
@@ -5550,8 +5796,8 @@ evalTerm env defs vars term st =
     witnessArrow wv wt = groundTerm env wv wt >>= inferTermIn env
 
     checkAgainst term want = do
-      got <- inferTermIn env term
-      subsumes (generalize M.empty got) want
+      (got, gsubs) <- inferTermSub env term
+      subsumes (generalizeWith M.empty gsubs got) want
 
     recErr what = "Runtime type error in a structural recursor: " ++ what
 
@@ -5589,7 +5835,7 @@ builtinArity name
   | isJust (distPrimArity name) = Right 2
 builtinArity name =
   case M.lookup name primEnv of
-    Just (Forall _ _ _ _ _ (Arrow i _ _)) -> Right (closedArity i)
+    Just (Forall _ _ _ _ _ _ (Arrow i _ _)) -> Right (closedArity i)
     Nothing -> Left $ "Unknown primitive at runtime: " ++ name
 
 runBuiltin :: Env -> RunDefs -> String -> [Value]
@@ -5703,7 +5949,7 @@ runBuiltin _ _ name args =
 -- not what makes a stage fit at a cut.
 checkInterposed :: Env -> Term -> Either String ()
 checkInterposed env t = do
-  arr@(Arrow i o _) <- inferTermIn env t
+  (arr@(Arrow i o _), asubs) <- inferTermSub env t
   let shown = "interpose: `" ++ renderTerm t ++ "` is "
            ++ show (normalizeArrow arr)
       rule  = "a stage inserted at every cut must be ρ ⇒ ρ, or E ρ ⇒ E ρ "
@@ -5718,7 +5964,7 @@ checkInterposed env t = do
   let side = foldr SCons (STail (SV "ρ")) e
       want = Arrow side side (Eff S.empty (Just (EV "ε")))
   either (\err -> Left (shown ++ "; " ++ rule ++ " (" ++ err ++ ")"))
-         Right (subsumesShape (generalize M.empty arr) want)
+         Right (subsumesShape (generalizeWith M.empty asubs arr) want)
 
 encodeListV :: [Value] -> Value
 encodeListV = foldr (\v r -> VSum 1 [v, r]) (VSum 0 [])
@@ -5989,7 +6235,7 @@ compileAbs env outer ps body = do
             Nothing -> Left $ "reflect: unknown name in abstraction body: " ++ nm
             -- an open-tailed word is final in its stage, so only its
             -- closed prefix can sit left of anything
-            Just (Forall _ _ _ _ _ (Arrow i _ _)) ->
+            Just (Forall _ _ _ _ _ _ (Arrow i _ _)) ->
               Right (AtomInfo (closedArity i) [] t)
     -- A quotation that mentions a parameter is a CLOSURE, and it is
     -- reified by the exponential's own maps (stage 5a¾).  Compile the
@@ -6064,7 +6310,7 @@ compileAbs env outer ps body = do
     inferGroupArrow g = do
       let dummy = TV "_p"
           dummyScheme =
-            Forall [dummy] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
+            Forall [dummy] [] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
           arityEnv = foldr (\nm -> M.insert nm dummyScheme) env (ps ++ outer)
       inferTermIn arityEnv g
 
@@ -6110,10 +6356,10 @@ runLaw m (n, t) = do
 -- wants the whole remaining segment.  Shared by the runtime scope
 -- builder and the elaboration-time one.
 arityOf :: Scheme -> Int
-arityOf (Forall _ _ _ _ _ (Arrow i _ _)) = closedArity i
+arityOf (Forall _ _ _ _ _ _ (Arrow i _ _)) = closedArity i
 
 openOf :: Scheme -> Bool
-openOf (Forall _ _ _ _ _ (Arrow i _ _)) = openTailed i
+openOf (Forall _ _ _ _ _ _ (Arrow i _ _)) = openTailed i
 
 openTailed :: SType -> Bool
 openTailed (SCons _ rest) = openTailed rest

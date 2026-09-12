@@ -372,11 +372,12 @@ moduleTypeTests =
   , ("7 >> zero? >> (forget | ---)",            "• ⇒ (• | Int)")
     -- 2026-09-12 PRIM REDUCTION.  `id` is the WORD for `_`, and `loop`
     -- is the Elgot dagger built on `fix` — both prelude defs now, with
-    -- the schemes they had as prims (`loop`'s body picks up the knot's
-    -- `Rec`, which it did not carry before: see §9).
+    -- EXACTLY the schemes they had as prims.  `loop`'s body was briefly
+    -- `=Rec>` because composition unified grades instead of joining
+    -- them; stage 5a⁹⁄₁₀ fixed that and the prim's type came back.
   , ("id",                                      "a0 ⇒ a0")
   , ("id drop",                                 "a0 a1 ⇒ a0")
-  , ("loop",     "Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
+  , ("loop",     "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
     -- and the three derived comparators keep the prims' schemes exactly
   , ("gt?",      "Int Int ⇒ (Int Int | Int Int)")
   , ("gte?",     "Int Int ⇒ (Int Int | Int Int)")
@@ -523,8 +524,28 @@ moduleTypeTests =
     -- `fix` itself runs nothing — tying the knot is pure — so the label
     -- sits on the knot it hands out and on the self it hands in, not on
     -- its own arrow.  The body is asked for no grade of its own.
-  , ("while",  "Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Rec> ρ0⟩ ρ0 =Rec> ρ2")
-  , ("until",  "Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ2 =Rec> ρ0⟩ ρ0 =Rec> ρ1")
+    -- GRADES JOIN (5a⁹⁄₁₀).  A derived higher-order word does not
+    -- narrow its arguments: `while` runs a test and a body and may
+    -- recurse, so IT carries `Rec` — but neither quotation is asked
+    -- for it, and a written pure `Fn` reaches both.
+  , ("while",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2")
+  , ("until",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ2 ⇒ ρ0⟩ ρ0 =Rec> ρ1")
+    -- the join is a JOIN, not a unification: an io body makes the loop
+    -- io as well as Rec, and the labels sort
+  , ("[[dup >> print ...] ... >> ev >> done] ... >> loop", "a0 =IO Rec> a0")
+    -- and a derived word that runs its argument and then prints does
+    -- not demand IO OF the argument (the `logged` case from the plan)
+  , ("(f -> f ... >> ev >> \"done\" ... >> print ...)",
+     "Fn⟨• ⇒ ρ0⟩ =IO> ρ0")
+    -- two `Fn` rows each carrying a label the other lacks still UNIFY
+    -- (they are the same row, not two parts of a composition): that is
+    -- `unifyEff`'s bridge, which composition no longer reaches
+  , ("def spin = [done] ... >> loop\ndef yell = \"a\" >> print\n[yell] [spin] >> eq? >> (drop drop | drop drop) >> merge",
+     "• ⇒ •")
+    -- three labels from three sources still UNION on one arrow: the
+    -- join is the whole point, and the set displays sorted
+  , ("def tracer = (c -> c)\nfunctor Traced = tracer\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef report = use Traced ; fac ; toStr ; print\nreport",
+     "Int =IO Rec Traced> •")
     -- structural recursors mint NOTHING: they are bounded by the value
     -- they eat, so the whole derived library stays unlabelled
   , ("foldList", "Fn⟨• ⇒ a0⟩ Fn⟨a0 a1 ⇒ a0⟩ List(a1) ⇒ a0")
@@ -964,6 +985,26 @@ evalTests =
     -- code is admitted
   , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [[_ 200 >> less?] [3 _ >> *] ... >> while] c (7) >> evalAs >> print) | print) >> forget",
      ["alt1(112)"], "")
+    -- STAGE 5a⁹⁄₁₀ — THE RULE THE PRIM REDUCTION WAS MISSING.  Every
+    -- derived higher-order prelude word is checked to be AT LEAST AS
+    -- GENERAL as the scheme its prim ancestor had, by the one routine
+    -- that states that question (`subsumes`, reached here through
+    -- `checkInstance`): a theory whose slots ARE the old schemes, and
+    -- an instance filling each with today's word.  Written at wire
+    -- granularity because a theory slot has one slot-local stack; the
+    -- grades, which is what this stage moved, are exact.
+    -- Under unifying grades `loopD`, `whileD` and `untilD` all failed
+    -- here ("Rec vs pure ... written and fixed").
+  , ("theory Derived =\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Rec> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Rec> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Rec> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\ninstance D : Derived =\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
+    -- …and the consequence, run: a WRITTEN pure `Fn⟨Int ⇒ (Int|Int)⟩`
+    -- in a data field reaches `loop`, which no derived word could take
+    -- while composition unified grades.
+  , ("data Step = Fn⟨Int ⇒ (Int | Int)⟩\ndef lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef boxed = [lt100? >> (double >> again | done) >> merge] ... >> Step\nboxed >> unStep >> _ 7 >> loop >> print",
+     ["112"], "")
+    -- the sandbox reads the order the other way too: a written pure
+    -- VALUE flows into an `=IO>` expectation (∅ is the bottom)
+  , ("\"dup >> *\" >> parse >> ((c -> [dup >> * >> dup >> print ...] c (7) >> evalAs >> print) | print) >> forget",
+     ["alt1(49)"], "")
   , ("1 >> sumN _",                                 [],     "0 1")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
@@ -1708,7 +1749,7 @@ moduleFailTests =
     -- A codata thunk built by `fix` must be declared `=Rec>`; the
     -- message says which label to write.
   , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> drop",
-     "Cannot unify effects: pure vs Rec (the unlabelled side's manifest is written and fixed: write =Rec> on that arrow, or keep this code label-free)")
+     "Cannot unify effects: Rec vs pure (composition joins grades, and this arrow's manifest is written and fixed: write =Rec> on that arrow, or keep this code label-free)")
     -- a NESTED written Fn keeps its grade through the `k := <data>`
     -- substitution: substituting theory parameters used to rebuild every
     -- nested Fn pure, which silently dropped the declared manifest

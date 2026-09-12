@@ -67,6 +67,20 @@ copies where they exist.
 - Katsumata, *Parametric effect monads and semantics of effect
   systems* (POPL 2014) — grades from an ordered monoid; the `⇒!` row
   is the two-element case.
+- Lucassen & Gifford, *Polymorphic effect systems* (POPL 1988) — the
+  origin: types and effects inferred together, effects as sets that
+  union along composition. Read it for why "what a term may do" is a
+  second component of its type rather than a second type system.
+- Talpin & Jouvelot, *The type and effect discipline* (LICS 1992;
+  Information and Computation 111(2), 1994) — the one Braid's solver
+  now implements. Effects are constrained by `⊆` rather than unified,
+  a scheme carries its surviving constraints, and the principal type is
+  the LEAST solution of that constraint set. Stage 5a⁹⁄₁₀ is this paper
+  applied to grades: composition joins, `Scheme` grew a constraint
+  list, and `solve` grew a least-fixpoint pass (design-effects.md,
+  "composition JOINS"). The contrast worth holding beside it is Koka's
+  pure row unification, which is what Braid had before and which
+  narrows a higher-order word's arguments the moment a row is shared.
 - Gaboardi, Katsumata, Orchard & Breuvart, [*Combining effects and
   coeffects via
   grading*](https://www.cs.kent.ac.uk/people/staff/dao7/publ/combining-effects-and-coeffects-icfp16.pdf)

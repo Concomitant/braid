@@ -795,6 +795,18 @@ subsumption with the tail skolemized, so an unlabelled written type
 refuses labelled code — the sandbox reads provenance exactly as it
 reads io.
 
+*(Amended 2026-09-12. **Composition joins** — the sentence two
+paragraphs up always said so, and the implementation now matches it.
+Composition emits a SUBEFFECTING constraint `part ⊆ composite` against
+a fresh composite row and `solve` takes the least solution, so a
+composite's labels are no longer pushed back into the rows its parts
+share with their arguments; every derived higher-order word recovered
+its prim's scheme. Unification is kept where two rows genuinely ARE one
+row — inside a `Fn` type, and the shared `ε` of `ev`/`fix`/the folds —
+and the subsumption rule above is unchanged, now stated as `⊆`, which
+IS the semilattice order. Principal constrained types, Talpin–Jouvelot.
+Full record and evidence: design-effects.md, "composition JOINS".)*
+
 **Not a coeffect** (labels union; "every stage is in the image" is the
 intersection half, still open), **not a rewrite trigger** (receipts are
 inference's output), **not a count** (idempotent; cost is another arc).
@@ -1262,7 +1274,9 @@ maps.)*
 Two prices, both paid in written types, both the sandbox rule reaching
 one level further than it used to.
 
-**Eight declarations across two example files** had to gain `=Rec>`:
+**Eight declarations across two example files** had to gain `=Rec>`
+*(amended 2026-09-12: six. Two of the eight were the unification bug,
+not the label — see the end of this section)*:
 `data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)` and, in
 `examples/circuits.braid`, `data Circuit(a, b) = Fn⟨a =Rec> b
 Circuit(a, b)⟩`, `data Arr(a, b) = Fn⟨a =Rec> b⟩`, and all five slots
@@ -1280,6 +1294,19 @@ ever did. The labelled spelling is the permissive one — a `=Rec>` arrow
 still accepts non-recursive code, since an inferred row is open and
 absorbs — and the bare spelling is the promise. That asymmetry is the
 whole design, and the eight declarations are what it costs.
+
+> **Amended 2026-09-12 — two of the eight were a BUG, not a cost.**
+> Composition joins now, so a `=Rec>` codata field no longer propagates
+> its label into the written type of the functions its body applies.
+> `data Arr(a, b) = Fn⟨a ⇒ b⟩` and
+> `arrP : Fn⟨a ⇒ b⟩ =Rec> k(a, b)` are what
+> `examples/circuits.braid` says today, and it prints the same five
+> numbers. The other six stand and always did: `Circuit`'s and
+> `Stream`'s thunks really recurse, and `arrP`'s own arrow plus
+> `thenP`, `firstP`, `observe` and `sample` are `=Rec>` because the
+> `Circuit` model builds every circuit with `fix`. The asymmetry
+> (labelled = permissive, bare = promise) is unchanged; what changed is
+> that only an arrow whose OWN code recurses has to say so.
 
 One latent bug surfaced and was fixed on the way: `substParams` rebuilt
 a nested `Fn` with `arrPure`, discarding the declared manifest — it had
@@ -1630,7 +1657,14 @@ implementation**:
   types; a **written** pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` handed to `loop` is now
   refused. That is arguably the honest reading — the body does run
   inside an unbounded knot — but it is a loss of precision, recorded
-  here rather than hidden. (2) A knot per loop instead of a builtin
+  here rather than hidden.
+  *(**Retracted 2026-09-12.** Cost (1) was not a cost and not honest:
+  it was the grade system unifying where it should join. `loop` is
+  `Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` again — the prim's type — and a
+  written pure body runs through it. The body does not recurse; the
+  KNOT does, and the knot is `loop`'s own arrow. See design-effects.md,
+  "composition JOINS". Cost (2) stands.)*
+  (2) A knot per loop instead of a builtin
   iteration: 100 000 iterations take 3.2 s against 1.9 s, with no
   growth in memory (the re-entry goes through `goAtoms`, which is where
   the fuel counter already lives).

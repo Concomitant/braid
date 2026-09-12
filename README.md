@@ -224,7 +224,11 @@ bare `use` leaves.
     refuses recursive code exactly as it refuses io. Which labels you get is
     **inferred, never annotated**: four prims are marked
     (`print`, `readLine`, `readFile`, `writeFile`) and every
-    other grade follows from composition — `def shout = toStr >> print : a0 =IO> •`.
+    other grade follows from composition, which **joins** the labels
+    rather than forcing them equal, so a part is never asked for the
+    composite's labels — `def shout = toStr >> print : a0 =IO> •`,
+    while `loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` recurses without
+    asking its body to.
     Quoting stays pure, since pushing an action isn't doing it:
     `[print] : • ⇒ Fn⟨a0 =IO> •⟩`, and `ev` is what transfers the grade out.
 
@@ -322,7 +326,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), an 879-case test suite, a full
+(typechecker, interpreter, REPL), an 885-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

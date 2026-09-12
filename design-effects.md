@@ -71,6 +71,13 @@ The corollary is the **auto-opening rule**: every instantiated closed
 grade gets a fresh tail, or a pure word could not sit beside an
 effectful one.
 
+> **REVERSED 2026-09-12.** Composition JOINS. The paragraph above was
+> the design from stage 1 until stage 5a⁹⁄₁₀; the amendment
+> "Composition joins" below states what replaced it and why. The
+> auto-opening rule survives unchanged, and so does the `ε` sharing in
+> the next paragraph — what went is *forcing two composed arrows'
+> rows equal*.
+
 **ε is a fifth variable sort.** The higher-order prims — `ev`,
 `loop`, `foldExp`, `foldExp2`, `mapN`, `mapN2` — share ONE ε between
 the inner `Fn` and the outer arrow, which is why a single `ev`
@@ -94,7 +101,12 @@ the io form writable in declarations: `Fn⟨Str =IO> •⟩`. A declaration
 that says `Fn⟨Str ⇒ •⟩` refuses an io quotation — *Cannot unify effects:
 IO vs pure*. That strictness is the point, and it is also the limit:
 there is no subeffecting, so a pure quote unified into an io context
-types as io. Let-generalization at `def` boundaries restores per-use
+types as io. *(Amended 2026-09-12: there IS subeffecting now, and this
+sentence names exactly the two halves that are now different. A pure
+quote COMPOSED into an io context no longer types as io — composition
+joins, so the composite is io and the quote stays pure. What survives
+is the first half: where a written type meets another written type,
+inside a `Fn⟨…⟩`, the rows are still compared exactly.)* Let-generalization at `def` boundaries restores per-use
 freshness; inside one expression nothing does. (ASCII `->!` and the old
 `⇒!` spelling still lex for backward compatibility.)
 
@@ -120,11 +132,133 @@ declarations across `examples/stream.braid` and
 including a theory slot's *nested* argument
 (`arrP : Fn⟨a =Rec> b⟩ =Rec> k(a, b)`) — composition unifies rows
 rather than joining them, so a closed `=Rec>` codata field propagates
-the label to the written type of every function its body applies. The
+the label to the written type of every function its body applies.
+*(Amended 2026-09-12: six of the eight, not eight. That propagation
+WAS the bug; see "composition JOINS" below for which two came back to
+`⇒` and why the other six were always right.)* The
 full accounting, together with what `Rec` does *not* promise (it bounds
 nothing, it unions rather than intersects, and elaboration-time
 recursion never meets it), is in `design-macros.md`, the 2026-09-09
 amendment "recursion at a typed boundary".
+
+## Amendment (2026-09-12) — composition JOINS; grades are a semilattice
+
+**This reverses "Grades unify; they do not join" (stage 1, above).**
+The simulation worked only while nothing else shared the row, and by
+stage 5a⁹⁄₁₀ several things did.
+
+**The evidence.** `ev` shares its stage's row with the argument's `Fn`
+row — that sharing is right, the stage IS the call. But `>>` then
+forced that row equal to the next stage's, so a composite's labels were
+pushed back INTO the parameter's type. Two verified readings, both on
+the 2026-09-12 build before the fix:
+
+```text
+loop   : Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1       -- the prim said `⇒`
+while  : Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Rec> ρ0⟩ ρ0 =Rec> ρ2
+def logged = (f -> f ... >> ev >> "done" ... >> print ...)
+logged : Fn⟨• =IO> ρ0⟩ =IO> ρ0                     -- IO demanded OF f
+```
+
+and the consequence a user meets:
+
+```text
+data Step = Fn⟨Int ⇒ (Int | Int)⟩
+… >> unStep >> _ 3 >> loop
+error: Cannot unify effects: pure vs Rec (the unlabelled side's
+manifest is written and fixed …)
+```
+
+An *inferred* quotation absorbs, so every example kept passing; a
+*written* pure `Fn` could not be handed to any derived higher-order
+word that carries a label. `loop` had just become a prelude def by
+Elgot (`fix` + `(self | pass) >> merge`) and that is where it showed —
+but by our own rule discipline (`scheme(new) ≥ scheme(old)`, the rule
+`rule` will enforce at 5b) the derived `loop` should have been REFUSED
+as a replacement for the prim. Reverting to prims was the wrong fix:
+**derivations must work the same as prims.**
+
+**The system.** Grades form the join-semilattice `(P(Labels), ∪, ∅)`
+and Braid is a category graded by it (Katsumata; "The manifest, stated
+once"). Composition joins: `Σ =L> Θ` then `Θ =M> Ξ` is `Σ =L∪M> Ξ`.
+The join is *commutative as a grade* — `pure ; io` and `io ; pure`
+have the same manifest — while execution order remains the premonoidal
+decree, which is a fact about running, not about grading. `∅` is the
+bottom and is included in everything: a pure part flows into any
+composite, and a written pure VALUE flows into any expectation.
+
+This is Talpin & Jouvelot's **type-and-effect discipline** —
+subeffecting stated as a CONSTRAINT SET, principal *constrained*
+types — not Koka-style pure row unification. Lucassen & Gifford is the
+origin; READING.md carries both.
+
+**Mechanically** (`src/MiniConcatTypechecker.hs`):
+
+- `infer (Seq t u)` mints a FRESH composite row and emits
+  `CSubEff e_part e_comp` for each part; never `CEqEff` between parts.
+  A tensor stage and a code row do the same across their atoms and
+  arms (a single atom or arm IS the stage, and mints nothing).
+  `ev`/`fix`/`into`/the folds keep SHARING ε between the inner `Fn`
+  and their own arrow: that equality is right, and the narrowing came
+  from `Seq`, not from sharing.
+- `solve` runs the equational fold as before, then a **least-fixpoint
+  pass** over the `⊆` constraints: labels flow upward into flexible
+  composite tails; a CLOSED row (one that was written) that would need
+  a label it lacks is the error — and that error is the sandbox; a
+  RIGID (skolem) tail absorbs nothing, which is `subsumes`.
+- `subsumes` compares grades by `⊆`, not `=`: *code's grade ≤ the
+  written grade* IS the semilattice order. The direction is unchanged
+  and now principled. `subsumesShape` (what `interpose` asks) leaves
+  the tail flexible, so it still admits every label.
+- `Scheme` carries the surviving constraints, quantified with the rest,
+  freshened at every instantiation, closed under transitivity and then
+  garbage-collected: a constraint naming a variable the arrow does not
+  mention is discharged by its least solution. What a prim wrote by
+  hand as a shared ε, a derived word now carries as `ε_f ⊆ ε_c`.
+- Display hides constraints exactly as it hides tails — in `:t`, in
+  `:t!`, and in `:defs`. Both of those render an *arrow*, and a
+  constraint is a relation between two things the arrow does not show;
+  printing `ε3 ⊆ ε7` beside a type whose tails are invisible would name
+  variables the reader cannot write. The raw `Show Scheme` instance
+  (compiler-internal) does print them.
+
+**Principality.** Each `⊆` constraint reads `lp ∪ σ(tp) ⊆ lc ∪ σ(tc)`
+over `(P(Labels), ∪, ∅)` — a Horn clause. If two assignments satisfy
+it, so does their pointwise intersection (∪ distributes over ∩ on
+sets), so the solution set is closed under intersection, a least
+element exists, and it is unique. The fixpoint pass adds only labels
+some constraint forces, so it computes exactly that least element;
+types stay principal. Termination is immediate: the label universe is
+finite and each step adds a label. (Tarski; Talpin–Jouvelot for the
+effect reading.)
+
+**What came back.** `loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` — the
+prim's type, exactly; `while`/`until` likewise; `logged : Fn⟨• ⇒ ρ0⟩
+=IO> ρ0`. A test pins the rule that was missing: a theory whose slots
+ARE the pre-reduction schemes, and an instance filling each slot with
+today's derived word, so `subsumes new old` is checked for nineteen
+higher-order prelude words at once.
+
+**What did NOT change.** Absorption between rows that genuinely ARE
+one row (a `Fn` type's, a prim's shared ε) is still unification, and
+`unifyEff`'s **bridge** — two open rows each carrying a label the other
+lacks, joined through a residual tail — is still reachable and still
+needed there. Stage 5a⁹⁄₁₀'s plan expected to delete it; it was kept,
+because `[yell] [spin] >> eq?` for an `=IO>` quote and a `=Rec>` one
+forces two `Fn` rows equal and must succeed. Composition no longer
+reaches it. A test pins that program.
+
+**Which `=Rec>` declarations stage 5a½ added were the bug.** Two of the
+eight, both in `examples/circuits.braid`: `data Arr(a, b) = Fn⟨a =Rec>
+b⟩` and the theory slot's NESTED argument
+`arrP : Fn⟨a =Rec> b⟩ =Rec> k(a, b)`. Both are `⇒` again; the example
+prints the same five numbers. The other six are still required and
+always were: `data Circuit(a, b) = Fn⟨a =Rec> b Circuit(a, b)⟩` and
+`data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)` are codata whose thunk
+really does recurse, and `arrP`'s OUTER row plus `thenP`, `firstP`,
+`observe` and `sample` are `=Rec>` because the `Circuit` model builds
+every circuit with `fix`. The paragraph above that blamed "composition
+unifies rows" for all eight is corrected by this list.
 
 ## Stages 2 and 4 as shipped (2026-08-26)
 

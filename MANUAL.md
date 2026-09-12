@@ -122,7 +122,27 @@ Manifests are **inferred, never annotated**: four prims are marked io
 every other arrow's grade follows from composition. Higher-order words
 (`ev`, `loop`, `map`, `foldExp`, `mapN`) share the grade of the
 quotation they run, so one `ev` serves pure and effectful quotes
-alike. Effect tails are invisible in display, the same hiding a `ρ`
+alike.
+
+**Composition JOINS.** A grade is a *set* of labels, and `Σ =L> Θ`
+followed by `Θ =M> Ξ` is `Σ =L∪M> Ξ`. The empty set is the bottom and
+is contained in everything, so a pure stage sits beside any other and
+contributes nothing; and because `∪` is commutative, `pure ; io` and
+`io ; pure` have the same manifest (execution order is still left to
+right — that is a fact about running, not about grading). The
+consequence worth stating on its own: **a part is never asked for the
+composite's labels.** `loop` may recurse, so `loop` is `=Rec>`; the
+quotation it runs is not, and a written pure `Fn⟨Int ⇒ (Int | Int)⟩`
+goes straight into it.
+
+Inference states the join as a `⊆` constraint and takes its least
+solution, and a scheme carries whichever of those constraints survive
+(that is how `loop` passes an io body's grade out to its caller without
+demanding it). Like effect tails, **constraints never display** — not
+in `:t`, not in `:t!`, not in `:defs`. Both of those render an arrow,
+and a constraint relates two tails the arrow does not show; there is
+nothing a reader could write in response to `ε3 ⊆ ε7`. What you see
+instead is the effect it has: the labels that reached the arrow. Effect tails are invisible in display, the same hiding a `ρ`
 tail already gets inside `Fn⟨…⟩`. Writing a grade in a type: §5 and
 §8. The two edges: §14. A label set is **writable** wherever a type is
 written — `=IO>`, `=Rec>`, `=IO Rec>`, in any order, displayed sorted;
@@ -174,6 +194,7 @@ that can run unbounded — and they are the only two that mint `Rec`:
 
 ```text
 fac    : Int =Rec> Int              -- built with `fix`
+loop   : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1     -- the LOOP recurses, not the body
 while  : Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2
 fold   : Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0    -- a structural recursor: bare
 map    : Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)    -- derived from it: bare
@@ -288,8 +309,10 @@ Type formers:
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
   (*Cannot unify effects: IO vs pure*); `Fn⟨Str =IO> •⟩` is the io form
   (§8). The same holds for every other label — `Fn⟨Int ⇒ Int⟩` refuses
-  a quotation that uses `while` or `fix`; write `Fn⟨Int =Rec> Int⟩`
-  (§14).
+  a quotation that USES `while` or `fix`; write `Fn⟨Int =Rec> Int⟩`
+  (§14). It is only the quotation's own code that counts: handing a
+  written pure `Fn` *to* `while` or `loop` is fine, since the label is
+  on the loop and not on what it runs (§3).
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
   match exactly (`:t!` shows raw).
@@ -988,7 +1011,7 @@ data Circuit(a, b) = Fn⟨a =Rec> b Circuit(a, b)⟩
 data Pair(a, b) = a b
 
 theory Arrow(k(_, _)) =
-    arrP    : Fn⟨a =Rec> b⟩ =Rec> k(a, b)
+    arrP    : Fn⟨a ⇒ b⟩ =Rec> k(a, b)
     thenP   : k(a, b) k(b, c) =Rec> k(a, c)
     firstP  : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
     …
@@ -1009,7 +1032,7 @@ ordinary types:
 braid> use Circuits
 ambient: use Circuits   (:clear or a bare `use` to leave)
 braid> :t arrP
-arrP : Fn⟨a0 =Rec> a1⟩ =Rec> Circuit(a0, a1)
+arrP : Fn⟨a0 ⇒ a1⟩ =Rec> Circuit(a0, a1)
 braid> :t thenP
 thenP : Circuit(a0, a1) Circuit(a1, a2) =Rec> Circuit(a0, a2)
 braid> :t firstP
@@ -1024,6 +1047,10 @@ The slots carry `=Rec>` because the `Circuit` model builds every
 circuit with `fix`; the function model does not, and a pure body under
 a `=Rec>` slot passes by absorption — which is why `Funcs`'s `firstP`
 comes back bare. A slot declares the *most* a model may do, as ever.
+What `arrP` does **not** ask for is a recursive *argument*: composition
+joins (§3), so a `fix`-built embedding takes an ordinary
+`Fn⟨a ⇒ b⟩`. It read `Fn⟨a =Rec> b⟩` until 2026-09-12, and that was the
+grade system unifying where it should join (§14).
 
 A slot is reached **through its scope, or not at all**: the compiler's
 own spelling for the generated def is `Circuits@arrP`, and writing an
@@ -1451,7 +1478,7 @@ validation mirror). See `examples/settle.braid`.
 `firstTrue` `matchWith` `choose` `ifRoute` `elifRoute`.
 
 **Loops** *(all derived since 2026-09-12)*: `loop :
-Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` is the **Elgot dagger**, and it is
+Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` is the **Elgot dagger**, and it is
 a prelude def over `fix`:
 
 ```braid
@@ -1463,16 +1490,20 @@ def loop = (f ... -> [(self ... -> f ... >> ev >> (self ... >> ev | pass) >> mer
 done track falls out, and `merge` — the codiagonal ∇ — joins them. Note
 it needs **no `into`**: the row is closed and two-track, so the
 copairing `[f†, id]` is just `(f† | pass) >> merge`; `into` (§6) is for
-the open case. `Rec` is *inherited* from `fix` rather than declared,
-which is why `loop`'s body type now reads `=Rec>` where the prim said
-`⇒` — the body genuinely does run inside an unbounded knot. An
-*inferred* quote absorbs the label, so every existing use still types;
-a *written* pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` handed to `loop` is now refused, which
-is the honest reading. Cost measured: 100 000 iterations in 3.2 s
-against 1.9 s for the builtin, and no growth in memory.
+the open case. `Rec` is *inherited* from `fix` rather than declared —
+it sits on `loop`'s **own** arrow, because the knot is what recurses,
+and the body is asked for nothing (§3: composition joins). A written
+pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` therefore goes straight in. Cost measured:
+100 000 iterations in 3.2 s against 1.9 s for the builtin, and no
+growth in memory.
+
+*(Between 2026-09-12 morning and evening this paragraph said the
+opposite — that `loop`'s body reads `=Rec>` and a written pure `Fn` is
+refused. That was composition unifying grades rather than joining
+them, and it was a bug; see design-effects.md, "composition JOINS".)*
 
 `while` `until` (+ `whileFn`/`untilFn`) are three-line defs over it:
-`while : Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Rec> ρ0⟩ ρ0 =Rec> ρ2`.
+`while : Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2`.
 
 **The identity and the order** *(2026-09-12)*: `def id = _` — `_` is
 the identity prim (the positional spelling), `id` the word for it.
@@ -1870,11 +1901,22 @@ holds for them too: final atom of their stage (§9).
   spliced code against the live environment — priced by its railway.)
 - Exponents: two independent open regions in one segment are rejected;
   same-variable regions (`Intⁿ Intⁿ`) are fine.
-- Effects don't sub-effect: composing forces two arrows' manifests
-  EQUAL (the join you expect comes from absorption into an open tail),
-  so a pure quote unified into an io context types as io for that use.
-  Let-generalization at a `def` boundary restores per-use freshness;
-  inside one expression nothing does.
+- Effects **do** sub-effect, in exactly one direction, and the precise
+  statement is worth memorizing *(2026-09-12; this bullet used to say
+  "effects don't sub-effect", which composition made false and written
+  types make half-true)*:
+  - **composition joins** — a pure part in an io composite stays pure,
+    and nothing pushes the composite's labels back into it (§3);
+  - **a written pure VALUE flows into any expectation** — `∅` is the
+    bottom of the lattice, so a pure quotation fills an `=IO>` slot,
+    an `=IO>` witness, an `=Rec>` codata field;
+  - **a written pure EXPECTATION refuses labelled code** — that is the
+    sandbox, and it is the next three bullets;
+  - **where a written type meets another written type the rows are
+    EXACT** — inside a `Fn⟨…⟩` two written manifests are unified, not
+    ordered, because a `Fn` type is invariant in its arrow. `Fn⟨Int
+    =IO> Int⟩` and `Fn⟨Int ⇒ Int⟩` are different types, and neither
+    stands for the other.
 - The same goes for a functor's receipt, and it surprises people once:
   a *written* type with no labels refuses labelled code. An `evalAs`
   witness `Fn⟨Int ⇒ Int⟩`, or a theory slot declared `a ⇒ a`, will not
@@ -1893,9 +1935,9 @@ holds for them too: final atom of their stage (§9).
   data Sink = (Fn⟨Int ⇒ Int⟩)
   [[_ 100 >> less?] [2 _ >> *] ... >> while] >> Sink >> drop
 
-  error: Cannot unify effects: Rec vs pure (the unlabelled side's
-  manifest is written and fixed: write =Rec> on that arrow, or keep
-  this code label-free)
+  error: Cannot unify effects: Rec vs pure (composition joins grades,
+  and this arrow's manifest is written and fixed: write =Rec> on that
+  arrow, or keep this code label-free)
   ```
 
   It reaches three places in particular: a codata declaration's thunk
@@ -1905,6 +1947,16 @@ holds for them too: final atom of their stage (§9).
   arrow still accepts *non*-recursive code — an inferred row is open
   and absorbs the label — so the labelled spelling is the permissive
   one, and the bare spelling is the promise.
+
+  What it does **not** reach *(2026-09-12)*: the argument of a
+  higher-order word. `loop`, `while`, `until` and every derived word
+  built from `fix` recurse in their OWN arrow, not in the quotation
+  they run, so `Fn⟨Int ⇒ (Int | Int)⟩` is what `loop` asks for. While
+  composition unified grades instead of joining them, they asked for
+  `=Rec>` bodies and a written pure `Fn` could not reach them at all —
+  that was a bug, and it is fixed (`design-effects.md`, "composition
+  JOINS"). The same correction removed `=Rec>` from two of the eight
+  declarations §8 and §12 said it had cost.
 - **`reflect` is total on binder code** *(2026-09-12)*. It had three
   corners that morning and has none by evening: a `use F` scope over the
   `fix` idiom, a parameter inside a **residual** row, and a parameter
