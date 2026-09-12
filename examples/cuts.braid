@@ -9,7 +9,7 @@
 #   VERTICAL:   atom slices WITHIN a stage are sub-tensors — runnable.
 #   BOXING:     a Code slice becomes an Fn value without running
 #               (deferred through a closure; the dynamic check rides
-#               the railway at apply time).
+#               the railway at ev time).
 
 def getCode = reflect ; ((c -> c) | drop ; nil) ; merge
 def c = [1 2 >> + >> dup >> *] ; getCode          # 4 stages: [1 2] [+] [dup] [*]
@@ -54,4 +54,4 @@ def s2 = ([dup drop] ; getCode) ; uncons ; (nil | (s r -> s)) ; merge
 # is also the fallback: on a miss it is still sitting there to run.
 def box = (w cd -> [(w) (cd) ... ; evalAs])
 [0] (2 c ; take) ; box              # Fn⟨ρ ⇒ (ρ Int | Str ρ)⟩ — unopened
-apply ; (print | forget) ; merge    # 3
+ev ; (print | forget) ; merge    # 3

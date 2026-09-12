@@ -139,7 +139,7 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
     sum what a generated `foldName` is to a data type: it folds the
     whole `(·|·)` spine in one stage instead of unwinding by hand with
     N `merge`s. Branches are spliced bare (like the `>=>` lift), so no
-    quoting or `apply` — the handlers may have *different* domains as
+    quoting or `ev` — the handlers may have *different* domains as
     long as they agree on the result.
 
 **The delay law.** Bare code is conditional only *inside a row* (a row
@@ -171,7 +171,7 @@ odd? >> (dup >> * | 1 ... >> +) >> merge     -- if odd then square else incremen
 ```
 
 `true`/`false : • ⇒ (• | •)` remain as degenerate routers (decisions
-about nothing). Quoted routers dispatch with plain `apply`.
+about nothing). Quoted routers dispatch with plain `ev`.
 
 ### Verdicts, when you really want them
 
@@ -371,7 +371,7 @@ consumed but never built) the list monad is prelude-level user code:
 def single  = _ list() >> cons                    -- return
 def concat  = [append] list() ... >> fold          -- join
 def flatMap = map >> concat                        -- bind
-def filter  = (p -> [p ... >> apply >>
+def filter  = (p -> [p ... >> ev >>
                 (single | drop >> list()) >> merge]) ... >> flatMap
 ```
 
@@ -408,9 +408,9 @@ two-wire pair (multi-wire list literals, cf. `List(A B)`) — folded by
 
 ```text
 def matchWith = (x default clauses ->
-  clauses >> [x >> default ... >> apply]
-             [(rest p f -> x >> p ... >> apply
-                >> (f ... >> apply | drop >> rest) >> merge)]
+  clauses >> [x >> default ... >> ev]
+             [(rest p f -> x >> p ... >> ev
+                >> (f ... >> ev | drop >> rest) >> merge)]
           ... >> foldList)
 ```
 
@@ -464,7 +464,7 @@ Recorded so the git history reads sanely:
 
 * `branch` (thunk-based conditional) → subsumed by code rows
   (`choose = (c t e -> c >> (t | e) >> merge)`).
-* `case` (promote quoted test) → subsumed by routers + `apply`.
+* `case` (promote quoted test) → subsumed by routers + `ev`.
 * `caseN`/`mergeN` families → rejected by the counting theorem.
 * `guard` (test-and-shift step) → superseded by `clause`.
 * `clause`/`finish` (two-quote guard machine) → superseded by the

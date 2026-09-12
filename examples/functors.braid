@@ -4,28 +4,28 @@
 # functors is just ; — and a monad is three such values.
 
 def fmapList = (q -> [q ... ; map])
-def compFn   = (p q -> [p ... ; apply ; q ... ; apply])
+def compFn   = (p q -> [p ... ; ev ; q ... ; ev])
 
 # the action, applied: fmapList : Fn⟨a⇒b⟩ ⇒ Fn⟨List(a)⇒List(b)⟩
-([dup ; *] ; fmapList) (1 2 3 ; pack) ; apply ; print                # list(1, 4, 9)
+([dup ; *] ; fmapList) (1 2 3 ; pack) ; ev ; print                # list(1, 4, 9)
 
 # the functor law, extensionally: fmap (f ; g) = fmap f ; fmap g
-([dup ; *] [2 _ ; *] ; compFn ; fmapList) (1 2 3 ; pack) ; apply ; print                 # list(2, 8, 18)
-(([dup ; *] ; fmapList) ([2 _ ; *] ; fmapList) ; compFn) (1 2 3 ; pack) ; apply ; print  # list(2, 8, 18)
+([dup ; *] [2 _ ; *] ; compFn ; fmapList) (1 2 3 ; pack) ; ev ; print                 # list(2, 8, 18)
+(([dup ; *] ; fmapList) ([2 _ ; *] ; fmapList) ; compFn) (1 2 3 ; pack) ; ev ; print  # list(2, 8, 18)
 
 # functor composition is ; — lift twice, act two layers deep
-([dup ; *] ; fmapList ; fmapList) ((1 2 ; pack) (3 ; pack) ; pack) ; apply ; print   # list(list(1, 4), list(9))
+([dup ; *] ; fmapList ; fmapList) ((1 2 ; pack) (3 ; pack) ; pack) ; ev ; print   # list(list(1, 4), list(9))
 
 # A monad is (fmap, return, join) as three VALUES. List's return and
 # join were already in the prelude: single and concat. Kleisli
 # composition, generic over ANY such triple — dictionary-passing, and
 # the dictionary is data (pick a monad at runtime if you like):
-def kcomp = (fm jn f g -> (f (fm g ; apply) ; compFn) jn ; compFn)
+def kcomp = (fm jn f g -> (f (fm g ; ev) ; compFn) jn ; compFn)
 
 def fanout = [(x -> (x (10 x ; *) ; pack))]        # x ↦ [x, 10x]: a List-Kleisli arrow
 
-([fmapList] [concat] [(x -> (x (1 x ; +) ; pack))] fanout ; kcomp) 3 ; apply ; print   # list(3, 30, 4, 40)
+([fmapList] [concat] [(x -> (x (1 x ; +) ; pack))] fanout ; kcomp) 3 ; ev ; print   # list(3, 30, 4, 40)
 
 # monad law, extensionally: (return >=>_List g) = g
-([fmapList] [concat] [single] fanout ; kcomp) 3 ; apply ; print    # list(3, 30)
-fanout 3 ; apply ; print                                           # list(3, 30)
+([fmapList] [concat] [single] fanout ; kcomp) 3 ; ev ; print    # list(3, 30)
+fanout 3 ; ev ; print                                           # list(3, 30)

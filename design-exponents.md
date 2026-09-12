@@ -136,7 +136,7 @@ def sign = x ->
 with `firstTrue : (Bool Fn⟨• ⇒ r⟩)^n Fn⟨• ⇒ r⟩ ⇒ r` defined by
 `foldExp` — conditions pre-evaluated (product = probe all lanes, the
 `||` negotiation's resolution), actions selected as quotes, one
-`apply`. Fixed-arity remains writable today as `select`-chains; the
+`ev`. Fixed-arity remains writable today as `select`-chains; the
 exponent buys the single variadic word.
 
 ## Level-1 GLA programme (what this unlocks, no arithmetic)
@@ -146,7 +146,7 @@ Generators, all width-polymorphic in `n`:
 `dropN` (counit/discard), `zip`, `sumN`, scalar `scale : ℝ ℝ^n ⇒ ℝ^n`.
 
 - Matrices are `Fn⟨ℝ^n ⇒ ℝ^m⟩` values; composition is `>>`-composition
-  of quotes (`bake`-style), application is `apply`.
+  of quotes (`bake`-style), application is `ev`.
 - The interacting-bialgebra laws (copy/add commutation, Frobenius/Hopf
   fragments as applicable) are **checkable in laws.braid style** —
   operational rewrite licenses, per the laws-are-programs doctrine.

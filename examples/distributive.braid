@@ -1,0 +1,74 @@
+# The closed structure, stated as a theory: `dist2`/`undist2` and the
+# coproduct's own two laws, written as runnable laws over two models.
+#
+# Braid is cartesian CLOSED (`curry`/`ev`) and has coproducts, so it is
+# DISTRIBUTIVE for free: `P × –` is a left adjoint, left adjoints
+# preserve colimits, and `dist2`'s prelude body is that proof written
+# out — capture `P` into one handler per track, then `case2`. Nothing
+# below is an axiom; `:doc dist2` has the derivation.
+#
+# Stage 5a¾ made this load-bearing: abstraction elimination reifies a
+# binder parameter used inside a ROW by distributing the parameter block
+# over the row's tracks with exactly this word (MANUAL §6).
+#
+# HONEST STATUS. The runtime holds every law below DEFINITIONALLY — the
+# sample points are checks, not proofs, and they run at module start
+# before main. DECIDING them (`sameCode` entering rows, `rule`/`rewrite`,
+# the normalizer on the closed structure) is stage 5b; `sameCode` today
+# refuses a row outright ("outside the structural fragment").
+
+theory Distributive(a) =
+    # a map on the distributed wire, and one per track of the sum
+    p      : a ⇒ a
+    f      : a ⇒ a
+    g      : a ⇒ a
+    # two wires observed as one, so a law can end in a single `eq?`
+    join   : a a ⇒ a
+    sample : • ⇒ a
+    other  : • ⇒ a
+    # --- the coproduct's own two laws ---------------------------------
+    # β: injecting then casing picks the branch you injected into.
+    law beta = (sample >> in1 >> (f | g) >> merge) (sample >> f) >> eq? >> (forget >> true | forget >> false) >> merge
+    # η: casing into the injections is the identity.
+    law eta = (sample >> in1 >> (in1 | in2) >> merge >> merge) (sample) >> eq? >> (forget >> true | forget >> false) >> merge
+    # --- dist and undist are inverse ----------------------------------
+    law distUndist = (sample (other >> in1) >> dist2 >> undist2 >> _ merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law undistDist = (sample other >> in1 >> undist2 >> dist2 >> merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    # --- naturality ---------------------------------------------------
+    # in the SUM: mapping the tracks commutes with distributing.
+    law natSum = (sample (other >> in1) >> _ (f | g) >> dist2 >> merge >> join) (sample (other >> in1) >> dist2 >> (_ f | _ g) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    # in P: mapping the distributed wire commutes with distributing.
+    law natP = (sample (other >> in1) >> p _ >> dist2 >> merge >> join) (sample (other >> in1) >> dist2 >> (p _ | p _) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    # --- coherence with the codiagonal --------------------------------
+    # distributing and then merging is merging with P passing beneath.
+    law distMerge = (sample (other >> in1) >> dist2 >> merge >> join) (sample (other >> in1) >> _ merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+instance IntD : Distributive(Int) =
+    p      = _ 1 >> +
+    f      = _ 10 >> *
+    g      = _ 100 >> *
+    join   = +
+    sample = 3
+    other  = 4
+instance StrD : Distributive(Str) =
+    p      = _ "!" >> cat
+    f      = _ "-f" >> cat
+    g      = _ "-g" >> cat
+    join   = cat
+    sample = "x"
+    other  = "y"
+"-- seven laws, two models, all audited before main --" >> print
+
+# The words themselves, at sample points.
+7 (5 >> in1) >> dist2 >> (+ | -) >> merge >> print          # 12
+7 (5 >> in2) >> dist2 >> (+ | -) >> merge >> print          # 2
+7 5 >> in1 >> undist2 >> dist2 >> (+ | -) >> merge >> print  # 12
+7 5 >> in2 >> undist2 >> dist2 >> (+ | -) >> merge >> print  # 2
+
+# The nested family, following `caseN`: `dist3` distributes over
+# `(ρ0 | (ρ1 | ρ2))`, the shape `case3` eliminates.
+7 (5 >> in1) >> dist3 >> (+ | (- | *) >> merge) >> merge >> print   # 12
+7 (5 >> in2 >> in2) >> dist3 >> (+ | (- | *) >> merge) >> merge >> print  # 35
+
+# And the reason the stage needed them: a binder parameter used inside a
+# row now reifies, by distributing the parameter block over the row.
+[(n -> n >> zero >> (n >> drop >> 1 | n n >> *) >> merge)] >> reflect >> ((c -> c >> unparse >> print) | print) >> merge

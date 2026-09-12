@@ -112,7 +112,7 @@ The levels:
 
 - **Level 0 — wiring on code values.** Code is a value; `dup`, `drop`,
   `swap` act on it; `(f -> [f ...])` is cross-stage persistence
-  (`a ⇒ Fn⟨ρ ⇒ a ρ⟩`) and `apply` is its inverse. Ambient structure,
+  (`a ⇒ Fn⟨ρ ⇒ a ρ⟩`) and `ev` is its inverse. Ambient structure,
   not machinery.
 - **Level 1 — typed macros**, `Fn ⇒ Fn`: `compose : Fn⟨ρ0 ⇒ ρ1⟩
   Fn⟨ρ1 ⇒ ρ2⟩ ⇒ Fn⟨ρ0 ⇒ ρ2⟩`, `lift` (strength — in the prelude all
@@ -302,8 +302,8 @@ free at every use, one checked per program:
    with three consumers: `subsumes`. So a rule is a declaration over
    names, checked once.
 6. **`lift2`** — the runtime lift of any `Code ⇒ Code` functor: `def
-   lift2 = (m f -> [f (m (f >> getCode) >> apply >> (c -> c)) ... >>
-   evalAs >> (... | drop ... >> f ... >> apply) >> merge])`, typed
+   lift2 = (m f -> [f (m (f >> getCode) >> ev >> (c -> c)) ... >>
+   evalAs >> (... | drop ... >> f ... >> ev) >> merge])`, typed
    `Fn⟨Code ⇒ Code⟩ Fn⟨Γ ⇒ Δ⟩ ⇒ Fn⟨Γ ⇒ Δ⟩`. Output arrow = input
    arrow by construction; the untyped middle is discharged at the
    boundary by the fibre the program started in, per program, and a
@@ -994,7 +994,7 @@ why.*
        seed   : • ⇒ e
        unwrap : e ⇒ a
 
-   def collected = use Collector ; (f -> [f (seed) ... ; apply ; unwrap ...])
+   def collected = use Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
    ```
 
    which comes out `Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩` under
@@ -1043,9 +1043,9 @@ and at run time alike). Recursion is a word with a type:
 fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩
 ```
 
-written `[(self args -> …)] ... >> fix ... >> apply` — quote the body,
-tie the knot, apply it. The knot arrives **deepest**, so the recursive
-call is an ordinary quoted call (`… >> self ... >> apply`); tying it is
+written `[(self args -> …)] ... >> fix ... >> ev` — quote the body,
+tie the knot, `ev` it. The knot arrives **deepest**, so the recursive
+call is an ordinary quoted call (`… >> self ... >> ev`); tying it is
 pure, and the `Rec` label sits on the arrow `fix` hands out and on the
 `self` it hands in, never on `fix`'s own arrow. At run time the knot is
 tied by the module's own lazy early-binding cycle, under a name the
@@ -1075,8 +1075,10 @@ the 09-08 amendment holds with no exception, and `principal : Free(G) ⇢
 Sch` is total on typeable code — a def is literally a morphism of the
 free category over its vocabulary.
 
-For *functors* it is not yet true, and the obstruction is stage 3⅞'s
-parked gate rather than anything recursion added. `fix` hands the knot
+*(Superseded 2026-09-12 — see "the closed structure" below: the gate is
+lifted and this demo now runs.)* For *functors* it was not yet true, and
+the obstruction was stage 3⅞'s parked gate rather than anything
+recursion added. `fix` hands the knot
 in as a **binder parameter**, so a self-call inside a row component or
 a quotation is a captured parameter — a true closure — and `reflect`
 refuses those. Reproduced:
@@ -1084,9 +1086,9 @@ refuses those. Reproduced:
 ```text
 def tr =
     use Traced
-    [(self n -> … self ... >> apply …)] ...
+    [(self n -> … self ... >> ev …)] ...
     fix ...
-    apply
+    ev
 
 error: in def tr: `use Traced`: Unknown primitive: self
 ```
@@ -1105,7 +1107,7 @@ one atom, the def having been elaborated outside the scope — and the
 labels union as they should. Verified:
 
 ```text
-def fac2 = [(self n -> …)] ... >> fix ... >> apply
+def fac2 = [(self n -> …)] ... >> fix ... >> ev
 def tr = use Traced ; fac2 ; _ 1 ; +
 tr : Int =IO Rec Traced> Int
 ```
@@ -1138,8 +1140,8 @@ What is **true today**: the fixpoint law is an ordinary Braid program
 and it runs, at sample points —
 
 ```text
-def facBody = (self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)
-def fac    = [facBody] ... >> fix ... >> apply
+def facBody = (self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)
+def fac    = [facBody] ... >> fix ... >> ev
 def unroll = [fac] ... >> facBody
 5 >> fac  →  120        5 >> unroll  →  120
 6 >> fac  →  720        6 >> unroll  →  720
@@ -1183,7 +1185,7 @@ type; it now inhabits every `=Rec>` type and — modulo the audit two
 paragraphs down — no bare one. Verified:
 
 ```text
-[(self ... -> self ... >> apply)] ... >> fix ... >> apply : ρ0 =Rec> ρ1
+[(self ... -> self ... >> ev)] ... >> fix ... >> ev : ρ0 =Rec> ρ1
 (x -> 1000 >> (n -> n) >> drop >> x)                      : a0 ⇒ a0
 ```
 
@@ -1247,14 +1249,13 @@ but the vocabulary they act on, and it changed by *subtraction*: the
 one atom with no scheme is gone. `Rec` likewise adds no row; it is a
 label, and the rows checked by subsumption read label sets already.
 
-The `fix` **idiom** is the exception, and it is (1)'s gate rather than
+The `fix` **idiom** was the exception, and it was (1)'s gate rather than
 a missing row: while the knot is a live binder parameter the spine is
-not closed over the environment, so there is nothing for a functor to
-act on yet.
-
-That gate is a limit on the base, not on any row, so the MANUAL states
-it **beside** the table (§12) and again as a sharp edge (§14) rather
-than as a seventh row.
+not closed over the environment, so there was nothing for a functor to
+act on yet. *(Lifted 2026-09-12: elimination reifies the capture, and
+the idiom elaborates. The table still gains no row — what changed is
+again the vocabulary, this time by ADDITION: the closed structure's two
+maps.)*
 
 ### The honest cost
 
@@ -1290,12 +1291,137 @@ substituted into one.
 That section's `a ⇒ a` counterpoint cites `def dvg = recurse` as typing
 `ρ0 ⇒ ρ1`. Both halves are now false: `recurse` does not exist, and
 divergence is no longer bare. The current reading is
-`[(self ... -> self ... >> apply)] ... >> fix ... >> apply : ρ0 =Rec>
+`[(self ... -> self ... >> ev)] ... >> fix ... >> ev : ρ0 =Rec>
 ρ1`, and the conclusion drawn there — that `a ⇒ a` is inhabited by
 divergence, so the receipt is not the mark — **no longer holds for
 unlabelled words**, modulo the prim audit above. What survives of it is
 the cost half, unchanged and still unaddressed: the identity-at-a-cost
 still types `a0 ⇒ a0`.
+
+## Amendment (2026-09-12): the closed structure
+
+*Beside the recursion amendment, and the thing that finishes it. Stage
+5a¾. Everything below was run in Docker on the shipping build.*
+
+**What changed.** Abstraction elimination used to take the **cartesian**
+generators as given and emit them: a parameter block parked deepest, a
+use of a parameter a `dup` on the block swapped up into place, the block
+dropped once at the end. That is `P ⋉ –`, table row 2, and it covered
+everything except the one case where a parameter is *not* consumed where
+it stands — a quotation or a row branch that mentions it. Those were
+refused (*"parameter captured in a quotation (a closure) — not
+reflectable yet"*), and since `fix` hands the knot in as a binder
+parameter, that was **every recursive def**.
+
+Elimination now uses the cartesian **closed** — and hence distributive —
+structure. Two maps, one taken as given and one derived:
+
+- **`ev`** is the exponential's **counit**. It is the prim formerly
+  spelled `apply`, renamed in this stage so the adjunction's two maps
+  carry matching names (one spelling, no alias: everything that named it
+  is in this repo and moved in the same commit). Not derivable —
+  nothing else consumes an `Fn`, and naming a value never runs it:
+  `(x f -> [x >> f])` fails with *Cannot unify stacks: a0 vs •*.
+- **`curry : Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a ⇒ Fn⟨ρ0 ⇒ ρ1⟩⟩`** is λ, and it is a
+  **prelude def**, not a prim:
+  `def curry = (f -> [(x -> [x ... >> f ... >> ev])])`. Its own body is
+  the one binder-into-quote that elimination takes as a **generator**
+  rather than eliminating. Every other capture is rewritten into it.
+
+Everything else is derived, in the prelude, with the derivation visible:
+
+- `capture = (x f -> (f >> curry) x >> ev) : a Fn⟨a ρ0 ⇒ ρ1⟩ ⇒
+  Fn⟨ρ0 ⇒ ρ1⟩` — partial application.
+- `dist2 : a (ρ0 | ρ1) ⇒ (a ρ0 | a ρ1 | σ0)`, whose body captures the
+  wire into one handler per track and then `case2`s. **Distributivity is
+  a theorem, not an axiom**: in a cartesian closed category `P × –` is a
+  left adjoint (that *is* `curry`), left adjoints preserve coproducts,
+  and that body is the proof written out. `undist2` needs no closed
+  structure at all — it is the canonical map any category with
+  coproducts has, `(s -> s >> (_ in1 | _ in2) >> merge)`.
+
+**The algorithm.** Under a block `P` of `k` wires: a quotation mentioning
+`m` of them copies the block, compiles the body against a copy laid
+deepest *inside* the quote (yielding `Fn⟨P ρ0 ⇒ ρ1⟩`), and then binds
+the copies off the stack with `capture`, once each. The order is forced
+and was checked against the body: each `capture` binds the wire directly
+below the `Fn`, which must be the `Fn`'s own **deepest** input — so the
+block inside the quote is laid in the **reverse** of the block on the
+stack, the shallowest stack copy binding first. A row mentioning `m`
+parameters copies the block, `dist2`s it into every track once per
+parameter (shallowest first, so the block lands in its own order at the
+bottom of each track), compiles each branch against it, and lets each
+branch drop its own copy — which is what `compileAbs` already does at
+the end of any body. Both keep the atom's **original type**, so nothing
+downstream changes. Nesting is the same recursion; `fix` needs nothing
+special.
+
+```text
+(x -> [x ... >> +])
+  dup pass >> _ (_ [dup pass >> _ + >> drop pass] >> capture) >> drop pass
+
+(n -> n >> zero >> (n >> drop >> 1 | n n >> *) >> merge)
+  dup pass >> _ zero >> dup pass
+    >> _ (dist2 >> (dup pass >> _ drop >> _ 1 >> drop pass
+                   | dup pass >> dup pass >> _ swap pass >> _ * >> drop pass))
+    >> _ merge >> drop pass
+```
+
+**Deviation from the scoped plan, and why.** The plan said to keep the
+block through each branch, `undistN` it back out, and drop it once.
+Dropping inside each branch is one word shorter *and better typed*:
+`undist2`'s output carries a residual row variable (`in2` is open in its
+tracks and nothing closes it), so undisting would widen the row's type
+where dropping per branch leaves it exactly as written. `undistN` ships
+anyway — it is half of the `Distributive` theory, and the laws need it.
+
+**What is now true of initiality, stated exactly.** `reflect` is total
+on binder code but for two corners, and both are honest:
+
+- A **residual** row `(p | q | ...)` that mentions a parameter is still
+  refused: the passing tracks would need the block too, and an open
+  row's width is not a type Braid can write.
+- A **flat row of three or more tracks** that mentions a parameter is
+  refused: distributing over a coproduct is derived from `case2`/`merge`,
+  and `merge : (ρ0 | ρ0) ⇒ ρ0` is **binary**. There is no N-ary
+  codiagonal to derive `distN` at a flat width, which is why `case3`/
+  `case4` nest their sums and why `dist3`/`dist4` follow them —
+  `dist3 = dist2 >> (pass | dist2)`. Polymorphism does not reach a
+  closed row's width, and neither does this. Every row in the prelude
+  and in `examples/` is binary, so the corner is a corner.
+
+`sameCode` **decides nothing new**. It normalizes the term it is handed
+and never runs abstraction elimination, so two spellings of a capturing
+binder are still *"outside the structural fragment: a binder"* — and "I
+cannot tell" is not "they differ". `dist ; undist = id` and
+`capture ; ev = substitution` are stated and *run* at sample points in
+`examples/distributive.braid`; **deciding** them is 5b.
+
+**Hygiene, and its one new edge.** Code still carries no captured
+values: a captured parameter reifies as a wire at the push, not as a
+name, so invariant four survives with no closure exception. But
+elimination now writes two *prelude* names into code that never
+mentioned them — `capture` and `dist2` — and a module that shadowed
+either would capture reflected code. So they are the two prelude names a
+module may not redefine, refused by name with the reason.
+
+**The functor receipt now says what ran.** `checkFunctorWord` tests
+`eIO` alone, so a `Rec`-labelled functor word runs at elaboration
+(fuel-bounded) and its `Rec` used to escape: a `fix`-built functor's
+expansion read `Int =RecId> Int`, saying nothing about the unbounded
+walk that produced it. The receipt now carries the functor word's **own
+labels** beside the functor's name — `Int =Rec RecId> Int` — which is
+the honest half of the choice the recursion amendment left open. `IO`
+cannot reach it: `checkFunctorWord` still refuses that, because the io
+grade *is* the phase distinction.
+
+**What falls out.** `use F` over the `fix` idiom works — `use Traced`
+over a `fix`ed factorial traces every stage and prints `24`, the demo
+that was refused with *Unknown primitive: self* when 5a½ shipped. The
+level-1 library reflects (`lift`, `box`, `equalsTo`, `both`, `whileFn`,
+`case2`). "This functor transports recursion" is now *statable* —
+`F(fix b) = fix (F b)` — but it is not stated: that is a law in
+`theory Functor`, and it is 5b.
 
 ## Honest gaps
 

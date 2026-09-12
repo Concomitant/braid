@@ -148,11 +148,11 @@ passTests =
   , ("1 2 3\n(1 ... >> +) ...\n+ ...", "• ⇒ Int Int")   -- same, via newlines
   , ("...",                      "ρ0 ⇒ ρ0")       -- bare remainder stage
 
-    -- quotations and apply (quotes are terminal-source constants)
+    -- quotations and ev (quotes are terminal-source constants)
   , ("[dup >> *]",               "• ⇒ Fn⟨Int ⇒ Int⟩")
-  , ("[dup >> *] 7 >> apply",    "• ⇒ Int")
-  , ("[dup >> *] 7 >> apply >> print", "• =IO> •")   -- spec example (49)
-  , ("apply",                    "Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
+  , ("[dup >> *] 7 >> ev",    "• ⇒ Int")
+  , ("[dup >> *] 7 >> ev >> print", "• =IO> •")   -- spec example (49)
+  , ("ev",                    "Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
 
     -- grouping: (p) is the open program p, never reified
   , ("(dup >> *)",       "Int ⇒ Int")
@@ -270,7 +270,7 @@ failTests =
   , ("7 >> [1]",      "Cannot unify stacks")   -- write `[1] ...` instead
     -- Γ inside Fn⟨…⟩: binding Γ := Fn⟨Γ⇒Δ⟩ ρ must fail the occurs
     -- check now that it traverses element types.
-  , ("dup >> apply",  "Occurs check")
+  , ("dup >> ev",  "Occurs check")
   , ("[dup",          "Unclosed quotation")
   , ("]",             "Expected a tensor stage")
   , ("(1",            "Unclosed group")
@@ -317,6 +317,27 @@ failTests =
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
+    -- THE CLOSED STRUCTURE (stage 5a¾).  `ev` is the exponential's
+    -- counit — the prim formerly spelled `apply` — and `curry` is the
+    -- other half, a prelude def whose own body is the one
+    -- binder-into-quote abstraction elimination takes as a generator.
+  , ("ev",       "Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1")
+  , ("curry",    "Fn⟨a0 ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ⇒ Fn⟨ρ0 ⇒ ρ1⟩⟩")
+  , ("capture",  "a0 Fn⟨a0 ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
+    -- distributivity is a THEOREM here (`P × –` is a left adjoint), and
+    -- `dist2`'s body is the derivation; `undist2` needs no closure
+  , ("dist2",    "a0 (ρ0 | ρ1) ⇒ (a0 ρ0 | a0 ρ1 | σ0)")
+  , ("undist2",  "(a0 ρ0 | a0 ρ1) ⇒ a0 (ρ0 | ρ1 | σ0)")
+    -- distN follows caseN's arity family, and like caseN the sums nest
+  , ("dist3",    "a0 (ρ0 | (ρ1 | ρ2)) ⇒ (a0 ρ0 | (a0 ρ1 | a0 ρ2 | σ0))")
+  , ("undist3",  "(a0 ρ0 | (a0 ρ1 | a0 ρ2)) ⇒ a0 (ρ0 | (ρ1 | ρ2 | σ0) | σ1)")
+    -- THE FUNCTOR RECEIPT SAYS WHAT RAN (2026-09-12).  `checkFunctorWord`
+    -- tests `eIO` alone, so a `Rec`-labelled functor word runs at
+    -- elaboration (fuel-bounded); before this its `Rec` escaped and the
+    -- expansion read `Int =RecId> Int`.  The receipt now carries the
+    -- word's own labels beside the functor's name.
+  , ("def idRec = [(self c -> c)] ... >> fix ... >> ev\nfunctor RecId = idRec\ndef twice =\n    use RecId\n    dup >> +\ntwice",
+     "Int =Rec RecId> Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
     -- routers, now derived in the prelude from eq?/lt?/mod via the
@@ -444,10 +465,10 @@ moduleTypeTests =
     -- an existential its callers must stay parametric in
   , ("box",       "Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩")
     -- pushing an action is PURE; the effect lives inside the Fn, and
-    -- `apply` is where it transfers back out
+    -- `ev` is where it transfers back out
   , ("[print]",   "• ⇒ Fn⟨a0 =IO> •⟩")
-  , ("[print] 5 >> apply", "• =IO> •")
-  , ("[dup >> *] 5 >> apply", "• ⇒ Int")
+  , ("[print] 5 >> ev", "• =IO> •")
+  , ("[dup >> *] 5 >> ev", "• ⇒ Int")
     -- reflect READS a program without running it: pure, any grade
   , ("reflect",   "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)")
     -- STAGE 5a½: recursion is a word with a type.  `fix` is the
@@ -468,15 +489,15 @@ moduleTypeTests =
   , ("reverse", "List(a0) ⇒ List(a0)")
     -- absorption: a recursive word beside a pure one is Rec, not an
     -- error — the union is what composition computes
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\ndef twice = fac >> dup >> +\ntwice", "Int =Rec> Int")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef twice = fac >> dup >> +\ntwice", "Int =Rec> Int")
     -- and the union with IO sorts: labels are a SET, displayed in order
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\ndef shout = fac >> toStr >> print\nshout", "Int =IO Rec> •")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef shout = fac >> toStr >> print\nshout", "Int =IO Rec> •")
     -- a WRITTEN `=Rec>` takes recursive code AND pure code (the pure
     -- quotation's row is open, so it absorbs the label)
-  , ("data Step = (Fn⟨Int =Rec> Int⟩)\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\n[fac] >> Step", "• ⇒ Step")
+  , ("data Step = (Fn⟨Int =Rec> Int⟩)\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\n[fac] >> Step", "• ⇒ Step")
   , ("data Step = (Fn⟨Int =Rec> Int⟩)\n[dup >> *] >> Step", "• ⇒ Step")
     -- a def built with fix keeps the arity its binder gives it
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\nfac", "Int =Rec> Int")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\nfac", "Int =Rec> Int")
     -- the generated STRUCTURAL RECURSOR is a builtin now, and its
     -- scheme is derived from the declaration rather than inferred from
     -- generated source.  Four shapes pin the derivation: a recursive
@@ -527,7 +548,7 @@ moduleTypeTests =
     -- one def used at two different types = let-polymorphism
   , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
     -- recursive defs (monomorphic self-reference)
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\nfib", "Int =Rec> Int")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)) >> merge)] ... >> fix ... >> ev\nfib", "Int =Rec> Int")
     -- a def body may leave a bracket open: the lines that close it
     -- belong to the body, so a blank line does not end the block and a
     -- `def`-looking line inside the bracket is code, not a declaration
@@ -621,10 +642,10 @@ moduleTypeTests =
     -- arity visible (`k(_, _)`), applied in the slots, and substituted
     -- away at the instance — so what comes out is an ordinary type and
     -- inference never meets a constructor variable.
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; apply ; (y -> g ; unK ; _ y ; apply))] ; K)\ndef t = use P ; thenP\nt",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = use P ; thenP\nt",
      "K(a0, a1) K(a1, a2) ⇒ K(a0, a2)")
     -- the substitution reaches inside an Fn type in a slot too
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; apply ; (y -> g ; unK ; _ y ; apply))] ; K)\ndef ar = use P ; arrP\nar",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = use P ; arrP\nar",
      "Fn⟨a0 ⇒ a1⟩ ⇒ K(a0, a1)")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ ⇒ Str")
@@ -730,7 +751,7 @@ handlerMod :: String
 handlerMod =
   "resource Log = Str\n\
   \def note = unLog _ ; cat ; Log\n\
-  \def collectLog = (f -> [f (\"\" ; Log) ... ; apply ; unLog ...])\n"
+  \def collectLog = (f -> [f (\"\" ; Log) ... ; ev ; unLog ...])\n"
 
 -- the GENERIC handler: a template is over a THEORY, never over a
 -- resource name, so the two words a handler needs become slots
@@ -747,7 +768,7 @@ collectorMod =
   \instance Counts : Collector(Counter, Int) =\n\
   \    seed   = 0 ; Counter\n\
   \    unwrap = unCounter\n\
-  \def collected = use Collector ; (f -> [f (seed) ... ; apply ; unwrap ...])\n"
+  \def collected = use Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])\n"
 
 -- a trivial functor: the identity on Code.  Enough to ask what `use`
 -- leaves behind, without a rewrite getting in the way.
@@ -793,9 +814,9 @@ evalTests =
     -- lift2: a Code ⇒ Code functor lifted to Fn ⇒ Fn at runtime, the
     -- program its own witness — metered where the result types, and
     -- the original where it does not
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [use Fuel >> dup >> *] >> lift2) (10 >> Fuel) 5 >> apply >> _ print >> unFuel >> print",
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [use Fuel >> dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
      ["25", "7"], "")
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [dup >> *] >> lift2) 5 >> apply >> print",
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [dup >> *] >> lift2) 5 >> ev >> print",
      ["25"], "")
     -- DECIDED laws (§12.9): `sameCode` normalizes both programs in the
     -- free cartesian category over their words and compares.  `same`
@@ -875,7 +896,7 @@ evalTests =
   , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance W : Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w = use W ; box\n5 >> w >> print",
      ["5"], "")
     -- STAGE 5a: a theory over a type CONSTRUCTOR, composed and run
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; apply ; (y -> g ; unK ; _ y ; apply))] ; K)\ndef run2 = use P ; [_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; unK ; _ 5 ; apply\nrun2 >> print",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 = use P ; [_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; unK ; _ 5 ; ev\nrun2 >> print",
      ["12"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
@@ -904,14 +925,14 @@ evalTests =
                                            ["60", "60"], "")
   , ("7\n-> x\ndrop\nx x >> *",            [],     "49")   -- name outlives wire
 
-    -- quotations and apply
-  , ("[dup >> *] 7 >> apply >> print",     ["49"], "")   -- from the spec
-  , ("[1 2 >> +] >> apply >> print",       ["3"],  "")
+    -- quotations and ev
+  , ("[dup >> *] 7 >> ev >> print",     ["49"], "")   -- from the spec
+  , ("[1 2 >> +] >> ev >> print",       ["3"],  "")
   , ("[pass]",                             [],     "[fn]")
-  , ("def sq = [dup >> *]\nsq 5 >> apply", [],     "25")
+  , ("def sq = [dup >> *]\nsq 5 >> ev", [],     "25")
     -- tails-only closing: a non-final def keeps its element-internal
     -- polymorphism (q's quoted pass applies to whatever follows)
-  , ("def q = [pass]\nq 1 >> apply",        [],     "1")
+  , ("def q = [pass]\nq 1 >> ev",        [],     "1")
 
   , ("5 >> negative?",                     [],     "in2(5)")
 
@@ -926,7 +947,7 @@ evalTests =
   , ("1 2 >> (x y -> x) >> print",         ["1"],  "")   -- unused y deleted
   , ("def sq = (x -> x x >> *)\n5 >> sq >> print", ["25"], "")
     -- closure: the quotation captures x at reification
-  , ("7 >> (x -> [x 1 >> +]) >> apply >> print",   ["8"], "")
+  , ("7 >> (x -> [x 1 >> +]) >> ev >> print",   ["8"], "")
 
     -- sums: injections, code rows, merge
   , ("5 >> in1 >> (dup >> * | ...) >> merge >> print",       ["25"], "")
@@ -939,9 +960,9 @@ evalTests =
                                            [],     "in1(4)")
   , ("def classify = even? >> (here | here >> there) >> merge\n5 >> classify",
                                            [],     "in2(5)")
-    -- routers in flight: quoted routers dispatch via plain apply
-  , ("5 >> [odd?] ... >> apply",           [],     "in1(5)")
-  , ("4 >> [odd?] ... >> apply",           [],     "in2(4)")
+    -- routers in flight: quoted routers dispatch via plain ev
+  , ("5 >> [odd?] ... >> ev",           [],     "in1(5)")
+  , ("4 >> [odd?] ... >> ev",           [],     "in2(4)")
     -- if-then-else is route >> row >> merge
   , ("5 >> odd? >> (id | drop >> 0) >> merge >> print", ["5"], "")
   , ("4 >> odd? >> (id | drop >> 0) >> merge >> print", ["0"], "")
@@ -953,12 +974,12 @@ evalTests =
   , ("7 >> (2 _ >> *) >> print",           ["14"], "")
     -- multi-line def bodies + `fix`: the knot is a word, and an OPEN
     -- binder (`self ... ->`) keeps the body point-free
-  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 =\n  [ self ... ->\n    lt100?\n    double >> self ... >> apply | _\n    merge ] ...\n  fix ...\n  apply\n7 >> until100 >> print", ["112"], "")
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib =\n  [ self ... ->\n    lt2?\n    _ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)\n    merge ] ...\n  fix ...\n  apply\n10 >> fib >> print", ["55"], "")
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 =\n  [ self ... ->\n    lt100?\n    double >> self ... >> ev | _\n    merge ] ...\n  fix ...\n  ev\n7 >> until100 >> print", ["112"], "")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib =\n  [ self ... ->\n    lt2?\n    _ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)\n    merge ] ...\n  fix ...\n  ev\n10 >> fib >> print", ["55"], "")
     -- while, DERIVED in-language: whileFn assembles the loop body
     -- from closures; while = whileFn ... >> loop fuses in the knot
-  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double] ... >> while >> print", ["112"], "")
-  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double >> double] ... >> while >> print", ["112"], "")
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double] ... >> while >> print", ["112"], "")
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\n7 >> [lt100?] [double >> double] ... >> while >> print", ["112"], "")
     -- comments: # to end of line, ## docs are inert at runtime
   , ("# header comment\n5 >> print # trailing", ["5"], "")
   , ("## doc for sq2\ndef sq2 = dup >> *\n3 >> sq2 >> print", ["9"], "")
@@ -967,11 +988,11 @@ evalTests =
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> _ drop >> print", ["ada"], "")
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> drop ... >> print", ["36"], "")
     -- Peano round-trip: folds by ordinary recursion through unNat
-  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> apply >> in2 >> Nat) >> merge)] ... >> fix ... >> apply\ndef toInt = [(self ... -> unNat >> (0 | self ... >> apply >> 1 ... >> +) >> merge)] ... >> fix ... >> apply\n3 >> fromInt >> toInt >> print", ["3"], "")
+  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> ev >> in2 >> Nat) >> merge)] ... >> fix ... >> ev\ndef toInt = [(self ... -> unNat >> (0 | self ... >> ev >> 1 ... >> +) >> merge)] ... >> fix ... >> ev\n3 >> fromInt >> toInt >> print", ["3"], "")
     -- trees: build with rolled injections, fold with recursion
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\ndef total = [(self ... -> unTree >> (_ | _ (self ... >> apply) >> swap >> _ (self ... >> apply) >> +) >> merge)] ... >> fix ... >> apply\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\ndef total = [(self ... -> unTree >> (_ | _ (self ... >> ev) >> swap >> _ (self ... >> ev) >> +) >> merge)] ... >> fix ... >> ev\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
     -- same folds, by points: [case1] [case2] ... >> foldName
-  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> apply >> in2 >> Nat) >> merge)] ... >> fix ... >> apply\n3 >> fromInt >> [0] [1 ... >> +] ... >> foldNat >> print", ["3"], "")
+  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> ev >> in2 >> Nat) >> merge)] ... >> fix ... >> ev\n3 >> fromInt >> [0] [1 ... >> +] ... >> foldNat >> print", ["3"], "")
   , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [_] [+] ... >> foldTree >> print", ["7"], "")
   , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [drop >> 1] [+] ... >> foldTree >> print", ["3"], "")
     -- prelude defs available with no local definition
@@ -1053,25 +1074,27 @@ evalTests =
     -- no >>, aligned-pipe track columns
   , ("def label =\n odd?\n drop | pass\n \"odd\" | pass\n pass | drop\n pass | \"even\"\n merge\n5 >> label >> print\n4 >> label >> print", ["odd", "even"], "")
     -- factorial / fibonacci / exponentiation, recursive and iterative
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\n5 >> fac >> print", ["120"], "")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\n5 >> fac >> print", ["120"], "")
     -- fix over a TWO-WIRE function: Σ and Θ are stacks, not wires, so
     -- the knotted function may take and return any width
-  , ("def sums = [(self n -> n >> zero? >> ((z -> 0 0) | (m -> (m 1 >> -) >> self ... >> apply >> (a b -> (a m >> +) (b 1 >> +)))) >> merge)] ... >> fix ... >> apply\n4 >> sums >> pack >> print", ["list(10, 4)"], "")
+  , ("def sums = [(self n -> n >> zero? >> ((z -> 0 0) | (m -> (m 1 >> -) >> self ... >> ev >> (a b -> (a m >> +) (b 1 >> +)))) >> merge)] ... >> fix ... >> ev\n4 >> sums >> pack >> print", ["list(10, 4)"], "")
     -- a fix-using program REIFIES: `fix` is an ordinary atom with an
     -- ordinary scheme, so reflect returns real Code where a `.recurse`
     -- atom used to have no type at all
-  , ("[[(self n -> n 1 >> - >> self ... >> apply)] ... >> fix ... >> apply] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
-     ["[_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ apply >> drop drop pass] pass >> fix pass >> apply"], "")
-    -- HONEST LIMIT (stage 3⅞'s parked gate, unchanged by 5a½): the knot
-    -- arrives as a binder PARAMETER, so a self-call inside a row
-    -- component is a closure, and closures do not reflect yet.  A
-    -- functor over such a body therefore still cannot elaborate — it
-    -- could not before either (a `.recurse` atom had no scheme); the
-    -- reason moved, the limit did not.
-  , ("[(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] >> reflect >> ((c -> \"reflected\" >> print) | print) >> merge",
-     ["Unknown primitive: self"], "")
-  , ("def fib = [(self n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> self ... >> apply) >> _ (x 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\n10 >> fib >> print", ["55"], "")
-  , ("def pow = [(self b e -> e >> zero? >> ((z -> 1) | (m -> b (b (m 1 >> -) >> self ... >> apply) >> *)) >> merge)] ... >> fix ... >> apply\n2 8 >> pow >> print", ["256"], "")
+  , ("[[(self n -> n 1 >> - >> self ... >> ev)] ... >> fix ... >> ev] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
+     ["[_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ ev >> drop drop pass] pass >> fix pass >> ev"], "")
+    -- LIMIT LIFTED (stage 5a¾).  The knot arrives as a binder
+    -- PARAMETER and the self-call sits inside a row, so this was a
+    -- closure and `reflect` refused it ("Unknown primitive: self").
+    -- Abstraction elimination now distributes the parameter block over
+    -- the row with `dist2` and the body reifies.
+  , ("[(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] >> reflect >> ((c -> \"reflected\" >> print) | print) >> merge",
+     ["reflected"], "")
+    -- and the reflected code is ordinary Code: it re-splices and runs
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[[(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev] ([[(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev] >> getCode) (5) >> evalAs >> (print | forget >> \"miss\" >> print) >> merge",
+     ["120"], "")
+  , ("def fib = [(self n -> n 2 >> lt? >> ((x y -> x) | (x y -> (x 1 >> - >> self ... >> ev) >> _ (x 2 >> - >> self ... >> ev) >> +)) >> merge)] ... >> fix ... >> ev\n10 >> fib >> print", ["55"], "")
+  , ("def pow = [(self b e -> e >> zero? >> ((z -> 1) | (m -> b (b (m 1 >> -) >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\n2 8 >> pow >> print", ["256"], "")
   , ("def fibL = n -> 0 1 n >> [(a b k -> k >> zero? >> ((z -> a >> done) | (m -> b (a b >> +) (m 1 >> -) >> again)) >> merge)] ... >> loop\n20 >> fibL >> print", ["6765"], "")
     -- postfix binder: `x y ->` names the top wires, rest of scope is the
     -- body (same OpenAbs as (x y -> …), now usable bare / as a stage)
@@ -1152,8 +1175,54 @@ evalTests =
   , ("[dup >> * >> 1 ... >> +] >> reflect >> ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget", ["in1(36)"], "")
   , ("[(x y -> x (2 y >> *) >> +)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["in1(11)"], "")
   , ("[(x y -> y)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["in1(4)"], "")
-    -- the closure gate: (x -> [x]) is a true closure, missed with a message
-  , ("[(x -> [x])] >> reflect >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
+    -- THE CLOSURE GATE IS LIFTED (stage 5a¾).  `(x -> [x])` is a true
+    -- closure; elimination now compiles the quote's body against a copy
+    -- of the parameter block laid deepest INSIDE the quote, then binds
+    -- the copy off the stack with `capture` — the exponential's two
+    -- maps doing what dup/swap/drop cannot.
+  , ("[(x -> [x])] >> reflect >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["0"], "")
+  , ("[(x -> [x])] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
+     ["dup pass >> _ (_ [dup pass >> drop pass] >> capture) >> drop pass"], "")
+    -- one capture per parameter, shallowest-on-the-stack bound first
+  , ("[(x -> [x ... >> +])] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
+     ["dup pass >> _ (_ [dup pass >> _ + >> drop pass] >> capture) >> drop pass"], "")
+  , ("[(p q -> [p ... >> ev >> (q ... >> ev | miss) >> merge])] >> reflect >> ((c -> \"two\" >> print) | print) >> forget", ["two"], "")
+    -- a capturing ROW: the block is distributed into every track with
+    -- `dist2`, each branch drops its own copy, and the row keeps its
+    -- original (closed) type
+  , ("[(n -> n >> zero >> (n >> drop >> 1 | n n >> *) >> merge)] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
+     ["dup pass >> _ zero >> dup pass >> _ (dist2 >> (dup pass >> _ drop >> _ 1 >> drop pass | dup pass >> dup pass >> _ swap pass >> _ * >> drop pass)) >> _ merge >> drop pass"], "")
+    -- the level-1 library reflects: `lift`, `box`, `whileFn`, `equalsTo`
+  , ("[(f -> [_ (f ... >> ev)])] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget",
+     ["dup pass >> _ (_ [dup pass >> _ swap pass >> _ _ (dup pass >> _ ev >> drop pass) >> drop pass] >> capture) >> drop pass"], "")
+  , ("[(w cd -> [(w) (cd) ... >> evalAs])] >> reflect >> ((c -> \"box\" >> print) | print) >> forget", ["box"], "")
+  , ("[(p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])] >> reflect >> ((c -> \"whileFn\" >> print) | print) >> forget", ["whileFn"], "")
+  , ("[(k -> [_ k >> equals?])] >> reflect >> ((c -> \"equalsTo\" >> print) | print) >> forget", ["equalsTo"], "")
+    -- THE TWO CORNERS THAT STAY REFUSED.  A residual row would need the
+    -- block on its passing tracks, and an open row's width is not a
+    -- type; and distributing over a flat N-track sum needs an N-ary
+    -- codiagonal, while `merge`/`case2` are binary.
+  , ("[(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] >> reflect >> ((c -> \"hit\" >> print) | print) >> merge",
+     ["reflect: parameter used inside a residual row `(p | q | ...)` — the passing tracks would need the parameter block too, and an open row's width is not a type Braid can write; close the row"], "")
+  , ("data Shape = (Int | Int Int | Int Int Int)\n[(x s -> s >> unShape >> (drop >> x | drop drop >> x | drop drop drop >> x))] >> reflect >> ((c -> \"hit\" >> print) | print) >> merge",
+     ["reflect: parameter used inside a row of 3 tracks — distributing the block over a coproduct is derived from `case2`/`merge`, which are binary, so only 2-track rows are covered; write it as nested 2-track rows"], "")
+    -- `use F` over the `fix` IDIOM: the 5a½ demo that was refused
+  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef fac =\n    use Traced\n    [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...\n    fix ...\n    ev\n4 >> fac >> print",
+     ["after [_ dup pass >> _ _ zero? >> dup pass >> _ swap pass >> _ _ (dist2 >> (_ _ 1 >> _ drop pass >> drop pass | _ dup pass >> _ dup pass >> _ _ swap pass >> dup pass >> _ swap pass >> _ _ swap pass >> _ _ _ (_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ ev >> _ drop pass >> drop pass) >> _ _ * >> _ drop pass >> drop pass)) >> _ _ merge >> drop drop pass] pass",
+      "after fix pass", "after ev", "24"], "")
+    -- and over a capturing QUOTE, where the emitted word is `capture`
+  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef adder =\n    use Traced\n    (n -> [n ... >> +])\n7 >> adder >> _ 5 >> ev >> print",
+     ["after dup pass", "after _ (_ [dup pass >> _ + >> drop pass] >> capture)", "after drop pass", "12"], "")
+    -- dist2/undist2 are inverse at sample points
+  , ("7 (5 >> in1) >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
+  , ("7 (5 >> in2) >> dist2 >> (+ | -) >> merge >> print", ["2"], "")
+  , ("7 5 >> in1 >> undist2 >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
+  , ("7 5 >> in2 >> undist2 >> dist2 >> (+ | -) >> merge >> print", ["2"], "")
+  , ("7 (5 >> in1) >> dist2 >> undist2 >> _ merge >> + >> print", ["12"], "")
+  , ("7 (5 >> in1) >> _ merge >> + >> print", ["12"], "")
+    -- partial application, the derived word elimination emits
+  , ("7 [+] >> capture >> _ 5 >> ev >> print", ["12"], "")
+  , ("[+] >> curry >> _ 7 >> ev >> _ 5 >> ev >> print", ["12"], "")
     -- evalCode dynamic check: + on one wire misses, evidence kept
   , ("[+] >> reflect >> ((c -> [dup >> *] c (5) >> evalAs >> (forget >> 0 | forget >> 1) >> merge >> print) | forget >> 2 >> print) >> forget", ["1"], "")
     -- THE SANDBOX: a pure witness refuses io code — by skolemizing the
@@ -1167,7 +1236,7 @@ evalTests =
   , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> [dup] (c >> transposeC) (5) >> evalAs >> print) | print) >> forget", ["in1(5, 5)"], "")
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
   , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> toStr _ >> _ toStr >> cat >> print", ["715"], "")
-    -- split-apply-combine: dup broadcasts, filters split, folds apply
+    -- split-ev-combine: dup broadcasts, filters split, folds ev
   , ("def sumL = [+] 0 ... >> fold\n(1 2 3 4 >> pack) >> dup >> ([odd?] ... >> filter >> sumL) _ >> _ ([even?] ... >> filter >> sumL) >> + >> print", ["10"], "")
     -- the list monad, all derived in the prelude:
     -- single = return, concat = join, flatMap = bind, filter via bind
@@ -1192,24 +1261,24 @@ evalTests =
     -- cleanup-baked comparison routers and quoted sections: predicates
     -- built inline, no lambda, no factory
   , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals? >> print", ["in1(5)"], "")
-  , ("def both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in1(5)"], "")
-  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\n6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> apply >> print", ["in2(6)"], "")
-  , ("def less = lt? >> (_ drop | _ drop)\ndef whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
+  , ("def both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> ev >> print", ["in1(5)"], "")
+  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\n6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> ev >> print", ["in2(6)"], "")
+  , ("def less = lt? >> (_ drop | _ drop)\ndef whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
     -- user-built predicates: scaffold-test-cleanup, and factories that
     -- return quoted routers
   , ("def five? = _ 5 >> eq? >> (_ drop | _ drop)\n5 >> five? >> print", ["in1(5)"], "")
-  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equalsK) ... >> apply >> print", ["in2(7)"], "")
-  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equalsK) ... >> apply >> print", ["in1(5)"], "")
-  , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef lessThan = (k -> [_ k >> lt? >> (_ drop | _ drop)])\ndef double = 2 _ >> *\n7 >> (100 >> lessThan) [double] ... >> while >> print", ["112"], "")
+  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equalsK) ... >> ev >> print", ["in2(7)"], "")
+  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equalsK) ... >> ev >> print", ["in1(5)"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef lessThan = (k -> [_ k >> lt? >> (_ drop | _ drop)])\ndef double = 2 _ >> *\n7 >> (100 >> lessThan) [double] ... >> while >> print", ["112"], "")
     -- value-level predicate combinators: negate/both/either on quoted
     -- routers (closures assemble the composed router)
-  , ("def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\ndef either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n4 >> ([even?] [small?] >> both) ... >> apply >> print", ["in1(4)"], "")
-  , ("def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\ndef either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n40 >> ([even?] [small?] >> both) ... >> apply >> print", ["in2(40)"], "")
-  , ("def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\ndef either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n7 >> ([even?] [small?] >> both) ... >> apply >> print", ["in2(7)"], "")
-  , ("def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\ndef either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n3 >> ([even?] [small?] >> either) ... >> apply >> print", ["in1(3)"], "")
-  , ("def negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> apply >> (q ... >> apply | in2) >> merge])\ndef either = (p q -> [p ... >> apply >> (in1 | q ... >> apply) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n9 >> ([even?] [small?] >> both >> negate) ... >> apply >> print", ["in1(9)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n4 >> ([even?] [small?] >> both) ... >> ev >> print", ["in1(4)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n40 >> ([even?] [small?] >> both) ... >> ev >> print", ["in2(40)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n7 >> ([even?] [small?] >> both) ... >> ev >> print", ["in2(7)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n3 >> ([even?] [small?] >> either) ... >> ev >> print", ["in1(3)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n9 >> ([even?] [small?] >> both >> negate) ... >> ev >> print", ["in1(9)"], "")
     -- until = while of the negated predicate, all in-language
-  , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef negate = (p -> [p ... >> apply >> (in2 | in1) >> merge])\ndef until = (p f -> (p >> negate) f) ... >> while\ndef big? = _ 100 >> lt? >> (_ drop | _ drop) >> (in2 | in1) >> merge\ndef double = 2 _ >> *\n7 >> [big?] [double] ... >> until >> print", ["112"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef until = (p f -> (p >> negate) f) ... >> while\ndef big? = _ 100 >> lt? >> (_ drop | _ drop) >> (in2 | in1) >> merge\ndef double = 2 _ >> *\n7 >> [big?] [double] ... >> until >> print", ["112"], "")
     -- router boolean algebra: not = track swap; and/or = one-sided rows
   , ("5 >> odd? >> (in2 | in1) >> merge >> print",  ["in2(5)"], "")
   , ("0 >> even? >> (zero? | in2) >> merge >> print", ["in1(0)"], "")
@@ -1217,12 +1286,12 @@ evalTests =
   , ("2 >> even? >> (in1 | zero?) >> merge >> print", ["in1(2)"], "")
   , ("7 >> even? >> (in1 | zero?) >> merge >> print", ["in2(7)"], "")
     -- Euclid's subtractive gcd: router negation is a track swap
-  , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["6"], "")
-  , ("def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["21"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["6"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["21"], "")
     -- recursion: tail recursion replaces the loop harness; tree recursion is new
-  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = [(self ... -> lt100? >> (double >> self ... >> apply | _) >> merge)] ... >> fix ... >> apply\n7 >> until100 >> print", ["112"], "")
-  , ("def decr = _ 1 >> -\ndef sumTo = [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> apply)) >> merge)] ... >> fix ... >> apply\n0 5 >> sumTo >> print", ["15"], "")
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)) >> merge)] ... >> fix ... >> apply\n10 >> fib >> print", ["55"], "")
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = [(self ... -> lt100? >> (double >> self ... >> ev | _) >> merge)] ... >> fix ... >> ev\n7 >> until100 >> print", ["112"], "")
+  , ("def decr = _ 1 >> -\ndef sumTo = [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n0 5 >> sumTo >> print", ["15"], "")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)) >> merge)] ... >> fix ... >> ev\n10 >> fib >> print", ["55"], "")
   , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
   , ("2 2 >> eq?",                         [],     "in1(2, 2)")
   , ("3 5 >> lt?",                         [],     "in1(3, 5)")
@@ -1252,7 +1321,7 @@ evalTests =
   , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")
 
     -- match2 as a DERIVED definition (spec: match = row of applies + merge)
-  , ("def match2 = (f g s -> s >> (f ... >> apply | g ... >> apply) >> merge)\n5 >> in1 >> [dup >> *] [1 ... >> +] ... >> match2 >> print",
+  , ("def match2 = (f g s -> s >> (f ... >> ev | g ... >> ev) >> merge)\n5 >> in1 >> [dup >> *] [1 ... >> +] ... >> match2 >> print",
                                            ["25"], "")
 
     -- lists: the spec's sum-of-squares program
@@ -1280,11 +1349,11 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2 >> + >> dup >> *] >> getCode\ndef cutAt =\n    pre suf k ->\n    (pre) (k c >> take) >> evalAs\n    ((suf) (k c >> skip) ... >> evalAs >> (print | forget) >> merge | forget) >> merge\n[pass] [1 2 >> + >> dup >> *] 0 >> cutAt\n[1 2] [+ >> dup >> *] 1 >> cutAt\n[1 2 >> + >> dup] [*] 3 >> cutAt", ["9", "9", "9"], "")
     -- vertical cuts: atom slices within a stage are runnable sub-tensors
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef s0 = ([1 2 >> +] >> getCode) >> uncons >> (nil | (s r -> s)) >> merge\n[1] (1 s0 >> take >> single) >> evalAs >> (print | forget) >> merge\n[2] (1 s0 >> skip >> single) >> evalAs >> (print | forget) >> merge", ["1", "2"], "")
-    -- box: Code -> Fn without running; the check fires at apply.
+    -- box: Code -> Fn without running; the check fires at ev.
     -- Deferring the RUN costs the result's TYPE: what boxed code returns
     -- is discovered when it runs, so the hit track is existential and a
     -- caller must stay parametric (`forget`, not `print`).
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[0] (2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (forget >> \"ran\" | pass) >> merge >> print", ["ran"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[0] (2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\nev >> (forget >> \"ran\" | pass) >> merge >> print", ["ran"], "")
     -- a splice whose code produces the WRONG WIDTH now rides the miss
     -- track (it used to reach the top-level backstop as "result desync")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n[0] (c) ... >> evalAs >> (print | forget) >> merge", [], "")
@@ -1296,7 +1365,7 @@ evalTests =
   , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
   , ("(1 2 3 >> pack) >> sum >> print\n(pack) >> len >> print", ["6", "0"], "")
   , ("(1 10 2 20 >> pack2) >> [0] [(acc bx -> bx >> unBox >> (a b -> (a b >> *) acc >> +))] ... >> foldList >> print", ["50"], "")
-  , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> apply >> print", ["list(7, 70)"], "")
+  , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> ev >> print", ["list(7, 70)"], "")
     -- EARLY BINDING: shadowing a prelude ingredient (equals, here forced
     -- always-true) must NOT leak into the derived prelude word odd? that
     -- was typechecked against the original.  odd? classifies 4 as even
@@ -1344,7 +1413,7 @@ evalTests =
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
-  , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> apply\ndef from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
+  , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> ev\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
     -- vertical track-columns: flat 3-sum via inject-and-collapse, then
     -- bare rows each touching one track (empty arms pass)
   , ("def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
@@ -1374,20 +1443,34 @@ evalTests =
      \(\"\" ; Log) 3 ; p ; unLog _ ; print ... ; print", ["done", "6"], "")
     -- the handler discharges the resource and the program runs
   , (handlerMod ++ "def square =\n    use Log\n    dup ; *\n    \"squared \"\n    note\n\
-     \[square] ; collectLog ; _ 7 ; apply\nprint print",
+     \[square] ; collectLog ; _ 7 ; ev\nprint print",
      ["squared ", "49"], "")
     -- the generic handler, at the resource its instance names
   , (collectorMod ++ "def bump = unCounter ; 1 ... ; + ; Counter\n\
      \def tick =\n    use Counter\n    dup ; *\n    bump\n\
      \def collectCount = use Counts ; collected\n\
-     \[tick] ; collectCount ; _ 7 ; apply\nprint print", ["1", "49"], "")
+     \[tick] ; collectCount ; _ 7 ; ev\nprint print", ["1", "49"], "")
   ]
 
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- HYGIENE: abstraction elimination EMITS `capture` and `dist2` into
+    -- reflected code, so a module def of either name would capture code
+    -- that never mentioned it.  They are the two prelude names a module
+    -- may not shadow (stage 5a¾).
+  [ ("def capture = dup\n1 >> print",
+     "`capture` cannot be shadowed: abstraction elimination EMITS it")
+  , ("def dist2 = dup\n1 >> print",
+     "`dist2` cannot be shadowed: abstraction elimination EMITS it")
+    -- `sameCode` is UNCHANGED by 5a¾: it normalizes the term it is
+    -- given and does not run abstraction elimination, so two spellings
+    -- of a capturing binder are still refused rather than decided.
+    -- "I cannot tell" is not "they differ" (§12.9); deciding them is 5b.
+  , ("[(x -> [x])] [(y -> [y])] >> sameCode >> (forget >> \"same\" | forget >> \"differ\") >> merge >> print",
+     "sameCode: outside the structural fragment: a binder")
     -- a FALSE law rejects the module when it starts running
-  [ ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
+  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
      "law 'leftUnit' fails for instance BadUnit")
     -- the evalCode arity gap: spliced code produces 2 wires but the
     -- context typed the hit track as 0 (Δ is existential, chosen by the
@@ -1396,7 +1479,7 @@ moduleFailTests =
     -- delivering the guarantee spec-code.md already claimed.
     -- box's first operand is the WITNESS, so handing it only the code
     -- is an ordinary arity/type error rather than anything exotic
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\napply >> (print | forget) >> merge",
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\nev >> (print | forget) >> merge",
      "Cannot unify types")
     -- an instance body must SUBSUME its slot's declared type, effect row
     -- included: an io body under a pure-declared slot used to pass the
@@ -1430,7 +1513,7 @@ moduleFailTests =
      "not defined at this point")
     -- purity is not totality: the budget is what stands between a
     -- looping functor and a hung compiler
-  , ("def w = [(self c -> c >> self ... >> apply)] ... >> fix ... >> apply\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+  , ("def w = [(self c -> c >> self ... >> ev)] ... >> fix ... >> ev\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
      "step budget exhausted")
   , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
      "Duplicate functor declaration")
@@ -1539,7 +1622,7 @@ moduleFailTests =
     -- STAGE 5a½: …and it refuses a RECURSIVE one for the same reason.
     -- A codata thunk built by `fix` must be declared `=Rec>`; the
     -- message says which label to write.
-  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply\n0 >> from >> drop",
+  , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> drop",
      "Cannot unify effects: pure vs Rec (the unlabelled side's manifest is written and fixed: write =Rec> on that arrow, or keep this code label-free)")
     -- a NESTED written Fn keeps its grade through the `k := <data>`
     -- substitution: substituting theory parameters used to rebuild every
@@ -1548,7 +1631,7 @@ moduleFailTests =
      "slot 'arrP' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Rec> a1⟩ ⇒ Arr(a0, a1)")
     -- a theory slot declared pure refuses a `fix`-built body — the same
     -- rule that already refused an io body under a pure slot
-  , ("theory Stepper =\n    step : Int ⇒ Int\n\ninstance Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> apply)) >> merge)] ... >> fix ... >> apply\n\ndef go = use Fixed ; step\n5 >> go >> drop",
+  , ("theory Stepper =\n    step : Int ⇒ Int\n\ninstance Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go = use Fixed ; step\n5 >> go >> drop",
      "slot 'step' is Int =Rec> Int but theory Stepper declares Int ⇒ Int (Cannot unify effects: Rec vs pure")
     -- the bound must agree with the bundle's actual width
   , ("fin0 >> 1 2 >> at",             "Cannot unify")
@@ -1682,7 +1765,7 @@ runModuleFail (src, fragment) = do
 --------------------------------------------------------------------------------
 -- Exponent unification (stage 1–2 of design-exponents.md): no surface
 -- syntax yet, so these drive unifyStack/unifyExp directly.  On success
--- the invariant is apply s a == apply s b (the unifier really unified).
+-- the invariant is ev s a == ev s b (the unifier really unified).
 --------------------------------------------------------------------------------
 
 unifTests :: [(String, SType, SType, Bool)]
@@ -1725,7 +1808,7 @@ unifTests =
 pureEvalTests :: [(String, Int, String, Either String String)]
 pureEvalTests =
   [ ("arithmetic",   1000, "1 2 >> +",            Right "3")
-  , ("quote/apply",  1000, "[dup >> *] >> _ 5 >> apply", Right "25")
+  , ("quote/ev",  1000, "[dup >> *] >> _ 5 >> ev", Right "25")
   , ("list library", 1000, "(1 2 3 >> pack) >> [+] 0 ... >> fold", Right "6")
     -- `print` is NOT an IO edge: it accumulates into the returned log,
     -- so it stays pure here (its io GRADE is what keeps it out of a

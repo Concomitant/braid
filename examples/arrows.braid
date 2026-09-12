@@ -6,7 +6,7 @@
 #   f *** g    = f g   (one stage!)      f &&& g   = dup ; f g
 #   left f     = (f |)                   right f   = (| f)
 #   f +++ g    = (f | g)                 f ||| g   = (f | g) ; merge
-#   app        = apply
+#   app        = ev
 #
 # The laws run below — with sq = square, db = double, on the pair 3 7.
 
@@ -30,7 +30,7 @@ def pair = (a b -> (a ; toStr) " " (b ; toStr) ; cat ... ; cat ; print)
 
 # ArrowChoice and ArrowApply
 5 ; in1 ; (sq | db) ; merge ; print    # 25 — f ||| g on the left track
-[sq] 6 ; apply ; print                # 36 — app
+[sq] 6 ; ev ; print                # 36 — app
 
 # ---- and the interface itself (2026-09-09) ---------------------------
 # Everything above spells the Arrow OPERATIONS out of Braid's syntax, at

@@ -35,7 +35,7 @@ def sign2 =
 7  >> sign2 >> print    # 7
 
 # Deeper ladder in the headline style; conditions are arbitrary Bool
-# expressions. (For lazy answers, quote them and `decide >> apply` —
+# expressions. (For lazy answers, quote them and `decide >> ev` —
 # or use the word chain with `otherwise` and a quoted default.)
 def grade =
     x ->

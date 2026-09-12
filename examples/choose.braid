@@ -1,5 +1,5 @@
 # Factor-style conditionals from the verdict tier: a Bool selects a
-# quotation and apply runs it on the rest of the stack. This only
+# quotation and ev runs it on the rest of the stack. This only
 # works because Bool's tracks are empty — selection commutes with the
 # data, so the branches see wires the test never touched.
 

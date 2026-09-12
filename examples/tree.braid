@@ -14,9 +14,9 @@ def total = [_] [+] ... >> foldTree
 ## structural recursor (a builtin that descends on a smaller value), so
 ## it needs no knot; this one ties its own.
 def size =
-  [(self ... -> unTree >> (drop >> 1 | _ (self ... >> apply) >> swap >> _ (self ... >> apply) >> +) >> merge)] ...
+  [(self ... -> unTree >> (drop >> 1 | _ (self ... >> ev) >> swap >> _ (self ... >> ev) >> +) >> merge)] ...
   fix ...
-  apply
+  ev
 
 1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print   # 7
 1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> size >> print    # 3

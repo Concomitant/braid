@@ -2,7 +2,7 @@
 #
 # `examples/arrows.braid` shows that Control.Arrow's INTERFACE is just
 # Braid's syntax: `arr f` is any pure program, `f >>> g` is `f ; g`,
-# `first f` is `f _`, `f *** g` is `f g`, `app` is `apply`. That covers
+# `first f` is `f _`, `f *** g` is `f g`, `app` is `ev`. That covers
 # every arrow whose category is the one Braid already computes in.
 #
 # The effect-shaped arrows are not new categories either: the state
@@ -72,18 +72,18 @@ theory Arrow(k(_, _)) =
 # ---- model one: circuits ---------------------------------------------
 # A circuit consumes an input and returns an output AND ITS SUCCESSOR.
 # Recursion through Fn is what makes it codata (cf. examples/stream.braid).
-def stepC = (c x -> c ; unCircuit ; _ x ; apply)
+def stepC = (c x -> c ; unCircuit ; _ x ; ev)
 
 # the identity circuit, `arr`, `>>>`, and `first`
-def idC    = [(self ... -> [(x -> x (self ... ; apply))] ; Circuit)] ... ; fix ... ; apply
-def arrC   = [(self g -> [(x -> g x ; apply ; (y -> y (g ; self ... ; apply)))] ; Circuit)] ... ; fix ... ; apply
-def compC  = [(self f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; self ... ; apply))))] ; Circuit)] ... ; fix ... ; apply
-def firstC = [(self f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; self ... ; apply))))] ; Circuit)] ... ; fix ... ; apply
+def idC    = [(self ... -> [(x -> x (self ... ; ev))] ; Circuit)] ... ; fix ... ; ev
+def arrC   = [(self g -> [(x -> g x ; ev ; (y -> y (g ; self ... ; ev)))] ; Circuit)] ... ; fix ... ; ev
+def compC  = [(self f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; self ... ; ev))))] ; Circuit)] ... ; fix ... ; ev
+def firstC = [(self f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; self ... ; ev))))] ; Circuit)] ... ; fix ... ; ev
 
 # A circuit that CANNOT be a pure function: its output depends on every
 # input it has already seen. This is the whole reason Arrows exist.
-def sumFrom = [(self n -> [(x -> n x ; + ; dup ; _ (self ... ; apply))] ; Circuit)] ... ; fix ... ; apply
-def scale   = [(self n -> [(x -> (n x ; *) (n ; self ... ; apply))] ; Circuit)] ... ; fix ... ; apply
+def sumFrom = [(self n -> [(x -> n x ; + ; dup ; _ (self ... ; ev))] ; Circuit)] ... ; fix ... ; ev
+def scale   = [(self n -> [(x -> (n x ; *) (n ; self ... ; ev))] ; Circuit)] ... ; fix ... ; ev
 
 # feed 3 then 4, and report both outputs summed — two steps, because one
 # step cannot tell a stateful circuit from a stateless one
@@ -100,9 +100,9 @@ instance Circuits : Arrow(Circuit) =
 # The boring model, and the point of having one: the same five laws run
 # again over a carrier with no state at all.
 def arrA     = Arr
-def thenA    = (f g -> [(x -> f ; unArr ; _ x ; apply ; (y -> g ; unArr ; _ y ; apply))] ; Arr)
-def firstA   = (f -> [(p -> p ; unPair ; (x d -> f ; unArr ; _ x ; apply ; (y -> y d ; Pair)))] ; Arr)
-def runA     = (f x -> f ; unArr ; _ x ; apply)
+def thenA    = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)
+def firstA   = (f -> [(p -> p ; unPair ; (x d -> f ; unArr ; _ x ; ev ; (y -> y d ; Pair)))] ; Arr)
+def runA     = (f x -> f ; unArr ; _ x ; ev)
 def observeA = (f -> (f 3 ; runA) (f 4 ; runA) ; +)
 
 instance Funcs : Arrow(Arr) =

@@ -13,22 +13,22 @@
 data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)
 
 def headS = unStream >> (h t -> h)               # observe the first cell
-def tailS = unStream >> (h t -> t) >> apply       # force one step
+def tailS = unStream >> (h t -> t) >> ev       # force one step
 
 # the integers upward from n — the self-call still sits UNDER the
 # quote, so the stream is produced lazily, one cell per force.  `fix`
 # only moves the knot to a typed boundary; guardedness (and so
 # productivity) is unchanged.
 def from =
-  [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ...
+  [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ...
   fix ...
-  apply
+  ev
 
 # a constant stream — same shape, different generator
 def repeat =
-  [(self x -> x [x >> self ... >> apply] >> Stream)] ...
+  [(self x -> x [x >> self ... >> ev] >> Stream)] ...
   fix ...
-  apply
+  ev
 
 def nats = 0 >> from                             # 0, 1, 2, 3, …  (infinite)
 

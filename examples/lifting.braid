@@ -13,7 +13,7 @@
 
 resource Game = Int
 
-def play  = (f -> [unGame >> f ... >> apply >> Game])
+def play  = (f -> [unGame >> f ... >> ev >> Game])
 #   play : Fn⟨Int ⇒ Int⟩ ⇒ Fn⟨• =Game> •⟩ — a pure rule, made a move
 
 def raise = 1 ... >> +
@@ -23,7 +23,7 @@ def dbl   = 2 _  >> *
 # all, fold them over the state. (A move sequence read from a file
 # would run identically.)
 ([raise] [dbl] [raise] [dbl] >> pack) >> [play] ... >> map
-[(x g -> g x >> apply)] (0 >> Game) ... >> fold
+[(x g -> g x >> ev)] (0 >> Game) ... >> fold
 unGame >> print                                    # 6 — ((0+1)·2+1)·2
 
 # ---- the logged version of a function --------------------------------
@@ -33,12 +33,12 @@ unGame >> print                                    # 6 — ((0+1)·2+1)·2
 resource Log = Str
 def note = unLog _ >> cat >> Log
 
-def logged = (f -> [use Log >> dup >> toStr >> note >> " " >> note >> f ... >> apply])
+def logged = (f -> [use Log >> dup >> toStr >> note >> " " >> note >> f ... >> ev])
 #   logged : Fn⟨a ⇒ ρ⟩ ⇒ Fn⟨a =Log> ρ⟩ — same function, now it remembers
 
 def celsius = (n -> 9 n >> * >> _ 5 >> div >> 32 ... >> +)
 
-([celsius] >> logged) ("" >> Log) 100 >> apply
+([celsius] >> logged) ("" >> Log) 100 >> ev
 _ print                                            # 212
 unLog >> print                                     # 100 — the log
 

@@ -84,7 +84,7 @@ both denote ordinary sequential composition:
 • ⇒ Int
 ```
 
-No function value or apply operation is involved.
+No function value or ev operation is involved.
 
 Exponentials are used only when a program itself must become a first-class value:
 
@@ -174,20 +174,20 @@ This is a first-class function value.
 To use it on an integer:
 
 ```text
-7 [dup >> *] >> apply
+7 [dup >> *] >> ev
 ```
 
 where:
 
 ```text
-apply :
+ev :
   Γ Fn⟨Γ ⇒ Δ⟩ ⇒ Δ
 ```
 
 or, if the chosen stack order places the function first:
 
 ```text
-apply :
+ev :
   Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ
 ```
 
@@ -287,7 +287,7 @@ Using the function value:
 ```text
 7
 squareValue
-apply
+ev
 ```
 
 These are semantically related but syntactically distinct.
@@ -354,7 +354,7 @@ Applying it:
 
 ```text
 [1 4 5]
-apply
+ev
 ```
 
 produces:
@@ -1171,7 +1171,7 @@ Choose one canonical stack order.
 For function-first order:
 
 ```text
-apply :
+ev :
   Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ
 ```
 
@@ -1180,13 +1180,13 @@ Example:
 ```text
 [dup >> *]
 7
-apply
+ev
 ```
 
 For argument-first order:
 
 ```text
-apply :
+ev :
   Γ Fn⟨Γ ⇒ Δ⟩ ⇒ Δ
 ```
 
@@ -1195,7 +1195,7 @@ Example:
 ```text
 7
 [dup >> *]
-apply
+ev
 ```
 
 The latter may align more naturally with:
@@ -1217,14 +1217,14 @@ direct composition;
 ```text
 7
 [square]
-apply
+ev
 ```
 
 evaluation of an exponential value.
 
 Whichever convention is selected must remain fixed across:
 
-* apply;
+* ev;
 * higher-order combinators;
 * closure construction;
 * map;
@@ -1745,7 +1745,7 @@ p
 [p]
 (x y -> p)
 [x y -> p]
-apply
+ev
 ```
 
 Use these exact semantic rules:
@@ -1770,8 +1770,8 @@ Use these exact semantic rules:
 * [f] [g] produces two distinct function values;
 * product and stack types are flat;
 * nested exponential types remain explicit;
-* exponential values require evaluation through apply;
-* direct named programs compose without apply.
+* exponential values require evaluation through ev;
+* direct named programs compose without ev.
 
 This preserves the core model:
 

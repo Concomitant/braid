@@ -16,7 +16,7 @@ Braid therefore has TWO exponentials, distinguished by whether the base
 is general or finite-discrete:
 
 - `Fn⟨Σ ⇒ Θ⟩` — the internal hom. Boxed into one wire, eliminated by
-  `apply`.
+  `ev`.
 - `Aⁿ` — the hom out of `Fin(n)`. Unboxed, because finiteness lets the
   product representation exist; eliminated by the fold.
 

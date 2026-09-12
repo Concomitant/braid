@@ -27,7 +27,7 @@ combinatorial content of the language.
 | def | a named composite: machines already wired together |
 | stage | a **parallel bank** (tensor) |
 | path | a **chain** of stages (composition) |
-| quote / `Fn⟨…⟩` | a machine **in a box**, passed as a value, opened by `apply` |
+| quote / `Fn⟨…⟩` | a machine **in a box**, passed as a value, opened by `ev` |
 | row | a **router**: runs one sub-machine per incoming track |
 
 The difference from Forth is entirely in the connectors. Forth is

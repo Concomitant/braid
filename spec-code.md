@@ -28,7 +28,7 @@ recurse (cf. Elliott, Compiling to Categories); (3) the result is
 encoded as the spine. v1 gate, on the miss track with an explanation:
 parameters captured inside quotations or row components (true
 closures — await curry), and segment-consuming or open-arity atoms
-(apply, injections, merge, loop, …) inside abstraction bodies. Plain
+(ev, injections, merge, loop, …) inside abstraction bodies. Plain
 wiring, arithmetic, literals, groups, closed rows, and exact defs all
 reflect — the GLA fragment in particular.
 
@@ -37,7 +37,7 @@ block is now the DEEPEST segment of the stack for the body's duration
 — parked exactly where `use` parks a resource wire, and routed the
 same way: every body stage gets one leading `_` per parameter
 (`P ⋉ stage`). Open-arity atoms eat upward from where they stand, so
-the block beneath them is never touched; injections, `merge`, `apply`,
+the block beneath them is never touched; injections, `merge`, `ev`,
 open groups anywhere in a binder body reflect, and a parameter may be
 fetched after them. A fetch is `dup` on the block swapped up by the
 width of the atoms to its left in its own stage — static, so no stack

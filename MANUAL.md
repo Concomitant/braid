@@ -112,15 +112,15 @@ world; a functor scope mints its own (below, and §12).
 def shout = toStr >> print  # a0 =IO> •         inferred through defs
 def quiet = toStr >> drop   # a0 ⇒ •            pure stays bare
 [print]                     # • ⇒ Fn⟨a0 =IO> •⟩ pushing an action is pure
-[print] 5 >> apply          # • =IO> •          apply transfers it out
-[dup >> *] 5 >> apply       # • ⇒ Int           same apply, pure quote
+[print] 5 >> ev          # • =IO> •          ev transfers it out
+[dup >> *] 5 >> ev       # • ⇒ Int           same ev, pure quote
 ```
 
 Manifests are **inferred, never annotated**: four prims are marked io
 (`print`, `readLine`, `readFile`, `writeFile` — §9) and
 every other arrow's grade follows from composition. Higher-order words
-(`apply`, `loop`, `map`, `foldExp`, `mapN`) share the grade of the
-quotation they run, so one `apply` serves pure and effectful quotes
+(`ev`, `loop`, `map`, `foldExp`, `mapN`) share the grade of the
+quotation they run, so one `ev` serves pure and effectful quotes
 alike. Effect tails are invisible in display, the same hiding a `ρ`
 tail already gets inside `Fn⟨…⟩`. Writing a grade in a type: §5 and
 §8. The two edges: §14. A label set is **writable** wherever a type is
@@ -257,7 +257,7 @@ Type formers:
   track `ok` builds and `>=>` threads, so a payload-second `Maybe`
   could not ride the railway at all (§7).
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
-  hom: `apply` is modus ponens. The arrow inside carries its grade, and
+  hom: `ev` is modus ponens. The arrow inside carries its grade, and
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
   (*Cannot unify effects: IO vs pure*); `Fn⟨Str =IO> •⟩` is the io form
   (§8). The same holds for every other label — `Fn⟨Int ⇒ Int⟩` refuses
@@ -283,8 +283,8 @@ Type formers:
 ### Quotation `[p]`
 `[p] : • ⇒ Fn⟨…⟩` — pushes the program as a value; a **pure point**
 even when `p` does real work, and even when that work is io
-(`[print] : • ⇒ Fn⟨a0 =IO> •⟩` — the grade rides inside, and `apply`
-transfers it out). Run with `apply : Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1`
+(`[print] : • ⇒ Fn⟨a0 =IO> •⟩` — the grade rides inside, and `ev`
+transfers it out). Run with `ev : Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1`
 (the `Fn` sits *below* its arguments). Quotes capture in-scope binder
 names (closures).
 
@@ -305,6 +305,33 @@ Parameters bind wires **leftmost = deepest**, exactly as atoms align in
 a tensor stage, and are in scope as constants — including inside quotes
 (closure capture). Bound names shadow prims/defs; duplicate parameters
 are rejected.
+
+**Binders are wiring, closures included** *(2026-09-12)*. `reflect`
+(§12) compiles a binder away into the vocabulary Code already has. A
+parameter used plainly is a `dup` on the parameter block; a parameter
+used **inside a quotation** is a `capture`, and one used **inside a
+row** is a `dist2` — the exponential's and the coproduct's own maps
+(§10), not new primitives. So there is no closure exception:
+
+```braid
+:t (x -> [x ... >> +])
+    a0 ⇒ Fn⟨Int ⇒ Int⟩
+[(x -> [x ... >> +])] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget
+    dup pass >> _ (_ [dup pass >> _ + >> drop pass] >> capture) >> drop pass
+[(n -> n >> zero >> (n >> drop >> 1 | n n >> *) >> merge)] >> reflect >> ((c -> c >> unparse >> print) | print) >> forget
+    dup pass >> _ zero >> dup pass >> _ (dist2 >> (dup pass >> _ drop >> _ 1 >> drop pass
+      | dup pass >> dup pass >> _ swap pass >> _ * >> drop pass)) >> _ merge >> drop pass
+```
+
+Read the first: `dup` the block, hand the copy to a quotation compiled
+against a block of its own, then `capture` the copy into it — one
+`capture` per parameter, the shallowest wire on the stack binding the
+deepest input of the `Fn`. Read the second: `dup` the block, `dist2` it
+into both tracks, compile each branch over its own copy, and let each
+branch drop it. Both keep the original type, so nothing downstream
+changes. `capture` and `dist2` are the two prelude names a module may
+**not** shadow — reflected code names them, and shadowing one would be
+capture.
 
 **A parameter list uses the stage vocabulary**, one slot per wire, in
 any order (slots align with wires exactly as atoms do — leftmost =
@@ -587,8 +614,8 @@ one quoted handler per track, sum on top, handlers below:
 tag >> [h1] [h2] [h3] ... >> case3     # (Δ1 | (Δ2 | Δ3)) ⇒ R
 ```
 
-`case3 ≡ (f g h s -> s >> (f ... >> apply | (g ... >> apply |
-h ... >> apply) >> merge) >> merge)` — heterogeneous handler domains,
+`case3 ≡ (f g h s -> s >> (f ... >> ev | (g ... >> ev |
+h ... >> ev) >> merge) >> merge)` — heterogeneous handler domains,
 one shared result; to sums what `foldList` is to lists. Handlers are
 quoted (the `[]` tax), unlike bare row arms — write the nested rows by
 hand when bareness matters.
@@ -638,14 +665,14 @@ def name =                    # block body — `=` ends the line,
 
   The body receives the knotted function **deepest**, then its own
   arguments, so the recursive call is an ordinary quoted call —
-  `… >> self ... >> apply`. Three stages: quote the body, tie the knot,
-  apply it.
+  `… >> self ... >> ev`. Three stages: quote the body, tie the knot,
+  `ev` it.
 
   ```braid
   def fac =
-      [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *)) >> merge)] ...
+      [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...
       fix ...
-      apply
+      ev
   # fac : Int =Rec> Int      5 >> fac  →  120
   ```
 
@@ -656,9 +683,9 @@ def name =                    # block body — `=` ends the line,
 
   ```braid
   def until100 =
-    [(self ... -> lt100? >> (double >> self ... >> apply | _) >> merge)] ...
+    [(self ... -> lt100? >> (double >> self ... >> ev | _) >> merge)] ...
     fix ...
-    apply
+    ev
   ```
 
   `fix` is to recursion what `loop` (§9) is to iteration: an operator
@@ -668,10 +695,11 @@ def name =                    # block body — `=` ends the line,
   the prelude's `fold`) when the recursion is structural, since those
   descend on a smaller value and terminate by construction — and, being
   bounded, mint no `Rec`.
-- **Limit** (unchanged from stage 3⅞): the knot arrives as a binder
-  parameter, so a self-call inside a row component or a quotation is a
-  closure, and closures do not `reflect` yet. A `use F` functor over
-  such a body is refused rather than silently mis-elaborated.
+- **The limit is gone** *(2026-09-12)*: the knot still arrives as a
+  binder parameter, but a self-call inside a row component or a
+  quotation now reflects (§6, §12), so `use F` over the `fix` idiom
+  itself works — `use Traced` over a `fix`ed factorial traces every
+  stage and prints `24`.
 - Let-polymorphism: defs generalize over all four variable sorts.
 - The prelude is auto-loaded user code; `:defs` lists it.
 
@@ -1068,9 +1096,9 @@ claims exactly the second thing.
 
 A codata type gets constructor/unroll as usual but **no `foldName`** —
 a structural fold through the thunk would diverge, so it is withheld by
-construction; you observe instead (`unStream`, then `apply` to force
+construction; you observe instead (`unStream`, then `ev` to force
 one cell). Productive corecursion guards its self-call under a quote —
-`def from = [(self n -> n [n 1 >> + >> self ... >> apply] >> Stream)] ... >> fix ... >> apply`,
+`def from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev`,
 whose self-call still sits under the thunk. See
 `examples/stream.braid`. Caveat: a `Fn` type whose stacks carry two
 open stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands, but won't
@@ -1191,7 +1219,7 @@ Sums & control:
 | `in1`…`inN`, `ok`/`here`/`again`, `miss`/`done` | `ρ0 ⇒ (… \| ρ0 \| σ0)` |
 | `there` | `(σ0) ⇒ (ρ0 \| σ0)` |
 | `merge` | `(ρ0 \| ρ0) ⇒ ρ0` |
-| `apply` | `Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1` |
+| `ev` | `Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1` — the exponential's **counit**; spelled `apply` before 2026-09-12, renamed to match `curry` (§10). The only word that consumes an `Fn`, and not derivable: naming a value never runs it. |
 | `loop` | `Fn⟨Σ ⇒ (Σ\|Θ)⟩ Σ =Rec> Θ` — Elgot iteration (`again`/`done`); mints `Rec` (§3) |
 | `fix` | `Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — the knot; body takes it deepest, and the knot carries `Rec` (§8) |
 
@@ -1309,16 +1337,34 @@ over `loop`, and so `=Rec>`:
 (derived from their own eliminators — `foldExp` + `cons`/`reverse`,
 Church-style for `pack2`).
 
+**The closed structure** *(2026-09-12)*: `curry : Fn⟨a ρ0 ⇒ ρ1⟩ ⇒
+Fn⟨a ⇒ Fn⟨ρ0 ⇒ ρ1⟩⟩` — λ, the other half of the exponential whose
+counit is the prim `ev` (§9). It is a **prelude def**, not a prim:
+`def curry = (f -> [(x -> [x ... >> f ... >> ev])])`, and its own body
+is the one binder-into-quote that abstraction elimination takes as a
+generator rather than eliminating (§6). From it: `capture : a
+Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` (partial application — `curry` then `ev`),
+and the distributivity family `dist2 : a (ρ0 | ρ1) ⇒ (a ρ0 | a ρ1 | σ0)`
+with its inverse `undist2 : (a ρ0 | a ρ1) ⇒ a (ρ0 | ρ1 | σ0)`, plus
+`dist3`/`dist4`/`undist3`/`undist4`. Distributivity is a **theorem**
+here, not an axiom: `P × –` is a left adjoint (that *is* `curry`), left
+adjoints preserve coproducts, and `dist2`'s body is that proof — capture
+the wire into one handler per track, then `case2`. `undist` needs no
+closed structure: it is the map any category with coproducts has.
+`distN` follows `caseN`'s arity family and, like `caseN`, the sums
+**nest** — polymorphism does not reach a row's width.
+`examples/distributive.braid` runs seven laws over two models.
+
 **Strength**: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` — run a program
 one wire deeper, the wire beneath untouched; compose it once per
 context wire (`[dup >> *] >> lift >> lift : • ⇒ Fn⟨a0 a1 Int ⇒ a0 a1
 Int⟩`). This is tensorial strength, the action of `(A ⊗ −)` on a
 morphism, and it is exactly what threads a resource past a pure stage —
 so ambient threading (§6) needs no machinery for the pure case, only
-the counting. `def lift = (f -> [_ (f ... >> apply)])`.
+the counting. `def lift = (f -> [_ (f ... >> ev)])`.
 
 **Code** (§12): `getCode : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Code` (`reflect`, or `nil`
-for a closure); the by-generators functors `stagewise : Fn⟨Stage ⇒
+when `reflect` misses); the by-generators functors `stagewise : Fn⟨Stage ⇒
 Code⟩ Code ⇒ Code` and `atomwise : Fn⟨Atom ⇒ Stage⟩ Code ⇒ Code`
 (`flatMap` on the spine, one level down for `atomwise`);
 `interposeRaw : Code Code ⇒ Code` (unchecked `interpose`); `lift2 :
@@ -1367,8 +1413,8 @@ x [default] ([p?] [action] … >> pack2) >> matchWith
 # loops
 7 >> [_ 100 >> less?] [2 _ >> *] ... >> while      # → 112
 
-# general recursion: quote the body, tie the knot, apply (§8)
-[(self ... -> _ 100 >> less? >> (2 _ >> * >> self ... >> apply | _) >> merge)] ... >> fix ... >> apply
+# general recursion: quote the body, tie the knot, ev (§8)
+[(self ... -> _ 100 >> less? >> (2 _ >> * >> self ... >> ev | _) >> merge)] ... >> fix ... >> ev
 ```
 
 There is **no guard syntax in the parser** — every idiom above is
@@ -1387,9 +1433,10 @@ duration — parked as the deepest wires, exactly where `use` parks a
 resource, and every body stage routed over it with a leading `_` per
 parameter; open-arity atoms eat upward and never reach it, a fetch is
 a `dup` on the block swapped up into place, and the block is dropped
-once at the end. True closures — parameters used inside a quotation or
-a row component — are still gated onto the miss track with an
-explanation. Code is an ordinary list — slice with `take`, transform
+once at the end. **True closures reflect too** *(2026-09-12)*: a
+parameter used inside a quotation becomes a `capture` and one used
+inside a row becomes a `dist2` (§6), so `reflect` is total on binder
+code but for the two corners in §14. Code is an ordinary list — slice with `take`, transform
 with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
 `code.braid`). `evalAs` checks the code against a
 witness and runs it; failures ride the miss track *with the untouched
@@ -1479,17 +1526,22 @@ choose by neighbour — is re-inferred and may fail. Such functors are
 not wrong; they are **audited** rather than **guaranteed** (laws over
 `Code`, `sameCode` on expansions, §12).
 
-**One limit is on the floor, not on any row.** `reflect` does not yet
-see a binder parameter that was **captured in a quotation or a row
-component** — a true closure. `fix` (§8) hands the knot in as exactly
-such a parameter, so a `use F` scope that contains the `fix` idiom
-*itself* is refused before any functor runs: *`use Traced`: Unknown
-primitive: self*. A `use F` scope that merely **calls** an
-already-recursive word is fine — the functor sees one atom, and the
-labels union (`Int =IO Rec Traced> Int`). Lifting the limit means
-distributing the parameter block over a sum and under a quote, which
-is table row 2 (`P ⋉ –`) doing more than it does today
-(`design-macros.md`, the 2026-09-09 amendment).
+**The closure gate is lifted** *(2026-09-12; it read "one limit is on
+the floor, not on any row").* `reflect` used to refuse a binder
+parameter captured in a quotation or a row component, and `fix` (§8)
+hands the knot in as exactly such a parameter — so a `use F` scope
+containing the `fix` idiom *itself* was refused before any functor ran
+(*`use Traced`: Unknown primitive: self*). Abstraction elimination now
+has wiring to translate a capture into: `capture` under a quote,
+`dist2` over a row (§6, §10). That is table row 2 (`P ⋉ –`) over the
+cartesian **closed** structure rather than the cartesian one, and it is
+a derivation, not three new primitives —
+`design-macros.md`, the 2026-09-12 amendment. What is left is two
+corners, both in §14: a **residual** row `(p | q | ...)`, and a flat
+row of three or more tracks. `sameCode` is unchanged: it normalizes the
+term it is handed and never runs elimination, so two spellings of a
+capturing binder are still *"outside the structural fragment: a
+binder"* — "I cannot tell" is not "they differ".
 
 **Why `interpose` checks what it checks.** The stage it inserts must
 type at *every* cut, and the cuts have different widths. A stage that
@@ -1596,8 +1648,14 @@ normalizing modulo an equational theory (AC, ACU, a field) instead of a
 free one.
 
 Outside the fragment — a quotation, a row, a binder, a word with no
-closed arity, a quote that captured a bound name — `sameCode` **errors**
-rather than answering, because "I cannot tell" is not "they differ".
+closed arity — `sameCode` **errors** rather than answering, because "I
+cannot tell" is not "they differ". A binder is outside it whether or not
+it captures: `sameCode` normalizes the term it is handed and never runs
+abstraction elimination, so the closed structure (§6, 2026-09-12)
+decided nothing new here. Bringing the normalizer through a row, and
+with it `dist ; undist = id` and `capture ; ev = substitution`, is the
+next stage's work; `examples/distributive.braid` states those laws and
+*runs* them at sample points in the meantime.
 `examples/laws.braid` shows decided and sampled laws side by side.
 
 ## 13. Open arity and exponents (summary)
@@ -1645,8 +1703,8 @@ holds for them too: final atom of their stage (§9).
   nesting, and one `merge` per level to collapse.
 - Open-arity words, open binders and `...`: final atom of their
   stage (§4, §13). Recursion is no longer on that list — the
-  recursive call is `self ... >> apply`, an ordinary quoted call,
-  and it is `...` and `apply` that carry the rule.
+  recursive call is `self ... >> ev`, an ordinary quoted call,
+  and it is `...` and `ev` that carry the rule.
 - Short names are yours: `f`, `g`, `x`, `succ`, `double` are all free
   (there are no placeholder prims — every primitive earns its name).
 - Shadowing is lexical and safe: name resolution is EARLY-bound. A def
@@ -1693,13 +1751,15 @@ holds for them too: final atom of their stage (§9).
   arrow still accepts *non*-recursive code — an inferred row is open
   and absorbs the label — so the labelled spelling is the permissive
   one, and the bare spelling is the promise.
-- **A `use F` scope may not contain the `fix` idiom itself** —
-  *`use Traced`: Unknown primitive: self*. `fix` hands the knot in as a
-  binder parameter, and a parameter captured under a quote or in a row
-  arm is a closure, which `reflect` does not see yet (§12). Define the
-  recursive word *outside* the scope and call it from inside: the
-  functor then sees one atom, and the labels union
-  (`Int =IO Rec Traced> Int`).
+- **`reflect` has two corners left** *(2026-09-12; a `use F` scope
+  containing the `fix` idiom used to be a third — it now works)*. A
+  parameter used inside a **residual** row is refused: *"the passing
+  tracks would need the parameter block too, and an open row's width is
+  not a type Braid can write; close the row"*. A parameter used inside
+  a flat row of **three or more tracks** is refused too: distributing
+  the block over a coproduct is derived from `case2`/`merge`, which are
+  binary — write it as nested 2-track rows, the shape `case3`/`case4`
+  already eliminate. Both messages name the fix.
 - Several effectful atoms in one tensor stage are **legal**, and run
   left to right — deepest wire first, the order they are written in
   (`print print : a0 a1 =IO> •`). That order is decreed, not checked, so
@@ -1811,7 +1871,7 @@ program, and unrolls it, and the arrow loses the label across it:
 ```braid
 resource Log = Str
 def note      = unLog _ ; cat ; Log
-def collectLog = (f -> [f ("" ; Log) ... ; apply ; unLog ...])
+def collectLog = (f -> [f ("" ; Log) ... ; ev ; unLog ...])
 -- collectLog : Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩
 ```
 

@@ -2,7 +2,7 @@
 # NOT in scope in its own body, so the knot is tied by a word with a
 # type — `fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — and the
 # body receives the recursive call DEEPEST, as an ordinary quoted
-# function. The three stages read: quote the body, tie the knot, apply
+# function. The three stages read: quote the body, tie the knot, ev
 # it. `Rec` is the receipt: `fix` and `loop` are the only words that can
 # run unbounded, so everything built from them says so on its arrow, and
 # a word with no `Rec` is fix-free and terminates by construction.
@@ -17,23 +17,23 @@ def double = 2 _ >> *
 def until100 =
   [ self ... ->
     lt100?
-    double >> self ... >> apply | _
+    double >> self ... >> ev | _
     merge ] ...
   fix ...
-  apply
+  ev
 
 def sumTo =
-  [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> apply)) >> merge)] ...
+  [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> ev)) >> merge)] ...
   fix ...
-  apply
+  ev
 
 def fib =
   [ self ... ->
     lt2?
-    _ | (n -> n >> decr >> self ... >> apply >> _ (n 2 >> - >> self ... >> apply) >> +)
+    _ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)
     merge ] ...
   fix ...
-  apply
+  ev
 
 7 >> until100 >> print
 0 5 >> sumTo >> print

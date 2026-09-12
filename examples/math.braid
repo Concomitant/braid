@@ -10,28 +10,28 @@ def fac =
     [ self n ->
       n
       zero?
-      ( (z -> 1) | (m -> m (m 1 >> - >> self ... >> apply) >> *) )
+      ( (z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *) )
       merge ] ...
     fix ...
-    apply
+    ev
 
 def fib =
     [ self n ->
       n 2
       lt?
-      ( (x y -> x) | (x y -> (x 1 >> - >> self ... >> apply) >> _ (x 2 >> - >> self ... >> apply) >> +) )
+      ( (x y -> x) | (x y -> (x 1 >> - >> self ... >> ev) >> _ (x 2 >> - >> self ... >> ev) >> +) )
       merge ] ...
     fix ...
-    apply
+    ev
 
 def pow =
     [ self b e ->
       e
       zero?
-      ( (z -> 1) | (m -> b (b (m 1 >> -) >> self ... >> apply) >> *) )
+      ( (z -> 1) | (m -> b (b (m 1 >> -) >> self ... >> ev) >> *) )
       merge ] ...
     fix ...
-    apply
+    ev
 
 # --- iterative (loop: state is a stack, again re-enters / done exits) --
 def facL =

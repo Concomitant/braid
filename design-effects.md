@@ -71,9 +71,9 @@ The corollary is the **auto-opening rule**: every instantiated closed
 grade gets a fresh tail, or a pure word could not sit beside an
 effectful one.
 
-**ε is a fifth variable sort.** The higher-order prims — `apply`,
+**ε is a fifth variable sort.** The higher-order prims — `ev`,
 `loop`, `foldExp`, `foldExp2`, `mapN`, `mapN2` — share ONE ε between
-the inner `Fn` and the outer arrow, which is why a single `apply`
+the inner `Fn` and the outer arrow, which is why a single `ev`
 serves pure and effectful quotes alike. Prelude defs (`map`, `filter`,
 `while`, `until`, `cond`) needed no changes at all; their
 ε-polymorphism is inferred.
@@ -83,8 +83,8 @@ serves pure and effectful quotes alike. Prelude defs (`map`, `filter`,
 def shout = toStr >> print    : a0 =IO> •             inferred through defs
 def quiet = toStr >> drop     : a0 ⇒ •               pure stays bare
 [print]                       : • ⇒ Fn⟨a0 =IO> •⟩    PUSHING is pure
-[print] 5 >> apply            : • =IO> •              apply transfers it out
-[dup >> *] 5 >> apply         : • ⇒ Int              same apply, pure quote
+[print] 5 >> ev            : • =IO> •              ev transfers it out
+[dup >> *] 5 >> ev         : • ⇒ Int              same ev, pure quote
 [dup >> print ...] ... >> map : List(a0) =IO> List(a0) ε-polymorphic
 print print                   : a0 a1 =IO> •          legal; left-to-right
 ```
@@ -211,7 +211,7 @@ would be padding rather than a statement.
 
 ```text
 lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩
-def lift = (f -> [_ (f ... >> apply)])
+def lift = (f -> [_ (f ... >> ev)])
 ```
 
 Run a program one wire deeper; compose it once per context wire. This
@@ -391,7 +391,7 @@ that rebind sequencing itself (F# computation expressions, made
 coherent by naming). Ambient bundles ride on the same scoping.
 
 **The shared variable sort.** Higher-order combinators need
-effect/bundle polymorphism: `apply : Fn⟨Γ ⇒ε Δ⟩ Γ ⇒ε Δ`, `map :
+effect/bundle polymorphism: `ev : Fn⟨Γ ⇒ε Δ⟩ Γ ⇒ε Δ`, `map :
 Fn⟨a =γ> b⟩ List(a) =γ> List(b)`. The arrows plan's ε and the ambient
 bundle's γ are ONE new variable sort. Since all labels but IO are
 wires, the elaborate effect-row unifier collapses to: bundle naming +

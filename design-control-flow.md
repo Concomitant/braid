@@ -53,7 +53,7 @@ heterogeneous domains, one result type. The honest defense: it is to
 anonymous sums what `list(…)` is to nil/cons and what generated
 `foldName` is to a data type. The objection (user): it's a parser
 special-case, "spits on the conventions." The value-level alternative
-`eitherV = (s ha hb -> s >> (ha ... >> apply | hb ... >> apply) >>
+`eitherV = (s ha hb -> s >> (ha ... >> ev | hb ... >> ev) >>
 merge)` typechecks and runs but **does not nest** (verified failure),
 so it can't replace `case` at depth. Options: keep and bless; keep for
 sums-of-depth-≥3 only (style rule); remove and accept merge-ladders.
@@ -83,12 +83,12 @@ retired (superseded — the bound subject makes conditions plain Bools).
 
 Key discovery behind the winner: with the subject **bound**, conditions
 are points and `Bool = (•|•)` tracks are empty, so row arms are points
-riding **bare** (delay law) — no quotes, no `_`, no apply. Closure
+riding **bare** (delay law) — no quotes, no `_`, no ev. Closure
 kills argument-threading; only nesting or auto-framing kills
 push-framing.
 
-Uncommitted: pointful `ifP/elifP/otherwiseP` (`(c a -> c ... >> apply >>
-verdict >> (a ... >> apply >> in1 | in2) >> merge)` etc.) — tested,
+Uncommitted: pointful `ifP/elifP/otherwiseP` (`(c a -> c ... >> ev >>
+verdict >> (a ... >> ev >> in1 | in2) >> merge)` etc.) — tested,
 simpler than the stack versions, first guard needs no `_`; continuation
 guards still do. Add if the quoted-word style sees use with bound
 subjects.
@@ -148,12 +148,12 @@ point-free. Wrap the inner eliminator in a binder-closure and it works
 → 100/200/49 on a 3-track sum). So value-level n-ary elimination
 exists today at the cost of one binder per level; `case(…)` remains
 the only *flat* spelling. Partial application is likewise derivable
-today: `def bake = (v q -> [v ... >> q ... >> apply])` (Factor's
+today: `def bake = (v q -> [v ... >> q ... >> ev])` (Factor's
 curry). Task #15's real control-flow content is therefore completion,
 not unblocking: point-free closure manufacture for guards-as-data, the
 de-nesting law (curry/uncurry witness nested ladders ≅ flat dispatch
 tables on products), and the deduction theorem completing the
-apply-is-modus-ponens story. Caveat for #15's design: `bakeTop` (close
+ev-is-modus-ponens story. Caveat for #15's design: `bakeTop` (close
 the TOP slot) hits the push-onto-open-width wall — the frame question
 (§1) in another costume.
 
@@ -197,7 +197,7 @@ conjunctions read straight off the wiring.
    as an action is only coherent when doing nothing is a valid outcome
    of the same type. (Classical logic never has to say this.)
 3. **The implication object** (internal hom): `Fn⟨A ⇒ B⟩`. A value that
-   *is* "a entails b". **Modus ponens is `apply : Fn⟨A ⇒ B⟩ A ⇒ B`** —
+   *is* "a entails b". **Modus ponens is `ev : Fn⟨A ⇒ B⟩ A ⇒ B`** —
    the eliminator of implication, literally. `curry`/`uncurry` (task
    #15, pending) are the deduction theorem: `A B ⇒ C  ↔  A ⇒ Fn⟨B ⇒ C⟩`.
    Under Curry–Howard, Braid's quotation tier is its implication

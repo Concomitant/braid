@@ -41,4 +41,4 @@ def traced = (poly ; getCode) ([trace] ; getCode) ; weave
 poly (traced) (5) ; evalAs ; (print | print forget) ; merge       # refused: the trace is io, the witness is not
 
 "-- traced, io witness --" ; print
-[trace ; poly ... ; apply] (traced) (5) ; evalAs ; (print | forget) ; merge   # 5 25 25 50 50 51, then 51
+[trace ; poly ... ; ev] (traced) (5) ; evalAs ; (print | forget) ; merge   # 5 25 25 50 50 51, then 51

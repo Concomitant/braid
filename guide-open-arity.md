@@ -8,7 +8,7 @@ Some words don't have a fixed number of inputs. Their input type has an
 pass    : ρ ⇒ ρ                          thread everything
 forget  : ρ ⇒ •                          destroy everything (terminal)
 mapN    : Fn⟨a ⇒ b⟩ aⁿ ⇒ bⁿ              map across a bundle
-apply   : Fn⟨ρ₀ ⇒ ρ₁⟩ ρ₀ ⇒ ρ₁            run a quotation on the segment
+ev   : Fn⟨ρ₀ ⇒ ρ₁⟩ ρ₀ ⇒ ρ₁            run a quotation on the segment
 loop    : Fn⟨Σ ⇒ (Σ|Θ)⟩ Σ ⇒ Θ            Elgot iteration on the segment
 foldExp : Fn⟨b a ⇒ b⟩ b aⁿ ⇒ b           fold a bundle, one wire at a time
 foldExp2: Fn⟨b a c ⇒ b⟩ b (a c)ⁿ ⇒ b     fold a bundle of pairs
@@ -66,7 +66,7 @@ why: it isn't last in its stage, so it was closed.
 
 Every open word takes its fixed arguments *below* the open bundle:
 step and seed for the folds, the scalar for `scaleN`, the quotation for
-`apply`/`loop`. When the bundle is already on the stack, you get the
+`ev`/`loop`. When the bundle is already on the stack, you get the
 fixed arguments underneath with the remainder marker — **`X ...`
 pushes X at the BOTTOM and threads everything else on top**:
 

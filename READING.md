@@ -82,6 +82,20 @@ copies where they exist.
   counterpoint argues for.
 - [nLab: graded monad](https://ncatlab.org/nlab/show/graded+monad).
 
+## Distributivity (the closed structure elimination now uses)
+
+- Cockett, [*Introduction to distributive
+  categories*](https://doi.org/10.1017/S0960129500000232) (MSCS 3(3),
+  1993) — the coherence of `dist`, and why the distributive law is
+  structure worth naming rather than an axiom to assume; Braid gets it
+  for free instead (`P × –` is a left adjoint, so `dist2` is derived
+  from `curry` and `case2`, not posited).
+- Carboni, Lack & Walters, [*Introduction to extensive and distributive
+  categories*](https://doi.org/10.1016/0022-4049(93)90035-R) (JPAA 84,
+  1993) — extensivity as the condition that makes coproducts behave
+  like disjoint unions, and the place to look when `sameCode` is asked
+  to enter a row (5b).
+
 ## String diagrams, free categories, decidable rewriting
 
 - [nLab: Lawvere theory](https://ncatlab.org/nlab/show/Lawvere+theory)

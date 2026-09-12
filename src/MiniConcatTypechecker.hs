@@ -680,7 +680,7 @@ unifyEff s e1 e2 =
     -- The residual tail of a pair, named from the pair itself: `solve`
     -- is a pure fold with no fresh-name supply, and a pair can be
     -- bridged only once (both its variables are bound by that step, so
-    -- `apply` never presents them again).  Never rigid — the tag is a
+    -- `ev` never presents them again).  Never rigid — the tag is a
     -- prefix, and this name starts with ε.
     bridge (EV a) (EV b) = EV ("ε<" ++ a ++ "|" ++ b ++ ">")
 
@@ -867,7 +867,7 @@ instantiate (Forall tvars svars rvars nvars evars arr) = do
 -- composition can absorb labels into it: `1 >> print` works because the
 -- literal's ⟨⟩ opens to ⟨|ε⟩ and unifies with print's ⟨io|ε'⟩.  Without
 -- this, every pure word would refuse to sit next to an effectful one.
--- Schemes that already carry an explicit ε (apply, loop, the folds) are
+-- Schemes that already carry an explicit ε (ev, loop, the folds) are
 -- left alone — their tail is their polymorphism.
 openEff :: Arrow -> Infer Arrow
 openEff (Arrow i o e@(Eff _ Nothing)) = do
@@ -1777,7 +1777,7 @@ dataDeclArtifacts d =
 --
 -- A payload of no closed elements (`•`, or an alternative that is a bare
 -- stack parameter as in `data Box(…) = (…)`) hands the case the whole
--- bundle; that is what `fi … >> apply` did in the source generator.
+-- bundle; that is what `fi … >> ev` did in the source generator.
 dataFoldArtifact :: DataDecl
                  -> Maybe (String, Scheme, (Int, Bool, Term), String)
 dataFoldArtifact d
@@ -2754,6 +2754,10 @@ inferOperand env final (Prim name)
       pick (Forall [] [] [] [] [] (arrPure SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
   | Just k <- finIndex name, not (M.member name env) = pick (finScheme k)
+  -- a receipt is `pass` that the type can see; `use` mints it and `@`
+  -- keeps it unwritable, so resolving it here needs no registration
+  | Just l <- receiptLabel name, not (M.member name env) =
+      pick (receiptScheme l)
 
   | otherwise =
       case M.lookup name env of
@@ -2772,7 +2776,7 @@ inferOperand env _ (Quote p) = do
   -- Fn⟨…⟩, solved (monomorphically) at the use site.
   (arrP, cs) <- infer env p
   -- The effect lives INSIDE the Fn: pushing an io action is pure, and
-  -- `apply` is where the grade transfers back out.  The outer row is
+  -- `ev` is where the grade transfers back out.  The outer row is
   -- open (openEff) so a quote may share a stage with an effectful atom.
   q <- openEff (arrPure SEnd (SCons (TFn arrP) SEnd))
   pure (q, cs)
@@ -2944,7 +2948,7 @@ intLitScheme = Forall [] [] [] [] [] (arrPure SEnd (SCons TInt SEnd))
 --  routers (predicates keep and route; hit = track 1):
 --    negative?, even?, odd?, zero? : Int ⇒ (Int | Int)
 --    lt? : Int Int ⇒ (Int Int | Int Int); eq? : ∀A. A A ⇒ (A A | A A)
---  apply : ∀Γ Δ. Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ   (Γ is consumed, not passed)
+--  ev : ∀Γ Δ. Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ   (Γ is consumed, not passed)
 --  guard machine: if / elif / otherwise / endif; loop (Elgot iteration)
 --  map   : ∀A B. Fn⟨A ⇒ B⟩ List A ⇒ List B
 --  fold  : ∀A B. Fn⟨B A ⇒ B⟩ B List A ⇒ B
@@ -2974,7 +2978,7 @@ primEnv =
       recR = Eff (S.singleton recLabel) (Just epsV)
       arrRec i o = Arrow i o recR
       fnGD = TFn (arrEps (STail gam) (STail del))
-      applyTy = Forall [] [gam, del] [] [] [epsV]
+      evTy = Forall [] [gam, del] [] [] [epsV]
         (arrEps (SCons fnGD (STail gam)) (STail del))
       -- merge : (Θ | Θ) ⇒ Θ — the binary codiagonal ∇
       mergeTy = Forall [] [SV "Θ"] [] [] []
@@ -3001,13 +3005,13 @@ primEnv =
       -- fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
       -- fixpoint operator on Fn.  The body receives the knotted function
       -- DEEPEST, then its own arguments, so a recursive call is spelled
-      -- `… >> self >> apply` exactly like any other quoted call; `fix`
+      -- `… >> self >> ev` exactly like any other quoted call; `fix`
       -- itself runs nothing, it ties the knot and hands back the Fn.
       -- This is to recursion what `loop` is to iteration: the operator
       -- that carries the laws (fixpoint, dinaturality, parameter), and
       -- the ONE place a program may be unbounded now that a definition
       -- is not in scope in its own body.  ε is shared with the inner
-      -- Fn, like `apply`/`loop`: a pure body ties a pure knot.
+      -- Fn, like `ev`/`loop`: a pure body ties a pure knot.
       --
       -- The `Rec` label (2026-09-09) rides on the KNOT, not on `fix`:
       -- tying it runs nothing, so fix's own arrow is pure and openEff
@@ -3178,7 +3182,7 @@ primEnv =
            (arrPure (SCons (TFn (arrEps (STail gam) (STail del)))
                           (one (TFn (arrEps (STail gam) (STail del)))))
                     (one tBool)))
-       , ("apply",     applyTy)
+       , ("ev",        evTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
        , ("loop",      loopTy)
@@ -3220,7 +3224,8 @@ inferTermIn env term =
                , not (isSymLiteral n)
                , not (M.member n env)
                , Nothing <- [injIndex n]
-               , Nothing <- [finIndex n] ] of
+               , Nothing <- [finIndex n]
+               , Nothing <- [receiptLabel n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
@@ -3450,7 +3455,20 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
       -- and each functor leaves its receipt on the expansion.  A label
       -- is minted here or nowhere: unconditionally, because a functor
       -- that leaves no receipt is a functor that cannot be audited.
-      pure (foldr (Seq . Prim . receiptName . fst) expanded fs)
+      --
+      -- The receipt says what RAN, so it carries the functor word's OWN
+      -- labels beside the functor's name (2026-09-12).  Before this,
+      -- `checkFunctorWord` tested `eIO` alone, so a `Rec`-labelled word
+      -- — a `fix`-built functor — ran at elaboration (fuel-bounded) and
+      -- its `Rec` escaped: the expansion said nothing about it.  `IO`
+      -- cannot reach here (`checkFunctorWord` refuses it), so in
+      -- practice this mints `Rec` and any receipt the word itself wears.
+      let wordLabels w = case M.lookup w (ecEnv ctx) of
+            Just (Forall _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
+            Nothing                                        -> []
+          marks = nub (concat [ receiptName f : map receiptName (wordLabels w)
+                              | (f, w) <- fs ])
+      pure (foldr (Seq . Prim) expanded marks)
     go (Seq a b)       = Seq <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
     go (Quote t)       = Quote <$> go t
@@ -4260,6 +4278,12 @@ checkModuleWith base src = do
                , ownAl, dd : ownDt, docs'' )
     addDef slotTable funcs thNames
            (env, run, shadow, acc, docs, tmpls) (name, bodySrc, doc) = do
+      if name `elem` elimEmits && M.member name env
+        then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
+                 ++ "elimination EMITS it, so a def of that name would "
+                 ++ "capture reflected code that never mentioned it "
+                 ++ "(MANUAL §6).  Pick another name."
+        else Right ()
       if (M.member name env && name `notElem` shadow)
            || isJust (lookup name tmpls)
         then Left $ "Duplicate definition: " ++ name
@@ -4328,18 +4352,18 @@ preludeSrc = unlines
   , "## left fold: step sees [acc, elem], list consumed left to right."
   , "## Derived from the STRUCTURAL recursor rather than written"
   , "## recursively: fold the list up into an endofunction of the"
-  , "## accumulator (Church-style, as pack2 does), then apply it to the"
+  , "## accumulator (Church-style, as pack2 does), then ev it to the"
   , "## seed.  So `fold` — and map/filter/reverse/append/concat with it —"
   , "## terminates by construction and needs no `fix`."
-  , "def fold = (f b l -> l >> [[pass]] [(g x -> [(acc -> f acc x >> apply >> g ... >> apply)])] ... >> foldList >> _ b >> apply)"
+  , "def fold = (f b l -> l >> [[pass]] [(g x -> [(acc -> f acc x >> ev >> g ... >> ev)])] ... >> foldList >> _ b >> ev)"
   , "## a reflected atom: prim | int | str | sym | quote | row | group"
   , "data Atom = (Sym | Int | Str | Sym | List(List(Atom)) | List(List(List(Atom))) Bool | List(List(Atom)))"
   , "## code is a chain of tensor stages of atoms (spine normal form)"
   , "type Stage = List(Atom)"
   , "type Code = List(Stage)"
 
-  , "## apply a quoted function to every element"
-  , "def map = (f l -> l >> [nil] [(r x -> f x >> apply >> _ r >> cons)] ... >> foldList)"
+  , "## ev a quoted function to every element"
+  , "def map = (f l -> l >> [nil] [(r x -> f x >> ev >> _ r >> cons)] ... >> foldList)"
   , "## invert a router: swap the hit and miss tracks"
   , "def not = (miss | ok) >> merge"
   , "## keep only a router's decision: collapse both payloads to nothing"
@@ -4363,11 +4387,11 @@ preludeSrc = unlines
   , "## re-nest a sum rightward: ((A | B) | C) => (A | (B | C))"
   , "def assocR = ((in1 | in1 >> in2) >> merge | in2 >> in2) >> merge"
   , "## negate a quoted router, as a value"
-  , "def negate = (p -> [p ... >> apply >> (miss | ok) >> merge])"
+  , "def negate = (p -> [p ... >> ev >> (miss | ok) >> merge])"
   , "## and on quoted routers: hit iff both hit; q runs only on p's hit"
-  , "def both = (p q -> [p ... >> apply >> (q ... >> apply | miss) >> merge])"
+  , "def both = (p q -> [p ... >> ev >> (q ... >> ev | miss) >> merge])"
   , "## or on quoted routers: hit if p hits, otherwise q decides"
-  , "def either = (p q -> [p ... >> apply >> (ok | q ... >> apply) >> merge])"
+  , "def either = (p q -> [p ... >> ev >> (ok | q ... >> ev) >> merge])"
   , "## compare two wires with eq?, route the first, drop the second"
   , "def equals? = eq? >> (_ drop | _ drop)"
   , "## compare two wires with lt?, route the first, drop the second"
@@ -4391,8 +4415,8 @@ preludeSrc = unlines
   , "def pack = [(l x -> x l >> cons)] nil ... >> foldExp >> reverse"
   , "## two-wire elements: (a b)ⁿ ⇒ List(a b).  reverse/append are"
   , "## single-wire words, so order is kept Church-style: fold up a"
-  , "## FUNCTION, then apply it to nil"
-  , "def pack2 = [(f x y -> [(l -> f ((x y >> Box) l >> cons) >> apply)])] [pass] ... >> foldExp2 >> _ nil >> apply"
+  , "## FUNCTION, then ev it to nil"
+  , "def pack2 = [(f x y -> [(l -> f ((x y >> Box) l >> cons) >> ev)])] [pass] ... >> foldExp2 >> _ nil >> ev"
   , "## top-first packs: head = TOP of the segment.  With a `...` ladder"
   , "## (each line pushes UNDER), list order = TEXT order — the vertical"
   , "## list idiom:   line1 / line2 ... / line3 ... / packR"
@@ -4404,12 +4428,12 @@ preludeSrc = unlines
   , "def else? = in1"
   , "## probe a clause list (pack2 / pack2R lanes): run the first hit;"
   , "## in1(result) on a hit, in2(input) if none hit"
-  , "def choose = (x clauses -> clauses >> [x >> in2] [(rest c -> c >> unBox >> (p f -> x >> p ... >> apply >> (f ... >> apply >> in1 | drop >> rest) >> merge))] ... >> foldList)"
-  , "def matchWith = (x default clauses -> x clauses >> choose >> (pass | default ... >> apply) >> merge)"
+  , "def choose = (x clauses -> clauses >> [x >> in2] [(rest c -> c >> unBox >> (p f -> x >> p ... >> ev >> (f ... >> ev >> in1 | drop >> rest) >> merge))] ... >> foldList)"
+  , "def matchWith = (x default clauses -> x clauses >> choose >> (pass | default ... >> ev) >> merge)"
   , "## commute List over the sum monad: all hits, or the first miss"
   , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"
-  , "def filter = (p -> [p ... >> apply >> (single | drop >> nil) >> merge]) ... >> flatMap"
+  , "def filter = (p -> [p ... >> ev >> (single | drop >> nil) >> merge]) ... >> flatMap"
   , "## splice one level of right-nesting into the parent row — ANY"
   , "## inner arity (the row variable does the counting):"
   , "##   splice : (ρ0 | (σ0)) ⇒ (ρ0 | σ0)"
@@ -4429,24 +4453,54 @@ preludeSrc = unlines
   , "## right-nested sum, all landing on a common result — to sums what"
   , "## foldList is to lists.  Sum on top, handlers below:"
   , "##   tag >> [h1] [h2] [h3] ... >> case3"
-  , "def case2 = (f g s -> s >> (f ... >> apply | g ... >> apply) >> merge)"
-  , "def case3 = (f g h s -> s >> (f ... >> apply | (g ... >> apply | h ... >> apply) >> merge) >> merge)"
-  , "def case4 = (f g h i s -> s >> (f ... >> apply | (g ... >> apply | (h ... >> apply | i ... >> apply) >> merge) >> merge) >> merge)"
+  , "def case2 = (f g s -> s >> (f ... >> ev | g ... >> ev) >> merge)"
+  , "def case3 = (f g h s -> s >> (f ... >> ev | (g ... >> ev | h ... >> ev) >> merge) >> merge)"
+  , "def case4 = (f g h i s -> s >> (f ... >> ev | (g ... >> ev | (h ... >> ev | i ... >> ev) >> merge) >> merge) >> merge)"
+  , "## LAMBDA -- the exponential's other map, beside `ev`.  `curry` takes"
+  , "## a program that wants one extra wire DEEPEST and returns one that"
+  , "## takes that wire and hands back the rest as an Fn.  Its own body is"
+  , "## the one binder-into-quote that abstraction elimination takes as a"
+  , "## GENERATOR rather than eliminating: every other capture is rewritten"
+  , "## into `capture`, which is `curry` then `ev` (MANUAL §6)."
+  , "##   curry : Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a ⇒ Fn⟨ρ0 ⇒ ρ1⟩⟩"
+  , "def curry = (f -> [(x -> [x ... >> f ... >> ev])])"
+  , "## partial application: bind one value into the DEEPEST input of an"
+  , "## Fn.  Derived -- curry, then ev -- and the word abstraction"
+  , "## elimination emits once per captured parameter, shallowest first."
+  , "##   capture : a Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩"
+  , "def capture = (x f -> (f >> curry) x >> ev)"
+  , "## distribute a wire over a coproduct.  Not a prim and not an axiom:"
+  , "## in a cartesian CLOSED category `P x -` is a left adjoint (that is"
+  , "## `curry`), left adjoints preserve coproducts, and the body below is"
+  , "## that proof -- capture the wire into one handler per track, then"
+  , "## case over the sum.  distN follows caseN's arity family, and like"
+  , "## caseN the sums nest: polymorphism does not reach a row's width."
+  , "##   dist2 : a (ρ0 | ρ1) ⇒ (a ρ0 | a ρ1 | σ0)"
+  , "def dist2 = (x s -> x [(y ... -> y ... >> in1)] >> capture >> _ x [(y ... -> y ... >> in2)] >> _ capture >> _ _ s >> case2)"
+  , "def dist3 = dist2 >> (pass | dist2)"
+  , "def dist4 = dist2 >> (pass | dist3)"
+  , "## the easy direction: pull a shared deepest wire out of every track."
+  , "## Always available (no closed structure needed) -- it is the map any"
+  , "## category with coproducts has, and `dist` is its inverse."
+  , "##   undist2 : (a ρ0 | a ρ1) ⇒ a (ρ0 | ρ1 | σ0)"
+  , "def undist2 = (s -> s >> (_ in1 | _ in2) >> merge)"
+  , "def undist3 = (pass | undist2) >> undist2"
+  , "def undist4 = (pass | undist3) >> undist2"
   , "def condFn = (b t e -> b >> (t | e) >> merge)"
-  , "## a Bool selects a quotation; apply runs it on the rest of the stack"
-  , "def cond = condFn ... >> apply"
+  , "## a Bool selects a quotation; ev runs it on the rest of the stack"
+  , "def cond = condFn ... >> ev"
   , "def whenFn = (b t -> b >> (t | [...]) >> merge)"
   , "## run the quotation only when the Bool hits"
-  , "def when = whenFn ... >> apply"
+  , "def when = whenFn ... >> ev"
   , "def unlessFn = (b t -> b >> ([...] | t) >> merge)"
   , "## run the quotation only when the Bool misses"
-  , "def unless = unlessFn ... >> apply"
+  , "def unless = unlessFn ... >> ev"
   , "## the length of a list"
   , "def len = [0] [_ drop >> 1 ... >> +] ... >> foldList"
   , "## sum and product of an Int list"
   , "def sum = [+] 0 ... >> fold"
   , "def product = [*] 1 ... >> fold"
-  , "def downFrom = [(self n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> self ... >> apply >> (m 1 >> -) ... >> cons)) >> merge)] ... >> fix ... >> apply"
+  , "def downFrom = [(self n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> self ... >> ev >> (m 1 >> -) ... >> cons)) >> merge)] ... >> fix ... >> ev"
   , "## list(0, 1, …, n-1)"
   , "def range = downFrom >> reverse"
   , "## conditionally swap two wires (the Fredkin gate): reversible routing"
@@ -4460,16 +4514,16 @@ preludeSrc = unlines
   , "def xor = (a b -> a [b >> not] [b] ... >> cond)"
   , "def implies = (a b -> a [b] [true] ... >> cond)"
   , "## take the first n elements; skip drops them instead"
-  , "def take = [(self n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> apply >> x ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> apply"
-  , "def skip = [(self n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> apply)) >> merge)) >> merge)] ... >> fix ... >> apply"
+  , "def take = [(self n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> ev >> x ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> ev"
+  , "def skip = [(self n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> ev)) >> merge)) >> merge)] ... >> fix ... >> ev"
   , "## zip two lists into flat two-wire elements: List(a) List(b) => List(a b)"
-  , "def zip = [(self l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> self ... >> apply >> (x y >> Box) ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> apply"
+  , "def zip = [(self l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> self ... >> ev >> (x y >> Box) ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> ev"
   , "## conjunction / disjunction over a Bool list"
   , "def all = [true] [and] ... >> foldList"
   , "def any = [false] [or] ... >> foldList"
   , "## split a list of sums into two lists (hits, misses) — two wires,"
   , "## no bundling: our products are the stack itself"
-  , "def partitionSum = [(self l -> l >> unList >> ((nil) (nil) | (x r -> r >> self ... >> apply >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)] ... >> fix ... >> apply"
+  , "def partitionSum = [(self l -> l >> unList >> ((nil) (nil) | (x r -> r >> self ... >> ev >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)] ... >> fix ... >> ev"
   , "## print every element, front to back"
   , "def printAll = [(b x -> x >> print >> b)] 0 ... >> fold >> drop"
   , "## guard ladders as first-class words, one guard per line.  A lane"
@@ -4488,23 +4542,23 @@ preludeSrc = unlines
   , "## close a ladder with a quoted default: runs only if nothing hit."
   , "## (Also the total default for ifRoute/elifRoute ladders, where the"
   , "## undecided track still carries the routed value.)"
-  , "def otherwise = (s a -> s >> (pass | a ... >> apply) >> merge)"
+  , "def otherwise = (s a -> s >> (pass | a ... >> ev) >> merge)"
   , "## fold a product of decisions accumulated line by line with `...`:"
   , "##     (cond1) answer1 ...      <- each lane line pushes UNDER the"
   , "##     (cond2) answer2 ...         product (remainder on top), so"
   , "##     default         ...         lanes stack reversed and the"
   , "##     decide                      overwrite fold makes the FIRST-"
   , "## written true lane win.  a ((•|•) a)ⁿ ⇒ a — answers are values;"
-  , "## quote them and `decide >> apply` when an answer does work."
+  , "## quote them and `decide >> ev` when an answer does work."
   , "def decide = [(acc b f -> b f acc >> select)] ... >> foldExp2"
   , "## routing guards: the condition must be a router, and its hit VALUE"
   , "## flows into the action (so the action sees the routed/refined type)."
-  , "def ifRoute   = (x p a -> x >> p ... >> apply >> (a ... >> apply | pass))"
-  , "def elifRoute = (s p a -> s >> (in1 | p ... >> apply >> (a ... >> apply | pass)) >> merge)"
+  , "def ifRoute   = (x p a -> x >> p ... >> ev >> (a ... >> ev | pass))"
+  , "def elifRoute = (s p a -> s >> (in1 | p ... >> ev >> (a ... >> ev | pass)) >> merge)"
   , "## box a Code value as a runnable Fn WITHOUT running it: the"
   , "## deferred half of reflect's round trip.  Takes the WITNESS whose"
   , "## type the code must meet, so the boxed Fn is ordinarily typed —"
-  , "## Fn⟨Γ ⇒ (Δ | Str Γ)⟩ — and the check rides the railway at apply"
+  , "## Fn⟨Γ ⇒ (Δ | Str Γ)⟩ — and the check rides the railway at ev"
   , "## time.  On a miss the witness is still there to fall back to."
   , "def box = (w cd -> [(w) (cd) ... >> evalAs])"
   , "## a program's wiring as Code — nil when it has none to show (a closure)"
@@ -4514,7 +4568,7 @@ preludeSrc = unlines
   , "## depends on that stage alone — which is a law that comes free, not"
   , "## a promise that the result types."
   , "def stagewise = flatMap"
-  , "def atomwise = (f c -> c >> [[f ... >> apply] ... >> flatMap] ... >> map)"
+  , "def atomwise = (f c -> c >> [[f ... >> ev] ... >> flatMap] ... >> map)"
   , "## insert a stage after every stage, UNCHECKED (level 2b); the"
   , "## checked word is the prim `interpose`"
   , "def interposeRaw = (h c -> c >> [(s -> (s >> pack) h >> append)] ... >> flatMap)"
@@ -4522,10 +4576,10 @@ preludeSrc = unlines
   , "## program is its own witness and its own fallback, so the result"
   , "## has the program's arrow by construction — a rewrite the witness"
   , "## refuses leaves the original running"
-  , "def lift2 = (m f -> [f (m (f >> getCode) >> apply >> (c -> c)) ... >> evalAs >> (... | drop ... >> f ... >> apply) >> merge])"
+  , "def lift2 = (m f -> [f (m (f >> getCode) >> ev >> (c -> c)) ... >> evalAs >> (... | drop ... >> f ... >> ev) >> merge])"
   , "## sum an Int bundle: the variadic +"
   , "## run a program one wire deeper: `[f] >> lift` is f with one wire riding beneath it, untouched.  Compose it once per context wire.  This is tensorial STRENGTH — the action of (A ⊗ −) on a morphism — and it is what threads a resource past a pure stage, so it is an ordinary word rather than machinery."
-  , "def lift = (f -> [_ (f ... >> apply)])"
+  , "def lift = (f -> [_ (f ... >> ev)])"
   , "def sumN = [+] 0 ... >> foldExp"
     -- the GLA generators are now DERIVED: mapN/mapN2 lift any one- or
     -- two-wire word pointwise, so `+` and `*` are the only arithmetic
@@ -4544,25 +4598,53 @@ preludeSrc = unlines
   , "## action ever runs (the fold selects quotes, applies once).  The"
   , "## accumulator is (decided | default): a true lane decides once;"
   , "## later lanes leave a decision alone."
-  , "def firstTrue = (d -> d >> in2) ... >> [(acc b f -> acc >> (in1 | (g -> b [f >> in1] [g >> in2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> apply"
+  , "def firstTrue = (d -> d >> in2) ... >> [(acc b f -> acc >> (in1 | (g -> b [f >> in1] [g >> in2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> ev"
   , "## assemble a loop body from a quoted predicate and step"
-  , "def whileFn = (p f -> [p ... >> apply >> (f ... >> apply >> again | done) >> merge])"
+  , "def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
   , "def while = whileFn ... >> loop"
   , "## assemble a loop body that exits on the predicate's hit"
-  , "def untilFn = (p f -> [p ... >> apply >> (done | f ... >> apply >> again) >> merge])"
+  , "def untilFn = (p f -> [p ... >> ev >> (done | f ... >> ev >> again) >> merge])"
   , "## run step until predicate hits; exit with the hit payload"
   , "def until = untilFn ... >> loop"
+  ]
+
+-- `##` docs for PRIMS.  Prims are not defs, so they have no `##` line to
+-- carry one; the table rides into the prelude's doc map so `:doc` finds
+-- them by the same lookup.  Only words whose name alone does not say
+-- what they are need an entry.
+primDocs :: Map String String
+primDocs = M.fromList
+  [ ("ev", unlines
+      [ "the exponential's COUNIT: evaluation.  `ev` is the only way to"
+      , "consume an `Fn`, and it is not derivable — naming a value never"
+      , "runs it, so `(x f -> [x >> f])` does not typecheck.  Paired with"
+      , "`curry`, the other half of the adjunction: `curry` makes an Fn"
+      , "out of a program that wanted one more wire, `ev` takes it back."
+      , "Spelled `apply` before 2026-09-12, renamed so the exponential's"
+      , "two maps carry matching names."
+      , "The Fn sits BELOW its arguments, and the grade rides inside it:"
+      , "`[print] : • ⇒ Fn⟨a =IO> •⟩`, and `ev` is where the io comes"
+      , "back out, so one `ev` serves pure and effectful quotes alike." ])
   ]
 
 preludeModule :: Module
 preludeModule =
   case checkModuleWith (moduleBase primEnv M.empty [] [] []) preludeSrc of
     Left err -> error ("prelude failed to check: " ++ err)
-    Right m  -> m
+    Right m  -> m { modDocs = modDocs m `M.union` primDocs }
 
 preludeNames :: [String]
 preludeNames = [ n | (n, _, _) <- modDefs preludeModule ]
+
+-- The prelude words abstraction elimination writes INTO reflected code
+-- (stage 5a¾): one `capture` per parameter a quotation closed over, one
+-- `dist2` per parameter a row's tracks need.  They are ordinary defs and
+-- re-splice like any other name — which is exactly why shadowing one
+-- would be capture, the hygiene invariant's one loophole.  So they are
+-- the two prelude names a module may not redefine.
+elimEmits :: [String]
+elimEmits = ["capture", "dist2"]
 
 -- Names a user definition is allowed to shadow: every prelude def, plus
 -- the structural recursors the prelude's own data declarations generate
@@ -4780,7 +4862,7 @@ desyncError o out =
     _ -> Nothing
 
 -- A runtime definition: closed input arity, whether the input has an
--- open tail (segment-consuming as a final atom, like apply/loop), the
+-- open tail (segment-consuming as a final atom, like ev/loop), the
 -- body term, and — crucially — the SCOPE the body resolves names
 -- against.  The scope is a SNAPSHOT taken when the def was introduced:
 -- the environment as it stood then, plus the def itself (a lazy knot
@@ -4937,20 +5019,20 @@ evalTerm env defs vars term st =
       (outRest, logs') <- goAtoms more stk'
       pure (out ++ outRest, logs ++ logs')
 
-    -- apply is special: its Γ is the stack segment after the code value.
+    -- ev is special: its Γ is the stack segment after the code value.
     -- As the final atom that segment is the whole remaining stack; as a
     -- non-final atom it was closed to • by the typechecker.  (Parameters
     -- shadow the special forms, hence the vars guards.)
-    applyAtom isFinal (Prim "apply") stk
-      | not (M.member "apply" vars) = do
-          (args, stk') <- takeWires "apply" 1 stk
+    applyAtom isFinal (Prim "ev") stk
+      | not (M.member "ev" vars) = do
+          (args, stk') <- takeWires "ev" 1 stk
           case args of
             [VFn scope cvars body] -> do
               let seg = if isFinal then stk' else []
               (out, logs) <- evalTerm env scope cvars body seg
               pure (out, if isFinal then [] else stk', logs)
             _ ->
-              throwError "Runtime type error in apply: expected a quotation"
+              throwError "Runtime type error in ev: expected a quotation"
     -- evalAs: witness-checked splice.  Rebuild the term, infer it in
     -- process, check it SUBSUMES the witness's arrow, then run it on the
     -- segment.  Every failure rides the miss track WITH the untouched
@@ -5425,7 +5507,7 @@ runBuiltin _ _ name args =
 -- v1 gate: bodies whose atoms all have closed arities (wiring,
 -- arithmetic, literals, groups, closed rows, exact defs).  Parameters
 -- captured in quotations or row components (true closures) and
--- segment-consuming atoms (apply, injections, merge, loop, …) are
+-- segment-consuming atoms (ev, injections, merge, loop, …) are
 -- rejected onto the miss track with an explanation.
 --------------------------------------------------------------------------------
 
@@ -5618,23 +5700,29 @@ groundTerm env cv = go cv
 -- stack width is ever needed, so an erased remainder (an open binder's
 -- `...`) simply rides above everything, untouched.  The block is
 -- dropped once, at the end.
+-- `outer` is the enclosing binders' parameters: names that are wires at
+-- some LEVEL ABOVE this one.  Bodies are eliminated innermost first, so
+-- an inner level must leave such a name alone (a 0-in/1-out push, like a
+-- literal) and let the level that owns it thread it — which is exactly
+-- what `groupInfo` does when it sees the compiled inner abstraction.
 elimAbsTerm :: Env -> Term -> Either String Term
-elimAbsTerm env = go
+elimAbsTerm env = go []
   where
-    go (Seq a b)      = Seq <$> go a <*> go b
-    go (Tensor ts)    = Tensor <$> mapM go ts
-    go (Quote t)      = Quote <$> go t
-    go (Alts cs r)    = Alts <$> mapM go cs <*> pure r
-    go (Use rs b)     = Use rs <$> go b
-    go (OpenAbs slots _ b) = do
-      b' <- go b
+    go o (Seq a b)      = Seq <$> go o a <*> go o b
+    go o (Tensor ts)    = Tensor <$> mapM (go o) ts
+    go o (Quote t)      = Quote <$> go o t
+    go o (Alts cs r)    = Alts <$> mapM (go o) cs <*> pure r
+    go o (Use rs b)     = Use rs <$> go o b
+    go o (OpenAbs slots _ b) = do
+      let ps = [ n | Just n <- slots ]
+      b' <- go (ps ++ o) b
       -- Braid binders bind the DEEPEST wires in slot order, so the
       -- entry layout is already [params][remainder] unless a `_` slot
       -- interleaves a body wire with the names; then a permutation
       -- prefix sinks the names below the unnamed wires.
-      inner <- compileAbs env [ n | Just n <- slots ] b'
+      inner <- compileAbs env o ps b'
       pure (foldr Seq inner (paramsBelowStages slots))
-    go t = Right t
+    go _ t = Right t
 
 -- Adjacent-transposition stages that stably sink the NAMED slots below
 -- the unnamed ones: [slots in written order][rest] → [names][`_`
@@ -5673,8 +5761,8 @@ data AtomInfo = AtomInfo Int [(Int, Int)] Term
 
 -- Rewrite `body` so the parameters `ps` arrive as a block of wires
 -- BELOW its input; the block is dropped at the end.
-compileAbs :: Env -> [String] -> Term -> Either String Term
-compileAbs env ps body = do
+compileAbs :: Env -> [String] -> [String] -> Term -> Either String Term
+compileAbs env outer ps body = do
   stages <- mapM rewriteStage (spineOf body)
   pure (chainTerm (concat stages ++ [finalStage]))
   where
@@ -5718,6 +5806,9 @@ compileAbs env ps body = do
       -- an injection is open-arity, hence final in its stage: nothing
       -- to its right needs its width
       | Just _ <- injIndex nm = Right (AtomInfo 0 [] t)
+      -- an ENCLOSING binder's parameter: a wire at a level above this
+      -- one, so it pushes here and is threaded by whoever owns it
+      | nm `elem` outer = Right (AtomInfo 0 [] t)
       | otherwise =
           case M.lookup nm env of
             Nothing -> Left $ "reflect: unknown name in abstraction body: " ++ nm
@@ -5725,29 +5816,74 @@ compileAbs env ps body = do
             -- closed prefix can sit left of anything
             Just (Forall _ _ _ _ _ (Arrow i _ _)) ->
               Right (AtomInfo (closedArity i) [] t)
+    -- A quotation that mentions a parameter is a CLOSURE, and it is
+    -- reified by the exponential's own maps (stage 5a¾).  Compile the
+    -- body against a COPY of the block laid deepest INSIDE the quote —
+    -- `Fn⟨P ρ0 ⇒ ρ1⟩` — and then bind the copies off the stack with
+    -- `capture`, once each.  Every `capture` binds the wire directly
+    -- below the Fn, which must be the Fn's own DEEPEST input; so the
+    -- block inside the quote is laid in the REVERSE of the block on the
+    -- stack, shallowest-outside binding deepest-inside first.  Nothing
+    -- downstream changes: the result has the quotation's original type.
     classify t@(Quote b)
-      | any (`elem` ps) (freeNamesIn b) =
-          Left "reflect: parameter captured in a quotation (a closure) — not reflectable yet"
-      | otherwise = Right (AtomInfo 0 [] t)
-    classify t@(Alts cs _)
-      | any (any (`elem` ps) . freeNamesIn) cs =
-          Left "reflect: parameter used inside a row component — not reflectable yet"
-      | otherwise = Right (AtomInfo 1 [] t)
+      | null (usedIn b) = Right (AtomInfo 0 [] t)
+      | otherwise =
+          let used = usedIn b
+              m    = length used
+              -- the block is m wires; the quote pushes on top of it
+              capAt j = replicate (m - 1 - j) (Prim "_") ++ [Prim "capture"]
+          in do
+            inner <- compileAbs env outer (reverse used) b
+            let stages = (replicate m (Prim "_") ++ [Quote inner])
+                       : [ capAt j | j <- [0 .. m - 1] ]
+            pure (AtomInfo m (zip [0 ..] (idxOf used)) (chainTerm stages))
+    -- A row that mentions a parameter: distribute a copy of the block
+    -- into every track with `dist2` (one per block wire, shallowest
+    -- first, so the block lands in its own order at the bottom of each
+    -- track), compile each branch against it, and let each branch drop
+    -- its own copy at the end — which is what `compileAbs` already does.
+    -- The row keeps its ORIGINAL type: no `undist2` is needed, and the
+    -- output row stays closed, which an `undist2` would not leave it.
+    classify t@(Alts cs residual)
+      | null (usedIn t) = Right (AtomInfo 1 [] t)
+      | residual =
+          Left $ "reflect: parameter used inside a residual row "
+              ++ "`(p | q | ...)` — the passing tracks would need the "
+              ++ "parameter block too, and an open row's width is not a "
+              ++ "type Braid can write; close the row"
+      | length cs /= 2 =
+          Left $ "reflect: parameter used inside a row of " ++ show (length cs)
+              ++ " tracks — distributing the block over a coproduct is "
+              ++ "derived from `case2`/`merge`, which are binary, so only "
+              ++ "2-track rows are covered; write it as nested 2-track rows"
+      | otherwise =
+          let used = usedIn t
+              m    = length used
+              distAt j = replicate (m - 1 - j) (Prim "_") ++ [Prim "dist2"]
+          in do
+            cs' <- mapM (compileAbs env outer used) cs
+            let stages = [ distAt j | j <- [0 .. m - 1] ] ++ [[Alts cs' False]]
+            pure (AtomInfo (m + 1) (zip [0 ..] (idxOf used)) (chainTerm stages))
     classify (OpenAbs {}) =
       Left "internal: nested abstraction not yet eliminated"
     classify g = groupInfo g
 
+    -- the parameters an atom actually mentions, in first-use order, and
+    -- their depths in the block
+    usedIn t = nub [ nm | nm <- freeNamesIn t, nm `elem` ps ]
+    idxOf us = [ i | Just i <- map (`elemIndex` ps) us ]
+
     -- a grouped compound: recursively thread the parameters it uses,
     -- which arrive as ITS block, below its own inputs
     groupInfo g = do
-      let used = nub [ nm | nm <- freeNamesIn g, nm `elem` ps ]
-          usedIdx = [ i | Just i <- map (`elemIndex` ps) used ]
+      let used = usedIn g
+          usedIdx = idxOf used
       Arrow gi _ _ <- inferGroupArrow g
       let gIn = closedArity gi
       if null used
         then Right (AtomInfo gIn [] g)
         else do
-          g' <- compileAbs env used g
+          g' <- compileAbs env outer used g
           pure (AtomInfo (length used + gIn)
                          (zip [0 ..] usedIdx)
                          g')
@@ -5756,7 +5892,7 @@ compileAbs env ps body = do
       let dummy = TV "_p"
           dummyScheme =
             Forall [dummy] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
-          arityEnv = foldr (\nm -> M.insert nm dummyScheme) env ps
+          arityEnv = foldr (\nm -> M.insert nm dummyScheme) env (ps ++ outer)
       inferTermIn arityEnv g
 
 openTailedS :: SType -> Bool

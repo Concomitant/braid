@@ -7,9 +7,9 @@ def z = in1 >> Nat
 def s = in2 >> Nat
 
 def fromInt =
-  [(self ... -> zero? >> (drop >> z | _ 1 >> - >> self ... >> apply >> s) >> merge)] ...
+  [(self ... -> zero? >> (drop >> z | _ 1 >> - >> self ... >> ev >> s) >> merge)] ...
   fix ...
-  apply
+  ev
 ## toInt by points: zero maps to 0, successor to +1 on the result
 def toInt = [0] [1 ... >> +] ... >> foldNat
 

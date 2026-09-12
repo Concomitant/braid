@@ -76,7 +76,7 @@ dup  : ∀A. A ⇒ A A
 drop : ∀A. A ⇒ •
 ```
 
-Signatures are exact: an operation consumes and produces precisely the wires written, and constants source from `•`. Nothing carries an implicit remainder — passing wires through is always explicit (`pass` / `...` / `>>>`, or `id` per known wire). When a stack variable does appear in a scheme (`pass`'s ρ, `apply`'s Γ), it is always the rightmost tail; see "Remainder discipline" for why.
+Signatures are exact: an operation consumes and produces precisely the wires written, and constants source from `•`. Nothing carries an implicit remainder — passing wires through is always explicit (`pass` / `...` / `>>>`, or `id` per known wire). When a stack variable does appear in a scheme (`pass`'s ρ, `ev`'s Γ), it is always the rightmost tail; see "Remainder discipline" for why.
 
 Stack identity / remainder passthrough:
 
@@ -346,7 +346,7 @@ t1 … tn : Γ1 … Γn ρ ⇒ Δ1 … Δn ρ
 
 Only the final atom may be open; every earlier atom has its stack variable instantiated to `•`. The result again satisfies the invariant.
 
-Since operations are exact, ρ-retention matters only for `pass` (hence `...`/`>>>`) and for the segment variables of higher-order eliminators (`apply`, `branch`) in final position. A bare `+` requires the stack to be exactly two wires wide; on a deeper stack write `+ ...`.
+Since operations are exact, ρ-retention matters only for `pass` (hence `...`/`>>>`) and for the segment variables of higher-order eliminators (`ev`, `branch`) in final position. A bare `+` requires the stack to be exactly two wires wide; on a deeper stack write `+ ...`.
 
 Operational reading: a stage consumes the leftmost `k` wires, where `k` is the sum of its atoms' closed input arities. If the stage is open (it ends in `pass` / `...`, or its final atom is a segment-consuming eliminator), all wires to the right flow through (or into the segment). If it is closed, the incoming stack must be exactly `k` wires wide.
 
@@ -387,7 +387,7 @@ def increment = (1 ... >> +)
 ### Consequences for the extension sections
 
 * All signatures are exact as written — no primitive quantifies over an implicit remainder. Stack variables appear only in `pass : ∀ρ. ρ ⇒ ρ` and as the consumed/produced segments of higher-order eliminators.
-* `apply : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ` already satisfies the invariant: the quotation sits on the first wire and `Γ` is the tail. Higher-order eliminators must follow this shape — a segment variable can only be a tail, so control values (quotations, booleans) come first and the consumed segment comes last.
+* `ev : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ` already satisfies the invariant: the quotation sits on the first wire and `Γ` is the tail. Higher-order eliminators must follow this shape — a segment variable can only be a tail, so control values (quotations, booleans) come first and the consumed segment comes last.
 * `branch` and `trace` are oriented accordingly (see their sections: condition/quotations on the leftmost wires, `Γ` as the tail; `trace` feeds back the first wire, not the last).
 
 ### Implementation notes
@@ -568,14 +568,14 @@ p : Γ ⇒ Δ
 Application:
 
 ```text
-apply : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ
+ev : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ
 ```
 
 Example:
 
 ```text
 [dup >> *] 7
-apply
+ev
 print
 ```
 
@@ -605,21 +605,21 @@ into this spec:
 
 Reconciliation with the remainder discipline:
 
-* **The `apply` ordering question is settled by the invariant.** The
+* **The `ev` ordering question is settled by the invariant.** The
   argument-first signature `Γ Fn⟨Γ ⇒ Δ⟩ ⇒ Δ` puts a segment variable in
   leading position — inexpressible under the tail-only invariant and
   non-principal to unify. So the typing convention is **function-first**:
-  `apply : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ`. Crucially, the argument-first *surface style*
+  `ev : Fn⟨Γ ⇒ Δ⟩ Γ ⇒ Δ`. Crucially, the argument-first *surface style*
   still works, because pushed values enter at the front wire:
 
   ```text
   7
   [square] ...
-  apply
+  ev
   ```
 
   After line 2 the stack is `Fn⟨Int ⇒ Int⟩ Int` — the quotation landed on
-  wire 1, exactly where function-first `apply` wants it, with the `...`
+  wire 1, exactly where function-first `ev` wants it, with the `...`
   carrying the `7` beneath it (constants have no implicit remainder). The
   update's desired visual parallel with `7 / square` holds with no change
   to the typing convention.
@@ -636,7 +636,7 @@ Reconciliation with the remainder discipline:
   and the spec-update's types hold verbatim (no elided-`ρ` reading
   convention). The only stack variables in the primitive environment are
   `pass`'s ρ — the sole source of remainder passing, reached via
-  `...`/`>>>` — and the segment variables of `apply`/`branch`, which are
+  `...`/`>>>` — and the segment variables of `ev`/`branch`, which are
   consumed by the eliminator rather than passed. Every line is a total
   description of its diagram slice: each wire is covered by an atom, an
   `id`, or the `...`.
@@ -873,7 +873,7 @@ Caution: selection may evaluate continuations multiple times. Keep selection reg
 5. Built-ins: `id`, `swap`, `dup`, `drop`, `pass`, literals, arithmetic, `print`.
 6. Desugaring: `...` and `>>>` insert trailing `pass`.
 7. Let-polymorphic definitions.
-8. Quotations and `apply`.
+8. Quotations and `ev`.
 9. Branch/list extensions.
 10. Later: trace/fix, monads, selection handlers.
 
@@ -885,6 +885,6 @@ spaces      = independent horizontal wiring
 dup/drop    = cartesian copying/deleting
 pass/...    = explicit remainder identity at tensor-stage boundary
 [program]   = reified diagram
-apply       = splice/run reified diagram
+ev       = splice/run reified diagram
 ```
 

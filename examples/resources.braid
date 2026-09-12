@@ -54,7 +54,7 @@ print                                  # 2401 — 7 squared, twice
 # no compiler support — compose it once per context wire.
 (":" ; Log) 7
 ([dup ; *] ; lift) ...
-apply
+ev
 unLog _ ; print print                  # ":" untouched, 49
 
 # ---- discharging a resource: a handler is a wrapping macro -----------
@@ -67,7 +67,7 @@ unLog _ ; print print                  # ":" untouched, 49
 # Braid's instances already are models, so discharge is a wrapping
 # functor rather than a form.)
 
-def collectLog = (f -> [f ("" ; Log) ... ; apply ; unLog ...])
+def collectLog = (f -> [f ("" ; Log) ... ; ev ; unLog ...])
 # collectLog : Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩
 
 def square =
@@ -76,7 +76,7 @@ def square =
     "squared "
     note
 
-[square] ; collectLog ; _ 7 ; apply
+[square] ; collectLog ; _ 7 ; ev
 print print                            # "squared " then 49
 
 # ---- and once, for every resource ------------------------------------
@@ -99,7 +99,7 @@ instance Counts : Collector(Counter, Int) =
     seed   = 0 ; Counter
     unwrap = unCounter
 
-def collected = use Collector ; (f -> [f (seed) ... ; apply ; unwrap ...])
+def collected = use Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
 
 def collectCount = use Counts ; collected
 # collectCount : Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩
@@ -109,5 +109,5 @@ def tick =
     dup ; *
     bump
 
-[tick] ; collectCount ; _ 7 ; apply
+[tick] ; collectCount ; _ 7 ; ev
 print print                            # 1 then 49

@@ -101,7 +101,10 @@ bare `use` leaves.
    scope for the rest of the block, the way a label sits beside a wire
    in a drawn diagram. The arrow's side is the whole rule. It is sugar,
    not machinery: `-> x y z` *is* `x y z ... -> x y z ...`, and
-   `reflect` compiles it back to dup/swap/drop to prove it.
+   `reflect` compiles it back to dup/swap/drop to prove it — and, for a
+   name a quotation or a row branch closed over, to `curry`/`ev`, the
+   exponential's two maps. Closures are wiring too, so `reflect` is
+   total on binder code and `use F` over the `fix` idiom works.
 6. **Guard ladders are ordinary words.** Bind the subject and a guard
    is a bare Bool beside its answer; `...` accumulates one lane per
    line and `decide` folds the product — first true lane wins:
@@ -215,7 +218,7 @@ bare `use` leaves.
     (`print`, `readLine`, `readFile`, `writeFile`) and every
     other grade follows from composition — `def shout = toStr >> print : a0 =IO> •`.
     Quoting stays pure, since pushing an action isn't doing it:
-    `[print] : • ⇒ Fn⟨a0 =IO> •⟩`, and `apply` is what transfers the grade out.
+    `[print] : • ⇒ Fn⟨a0 =IO> •⟩`, and `ev` is what transfers the grade out.
 
     The other wires you can *name*: `resource Log = Str` declares a
     threaded wire — nominal, so `Int Int` is never silently a
@@ -311,7 +314,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 815-case test suite, a full
+(typechecker, interpreter, REPL), an 848-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

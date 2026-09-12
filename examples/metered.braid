@@ -35,10 +35,10 @@ def poly =
 # is its own witness, so the result has the program's arrow whatever
 # the functor did.  A program that threads Fuel is metered …
 "-- lift2: metered where it types --" ; print
-([metered] [use Fuel ; dup ; *] ; lift2) (10 ; Fuel) 5 ; apply ; _ print ; unFuel ; print   # 25, then 7
+([metered] [use Fuel ; dup ; *] ; lift2) (10 ; Fuel) 5 ; ev ; _ print ; unFuel ; print   # 25, then 7
 
 # … and one that does not thread Fuel is left alone: the metered code
 # needs a wire the program never had, the witness refuses it, and the
 # original runs.
 "-- lift2: the original where it does not --" ; print
-([metered] [dup ; *] ; lift2) 5 ; apply ; print          # 25
+([metered] [dup ; *] ; lift2) 5 ; ev ; print          # 25
