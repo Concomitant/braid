@@ -19,4 +19,4 @@ def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))
 def showPair = (a b -> a >> toStr >> _ (b >> toStr) >> cat)
 def lhsB = + >> dup
 def rhsB = (x y -> x y >> + >> _ (x y >> +))
-3 4 >> lhsB >> showPair >> _ (3 4 >> rhsB >> showPair) >> eq? >> verdict >> print   # in1()
+3 4 >> lhsB >> showPair >> _ (3 4 >> rhsB >> showPair) >> eq? >> verdict >> print   # alt1()

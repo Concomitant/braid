@@ -1338,7 +1338,7 @@ Everything else is derived, in the prelude, with the derivation visible:
   left adjoint (that *is* `curry`), left adjoints preserve coproducts,
   and that body is the proof written out. `undist2` needs no closed
   structure at all — it is the canonical map any category with
-  coproducts has, `(s -> s >> (_ in1 | _ in2) >> merge)`.
+  coproducts has, `(s -> s >> (_ alt1 | _ alt2) >> merge)`.
 
 **The algorithm.** Under a block `P` of `k` wires: a quotation mentioning
 `m` of them copies the block, compiles the body against a copy laid
@@ -1370,7 +1370,7 @@ special.
 **Deviation from the scoped plan, and why.** The plan said to keep the
 block through each branch, `undistN` it back out, and drop it once.
 Dropping inside each branch is one word shorter *and better typed*:
-`undist2`'s output carries a residual row variable (`in2` is open in its
+`undist2`'s output carries a residual row variable (`alt2` is open in its
 tracks and nothing closes it), so undisting would widen the row's type
 where dropping per branch leaves it exactly as written. `undistN` ships
 anyway — it is half of the `Distributive` theory, and the laws need it.
@@ -1378,7 +1378,7 @@ anyway — it is half of the `Distributive` theory, and the laws need it.
 **What is now true of initiality, stated exactly.** `reflect` is total
 on binder code but for two corners, and both are honest:
 
-- A **residual** row `(p | q | ...)` that mentions a parameter is still
+- A **residual** row `(p | q | ---)` that mentions a parameter is still
   refused: the passing tracks would need the block too, and an open
   row's width is not a type Braid can write.
 - A **flat row of three or more tracks** that mentions a parameter is
@@ -1389,6 +1389,10 @@ on binder code but for two corners, and both are honest:
   `dist3 = dist2 >> (pass | dist2)`. Polymorphism does not reach a
   closed row's width, and neither does this. Every row in the prelude
   and in `examples/` is binary, so the corner is a corner.
+
+*(Both corners closed the same day — see "Rows get a proper tail"
+below. The reading above is kept because it is why `#dist:K` had to be
+a generator rather than one more derivation.)*
 
 `sameCode` **decides nothing new**. It normalizes the term it is handed
 and never runs abstraction elimination, so two spellings of a capturing
@@ -1422,6 +1426,157 @@ level-1 library reflects (`lift`, `box`, `equalsTo`, `both`, `whileFn`,
 `case2`). "This functor transports recursion" is now *statable* —
 `F(fix b) = fix (F b)` — but it is not stated: that is a law in
 `theory Functor`, and it is 5b.
+
+## Amendment 2026-09-12 — rows get a proper tail (`---`, `into`, `#dist:K`, `altN`)
+
+*Written after the products-versus-coproducts pass. Every asymmetry
+between the two in Braid traces to one fact — **products are the ambient
+structure, coproducts are an object** — and that fact is a choice, not
+an accident: the stack IS the product, so product structure is spelled
+by juxtaposition and needs no words, while a sum is one wire and every
+map on it has to be a word. This stage removed the asymmetries that were
+gaps rather than consequences of that choice. Labels stay out: rows are
+POSITIONAL.*
+
+### The table
+
+| | product (the stack) | coproduct (a sum wire) |
+|---|---|---|
+| where it lives | the ambient structure; juxtaposition | one wire, `(Δ₁ \| … \| Δₙ [\| σ])` |
+| the tail | `...` — a stack variable `ρ` | `---` — a row variable `σ` |
+| introduction | writing wires side by side | `alt1`…`altN` (`here`/`ok`/`again` ≡ `alt1`) |
+| functorial action | a tensor stage `f g` | a code row `(f \| g)` |
+| act on some, pass the rest | `f ...` / `>>>` | `(f \| ---)` |
+| closed eliminator | `drop`, `at`, `foldExp` | `merge`, `case2`…`case4`, `otherwise` |
+| **open** eliminator | `pass` (identity on an unknown rest) | **`into`** (handle one, shift the rest) |
+| diagonal / codiagonal | `dup : a ⇒ a a` | `merge : (ρ \| ρ) ⇒ ρ` |
+| terminal / initial | `• `, `forget : ρ ⇒ •` | the empty row — unwritable, and nothing needs it |
+| symmetry | `swap` | `(alt2 \| alt1) >> merge` (the track swap; the prelude's `not`) |
+| distributivity | — | `dist2` derived, `#dist:K` a generator |
+| decided or run | `sameCode` decides the wiring fragment | rows are outside it; laws run at sample points |
+
+**The dual pairs, read off the table.** `dup`/`merge` (diagonal and
+codiagonal). `forget`/the-initial-map (terminal and initial; Braid has
+the first as a word and does not need the second, because an empty row
+is never built). `swap`/track-swap. `f g`/`(f | g)` (the two functorial
+actions). `f ...`/`(f | ---)` (act on some, pass the rest). `pass`/`into`
+(the two OPEN eliminators — this is the pair the stage added, and it is
+the one that makes the column read straight).
+
+What is *not* dual, and shouldn't be: `curry`/`ev` have no coproduct
+mirror, because the exponential is right adjoint to the product alone.
+That asymmetry is real category theory, not a Braid gap.
+
+### `into` is `[h, id]`, and why that is the only choice
+
+```
+into : Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)
+```
+
+A copairing needs one handler per alternative. Over a residual, the
+alternatives inside `σ0` have no names, so the only handler you can
+supply for them is the identity — and `[h, id]` is therefore not one
+copairing among many, it is the whole of what can be written. Its
+runtime content is a **tag shift**: tag 0 runs `h` on its bundle (whose
+answer is already a value of the remaining sum), and tag `k > 0` becomes
+`k − 1` with the bundle untouched.
+
+It is not derivable. The obvious attempt, `(h | ---)`, gives
+`((σ0) | σ0)` — a sum of a sum beside itself — and collapsing that
+*positionally* is exactly the shift `into` performs; there is no word
+that does it, and `merge` cannot, since the two sides have different
+types. `splice : (ρ0 | (σ0)) ⇒ (ρ0 | σ0)` flattens the *other* nesting.
+
+**`>=>` is not an instance of `into`.** `t1 >=> t2` desugars to
+`t1 >> (t2 | alt2) >> merge` — the copairing `[q, alt2]`, with a
+**written** second handler over a **closed** two-track row. `into`'s
+second component is forced to be the identity. A closed two-track
+copairing `[h, id]` is just `(h | pass) >> merge` and needs no prim
+either; `into` earns its keep exactly when what remains is a residual,
+or more than one track.
+
+`into` and `otherwise` are the pair worth naming together. `otherwise =
+(s a -> s >> (pass | a ... >> ev) >> merge)` is `[id, a]` then un-sum —
+the ladder **closer**. `into` is `[h, id]` — the ladder **step**. The
+idiom is one of each:
+
+```braid
+s
+[h1 ; alt1] ... ; into
+[h2 ; alt1] ... ; into
+_ [d] ; otherwise
+```
+
+### Why `#dist:K` is a generator while `dist2` is derived
+
+`dist2 : a (ρ0 | ρ1) ⇒ (a ρ0 | a ρ1 | σ0)` is a **theorem**: in a
+cartesian closed category `P × –` is a left adjoint (that is `curry`),
+left adjoints preserve coproducts, and the prelude body is that proof
+written out — capture the wire into one handler per track, then `case2`.
+The derivation goes through `merge`, and `merge` is **binary**. So the
+derivation reaches exactly the closed two-track case, and `dist3 =
+dist2 >> (pass | dist2)` reaches the NESTED ones, and nothing derives a
+flat width or a residual.
+
+```
+#dist:K : a (ρ1 | … | ρK | σ) ⇒ (a ρ1 | … | a ρK | σ)
+```
+
+Two reasons this cannot be a definition. (1) **Width.** `K` is the arity
+of a *written* row, and polymorphism does not reach it — the same wall
+`caseN`, `distN` and the generated `#fold:` recursors all stand at, so
+`#dist:K` is a synthesized family exactly like `#fold:`, one member per
+width, its name unspellable (`#` opens a comment) so nothing can shadow
+it. (2) **The residual.** `σ` is not distributed into *at all*; it
+passes, block-free. That is not a shortcut, it is the only possibility:
+to push `a` into a track you must write a handler for that track, and
+the tracks in `σ` have no names. A word that "prepends `P` to every
+track of an unknown row" is not a type Braid can write.
+
+With it, abstraction elimination covers every row — closed binary
+(emitting the derived `dist2`, because reflected code should show the
+theorem), wider, and residual — and **`reflect` is total on binder
+code**, full stop. The two corners above are closed.
+
+### The alternative that is parked: extensive rows
+
+The other way to type `P ⋉ σ` is as a **type former** — a row with a
+pending prefix, distributed lazily. It is principal for a fixed-width
+prefix and fails for a stack-variable one:
+
+```
+ρ ⋉ σ  ~  Int ⋉ τ
+```
+
+has `ρ := •, σ := Int ⋉ τ` and `ρ := Int, σ := τ`, and the two are
+**incomparable** — neither is an instance of the other, so there is no
+principal solution and the unifier would have to guess. That is the
+whole argument; extensivity waits for a use that forces it.
+
+### The copower, also parked
+
+`n·C` — the `n`-fold coproduct of one object, a row *segment* rather
+than a row — is the exact dual of `Cⁿ`, which Braid already has as
+exponents (§13, `design-exponents.md`). Its **one-track** form is
+writable today: `Fin(n) C` is a tag beside a payload, which is what a
+copower collapses to when every alternative has the same shape. The row
+form (`n` alternatives, each `C`, with `merge` at width `n`) needs
+`mergeN` and the same width machinery exponents needed. Parked beside
+stage 7, where the exponent/copower symmetry is the natural place to
+finish it.
+
+### `in1..inN` → `alt1..altN`
+
+One spelling, **no alias** (2026-09-12, Daniel: "alt is good"). The
+reasons are small and both real: `[h >> in1] into` read badly, and `in`
+is the prefix `into` now lives beside. ~360 mechanical sites moved in
+one commit — prelude, examples, tests, manual, design notes, the value
+printer, and `injIndex`'s pattern; `here ≡ alt1` stays, as do
+`ok`/`miss`/`again`/`done`. The Haskell identifiers (`injIndex`,
+`injScheme`) keep their names: they are about injections, which is what
+the family still is.
+
+The word for a sum's tracks, in prose, is **alternative**.
 
 ## Honest gaps
 

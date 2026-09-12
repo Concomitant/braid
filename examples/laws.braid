@@ -9,7 +9,7 @@ def samples = (0 1 2 3 4 5 ; pack)
 def lhs = [succ ; double]        ... ; map
 def rhs = [double ; succ ; succ] ... ; map
 
-samples >> lhs >> _ (samples >> rhs) >> eq? >> verdict >> print   # in1() = law holds
+samples >> lhs >> _ (samples >> rhs) >> eq? >> verdict >> print   # alt1() = law holds
 
 # ---- laws that need no samples at all --------------------------------
 # The law above is TESTED: it holds at 0..5, and says nothing about 6.

@@ -3,8 +3,8 @@
 
 type Tree(a) = (a | Tree(a) Tree(a))
 
-def leaf = in1 >> Tree
-def node = in2 >> Tree
+def leaf = alt1 >> Tree
+def node = alt2 >> Tree
 
 ## sum of the leaves, by points: leaf keeps its value, node adds results
 def total = [_] [+] ... >> foldTree

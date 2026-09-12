@@ -84,9 +84,13 @@ bare `use` leaves.
    is increment. No implicit anything — this is what keeps inference
    principal.
 2. **Sums are alternate flows.** `(Int | Str)` is one wire carrying
-   either. Rows `(f | g)` run one branch; `merge` rejoins; `assocL` /
-   `assocR` re-nest; `case3` folds a whole nested sum at once.
-   Bool is just `(• | •)`.
+   either. Rows `(f | g)` run one branch; `alt1`…`altN` tag; `merge`
+   rejoins; `assocL` / `assocR` re-nest; `case3` folds a whole nested
+   sum at once. Bool is just `(• | •)`. A row has **two tails**: `...`
+   continues a track's wires, `---` continues the alternatives — so
+   `(f | ---)` acts on the first alternative and passes every other one,
+   named or not, and `into` peels one alternative off a row nobody has
+   to have written down.
 3. **Predicates are routers.** `odd? : Int ⇒ (Int | Int)` *routes*
    its input instead of returning a detached boolean — branches
    receive the data. Drop the `?` to forget instead: `odd : Int ⇒
@@ -94,7 +98,7 @@ bare `use` leaves.
 4. **Failure is a track.** `>=>` composes hit-tracks and lets misses
    fall through; `>?>` chains along the miss track (it *is* elif);
    `readFile` and `parse` are railway stages too. None of them are
-   primitive: each is `>> (stage | injector) >> merge`, bundled.
+   primitive: each is `>> (stage | alt1/alt2) >> merge`, bundled.
 5. **Names label wires; they don't cut them.** `x y ->` consumes the
    wires it names, so the body re-pushes them. `-> x y` instead tags
    them as they go by — identity at runtime, wires flowing on, names in
@@ -314,7 +318,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), an 848-case test suite, a full
+(typechecker, interpreter, REPL), a 875-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

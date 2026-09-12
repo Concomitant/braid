@@ -5,11 +5,11 @@
 # miss track carrying the untouched segment.
 
 [dup >> * >> 1 ... >> +] >> reflect
-    ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget   # in1(36): a 2-stage section, run
+    ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget   # alt1(36): a 2-stage section, run
 
 # abstraction elimination: lambdas reflect as pure wiring
 [(x y -> x (2 y >> *) >> +)] >> reflect
-    ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget           # in1(11)
+    ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget           # alt1(11)
 
 # true closures are gated onto the miss track with an explanation
 [(x -> [x])] >> reflect >> (forget >> "ground?!" ... >> print | print) >> forget

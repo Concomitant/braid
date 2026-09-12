@@ -1,12 +1,12 @@
-def okStep = (1 ... >> + | ...)
+def okStep = (1 ... >> + | ---)
 
-10 >> in1
+10 >> alt1
 okStep
 okStep
 merge
 print
 
-10 >> in2
+10 >> alt2
 okStep
 okStep
 merge

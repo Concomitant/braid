@@ -1,9 +1,9 @@
 def area = (* | dup >> *) >> merge
 
-3 4 >> in1
+3 4 >> alt1
 area
 print
 
-5 >> in2
+5 >> alt2
 area
 print

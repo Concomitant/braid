@@ -3,9 +3,9 @@
 # eliminator, and the dual of folding a list.
 
 data Shape = (Int | Int Int | Int Int Int)     # radius | w h | a b c
-def circle = in1 >> Shape
-def rect   = in2 >> Shape
-def tri    = in3 >> Shape
+def circle = alt1 >> Shape
+def rect   = alt2 >> Shape
+def tri    = alt3 >> Shape
 
 # a row of handlers (each alternative to Int) collapsed by the
 # generated n-ary mergeShape:

@@ -55,7 +55,7 @@ The same argument rejects automatic distribution/factoring
 
 `(Δ₁ | … | σ)`: unification is list-with-optional-tail over the
 alternatives — decidable, principal, the stack unifier one level up.
-Producers commit only to a prefix (`in2 : Δ ⇒ (Δ₁ | Δ | σ)`); consumers
+Producers commit only to a prefix (`alt2 : Δ ⇒ (Δ₁ | Δ | σ)`); consumers
 widen or close the row. **Elimination closes**: matching against a
 closed row pins `σ`, so missing cases are unification errors.
 
@@ -64,20 +64,20 @@ closed row pins `σ`, so missing cases are unification errors.
 ```text
 here  : ∀Δ σ.  Δ ⇒ (Δ | σ)      -- start a sum: my segment, front track
 there : ∀Δ σ. (σ) ⇒ (Δ | σ)     -- widen: new unknown track in front (tag+1)
-inN   : ∀…  . Δ ⇒ (Δ₁ | … | Δ | σ)   -- flat spelling: inN ≡ here >> there^(n-1)
+altN   : ∀…  . Δ ⇒ (Δ₁ | … | Δ | σ)   -- flat spelling: altN ≡ here >> there^(n-1)
 ```
 
 Injections are unary numerals (`here`/`there`) with a lexical flat
-family (`in1`, `in2`, …) as sugar; tags are positional and stable under
+family (`alt1`, `alt2`, …) as sugar; tags are positional and stable under
 tail-widening, so runtime representation is `tag + bundle` and widening
-is free. Value display echoes the family: `in2(3, 4)`.
+is free. Value display echoes the family: `alt2(3, 4)`.
 
 ## 3. Elimination: code rows
 
 The `|` that forms sum *types* also forms sum *programs*:
 
 ```text
-(p₁ | p₂ [| ...]) : (Γ₁ | Γ₂ [| σ]) ⇒ (Δ₁ | Δ₂ [| σ])
+(p₁ | p₂ [| ---]) : (Γ₁ | Γ₂ [| σ]) ⇒ (Δ₁ | Δ₂ [| σ])
 ```
 
 A **code row** is the sum functor action: one component per alternative,
@@ -87,11 +87,15 @@ alternate (one runs, by tag) — and satisfies the matching functoriality
 law `(f | g) >> (h | k) = (f >> h | g >> k)`.
 
 * A 1-ary row **is** plain grouping: `(p)`.
-* The trailing residual `| ...` is identity on the remaining
-  alternatives (open row). `pass` is the blessed readable spelling of an
-  identity *component*; `...` remains synonymous. The ellipsis thus
-  means "identity on the unknown remainder" in **both** monoidal
-  dimensions (stack tail, row tail).
+* The trailing residual `| ---` is identity on the remaining
+  alternatives (open row). `pass` is the spelling of an identity
+  *component* — one track that passes. **Amended 2026-09-12**: the two
+  tails are now two glyphs, because they are two kinds. `...` after
+  whitespace continues WIRES (a stack tail, `ρ`); `---` after `|`
+  continues ALTERNATIVES (a row tail, `σ`). `| ...` used to mean the
+  residual and is refused for one release, with a message naming both
+  replacements. "Identity on the unknown remainder" is still one idea
+  in both monoidal dimensions; it is no longer one token.
 * Precedence, loosest to tightest: newline (strict `>>`), then `|`, then
   `>>`, then juxtaposition — so **each line is a row**, mirroring the
   type grammar. A newline is a strict `>>` and does **not** absorb around
@@ -112,11 +116,11 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
     without it, formatting was load-bearing in a way no editor,
     formatter, or feed renderer respects.
   * The fish is *not* a separate composition — it is `>>` plus a lift:
-    `t1 >=> t2 ≡ t1 >> (t2 | in2) >> merge` (dually `>?>` uses `(in1 |
+    `t1 >=> t2 ≡ t1 >> (t2 | alt2) >> merge` (dually `>?>` uses `(alt1 |
     t2)`, `>!>` uses `(pass | t2)`), all the shape `t1 >> (a|b) >>
     merge` with the stage on one track and a default injector on the
     other. So a railway *already* decomposes into a plain newline-`>>`
-    stack of rows — `even?` ⏎ `(g | in2) >> merge` ⏎ … — with no
+    stack of rows — `even?` ⏎ `(g | alt2) >> merge` ⏎ … — with no
     absorption. `>=>` keeps its line-spanning as a deliberate terseness
     sugar that bundles the `>>` and the lift into one infix token; the
     row form is always available when you'd rather stay purely `>>`.
@@ -128,7 +132,7 @@ law `(f | g) >> (h | k) = (f >> h | g >> k)`.
   `(A | (B | (C | …)))`, the branch structure written in the type. Two
   structural tools tame it:
   * `assocL : (A | (B | C)) ⇒ ((A | B) | C)` and `assocR` (its inverse)
-    re-nest the tree — pure `in1`/`in2`/`merge` rewiring, no data
+    re-nest the tree — pure `alt1`/`alt2`/`merge` rewiring, no data
     touched. With `not` (the sum braiding) they let you rebalance a
     tree before eliminating it. (Both carry open row tails from the
     injections; they are isos up to that openness.)
@@ -147,6 +151,53 @@ is the one context where exactly one component runs). Quoted code is
 skippable anywhere. This law decides every syntax question below: bare
 things ride rows; deferred things wear brackets. Conditionals need no
 thunk ceremony because rows are wiring, not functions.
+
+## 3b. The open eliminator: `into` *(amendment 2026-09-12)*
+
+Every eliminator above needs a **closed** row: `merge` two tracks of one
+type, `caseN` one handler per alternative, `otherwise` the ladder's
+two-track state. That is forced — a copairing is one map per
+alternative, so a copairing over alternatives you have not written down
+cannot exist. Over a **residual** there is exactly one, because the only
+handler you can give an unnamed track is the identity:
+
+```text
+into : Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)
+```
+
+`[h, id]`: handle the first alternative by mapping it INTO the remaining
+row, and shift every other tag down one. A prim — `(h | ---)` yields
+`((σ0) | σ0)` and collapsing that positionally *is* the shift, which no
+existing word performs. `splice : (ρ0 | (σ0)) ⇒ (ρ0 | σ0)` flattens the
+other nesting and does not help.
+
+It is the **step**; `otherwise` (§5) is the **closer**:
+
+```braid
+s
+[h1 ; alt1] ... ; into
+[h2 ; alt1] ... ; into
+_ [d] ; otherwise
+```
+
+With one alternative left, `into` lands in the 1-ary sum `(Θ)`;
+`there ; merge` brings a 1-ary sum back to a bare stack.
+
+NOTE `>=>` (§6c) is `[q, alt2]` — a *closed* copairing with a written
+second handler — and is **not** an instance of this. The closed
+two-track `[h, id]` is `(h | pass) ; merge` and needs no prim either.
+`into` earns its keep when what remains is a residual, or more than one
+track.
+
+**The Elgot identity becomes runnable.** §6 states `loop`'s axiom;
+`into` is what lets the unrolling be written:
+
+```braid
+loop f  =  f >> [loop f] into          # up to un-summing
+```
+
+`examples/into.braid` checks both sides at sample points. Runnable, not
+decided.
 
 ## 4. Routers: predicates route
 
@@ -273,7 +324,7 @@ vocabulary as everything else. Example (sum 1..n):
 
 ```text
 0 5
-[(a n -> n >> zero? >> ((z -> a >> in2) | (m -> (a m >> +) (m 1 >> -) >> in1)) >> merge)] ...
+[(a n -> n >> zero? >> ((z -> a >> alt2) | (m -> (a m >> +) (m 1 >> -) >> alt1)) >> merge)] ...
 loop        -- ⇒ 15
 ```
 
@@ -321,16 +372,16 @@ Routers are the Kleisli arrows of the sum monad `(· | E)`, and the
 combinator vocabulary of sections 3–5 turns out to be its structure
 maps in costume:
 
-* **return** = `in1`, alias `ok` — injection into the hit track.
-* `in2` has the alias `miss` — stay on the miss track.
-* **fmap f** = `(f | ...)` — a code row is the functor action.
-* **join** = `(... | in2) >> merge` — flatten one nested layer.
-* **Kleisli composition** = the `and` idiom: `p >> (q | in2) >> merge`.
+* **return** = `alt1`, alias `ok` — injection into the hit track.
+* `alt2` has the alias `miss` — stay on the miss track.
+* **fmap f** = `(f | ---)` — a code row is the functor action.
+* **join** = `(... | alt2) >> merge` — flatten one nested layer.
+* **Kleisli composition** = the `and` idiom: `p >> (q | alt2) >> merge`.
 
 The surface operator `>=>` makes the last one first-class syntax:
 
 ```text
-p >=> q       ≡       p >> (q | in2) >> merge
+p >=> q       ≡       p >> (q | alt2) >> merge
 ```
 
 It is pure parse-time sugar — the desugaring happens before inference,
@@ -355,7 +406,7 @@ where sequencing means `>=>`; the operator by itself is the whole
 feature.
 
 **Scope.** The desugaring is binary: the miss track is one
-alternative (`in2`). N-ary error rows compose with explicit rows
+alternative (`alt2`). N-ary error rows compose with explicit rows
 and injections — a parse-time desugar cannot know the row's arity.
 Monad *polymorphism* (code generic over which monad, via constructor
 variables of kind Stack → Stack) is explicitly deferred; the sum
@@ -437,8 +488,8 @@ lane is `[router] [action]`, and the value has type
 type-checks alone and can be bound, passed, and reused.
 
 `choose : A List(Fn⟨A⇒(A|A)⟩ Fn⟨A⇒B⟩) ⇒ (B | A)` folds the product,
-running the first lane whose router hits (`in1(result)`), or `in2(input)`
-if none. `else? = in1` is the always-hit router — a final
+running the first lane whose router hits (`alt1(result)`), or `alt2(input)`
+if none. `else? = alt1` is the always-hit router — a final
 `|| [else?] [d]` lane makes the guard total. No dependent types (a
 product is a plain List); `|` is untouched. See examples/fizzbuzz.braid,
 examples/guards.braid.
@@ -451,7 +502,7 @@ scheme, n-arity by composition):
 
 | flat family | iterator |
 |---|---|
-| `inN` | `here` / `there` |
+| `altN` | `here` / `there` |
 | guard tables | `if` / `elif` / `endif` folds |
 
 Families are lexical (schemes generated from the name, like integer

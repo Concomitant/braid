@@ -3,8 +3,8 @@
 
 type Nat = (• | Nat)
 
-def z = in1 >> Nat
-def s = in2 >> Nat
+def z = alt1 >> Nat
+def s = alt2 >> Nat
 
 def fromInt =
   [(self ... -> zero? >> (drop >> z | _ 1 >> - >> self ... >> ev >> s) >> merge)] ...

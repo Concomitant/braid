@@ -3,8 +3,8 @@
 # one >=> chain until the eval.
 
 [dup >> *] >> reflect
-    ((c -> "/tmp/braid-square.braid" (c >> unparse) >> writeFile) | in2) >> merge
+    ((c -> "/tmp/braid-square.braid" (c >> unparse) >> writeFile) | alt2) >> merge
     ("saved" >> print | print) >> forget
 
 ("/tmp/braid-square.braid" >> readFile >=> parse)
-    ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget    # in1(49)
+    ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget    # alt1(49)

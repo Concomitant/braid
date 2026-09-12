@@ -18,7 +18,7 @@ def classify =
 7  >> classify >> print   # 7
 
 # assocL / assocR re-nest the tree: (A | (B | C)) <=> ((A | B) | C).
-# Pure in1/in2 rewiring — rebalance a decision tree before folding it.
+# Pure alt1/alt2 rewiring — rebalance a decision tree before folding it.
 # Round-trip is identity on the routed value.
 def tag = negative? >> (drop >> "neg" | pass) >> (pass | zero?)
 

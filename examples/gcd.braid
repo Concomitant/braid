@@ -6,7 +6,7 @@
 def neq? = eq? >> not
 
 # [a, b] -> [big - small, small]
-def shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...
+def shrink = lt? >> (swap | ---) >> merge >> _ dup >> - ...
 
 48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print      # 6
 1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print   # 21

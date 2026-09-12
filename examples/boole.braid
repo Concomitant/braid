@@ -8,9 +8,9 @@ def big? = small? >> not
 def evenAndSmall? = even? >> (small? | miss) >> merge
 def oddOrZero? = odd? >> (ok | zero?) >> merge
 
-4 >> evenAndSmall? >> print    # in1(4)
-40 >> evenAndSmall? >> print   # in2(40)
-7 >> oddOrZero? >> print       # in1(7)
-0 >> oddOrZero? >> print       # in1(0)
-8 >> oddOrZero? >> print       # in2(8)
-12 >> big? >> print            # in1(12)
+4 >> evenAndSmall? >> print    # alt1(4)
+40 >> evenAndSmall? >> print   # alt2(40)
+7 >> oddOrZero? >> print       # alt1(7)
+0 >> oddOrZero? >> print       # alt1(0)
+8 >> oddOrZero? >> print       # alt2(8)
+12 >> big? >> print            # alt1(12)

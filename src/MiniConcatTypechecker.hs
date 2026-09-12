@@ -1021,7 +1021,7 @@ data Term
                           -- the elaborator (`elabUse`), which runs
                           -- between parse and infer.  This node never
                           -- reaches inference.
-  | Alts [Term] Bool      -- (p₁ | … | pₙ [| ...]): code row — the sum
+  | Alts [Term] Bool      -- (p₁ | … | pₙ [| ---]): code row — the sum
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
                           -- the remaining alternatives
@@ -1040,6 +1040,7 @@ data Token
   | TokSeq        -- >>
   | TokSeqPass    -- >>>
   | TokEllipsis   -- ...
+  | TokDashes     -- --- (the ROW tail: "and more alternatives")
   | TokNewline    -- line break (strict >>)
   | TokLBrack     -- [ (open quotation)
   | TokRBrack     -- ] (close quotation)
@@ -1097,6 +1098,8 @@ tokenize = go
     go ('=':cs)
       | Just (labels, rest) <- lexEffArrow cs = (TokEffArrow labels :) <$> go rest
     go ('-':'>':'!':cs) = (TokEffArrow [ioLabel] :) <$> go cs
+    -- `---` is ONE token, and only one: `----` is `---` then minus.
+    go ('-':'-':'-':cs) = (TokDashes :) <$> go cs
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
     go ('-':cs)
       | (ds@(_:_), rest) <- span isDigit cs =
@@ -1412,7 +1415,7 @@ parseProgramToks toks =
     isParamTok TokEllipsis  = True
     isParamTok _            = False
 
--- row level: sequences joined by |, optional trailing `| ...` residual
+-- row level: sequences joined by |, optional trailing `| ---` residual
 parseRow :: [Token] -> Either String (Term, [Token])
 parseRow toks =
   case toks of
@@ -1423,9 +1426,18 @@ parseRow toks =
     _            -> do (t0, rest) <- parseKleisli toks
                        loop [t0] rest
   where
-    loop acc (TokBar : TokEllipsis : rest)
+    -- `| ---` is the RESIDUAL: identity on every remaining alternative.
+    loop acc (TokBar : TokDashes : rest)
       | endsRow rest = Right (Alts (reverse acc) True, rest)
-      | otherwise    = Left "'| ...' must end its row"
+      | otherwise    = Left "'| ---' must end its row"
+    -- `| ...` meant the residual until 2026-09-12.  Refused rather than
+    -- re-read, so no old row silently changes meaning: `...` continues
+    -- WIRES, `---` continues ALTERNATIVES, and a row that wanted a third
+    -- track that passes says so.
+    loop _ (TokBar : TokEllipsis : rest)
+      | endsRow rest =
+          Left "`| ...` used to mean the residual; write `| ---` for more \
+               \alternatives, or `| pass` for a third track that passes"
     -- a trailing `|` defaults the LAST alternative to identity:
     -- `(f |)` ≡ `(f | pass)`
     loop acc (TokBar : rest)
@@ -1451,7 +1463,7 @@ parseRow toks =
 
 -- kleisli level: >>-sequences joined by >=>.  Pure parse-time sugar for
 -- composition in the sum monad — the desugaring is the `and` idiom:
---   t1 >=> t2   ≡   t1 >> (t2 | in2) >> merge
+--   t1 >=> t2   ≡   t1 >> (t2 | alt2) >> merge
 -- (t2 runs on the hit track; the miss track re-injects untouched).
 parseKleisli :: [Token] -> Either String (Term, [Token])
 parseKleisli toks = do
@@ -1472,9 +1484,9 @@ parseKleisli toks = do
     -- >=> threads the hit track (bind of (·|E)); >?> threads the miss
     -- track (bind of (B|·)): keep an answer, else try the next stage
     kleisli t1 t2 =
-      Seq t1 (Seq (Alts [t2, Prim "in2"] False) (Prim "merge"))
+      Seq t1 (Seq (Alts [t2, Prim "alt2"] False) (Prim "merge"))
     orElse t1 t2 =
-      Seq t1 (Seq (Alts [Prim "in1", t2] False) (Prim "merge"))
+      Seq t1 (Seq (Alts [Prim "alt1", t2] False) (Prim "merge"))
     orClose t1 t2 =
       Seq t1 (Seq (Alts [Prim "pass", t2] False) (Prim "merge"))
 
@@ -1540,7 +1552,7 @@ parseStage = go []
 -- The contents of a ( ) or [ ]: an optional `x y ->` parameter prefix
 -- (the arrow is required for parameter introduction — bare idents are a
 -- tensor stage), then a full program, possibly a |-separated code row.
--- A 1-ary row is plain grouping.  A trailing `| ...` marks the residual:
+-- A 1-ary row is plain grouping.  A trailing `| ---` marks the residual:
 -- identity on the remaining alternatives (open row).
 -- A delimited scope (group or quote body).  Binder recognition lives
 -- in parseProgramToks now, so `(x y -> body)` and `[x y -> body]` are
@@ -1579,7 +1591,15 @@ parseDelimited = parseProgramToks
 -- theory's slot signatures only, and `slotArrowAt` substitutes the
 -- instance's declared constructor NAME for it before any slot is
 -- forward-declared or checked (the ML-functor move).
+-- A fifth kind (2026-09-12): `PRow`, a ROW — the tail of a sum's
+-- ALTERNATIVES, written `---`.  `...` and `---` are the two tails, and
+-- they are different things in different positions: `...` after
+-- whitespace continues WIRES (ρ), `---` after `|` continues
+-- ALTERNATIVES (σ).  Every σ used to be inferred and unwritable; a
+-- `---` parameter is what lets a declaration say "at least these
+-- alternatives, maybe more".
 data TyParam = PWire TVar | PStack SVar | PWidth NVar | PCon String Int
+             | PRow RVar
   deriving (Eq, Show)
 
 pName :: TyParam -> String
@@ -1587,6 +1607,7 @@ pName (PWire (TV n))  = n
 pName (PStack (SV n)) = n
 pName (PWidth (NV n)) = n
 pName (PCon n _)      = n
+pName (PRow (RV n))   = n
 
 -- how a parameter's kind reads back in an error message
 pKind :: TyParam -> String
@@ -1594,6 +1615,7 @@ pKind (PWire _)    = "a wire"
 pKind (PStack _)   = "a stack (`...`)"
 pKind (PWidth _)   = "a width"
 pKind (PCon _ k)   = "a type constructor of arity " ++ show k
+pKind (PRow _)     = "a row (`---`)"
 
 isStackParam :: TyParam -> Bool
 isStackParam (PStack _) = True
@@ -1606,6 +1628,16 @@ isWidthParam _          = False
 isWireParam :: TyParam -> Bool
 isWireParam (PWire _) = True
 isWireParam _         = False
+
+isRowParam :: TyParam -> Bool
+isRowParam (PRow _) = True
+isRowParam _        = False
+
+-- the one `---` parameter of a declaration, if it has one
+rowParamOf :: [TyParam] -> Maybe RVar
+rowParamOf ps = case [ rv | PRow rv <- ps ] of
+                  (rv : _) -> Just rv
+                  []       -> Nothing
 
 -- the stack a parameter stands for when the declaration is instantiated
 paramStack :: TyParam -> SType
@@ -1621,6 +1653,12 @@ paramStack (PCon n _) =
   -- parameter, and a theory builds no TData spine from its parameters
   error ("paramStack: constructor parameter " ++ n
          ++ " (only theories declare these)")
+-- A row argument rides as the ONE WIRE it always is in a type: the sum
+-- whose alternatives it names.  `data Any2(---) = (Int | Str | ---)`
+-- therefore gives `Any2 : (Int | Str | s) => Any2((s))` — the inner
+-- parens are the row, the outer ones the argument list, and the
+-- argument at a `---` position is written exactly as any row is.
+paramStack (PRow rv) = SCons (TSum (RTail rv)) SEnd
 
 -- An argument at a use site: a stack for wire/`...` parameters, a
 -- width for `^`-parameters.  TData still carries only stacks (data
@@ -1711,8 +1749,8 @@ dataSig d = (dName d, dParams d)
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall tvs svs [] nvs [] (Arrow bodyStack namedStack effPure))
-    , ("un" ++ dName d,  Forall tvs svs [] nvs [] (Arrow namedStack bodyStack effPure)) ]
+  ( [ (dName d,          Forall tvs svs rvs nvs [] (Arrow bodyStack namedStack effPure))
+    , ("un" ++ dName d,  Forall tvs svs rvs nvs [] (Arrow namedStack bodyStack effPure)) ]
       ++ mergeSchemes ++ foldSchemes
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
@@ -1725,6 +1763,7 @@ dataDeclArtifacts d =
     ps         = dParams d
     tvs        = [ tv | PWire tv  <- ps ]
     svs        = [ sv | PStack sv <- ps ]
+    rvs        = [ rv | PRow   rv <- ps ]
     nvs        = [ nv | PWidth nv <- ps ]   -- always [] today (see below)
     namedStack = SCons (TData (dName d) (map paramStack ps)) SEnd
     rollOpen   = openTailedS bodyStack
@@ -1752,7 +1791,7 @@ dataDeclArtifacts d =
     (bodyStack, rollArity, rollTerm, unrollTerm) =
       case dBody d of
         TSum (RCons st RNil) ->
-          (st, closedArity st, Prim "in1", Prim "merge")
+          (st, closedArity st, Prim "alt1", Prim "merge")
         _ ->
           (SCons (dBody d) SEnd, 1, Prim "id", Prim "id")
     -- (rollOpen marks splice-shaped field stacks segment-consuming)
@@ -1791,6 +1830,7 @@ dataFoldArtifact d
               selfTy   = TData (dName d) (map paramStack (dParams d))
               tvs0     = [ tv | PWire tv  <- dParams d ]
               svs0     = [ sv | PStack sv <- dParams d ]
+              rvs0     = [ rv | PRow   rv <- dParams d ]
               nvs0     = [ nv | PWidth nv <- dParams d ]
               payloads = map stackElems alts
               flagsOf  = map (== selfTy)
@@ -1832,7 +1872,7 @@ dataFoldArtifact d
                               (SCons selfTy SEnd) sigmas
               sc = Forall (tvs0 ++ [ resTV | oneWire ])
                           (svs0 ++ [ resSV | not oneWire ])
-                          [] nvs0 [eps]
+                          rvs0 nvs0 [eps]
                           (arrE inStack resStack)
               doc = "definition by points: one quoted case per constructor of "
                       ++ dName d ++ ", recursive slots pre-folded"
@@ -1855,6 +1895,28 @@ foldPrimName specs = "#fold:" ++ intercalate "," (map enc specs)
   where
     enc Nothing   = "*"
     enc (Just fs) = [ if f then 'r' else 'x' | f <- fs ]
+
+-- distK, the OPEN distributivity generator (stage 5a⅞).  Abstraction
+-- elimination needs `P (ρ₁ | … | ρₖ | σ) ⇒ (P ρ₁ | … | P ρₖ | σ)` for the
+-- row it is actually looking at, and that is not one word: the arity of
+-- a WRITTEN row is not something polymorphism reaches, and the residual
+-- σ cannot be distributed into at all (you cannot write a handler for a
+-- track you cannot name).  So it is a family, synthesized per K exactly
+-- like `#fold:` — and a GENERATOR, not a derivation: the prelude's
+-- `dist2`/`dist3` are the CLOSED instances, proved through `capture`,
+-- and they are what `theory Distributive` runs.
+-- The name is unspellable (`#` opens a comment), so nothing can shadow
+-- it — the same protection `capture`/`dist2` need `elimEmits` for.
+distPrimName :: Int -> String
+distPrimName k = "#dist:" ++ show k
+
+distPrimArity :: String -> Maybe Int
+distPrimArity nm
+  | ("#dist:", ds@(_ : _)) <- splitAt 6 nm
+  , all isDigit ds
+  , k >= 1 = Just k
+  | otherwise = Nothing
+  where k = read (drop 6 nm) :: Int
 
 foldPrimSpec :: String -> Maybe [Maybe [Bool]]
 foldPrimSpec nm
@@ -1930,6 +1992,9 @@ parseTheory aliases dataSigs header body = do
     theoryParams (TokIdent p : TokComma : r) = (PWire (TV p) :) <$> theoryParams r
     theoryParams [TokIdent p, TokRParen]     = Right [PWire (TV p)]
     theoryParams [TokEllipsis, TokRParen]    = Right [PStack (SV "s")]
+    theoryParams [TokEllipsis, TokComma, TokDashes, TokRParen] =
+      Right [PStack (SV "s"), PRow (RV "r")]
+    theoryParams [TokDashes, TokRParen]      = Right [PRow (RV "r")]
     theoryParams _ = Left "Malformed theory parameter list"
 
     -- `_`, `_, _`, … : the arity of a constructor parameter
@@ -2088,7 +2153,7 @@ parseTypeLine aliases dataSigs line =
       -- KINDS BY USE: every named parameter parses as a wire, and an
       -- occurrence under `^` makes it an exponent variable in the body.
       -- So the body's own free-variable sets settle the kinds.
-      let (bodyTVs, bodySVs, _, bodyNVs, _) = varsOfTy body
+      let (bodyTVs, bodySVs, bodyRVs, bodyNVs, _) = varsOfTy body
           reclass q@(PWire (TV nm))
             | NV nm `elem` bodyNVs, TV nm `elem` bodyTVs =
                 Left $ "Type " ++ name ++ ": parameter '" ++ nm
@@ -2104,6 +2169,7 @@ parseTypeLine aliases dataSigs line =
           -- unreachable: only a `theory` head parses a constructor
           -- parameter; `paramList` below never builds one
           occurs (PCon _ _)  = True
+          occurs (PRow rv)   = rv `elem` bodyRVs
       if all occurs params
         then Right ()
         else Left $ "Type alias " ++ name
@@ -2146,8 +2212,15 @@ parseTypeLine aliases dataSigs line =
     paramList (TokIdent p : TokComma : rest) = (PWire (TV p) :) <$> paramList rest
     paramList [TokIdent p, TokRParen]        = Right [PWire (TV p)]
     paramList [TokEllipsis, TokRParen]       = Right [PStack (SV "s")]
+    -- the two tails may share a head, in their own order: wires first,
+    -- then alternatives
+    paramList [TokEllipsis, TokComma, TokDashes, TokRParen] =
+      Right [PStack (SV "s"), PRow (RV "r")]
     paramList (TokEllipsis : _) =
       Left "'...' must be the last type parameter"
+    paramList [TokDashes, TokRParen]         = Right [PRow (RV "r")]
+    paramList (TokDashes : _) =
+      Left "'---' must be the last type parameter"
     paramList _ = Left "Malformed type parameter list"
     declKws = ["type", "data", "resource"]
     validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
@@ -2211,8 +2284,8 @@ parseTyElem aliases dataSigs params toks = case toks of
       _ -> Left "Expected ')' to close Fin(…)"
   (TokIdent "Fin" : _) -> Left "Fin must be written Fin(n)"
   (TokLParen : rest) -> do
-    (alts, rest') <- goAlts rest
-    pure (TSum (foldr RCons RNil alts), rest')
+    (alts, end, rest') <- goAlts rest
+    pure (TSum (foldr RCons end alts), rest')
   (TokIdent "Int" : rest) -> pure (TInt, rest)
   (TokIdent "Str" : rest) -> pure (TStr, rest)
   (TokIdent "Sym" : rest) -> pure (TSym, rest)
@@ -2265,6 +2338,10 @@ parseTyElem aliases dataSigs params toks = case toks of
     | Just (PWidth _) <- lookupParam name params ->
         Left $ "Type parameter " ++ name
              ++ " is a width: write it as an exponent (T^" ++ name ++ ")"
+    | Just (PRow _) <- lookupParam name params ->
+        Left $ "Type parameter " ++ name
+             ++ " is a row (`---`): write it as the last alternative of a "
+             ++ "sum — (A | ---)"
     | Just (PCon _ ar) <- lookupParam name params ->
         Left $ "Type parameter " ++ name ++ " is a type constructor of "
              ++ "arity " ++ show ar ++ ": it is not a wire, write it "
@@ -2280,14 +2357,25 @@ parseTyElem aliases dataSigs params toks = case toks of
     | otherwise -> Left $ "Unknown type name: " ++ name
   _ -> Left "Expected a type expression"
   where
-    -- sum alternatives: stack (| stack)* )
+    -- sum alternatives: stack (| stack)* [| ---] )
+    -- `---` is the ROW TAIL: "at least these alternatives, maybe more".
+    -- It is last by construction, which is what keeps a row variable in
+    -- tail position exactly as `...` keeps a stack variable there.
+    -- `( --- )` alone is the sum that is ALL residual — `into`'s result.
+    goAlts (TokDashes : TokRParen : rest) =
+      case rowParamOf params of
+        Just rv -> pure ([], RTail rv, rest)
+        Nothing ->
+          Left "'---' needs a `---` parameter on the declaration"
+    goAlts (TokDashes : _) =
+      Left "'---' must be the last alternative of its row"
     goAlts ts = do
       (st, rest) <- goStack ts
       case rest of
         (TokBar : rest')    -> do
-          (alts, rest'') <- goAlts rest'
-          pure (st : alts, rest'')
-        (TokRParen : rest') -> pure ([st], rest')
+          (alts, end, rest'') <- goAlts rest'
+          pure (st : alts, end, rest'')
+        (TokRParen : rest') -> pure ([st], RNil, rest')
         _ -> Left "Expected '|' or ')' in sum type"
     -- a stack: • or a run of elements; a parameter occurrence splices
     goStack (TokIdent "•" : rest) = pure (SEnd, rest)
@@ -2298,6 +2386,8 @@ parseTyElem aliases dataSigs params toks = case toks of
             SEnd -> pure (STail sv, rest')
             _ -> Left "'...' must be the last thing in its stack"
       | otherwise = Left "'...' needs a `...` parameter on the declaration"
+    goStack (TokDashes : _) =
+      Left "'---' continues a row's ALTERNATIVES: it can only follow '|'"
     goStack ts@(TokIdent name : rest)
       | Just (PStack sv) <- lookupParam name params = do
           (suffix, rest') <- goStackEnd rest
@@ -2406,20 +2496,29 @@ applyAlias al args
       Left $ "Type alias " ++ aName al ++ " expects "
            ++ show (length (aParams al)) ++ " argument(s)"
   | otherwise = do
-      (tm, sm, nm) <- foldM bind (M.empty, M.empty, M.empty)
+      (tm, sm, rm, nm) <- foldM bind (M.empty, M.empty, M.empty, M.empty)
                             (zip (aParams al) args)
-      pure (substParams tm sm nm (aBody al))
+      pure (substParams tm sm rm nm (aBody al))
   where
     -- a wire parameter takes exactly one wire; a `...` parameter takes
-    -- the whole argument stack; a `^` parameter takes a width
-    bind (tm, sm, nm) (PWire tv, AStack (SCons t SEnd)) =
-      Right (M.insert tv t tm, sm, nm)
+    -- the whole argument stack; a `^` parameter takes a width; a `---`
+    -- parameter takes the ROW of the one sum wire it is given
+    bind (tm, sm, rm, nm) (PWire tv, AStack (SCons t SEnd)) =
+      Right (M.insert tv t tm, sm, rm, nm)
     bind _ (PWire tv, AStack st) =
       Left $ "Type " ++ aName al ++ ": parameter '" ++ show tv
            ++ "' takes one wire, but was given '" ++ show st
            ++ "' (declare it '...' to take a stack)"
-    bind (tm, sm, nm) (PStack sv, AStack st) = Right (tm, M.insert sv st sm, nm)
-    bind (tm, sm, nm) (PWidth nv, AWidth e)  = Right (tm, sm, M.insert nv e nm)
+    bind (tm, sm, rm, nm) (PStack sv, AStack st) =
+      Right (tm, M.insert sv st sm, rm, nm)
+    bind (tm, sm, rm, nm) (PWidth nv, AWidth e)  =
+      Right (tm, sm, rm, M.insert nv e nm)
+    bind (tm, sm, rm, nm) (PRow rv, AStack (SCons (TSum row) SEnd)) =
+      Right (tm, sm, M.insert rv row rm, nm)
+    bind _ (PRow rv, AStack st) =
+      Left $ "Type " ++ aName al ++ ": parameter '" ++ show rv
+           ++ "' is a row (`---`): its argument is a sum's alternatives, "
+           ++ "written as a row — (A | B) — but was given '" ++ show st ++ "'"
     bind _ (q, a) =
       Left $ "Type " ++ aName al ++ ": parameter '" ++ pName q
            ++ "' was given the wrong kind of argument ("
@@ -2427,10 +2526,11 @@ applyAlias al args
                          AStack st -> "stack " ++ show st) ++ ")"
 
 substStackVars :: Map SVar SType -> Ty -> Ty
-substStackVars m = substParams M.empty m M.empty
+substStackVars m = substParams M.empty m M.empty M.empty
 
-substParams :: Map TVar Ty -> Map SVar SType -> Map NVar Exp -> Ty -> Ty
-substParams tmap m nmap = goT
+substParams :: Map TVar Ty -> Map SVar SType -> Map RVar SumRow
+            -> Map NVar Exp -> Ty -> Ty
+substParams tmap m rmap nmap = goT
   where
     goT t@(TVarTy v) = M.findWithDefault t v tmap
     goT TInt         = TInt
@@ -2445,7 +2545,10 @@ substParams tmap m nmap = goT
     goT (TData n as) = TData n (map goS as)
     goT (TFin e)     = TFin (goE e)
     goR RNil         = RNil
-    goR t@(RTail _)  = t
+    -- SPLICING a row tail: a row variable only ever sits in tail
+    -- position, so replacing it with the argument row IS the splice
+    -- (the same reason `...` needs no splice machinery).
+    goR t@(RTail v)  = M.findWithDefault t v rmap
     goR (RCons s r)  = RCons (goS s) (goR r)
     goS SEnd            = SEnd
     goS t@(STail v)     = M.findWithDefault t v m
@@ -2753,6 +2856,7 @@ inferOperand env final (Prim name)
   | isSymLiteral name =
       pick (Forall [] [] [] [] [] (arrPure SEnd (SCons TSym SEnd)))
   | Just n <- injIndex name, not (M.member name env) = pick (injScheme n)
+  | Just k <- distPrimArity name = pick (distScheme k)
   | Just k <- finIndex name, not (M.member name env) = pick (finScheme k)
   -- a receipt is `pass` that the type can see; `use` mints it and `@`
   -- keeps it unwritable, so resolving it here needs no registration
@@ -2781,9 +2885,9 @@ inferOperand env _ (Quote p) = do
   q <- openEff (arrPure SEnd (SCons (TFn arrP) SEnd))
   pure (q, cs)
 inferOperand env _ (Alts comps residual) = do
-  -- Code row (p₁ | … | pₙ [| ...]): the sum functor action.  A one-wire
+  -- Code row (p₁ | … | pₙ [| ---]): the sum functor action.  A one-wire
   -- atom (Δ-in-sum ⇒ Δ-out-sum); component i maps alternative i,
-  -- re-tagging into the same position.  The residual `| ...` shares one
+  -- re-tagging into the same position.  The residual `| ---` shares one
   -- row variable between input and output: identity on the rest.
   results <- mapM (infer env) comps
   end <- if residual then RTail <$> freshRVarName else pure RNil
@@ -2882,15 +2986,18 @@ isSymLiteral :: String -> Bool
 isSymLiteral ('.' : _ : _) = True
 isSymLiteral _             = False
 
--- The lexical injection family: in1, in2, … — position fixed, width
+-- The lexical injection family: alt1, alt2, … — position fixed, width
 -- open via the row tail.
 injIndex :: String -> Maybe Int
-injIndex "here"  = Just 1         -- here ≡ in1: start a sum at the front
-injIndex "ok"    = Just 1         -- ok ≡ in1: return of the sum monad
-injIndex "miss"  = Just 2         -- miss ≡ in2: stay on the miss track
+injIndex "here"  = Just 1         -- here ≡ alt1: start a sum at the front
+injIndex "ok"    = Just 1         -- ok ≡ alt1: return of the sum monad
+injIndex "miss"  = Just 2         -- miss ≡ alt2: stay on the miss track
 injIndex "again" = Just 1         -- loop protocol: continue with new state
 injIndex "done"  = Just 2         -- loop protocol: exit with this result
-injIndex ('i':'n':ds)
+-- ONE SPELLING: `alt1..altN`, with no `inN` alias kept (2026-09-12 —
+-- `[h >> alt1] into` read badly, and `in` is the prefix `into` lives
+-- beside).  `def alt1 = ...` is not the migration; a rename is.
+injIndex ('a':'l':'t':ds)
   | not (null ds), all isDigit ds, n >= 1 = Just n
   where n = read ds
 injIndex _ = Nothing
@@ -2909,7 +3016,7 @@ finScheme k =
   Forall [] [] [] [NV "n"] []
     (arrPure SEnd (SCons (TFin (Exp (k + 1) (Just (NV "n")))) SEnd))
 
--- inN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
+-- altN : ∀ Δ₁…Δₙ σ. Δₙ ⇒ (Δ₁ | … | Δₙ | σ) — bundle the whole input
 -- segment, tagged at position N; other alternatives are placeholders.
 injScheme :: Int -> Scheme
 injScheme n =
@@ -2919,6 +3026,24 @@ injScheme n =
       row = foldr (RCons . STail) (RCons (STail d) (RTail rv)) ps
   in Forall [] (ps ++ [d]) [rv] [] []
        (arrPure (STail d) (SCons (TSum row) SEnd))
+
+-- #dist:K : a (ρ₁ | … | ρₖ | σ) ⇒ (a ρ₁ | … | a ρₖ | σ) — push one wire
+-- into the first K alternatives of a row and PASS the residual.  One
+-- wire, not a block: elimination applies it once per block wire
+-- (shallowest first), which is what lands the block in its own order at
+-- the bottom of every track.  The residual is the same variable on both
+-- sides, so a CLOSED row instantiates it to nothing and the output row
+-- stays closed — which is why this covers both of 5a¾'s corners.
+distScheme :: Int -> Scheme
+distScheme k =
+  let a    = TV "a"
+      rhos = [ SV ("\961" ++ show i) | i <- [1 .. k] ]
+      sig  = RV "\963"
+      inRow  = foldr (RCons . STail) (RTail sig) rhos
+      outRow = foldr (\r -> RCons (SCons (TVarTy a) (STail r))) (RTail sig) rhos
+  in Forall [a] rhos [sig] [] []
+       (arrPure (SCons (TVarTy a) (SCons (TSum inRow) SEnd))
+                (SCons (TSum outRow) SEnd))
 
 -- Integer literals are terminal-source: • ⇒ Int.  Constants have NO
 -- implicit remainder — pushing onto a nonempty stack requires explicit
@@ -2985,8 +3110,22 @@ primEnv =
         (arrPure (SCons (TSum (RCons (STail (SV "Θ"))
                        (RCons (STail (SV "Θ")) RNil))) SEnd)
                (STail (SV "Θ")))
+      -- into : Fn⟨Γ ⇒ (σ)⟩ (Γ | σ) ⇒ (σ) — the OPEN eliminator.  The
+      -- copairing [h, id]: handle the FIRST alternative by mapping it
+      -- into the remaining row, and tag-shift everything else down one.
+      -- Over a residual that is the only copairing that can be written
+      -- at all (a handler for a track hidden in σ is unwritable), which
+      -- is why it is a prim and not `caseN`.  ε is shared with the
+      -- handler exactly as `ev` shares it.
+      intoTy =
+        let sig = RV "σ"
+            resSum = one (TSum (RTail sig))
+        in Forall [] [gam] [sig] [] [epsV]
+             (arrEps (SCons (TFn (arrEps (STail gam) resSum))
+                            (one (TSum (RCons (STail gam) (RTail sig)))))
+                     resSum)
       -- there : (σ) ⇒ (Δ | σ) — widen a sum with a new front track
-      -- (tags shift by one; here ≡ in1, inN ≡ here >> there^(n-1))
+      -- (tags shift by one; here ≡ alt1, altN ≡ here >> there^(n-1))
       thereTy = Forall [] [SV "Δ"] [RV "σ"] [] []
         (arrPure (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
@@ -3035,7 +3174,7 @@ primEnv =
          in arrPure aa (one (TSum (RCons aa (RCons aa RNil)))))
       binIntTy = Forall [] [] [] [] []
         (arrPure (SCons TInt (one TInt)) (one TInt))
-      -- Bool ≡ (• | •): two payload-free tracks; true = in1, false = in2
+      -- Bool ≡ (• | •): two payload-free tracks; true = alt1, false = alt2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
       boolLit  = Forall [] [] [] [] [] (arrPure SEnd (one tBool))
       -- foldExp: the eliminator of an exponent bundle aⁿ (the stack-level
@@ -3183,6 +3322,7 @@ primEnv =
                           (one (TFn (arrEps (STail gam) (STail del)))))
                     (one tBool)))
        , ("ev",        evTy)
+       , ("into",      intoTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
        , ("loop",      loopTy)
@@ -3225,7 +3365,8 @@ inferTermIn env term =
                , not (M.member n env)
                , Nothing <- [injIndex n]
                , Nothing <- [finIndex n]
-               , Nothing <- [receiptLabel n] ] of
+               , Nothing <- [receiptLabel n]
+               , Nothing <- [distPrimArity n] ] of
     (n : _) -> Left $ "Unknown primitive: " ++ n
     [] -> do
       let (arr, cs) = runInfer0 (infer env term)
@@ -3706,18 +3847,20 @@ checkInstance env theories inst = do
 -- instance's arguments.
 slotArrowAt :: Instance -> Theory -> Arrow -> Either String Arrow
 slotArrowAt inst th (Arrow i o e) = do
-  (tm, sm, cm) <- foldM bind (M.empty, M.empty, M.empty)
+  (tm, sm, rm, cm) <- foldM bind (M.empty, M.empty, M.empty, M.empty)
                         (zip (thParams th) (inArgs inst))
-  pure (Arrow (substParamsS tm sm cm i) (substParamsS tm sm cm o) e)
+  pure (Arrow (substParamsS tm sm rm cm i) (substParamsS tm sm rm cm o) e)
   where
-    bind (tm, sm, cm) (PWire tv, IAStack (SCons t SEnd)) =
-      Right (M.insert tv t tm, sm, cm)
-    bind (tm, sm, cm) (PStack sv, IAStack st) =
-      Right (tm, M.insert sv st sm, cm)
+    bind (tm, sm, rm, cm) (PWire tv, IAStack (SCons t SEnd)) =
+      Right (M.insert tv t tm, sm, rm, cm)
+    bind (tm, sm, rm, cm) (PRow rv, IAStack (SCons (TSum row) SEnd)) =
+      Right (tm, sm, M.insert rv row rm, cm)
+    bind (tm, sm, rm, cm) (PStack sv, IAStack st) =
+      Right (tm, M.insert sv st sm, rm, cm)
     -- the ML-functor move: `k` becomes the instance's constructor NAME,
     -- and every `k(a, b)` in the slot is already a TData under that name
-    bind (tm, sm, cm) (PCon n _, IACon c) =
-      Right (tm, sm, M.insert n c cm)
+    bind (tm, sm, rm, cm) (PCon n _, IACon c) =
+      Right (tm, sm, rm, M.insert n c cm)
     bind _ (q, a) =
       Left $ "instance " ++ inName inst ++ ": parameter '" ++ pName q
           ++ "' is " ++ pKind q ++ ", given " ++ showArg a
@@ -3740,13 +3883,13 @@ declaredSlots theories inst = do
 -- ordinary parameter substitution, constructor parameters by renaming
 -- the data name.  The rename runs FIRST, so it cannot reach inside a
 -- type the instance supplied.
-substParamsS :: Map TVar Ty -> Map SVar SType -> Map String String
-             -> SType -> SType
-substParamsS tm sm cm = go . substConNamesS cm
+substParamsS :: Map TVar Ty -> Map SVar SType -> Map RVar SumRow
+             -> Map String String -> SType -> SType
+substParamsS tm sm rm cm = go . substConNamesS cm
   where
     go SEnd          = SEnd
     go t@(STail v)   = M.findWithDefault t v sm
-    go (SCons t r)   = SCons (substParams tm sm M.empty t) (go r)
+    go (SCons t r)   = SCons (substParams tm sm rm M.empty t) (go r)
     go (SExp b e r)  = sexp (go b) e (go r)
 
 -- rename data-type NAMES through a stack.  Only theories use it: a
@@ -4336,7 +4479,7 @@ preludeSrc :: String
 preludeSrc = unlines
   [ "## the boolean object: a bare two-way decision"
   , "type Bool = (• | •)"
-  , "## an optional value, PAYLOAD FIRST: one element, or empty.  The order matters here in a way it does not in Haskell — in1 is the track `>=>` threads and `ok` builds, so a payload-second Maybe could not ride the railway at all."
+  , "## an optional value, PAYLOAD FIRST: one element, or empty.  The order matters here in a way it does not in Haskell — alt1 is the track `>=>` threads and `ok` builds, so a payload-second Maybe could not ride the railway at all."
   , "type Maybe(...) = (... | •)"
   , "## the list: initial algebra of (• | a X); foldList is generated"
   , "type List(a) = (• | a List(a))"
@@ -4344,9 +4487,9 @@ preludeSrc = unlines
     -- that list cells hold a single wire
   , "data Box(...) = (...)"
   , "## the empty list"
-  , "def nil = in1 >> List"
+  , "def nil = alt1 >> List"
   , "## prepend an element"
-  , "def cons = in2 >> List"
+  , "def cons = alt2 >> List"
   , "## open one layer: the asymmetric list router"
   , "def uncons = unList"
   , "## left fold: step sees [acc, elem], list consumed left to right."
@@ -4383,9 +4526,9 @@ preludeSrc = unlines
   , "def zero? = (n -> n >> zero >> (n | n))"
   , "def negative? = (n -> n >> negative >> (n | n))"
   , "## re-nest a sum leftward: (A | (B | C)) => ((A | B) | C)"
-  , "def assocL = (in1 >> in1 | (in2 >> in1 | in2) >> merge) >> merge"
+  , "def assocL = (alt1 >> alt1 | (alt2 >> alt1 | alt2) >> merge) >> merge"
   , "## re-nest a sum rightward: ((A | B) | C) => (A | (B | C))"
-  , "def assocR = ((in1 | in1 >> in2) >> merge | in2 >> in2) >> merge"
+  , "def assocR = ((alt1 | alt1 >> alt2) >> merge | alt2 >> alt2) >> merge"
   , "## negate a quoted router, as a value"
   , "def negate = (p -> [p ... >> ev >> (miss | ok) >> merge])"
   , "## and on quoted routers: hit iff both hit; q runs only on p's hit"
@@ -4425,19 +4568,19 @@ preludeSrc = unlines
   , "## first-match over a clause list: each clause is [router] [action];"
   , "## the first router that hits runs its action on x, else the default."
   , "## the always-hit router: the last lane of a guard clause list"
-  , "def else? = in1"
+  , "def else? = alt1"
   , "## probe a clause list (pack2 / pack2R lanes): run the first hit;"
-  , "## in1(result) on a hit, in2(input) if none hit"
-  , "def choose = (x clauses -> clauses >> [x >> in2] [(rest c -> c >> unBox >> (p f -> x >> p ... >> ev >> (f ... >> ev >> in1 | drop >> rest) >> merge))] ... >> foldList)"
+  , "## alt1(result) on a hit, alt2(input) if none hit"
+  , "def choose = (x clauses -> clauses >> [x >> alt2] [(rest c -> c >> unBox >> (p f -> x >> p ... >> ev >> (f ... >> ev >> alt1 | drop >> rest) >> merge))] ... >> foldList)"
   , "def matchWith = (x default clauses -> x clauses >> choose >> (pass | default ... >> ev) >> merge)"
   , "## commute List over the sum monad: all hits, or the first miss"
-  , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] ... >> foldList"
+  , "def sequence = [nil >> ok] [(r x -> x >> ((y -> r >> (y ... >> cons | ---)) | miss) >> merge)] ... >> foldList"
   , "## keep the elements a quoted router hits"
   , "def filter = (p -> [p ... >> ev >> (single | drop >> nil) >> merge]) ... >> flatMap"
   , "## splice one level of right-nesting into the parent row — ANY"
   , "## inner arity (the row variable does the counting):"
   , "##   splice : (ρ0 | (σ0)) ⇒ (ρ0 | σ0)"
-  , "def splice = (in1 | there) >> merge"
+  , "def splice = (alt1 | there) >> merge"
   , "## the ladder steps, a dual pair.  settle: the GUARD ladder — state"
   , "## (answered | working); each level routes the working track,"
   , "## answers the hit, and settle folds the agreeing answer in, so the"
@@ -4476,14 +4619,14 @@ preludeSrc = unlines
   , "## case over the sum.  distN follows caseN's arity family, and like"
   , "## caseN the sums nest: polymorphism does not reach a row's width."
   , "##   dist2 : a (ρ0 | ρ1) ⇒ (a ρ0 | a ρ1 | σ0)"
-  , "def dist2 = (x s -> x [(y ... -> y ... >> in1)] >> capture >> _ x [(y ... -> y ... >> in2)] >> _ capture >> _ _ s >> case2)"
+  , "def dist2 = (x s -> x [(y ... -> y ... >> alt1)] >> capture >> _ x [(y ... -> y ... >> alt2)] >> _ capture >> _ _ s >> case2)"
   , "def dist3 = dist2 >> (pass | dist2)"
   , "def dist4 = dist2 >> (pass | dist3)"
   , "## the easy direction: pull a shared deepest wire out of every track."
   , "## Always available (no closed structure needed) -- it is the map any"
   , "## category with coproducts has, and `dist` is its inverse."
   , "##   undist2 : (a ρ0 | a ρ1) ⇒ a (ρ0 | ρ1 | σ0)"
-  , "def undist2 = (s -> s >> (_ in1 | _ in2) >> merge)"
+  , "def undist2 = (s -> s >> (_ alt1 | _ alt2) >> merge)"
   , "def undist3 = (pass | undist2) >> undist2"
   , "def undist4 = (pass | undist3) >> undist2"
   , "def condFn = (b t e -> b >> (t | e) >> merge)"
@@ -4536,8 +4679,8 @@ preludeSrc = unlines
   , "##     (x >> negative) \"neg\"  >> if"
   , "##     _ (x >> zero)   \"zero\" >> elif"
   , "##     _ (x >> toStr)         >> else"
-  , "def if   = (b f -> b [f >> in1] [in2] >> cond)"
-  , "def elif = (acc b f -> acc >> (in1 | (b [f >> in1] [in2] >> cond)) >> merge)"
+  , "def if   = (b f -> b [f >> alt1] [alt2] >> cond)"
+  , "def elif = (acc b f -> acc >> (alt1 | (b [f >> alt1] [alt2] >> cond)) >> merge)"
   , "def else = (acc d -> acc >> (pass | d) >> merge)"
   , "## close a ladder with a quoted default: runs only if nothing hit."
   , "## (Also the total default for ifRoute/elifRoute ladders, where the"
@@ -4554,7 +4697,7 @@ preludeSrc = unlines
   , "## routing guards: the condition must be a router, and its hit VALUE"
   , "## flows into the action (so the action sees the routed/refined type)."
   , "def ifRoute   = (x p a -> x >> p ... >> ev >> (a ... >> ev | pass))"
-  , "def elifRoute = (s p a -> s >> (in1 | p ... >> ev >> (a ... >> ev | pass)) >> merge)"
+  , "def elifRoute = (s p a -> s >> (alt1 | p ... >> ev >> (a ... >> ev | pass)) >> merge)"
   , "## box a Code value as a runnable Fn WITHOUT running it: the"
   , "## deferred half of reflect's round trip.  Takes the WITNESS whose"
   , "## type the code must meet, so the boxed Fn is ordinarily typed —"
@@ -4598,7 +4741,7 @@ preludeSrc = unlines
   , "## action ever runs (the fold selects quotes, applies once).  The"
   , "## accumulator is (decided | default): a true lane decides once;"
   , "## later lanes leave a decision alone."
-  , "def firstTrue = (d -> d >> in2) ... >> [(acc b f -> acc >> (in1 | (g -> b [f >> in1] [g >> in2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> ev"
+  , "def firstTrue = (d -> d >> alt2) ... >> [(acc b f -> acc >> (alt1 | (g -> b [f >> alt1] [g >> alt2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> ev"
   , "## assemble a loop body from a quoted predicate and step"
   , "def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
@@ -4615,7 +4758,22 @@ preludeSrc = unlines
 -- what they are need an entry.
 primDocs :: Map String String
 primDocs = M.fromList
-  [ ("ev", unlines
+  [ ("into", unlines
+      [ "the OPEN coproduct eliminator: peel the FIRST alternative off a"
+      , "sum and leave the rest standing.  `into : Fn⟨ρ0 ⇒ (σ0)⟩"
+      , "(ρ0 | σ0) ⇒ (σ0)` — the copairing `[h, id]`, where `h` maps the"
+      , "handled alternative into the REMAINING row and every other tag"
+      , "shifts down one.  Not derivable: over a residual you cannot write"
+      , "a handler for a track you cannot name, so `[h, id]` is the only"
+      , "copairing there is, and collapsing `(h | ---)`'s `((σ0) | σ0)`"
+      , "positionally is exactly the tag shift."
+      , "Peel, then close the ladder with `otherwise`:"
+      , "  s >> [h1 >> alt1] into >> [h2 >> alt1] into >> [d] otherwise"
+      , "Each `into` handles one track and shortens the row by one; the"
+      , "closed eliminators (`case2`, `merge`, `otherwise`) finish the job"
+      , "once the row is closed.  `>=>` is `[q, alt2]` — a CLOSED"
+      , "copairing, not an instance of this." ])
+  , ("ev", unlines
       [ "the exponential's COUNIT: evaluation.  `ev` is the only way to"
       , "consume an `Fn`, and it is not derivable — naming a value never"
       , "runs it, so `(x f -> [x >> f])` does not typecheck.  Paired with"
@@ -4806,8 +4964,8 @@ instance Eq Value where
   VSum i vs  == VSum j ws  = i == j && vs == ws
   _          == _          = False
 
--- Cons-shaped sum spines (in2(x, in2(y, … in1()))) display as
--- list(x, y, …); a bare in1() stays in1().
+-- Cons-shaped sum spines (alt2(x, alt2(y, … alt1()))) display as
+-- list(x, y, …); a bare alt1() stays alt1().
 listView :: Value -> Maybe [Value]
 listView (VSum 1 [x, rest]) = (x :) <$> end rest
   where
@@ -4825,7 +4983,7 @@ instance Show Value where
   show (VSym t)      = t
   show (VFn _ _ _)   = "[fn]"
   show (VSum i vs)   =
-    "in" ++ show (i + 1) ++ "(" ++ intercalate ", " (map show vs) ++ ")"
+    "alt" ++ show (i + 1) ++ "(" ++ intercalate ", " (map show vs) ++ ")"
 
 -- Number of concrete wires in a stack type (its closed prefix).
 closedArity :: SType -> Int
@@ -5033,6 +5191,25 @@ evalTerm env defs vars term st =
               pure (out, if isFinal then [] else stk', logs)
             _ ->
               throwError "Runtime type error in ev: expected a quotation"
+    -- into: the open eliminator.  Tag 0 runs the handler on its own
+    -- bundle and the handler's answer (already a value of the remaining
+    -- sum) IS the result; every other tag shifts down one, bundle
+    -- untouched.  That shift is the whole content of `[h, id]` at a
+    -- positional row — and the reason this cannot be derived.
+    applyAtom _ (Prim "into") stk
+      | not (M.member "into" vars), not (M.member "into" defs) = do
+          (args, stk') <- takeWires "into" 2 stk
+          case args of
+            [VFn scope cv body, VSum tag bundle]
+              | tag == 0 -> do
+                  (out, logs) <- evalTerm env scope cv body bundle
+                  case out of
+                    [v@(VSum _ _)] -> pure ([v], stk', logs)
+                    _ -> throwError "Runtime type error in into: the handler \
+                                    \must land in the remaining sum"
+              | otherwise -> pure ([VSum (tag - 1) bundle], stk', [])
+            _ -> throwError "Runtime type error in into: expected a handler \
+                            \quotation and a sum"
     -- evalAs: witness-checked splice.  Rebuild the term, infer it in
     -- process, check it SUBSUMES the witness's arrow, then run it on the
     -- segment.  Every failure rides the miss track WITH the untouched
@@ -5415,6 +5592,7 @@ evalTerm env defs vars term st =
 builtinArity :: String -> Either String Int
 builtinArity name
   | isJust (receiptLabel name) = Right 0
+  | isJust (distPrimArity name) = Right 2
 builtinArity name =
   case M.lookup name primEnv of
     Just (Forall _ _ _ _ _ (Arrow i _ _)) -> Right (closedArity i)
@@ -5490,6 +5668,13 @@ runBuiltin _ _ "asInt?" [VStr t]        =
   case reads t :: [(Int, String)] of
     [(n, "")] -> Right ([VSum 0 [VInt n]], [])
     _         -> Right ([VSum 1 [VStr t]], [])
+-- #dist:K at runtime: the wire joins the bundle of any of the first K
+-- alternatives (deepest, so it heads the bundle), and a tag at or past
+-- K is the residual, which passes untouched — the wire is simply gone
+-- from it, which is what the type already said.
+runBuiltin _ _ nm [x, VSum tag bundle]
+  | Just k <- distPrimArity nm =
+      Right ([if tag < k then VSum tag (x : bundle) else VSum tag bundle], [])
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin _ _ name args =
@@ -5585,7 +5770,7 @@ renderTerm t =
     rAtom (Quote q)     = "[" ++ renderTerm q ++ "]"
     rAtom (Alts cs res) =
       "(" ++ intercalate " | " (map renderTerm cs)
-          ++ (if res then " | ..." else "") ++ ")"
+          ++ (if res then " | ---" else "") ++ ")"
     rAtom (OpenAbs slots hasRest b) =
       "(" ++ unwords (map (maybe "_" id) slots ++ ["..." | hasRest])
           ++ " -> " ++ renderTerm b ++ ")"
@@ -5665,7 +5850,7 @@ valueToCode env (VFn _ cv t) = do
   pure (Quote t2)
 valueToCode env (VSum tag vs) = do
   fields <- mapM (valueToCode env) vs
-  let inj = Prim ("in" ++ show (tag + 1))
+  let inj = Prim ("alt" ++ show (tag + 1))
   pure $ if null fields then inj else Seq (Tensor fields) inj
 
 -- substitute captured closure values (shadow-aware)
@@ -5838,31 +6023,29 @@ compileAbs env outer ps body = do
                        : [ capAt j | j <- [0 .. m - 1] ]
             pure (AtomInfo m (zip [0 ..] (idxOf used)) (chainTerm stages))
     -- A row that mentions a parameter: distribute a copy of the block
-    -- into every track with `dist2` (one per block wire, shallowest
-    -- first, so the block lands in its own order at the bottom of each
-    -- track), compile each branch against it, and let each branch drop
-    -- its own copy at the end — which is what `compileAbs` already does.
-    -- The row keeps its ORIGINAL type: no `undist2` is needed, and the
-    -- output row stays closed, which an `undist2` would not leave it.
+    -- into every track (one `dist` per block wire, shallowest first, so
+    -- the block lands in its own order at the bottom of each track),
+    -- compile each branch against it, and let each branch drop its own
+    -- copy at the end — which is what `compileAbs` already does.  The
+    -- row keeps its ORIGINAL type: no `undist` is needed.
+    -- WHICH dist: the derived prelude `dist2` for the closed binary row
+    -- (that is the theorem, and reflected code should show it), the
+    -- generator `#dist:K` for every other width and for a residual —
+    -- the two corners 5a¾ pinned as refusals.  `#dist:K` passes the
+    -- residual untouched, which is the only thing that CAN be done with
+    -- alternatives nobody can name.
     classify t@(Alts cs residual)
       | null (usedIn t) = Right (AtomInfo 1 [] t)
-      | residual =
-          Left $ "reflect: parameter used inside a residual row "
-              ++ "`(p | q | ...)` — the passing tracks would need the "
-              ++ "parameter block too, and an open row's width is not a "
-              ++ "type Braid can write; close the row"
-      | length cs /= 2 =
-          Left $ "reflect: parameter used inside a row of " ++ show (length cs)
-              ++ " tracks — distributing the block over a coproduct is "
-              ++ "derived from `case2`/`merge`, which are binary, so only "
-              ++ "2-track rows are covered; write it as nested 2-track rows"
       | otherwise =
           let used = usedIn t
               m    = length used
-              distAt j = replicate (m - 1 - j) (Prim "_") ++ [Prim "dist2"]
+              dist | residual || length cs /= 2 = Prim (distPrimName (length cs))
+                   | otherwise                  = Prim "dist2"
+              distAt j = replicate (m - 1 - j) (Prim "_") ++ [dist]
           in do
             cs' <- mapM (compileAbs env outer used) cs
-            let stages = [ distAt j | j <- [0 .. m - 1] ] ++ [[Alts cs' False]]
+            let stages = [ distAt j | j <- [0 .. m - 1] ]
+                      ++ [[Alts cs' residual]]
             pure (AtomInfo (m + 1) (zip [0 ..] (idxOf used)) (chainTerm stages))
     classify (OpenAbs {}) =
       Left "internal: nested abstraction not yet eliminated"

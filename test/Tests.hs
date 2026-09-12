@@ -177,18 +177,25 @@ passTests =
   , ("(x -> [x])",            "a0 ⇒ Fn⟨• ⇒ a0⟩")   -- closure over a parameter
 
     -- sums: injections, code rows, merge
-  , ("in1",           "ρ0 ⇒ (ρ0 | σ0)")
-  , ("in2",           "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
+  , ("alt1",           "ρ0 ⇒ (ρ0 | σ0)")
+  , ("alt2",           "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
     -- compositional injections: here starts a sum, there widens it;
-    -- here >> there ≡ in2, exactly
+    -- here >> there ≡ alt2, exactly
   , ("here",          "ρ0 ⇒ (ρ0 | σ0)")
   , ("there",         "(σ0) ⇒ (ρ0 | σ0)")
   , ("here >> there", "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
-  , ("1 2 >> in1",    "• ⇒ (Int Int | σ0)")
+  , ("1 2 >> alt1",    "• ⇒ (Int Int | σ0)")
   , ("merge",         "(ρ0 | ρ0) ⇒ ρ0")
   , ("(dup | drop)",  "(a0 | a1) ⇒ (a0 a0 | •)")
-  , ("(dup | ...)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
-  , ("5 >> in1 >> (dup >> * | ...) >> merge", "• ⇒ Int")
+  , ("(dup | ---)",   "(a0 | σ0) ⇒ (a0 a0 | σ0)")
+  , ("5 >> alt1 >> (dup >> * | ---) >> merge", "• ⇒ Int")
+    -- `into`: the OPEN eliminator.  [h, id] — handle the first
+    -- alternative into the remaining row, tag-shift the rest.
+  , ("into", "Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)")
+  , ("5 >> alt1 >> [toStr >> alt1] ... >> into", "• ⇒ (Str | σ0)")
+    -- peel one track off an OPEN row: the residual passes untouched
+  , ("[toStr >> alt1] ... >> into", "(a0 | Str | σ0) ⇒ (Str | σ0)")
+
   , ("[dup >> * | drop]", "• ⇒ Fn⟨(Int | a0) ⇒ (Int | •)⟩")
     -- bare rows: each LINE is a code row (>> binds tighter than |,
     -- | tighter than newline)
@@ -226,7 +233,7 @@ passTests =
   , ("5\n-> n\nn ... >> *",      "• ⇒ Int")   -- ...or an ordinary stage break
   , ("dup | +",                  "(a0 | Int Int) ⇒ (a0 a0 | Int)")
   , ("dup | +\n+ | id\nmerge",   "(Int | Int Int) ⇒ Int")
-  , ("1 ... >> + | ...",         "(Int | σ0) ⇒ (Int | σ0)")
+  , ("1 ... >> + | ---",         "(Int | σ0) ⇒ (Int | σ0)")
     -- EVERY empty arm is pass, not just first/last — track-column layout
   , ("(drop | |)",               "(a0 | ρ0 | ρ1) ⇒ (• | ρ0 | ρ1)")
   , ("(| | drop)",               "(ρ0 | ρ1 | a0) ⇒ (ρ0 | ρ1 | •)")
@@ -252,7 +259,7 @@ passTests =
     -- `loop`'s body is an ordinary step (its own grade passes through
     -- ε); the ITERATION is what carries Rec.
   , ("loop",          "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
-    -- loop protocol aliases: again ≡ in1 (continue), done ≡ in2 (exit)
+    -- loop protocol aliases: again ≡ alt1 (continue), done ≡ alt2 (exit)
   , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
   , ("done",          "ρ0 ⇒ (ρ1 | ρ0 | σ0)")
   ]
@@ -285,7 +292,14 @@ failTests =
   , ("nonsense42x",   "Unknown primitive")
   , ("",              "Expected a tensor stage")
     -- sums
-  , ("5 >> in1 >> (1 | ...)",  "Cannot unify stacks")   -- alt • vs Int
+  , ("5 >> alt1 >> (1 | ---)",  "Cannot unify stacks")   -- alt • vs Int
+    -- `| ...` MEANT the residual until 2026-09-12.  Refused for one
+    -- release rather than re-read, so no old row silently changes
+    -- meaning; the message names both replacements.
+  , ("(dup | ...)",
+     "`| ...` used to mean the residual; write `| ---` for more alternatives, or `| pass` for a third track that passes")
+  , ("1 ... >> + | ...", "used to mean the residual")
+  , ("(dup | --- | drop)", "'| ---' must end its row")
   , ("1 >> (dup | drop)",      "Cannot unify types")    -- Int vs a sum wire
     -- scope rules: unresolved names are errors, never inferred parameters
   , ("(x -> y)",      "Unknown primitive: y")
@@ -345,7 +359,7 @@ moduleTypeTests =
   , ("negative?",     "Int ⇒ (Int | Int)")
   , ("odd?",          "Int ⇒ (Int | Int)")
   , ("zero?",         "Int ⇒ (Int | Int)")
-    -- sum associators re-nest a decision tree (open tails from in1/in2)
+    -- sum associators re-nest a decision tree (open tails from alt1/alt2)
   , ("assocL", "(ρ0 | (ρ1 | ρ2)) ⇒ ((ρ0 | ρ1 | σ0) | ρ2 | σ1)")
   , ("assocR", "((ρ0 | ρ1) | ρ2) ⇒ (ρ0 | (ρ1 | ρ2 | σ0) | σ1)")
     -- type aliases: display folding (Bool/Maybe from the prelude;
@@ -355,8 +369,28 @@ moduleTypeTests =
     -- CONSTRUCTION; the checked interposition is a plain Code word
   , ("lift2",     "Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
   , ("interpose", "Code Code ⇒ Code")
-  , ("7 >> zero? >> (forget | ...)",            "• ⇒ (• | Int)")
-  , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ...)", "• ⇒ MInt")
+  , ("7 >> zero? >> (forget | ---)",            "• ⇒ (• | Int)")
+    -- THE TWO TAILS (5a⅞).  `...` continues WIRES, `---` continues
+    -- ALTERNATIVES, and the inferred types already told them apart by
+    -- letter: ρ is a track's contents, σ the residual.
+  , ("(toStr | not | ---)",  "(a0 | (ρ0 | ρ1) | σ0) ⇒ (Str | (ρ1 | ρ0 | σ1) | σ0)")
+  , ("(toStr | not | pass)", "(a0 | (ρ0 | ρ1) | ρ2) ⇒ (Str | (ρ1 | ρ0 | σ0) | ρ2)")
+    -- peel one alternative with `into`, then close the ladder with the
+    -- existing `otherwise` — the pairing this stage is for
+  , ("[toStr >> alt1] ... >> into >> _ [drop >> \"?\"] >> otherwise",
+     "(a0 | Str | a1) ⇒ Str")
+    -- `---` in a DECLARATION HEAD: the fifth parameter kind.  A written
+    -- residual displays as the ordinary σ.
+  , ("data Any2(---) = (Int | Str | ---)\nAny2", "(Int | Str | σ0) ⇒ Any2((σ0))")
+  , ("data Any2(---) = (Int | Str | ---)\nunAny2", "Any2((σ0)) ⇒ (Int | Str | σ0)")
+    -- Fn⟨(A | ---) ⇒ (B | ---)⟩ in a declaration: roll/unroll is the
+    -- ascription that forces a quote to that type
+  , ("data Peeler(---) = Fn⟨(Int | ---) ⇒ (Str | ---)⟩\n[(s -> s >> (toStr | ---))] >> Peeler >> unPeeler",
+     "• ⇒ Fn⟨(Int | σ0) ⇒ (Str | σ0)⟩")
+    -- `(---)` — the sum that is ALL residual — is a legal written type;
+    -- it is `into`'s result shape
+  , ("type Rest(---) = (---)\ntheory Recover(---) =\n    recover : (Str | ---) ⇒ (---)\n7 >> alt1", "• ⇒ (Int | σ0)")
+  , ("type MInt = (• | Int)\n7 >> zero? >> (forget | ---)", "• ⇒ MInt")
   , ("type Result(a, e) = (a | e)\nodd?",       "Int ⇒ Result(Int, Int)")
   , ("type YN = Bool\ntrue",                    "• ⇒ YN")
     -- Fn in type declarations: alias naming + display folding, both
@@ -404,9 +438,9 @@ moduleTypeTests =
   , ("(1 \"a\" 2 \"b\" >> pack2)", "• ⇒ List(Box(Int Str))")
     -- exponent syntax in type declarations: literal ^k (and Unicode
     -- superscript input) expands to k copies; segments repeat wholesale
-  , ("type T3 = (Int^3 | Str)\n1 2 3 >> in1 >> (pass | drop >> \"x\")", "• ⇒ T3")
-  , ("type W = (• | Int³)\n1 2 3 >> in2 >> (forget | pass)", "• ⇒ W")
-  , ("type PP = ((Int Str)^2 | •)\n1 \"a\" 2 \"b\" >> in1 >> (pass | forget)", "• ⇒ PP")
+  , ("type T3 = (Int^3 | Str)\n1 2 3 >> alt1 >> (pass | drop >> \"x\")", "• ⇒ T3")
+  , ("type W = (• | Int³)\n1 2 3 >> alt2 >> (forget | pass)", "• ⇒ W")
+  , ("type PP = ((Int Str)^2 | •)\n1 \"a\" 2 \"b\" >> alt1 >> (pass | forget)", "• ⇒ PP")
     -- foldExp: the exponent eliminator — variadic folds over bare stack
     -- products; n is erased and generalizes per def
   , ("[+] 0 ... >> foldExp",                    "Intⁿ⁰ ⇒ Int")
@@ -856,7 +890,7 @@ evalTests =
   , ("1 2 3 >> (1 ... >> +) ... >> + ...",   [],     "4 3")
   , ("1 2 3 >> (1 ... >> +) >>> + ...",      [],     "4 3")
   , ("def square = dup >> *\n5 >> square >> print", ["25"], "")
-  , ("true false",                         [],     "in1() in2()")
+  , ("true false",                         [],     "alt1() alt2()")
   , ("1 2\nswap\nprint ...\nprint",        ["2", "1"], "")
   , ("1\n2 id",                            [],     "2 1")
   , ("1\n2 ...",                           [],     "2 1")
@@ -909,16 +943,16 @@ evalTests =
   , ("0 0 >> checkedAt >> (at >> print | forget >> \"oob\" >> print) >> merge", ["0"], "")
     -- an index literal is a closed point, so it reflects like any
     -- other literal (not an open-arity word)
-  , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> [10] c >> evalAs >> print) | print) >> forget", ["in1(20)"], "")
+  , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> [10] c >> evalAs >> print) | print) >> forget", ["alt1(20)"], "")
     -- STAGE 5a½: an `evalAs` WITNESS is a written type, so an
     -- unlabelled one refuses recursive code — the sandbox reads `Rec`
     -- exactly as it reads io, and the refusal rides the miss track
   , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget",
-     ["in2(Cannot unify effects: Rec vs pure (the expected type fixes the grade; this code must stay pure), 7)"], "")
+     ["alt2(Cannot unify effects: Rec vs pure (the expected type fixes the grade; this code must stay pure), 7)"], "")
     -- a witness that itself recurses is `=Rec>`, and then the same
     -- code is admitted
   , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [[_ 200 >> less?] [3 _ >> *] ... >> while] c (7) >> evalAs >> print) | print) >> forget",
-     ["in1(112)"], "")
+     ["alt1(112)"], "")
   , ("1 >> sumN _",                                 [],     "0 1")
   , ("5\n-> x\nx ... >> + >> print",       ["10"], "")
   , ("10 20 30\n-> h m f\nsumN >> print\nh m f >> sumN >> print",
@@ -934,7 +968,7 @@ evalTests =
     -- polymorphism (q's quoted pass applies to whatever follows)
   , ("def q = [pass]\nq 1 >> ev",        [],     "1")
 
-  , ("5 >> negative?",                     [],     "in2(5)")
+  , ("5 >> negative?",                     [],     "alt2(5)")
 
     -- grouping
   , ("7 >> (dup >> *) >> print",           ["49"], "")
@@ -950,19 +984,39 @@ evalTests =
   , ("7 >> (x -> [x 1 >> +]) >> ev >> print",   ["8"], "")
 
     -- sums: injections, code rows, merge
-  , ("5 >> in1 >> (dup >> * | ...) >> merge >> print",       ["25"], "")
-  , ("7 >> in2 >> (dup >> * | 1 ... >> +) >> merge >> print", ["8"], "")
-  , ("5 >> in2 >> (drop | ...)",           [],     "in2(5)")
-  , ("1 2 >> in1",                         [],     "in1(1, 2)")
-  , ("3 4 >> here >> there",               [],     "in2(3, 4)")
+  , ("5 >> alt1 >> (dup >> * | ---) >> merge >> print",       ["25"], "")
+    -- `into` (5a⅞): the OPEN eliminator.  Peel one alternative and
+    -- tag-shift the rest — three tracks, three answers, then the
+    -- existing `otherwise` closes what is left.
+  , ("data T3 = (Int | Str | Sym)\ndef peel = unT3 >> [toStr >> alt1] ... >> into >> _ [drop >> \"sym\"] >> otherwise\n7 >> alt1 >> T3 >> peel >> print\n\"hi\" >> alt2 >> T3 >> peel >> print\n.tok >> alt3 >> T3 >> peel >> print",
+     ["7", "hi", "sym"], "")
+    -- two tracks: the handler runs on tag 0, and on tag 1 the tag shifts
+    -- down into a 1-ary sum, which `there >> merge` un-sums
+  , ("5 >> alt1 >> [toStr >> alt1] ... >> into >> there >> merge >> print\n\"x\" >> alt2 >> [toStr >> alt1] ... >> into >> there >> merge >> print",
+     ["5", "x"], "")
+    -- THE ELGOT IDENTITY, `loop f = f >> [loop f] into` up to un-summing.
+    -- 5a½ listed the iteration axiom as "statable, not yet run"; with
+    -- `into` it is a program, checked at sample points.  RUNNABLE, NOT
+    -- DECIDED: `sameCode` does not enter rows yet (5b).
+  , ("def step = [(n -> n 10 >> gt? >> (_ drop >> toStr >> alt2 | _ drop >> 2 ... >> * >> alt1) >> merge)]\ndef lhs = (n -> step n >> loop)\ndef rhs = (n -> n >> step ... >> ev >> [(m -> step m >> loop >> alt1)] ... >> into >> there >> merge)\n1 >> lhs >> print\n1 >> rhs >> print\n20 >> lhs >> print\n20 >> rhs >> print\n7 >> lhs >> print\n7 >> rhs >> print",
+     ["16", "16", "20", "20", "14", "14"], "")
+    -- a written `Fn⟨(A | ---) ⇒ (B | ---)⟩` is an `evalAs` WITNESS: the
+    -- residual is part of the expectation the loaded code must meet.
+    -- (The pipeline stays pure — a written pure witness refuses io.)
+  , ("data Peeler(---) = Fn⟨(Int | ---) ⇒ (Str | ---)⟩\ndef getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef w = [(s -> s >> (toStr | ---))] >> Peeler >> unPeeler\ndef c = (w) >> getCode\n(5 >> alt1) >> (w) (c) ... >> evalAs",
+     [], "alt1(alt1(5))")
+  , ("7 >> alt2 >> (dup >> * | 1 ... >> +) >> merge >> print", ["8"], "")
+  , ("5 >> alt2 >> (drop | ---)",           [],     "alt2(5)")
+  , ("1 2 >> alt1",                         [],     "alt1(1, 2)")
+  , ("3 4 >> here >> there",               [],     "alt2(3, 4)")
     -- decide-then-inject: predicate is already the fork (Bool ≡ (• | •))
   , ("def classify = even? >> (here | here >> there) >> merge\n4 >> classify",
-                                           [],     "in1(4)")
+                                           [],     "alt1(4)")
   , ("def classify = even? >> (here | here >> there) >> merge\n5 >> classify",
-                                           [],     "in2(5)")
+                                           [],     "alt2(5)")
     -- routers in flight: quoted routers dispatch via plain ev
-  , ("5 >> [odd?] ... >> ev",           [],     "in1(5)")
-  , ("4 >> [odd?] ... >> ev",           [],     "in2(4)")
+  , ("5 >> [odd?] ... >> ev",           [],     "alt1(5)")
+  , ("4 >> [odd?] ... >> ev",           [],     "alt2(4)")
     -- if-then-else is route >> row >> merge
   , ("5 >> odd? >> (id | drop >> 0) >> merge >> print", ["5"], "")
   , ("4 >> odd? >> (id | drop >> 0) >> merge >> print", ["0"], "")
@@ -988,40 +1042,40 @@ evalTests =
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> _ drop >> print", ["ada"], "")
   , ("data Person = (Str Int)\n\"ada\" 36 >> Person >> unPerson >> drop ... >> print", ["36"], "")
     -- Peano round-trip: folds by ordinary recursion through unNat
-  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> ev >> in2 >> Nat) >> merge)] ... >> fix ... >> ev\ndef toInt = [(self ... -> unNat >> (0 | self ... >> ev >> 1 ... >> +) >> merge)] ... >> fix ... >> ev\n3 >> fromInt >> toInt >> print", ["3"], "")
+  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> alt1 >> Nat | _ 1 >> - >> self ... >> ev >> alt2 >> Nat) >> merge)] ... >> fix ... >> ev\ndef toInt = [(self ... -> unNat >> (0 | self ... >> ev >> 1 ... >> +) >> merge)] ... >> fix ... >> ev\n3 >> fromInt >> toInt >> print", ["3"], "")
     -- trees: build with rolled injections, fold with recursion
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\ndef total = [(self ... -> unTree >> (_ | _ (self ... >> ev) >> swap >> _ (self ... >> ev) >> +) >> merge)] ... >> fix ... >> ev\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = alt1 >> Tree\ndef node = alt2 >> Tree\ndef total = [(self ... -> unTree >> (_ | _ (self ... >> ev) >> swap >> _ (self ... >> ev) >> +) >> merge)] ... >> fix ... >> ev\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print", ["7"], "")
     -- same folds, by points: [case1] [case2] ... >> foldName
-  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> in1 >> Nat | _ 1 >> - >> self ... >> ev >> in2 >> Nat) >> merge)] ... >> fix ... >> ev\n3 >> fromInt >> [0] [1 ... >> +] ... >> foldNat >> print", ["3"], "")
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [_] [+] ... >> foldTree >> print", ["7"], "")
-  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = in1 >> Tree\ndef node = in2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [drop >> 1] [+] ... >> foldTree >> print", ["3"], "")
+  , ("type Nat = (• | Nat)\ndef fromInt = [(self ... -> zero? >> (drop >> alt1 >> Nat | _ 1 >> - >> self ... >> ev >> alt2 >> Nat) >> merge)] ... >> fix ... >> ev\n3 >> fromInt >> [0] [1 ... >> +] ... >> foldNat >> print", ["3"], "")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = alt1 >> Tree\ndef node = alt2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [_] [+] ... >> foldTree >> print", ["7"], "")
+  , ("type Tree(a) = (a | Tree(a) Tree(a))\ndef leaf = alt1 >> Tree\ndef node = alt2 >> Tree\n1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> [drop >> 1] [+] ... >> foldTree >> print", ["3"], "")
     -- prelude defs available with no local definition
-  , ("5 >> _ 5 >> equals? >> print",             ["in1(5)"], "")
+  , ("5 >> _ 5 >> equals? >> print",             ["alt1(5)"], "")
   , ("def double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
   , ("7 >> [_ 100 >> less? >> not] [dup >> +] ... >> until >> print", ["112"], "")
     -- user defs shadow prelude defs
   , ("def while = drop\n1 2 >> while ... >> print", ["2"], "")
-    -- >=>: short-circuiting Kleisli chains; in1 lifts pure stages
-  , ("4 >> (even? >=> zero?) >> print",         ["in2(4)"], "")
-  , ("0 >> (even? >=> zero?) >> print",         ["in1(0)"], "")
-  , ("7 >> (even? >=> zero?) >> print",         ["in2(7)"], "")
-  , ("def double = 2 _ >> *\n4 >> (even? >=> _ 100 >> less? >=> double >> in1) >> print", ["in1(8)"], "")
-  , ("def double = 2 _ >> *\n120 >> (even? >=> _ 100 >> less? >=> double >> in1) >> print", ["in2(120)"], "")
-  , ("def double = 2 _ >> *\n7 >> (even? >=> _ 100 >> less? >=> double >> in1) >> print", ["in2(7)"], "")
-  , ("5 >> (_ 5 >> equals? >=> odd?) >> print",  ["in1(5)"], "")
+    -- >=>: short-circuiting Kleisli chains; alt1 lifts pure stages
+  , ("4 >> (even? >=> zero?) >> print",         ["alt2(4)"], "")
+  , ("0 >> (even? >=> zero?) >> print",         ["alt1(0)"], "")
+  , ("7 >> (even? >=> zero?) >> print",         ["alt2(7)"], "")
+  , ("def double = 2 _ >> *\n4 >> (even? >=> _ 100 >> less? >=> double >> alt1) >> print", ["alt1(8)"], "")
+  , ("def double = 2 _ >> *\n120 >> (even? >=> _ 100 >> less? >=> double >> alt1) >> print", ["alt2(120)"], "")
+  , ("def double = 2 _ >> *\n7 >> (even? >=> _ 100 >> less? >=> double >> alt1) >> print", ["alt2(7)"], "")
+  , ("5 >> (_ 5 >> equals? >=> odd?) >> print",  ["alt1(5)"], "")
     -- ok/miss aliases: return and stay-missed of the sum monad
-  , ("def double2 = 2 _ >> *\ndef process = even? >=> _ 100 >> less? >=> double2 >> ok\n4 >> process >> print", ["in1(8)"], "")
-  , ("7 >> odd? >> (ok | zero?) >> merge >> print", ["in1(7)"], "")
+  , ("def double2 = 2 _ >> *\ndef process = even? >=> _ 100 >> less? >=> double2 >> ok\n4 >> process >> print", ["alt1(8)"], "")
+  , ("7 >> odd? >> (ok | zero?) >> merge >> print", ["alt1(7)"], "")
     -- forget (terminal morphism) and verdict: routers to pure decisions
   , ("1 2 3 >> forget", [], "")
-  , ("5 >> odd? >> verdict >> print", ["in1()"], "")
-  , ("4 >> odd? >> verdict >> print", ["in2()"], "")
-  , ("3 4 >> eq? >> verdict >> print", ["in2()"], "")
-  , ("4 4 >> eq? >> verdict >> print", ["in1()"], "")
-  , ("3 3 >> equals >> print",  ["in1()"], "")
-  , ("5 3 >> less >> print",    ["in2()"], "")
-  , ("3 5 >> less >> print",    ["in1()"], "")
-  , ("7 >> odd >> print",       ["in1()"], "")
+  , ("5 >> odd? >> verdict >> print", ["alt1()"], "")
+  , ("4 >> odd? >> verdict >> print", ["alt2()"], "")
+  , ("3 4 >> eq? >> verdict >> print", ["alt2()"], "")
+  , ("4 4 >> eq? >> verdict >> print", ["alt1()"], "")
+  , ("3 3 >> equals >> print",  ["alt1()"], "")
+  , ("5 3 >> less >> print",    ["alt2()"], "")
+  , ("3 5 >> less >> print",    ["alt1()"], "")
+  , ("7 >> odd >> print",       ["alt1()"], "")
     -- a Bool drives a choice through an ordinary row
   , ("7 >> odd >> (1 | 0) >> merge >> print", ["1"], "")
   , ("8 >> odd >> (1 | 0) >> merge >> print", ["0"], "")
@@ -1038,26 +1092,26 @@ evalTests =
   , ("\"a\" \"b\" >> cat >> print", ["ab"], "")
   , ("\"Q: \" \"why?\" >> cat >> print", ["Q: why?"], "")
   , ("7 >> toStr >> \"n=\" ... >> cat >> print", ["n=7"], "")
-  , (".red .red >> eq? >> verdict >> print", ["in1()"], "")
-  , (".red .blue >> eq? >> verdict >> print", ["in2()"], "")
-  , ("\"42\" >> asInt? >> print", ["in1(42)"], "")
-  , ("\"4x\" >> asInt? >> print", ["in2(4x)"], "")
+  , (".red .red >> eq? >> verdict >> print", ["alt1()"], "")
+  , (".red .blue >> eq? >> verdict >> print", ["alt2()"], "")
+  , ("\"42\" >> asInt? >> print", ["alt1(42)"], "")
+  , ("\"4x\" >> asInt? >> print", ["alt2(4x)"], "")
     -- REAL column sniffing now: strings in, typed column or evidence out
-  , ("(\"1\" \"2\" \"3\" >> pack) >> [asInt?] ... >> map >> sequence >> print", ["in1(list(1, 2, 3))"], "")
-  , ("(\"1\" \"x\" \"3\" >> pack) >> [asInt?] ... >> map >> sequence >> print", ["in2(x)"], "")
+  , ("(\"1\" \"2\" \"3\" >> pack) >> [asInt?] ... >> map >> sequence >> print", ["alt1(list(1, 2, 3))"], "")
+  , ("(\"1\" \"x\" \"3\" >> pack) >> [asInt?] ... >> map >> sequence >> print", ["alt2(x)"], "")
     -- sequence: the List/Sum distributive law — column sniffing is
     -- map parse-router >> sequence
-  , ("(1 3 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["in1(list(1, 3, 5))"], "")
-  , ("(1 4 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["in2(4)"], "")
+  , ("(1 3 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["alt1(list(1, 3, 5))"], "")
+  , ("(1 4 5 >> pack) >> [odd?] ... >> map >> sequence >> print", ["alt2(4)"], "")
     -- >?> / >!> : guard chains along the miss track (dual of >=>)
     -- asymmetric guard predicates: hit carries nothing (drop-free
     -- actions); the hit carries n, so this IS a Maybe now
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (... | n))\ndef fz = by3? >> (\"fizz\" | ...) >!> toStr\n9 >> fz >> print", ["fizz"], "")
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (... | n))\ndef fz = by3? >> (\"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n9 >> fz >> print", ["fizz"], "")
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n10 >> fz >> print", ["b"], "")
-  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ...) >?> by5? >> (drop >> \"b\" | ...) >!> toStr\n7 >> fz >> print", ["7"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (... | n))\ndef fz = by3? >> (\"fizz\" | ---) >!> toStr\n9 >> fz >> print", ["fizz"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (... | n))\ndef fz = by3? >> (\"fizz\" | ---) >!> toStr\n7 >> fz >> print", ["7"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ---) >!> toStr\n9 >> fz >> print", ["fizz"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"fizz\" | ---) >!> toStr\n7 >> fz >> print", ["7"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ---) >?> by5? >> (drop >> \"b\" | ---) >!> toStr\n10 >> fz >> print", ["b"], "")
+  , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\ndef by5? = (n -> n 5 >> mod >> zero >> (n | n))\ndef fz = by3? >> (drop >> \"f\" | ---) >?> by5? >> (drop >> \"b\" | ---) >!> toStr\n7 >> fz >> print", ["7"], "")
     -- leading | in a row defaults the first arm to pass (id):
     -- (| f) == (pass | f)
   , ("def k = odd? >> (| dup >> *) >> merge\n5 >> k >> print", ["5"], "")
@@ -1111,7 +1165,7 @@ evalTests =
   , ("def sign =\n    [odd?] [dup >> *]\n    [negative?] [drop >> 0] ...\n    pack2R\n7 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["49"], "")
   , ("def sign = ([odd?] [dup >> *] [negative?] [drop >> 0] >> pack2)\n8 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["9"], "")
   , ("def sign =\n    [odd?] [dup >> *]\n    [negative?] [drop >> 0] ...\n    pack2R\n-4 sign >> choose >> (id | 1 ... >> +) >> merge >> print", ["0"], "")
-    -- no else lane: none hit -> in2(input)
+    -- no else lane: none hit -> alt2(input)
   , ("5 ([odd?] [dup >> *] >> pack2) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["hit"], "")
   , ("6 ([odd?] [dup >> *] >> pack2) >> choose >> (drop >> \"hit\" | drop >> \"miss\") >> merge >> print", ["miss"], "")
     -- a bound clause value reused; and | sum rows still work
@@ -1126,17 +1180,17 @@ evalTests =
     -- swapIf twice with the same control = id (reversibility)
   , ("true 1 2 >> swapIf >> true ... >> swapIf >> print _ >> print", ["1", "2"], "")
     -- boolean connectives (two Bool wires, cond-dispatched)
-  , ("true false >> and >> print",  ["in2()"], "")
-  , ("true true >> and >> print",   ["in1()"], "")
-  , ("false true >> or >> print",   ["in1()"], "")
-  , ("true true >> xor >> print",   ["in2()"], "")
-  , ("true false >> xor >> print",  ["in1()"], "")
-  , ("false true >> implies >> print", ["in1()"], "")
-  , ("true false >> implies >> print", ["in2()"], "")
-  , ("true >> not >> print",        ["in2()"], "")
+  , ("true false >> and >> print",  ["alt2()"], "")
+  , ("true true >> and >> print",   ["alt1()"], "")
+  , ("false true >> or >> print",   ["alt1()"], "")
+  , ("true true >> xor >> print",   ["alt2()"], "")
+  , ("true false >> xor >> print",  ["alt1()"], "")
+  , ("false true >> implies >> print", ["alt1()"], "")
+  , ("true false >> implies >> print", ["alt2()"], "")
+  , ("true >> not >> print",        ["alt2()"], "")
     -- folding a sum: row of handlers + generated mergeName / foldName
-  , ("data Shape = (Int | Int Int | Int Int Int)\ndef rect = in2 >> Shape\n3 4 >> rect >> unShape >> (dup >> * | * | + ... >> +) >> mergeShape >> print", ["12"], "")
-  , ("data Shape = (Int | Int Int | Int Int Int)\ndef tri = in3 >> Shape\n1 2 3 >> tri >> [dup >> *] [*] [+ ... >> +] ... >> foldShape >> print", ["6"], "")
+  , ("data Shape = (Int | Int Int | Int Int Int)\ndef rect = alt2 >> Shape\n3 4 >> rect >> unShape >> (dup >> * | * | + ... >> +) >> mergeShape >> print", ["12"], "")
+  , ("data Shape = (Int | Int Int | Int Int Int)\ndef tri = alt3 >> Shape\n1 2 3 >> tri >> [dup >> *] [*] [+ ... >> +] ... >> foldShape >> print", ["6"], "")
     -- multi-wire list literals + matchWith: data-driven first-match guard
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n9 [toStr] ([by3?] [drop >> \"fizz\"] >> pack2) >> matchWith >> print", ["fizz"], "")
   , ("def by3? = (n -> n 3 >> mod >> zero >> (n | n))\n7 [toStr] ([by3?] [drop >> \"fizz\"] >> pack2) >> matchWith >> print", ["7"], "")
@@ -1147,22 +1201,22 @@ evalTests =
   , ("15 3 >> mod >> print", ["0"], "")
   , ("-5 >> print",          ["-5"], "")
   , ("-5 3 >> + >> print",   ["-2"], "")
-  , ("5 3 >> gt? >> verdict >> print", ["in1()"], "")
-  , ("3 3 >> lte? >> verdict >> print", ["in1()"], "")
+  , ("5 3 >> gt? >> verdict >> print", ["alt1()"], "")
+  , ("3 3 >> lte? >> verdict >> print", ["alt1()"], "")
     -- prelude round-out
   , ("5 >> range >> print",  ["list(0, 1, 2, 3, 4)"], "")
   , ("5 >> range >> len >> print", ["5"], "")
   , ("5 >> range >> sum >> print", ["10"], "")
   , ("(2 3 4 >> pack) >> product >> print", ["24"], "")
-  , ("(1 3 5 >> pack) >> [odd] ... >> map >> all >> print", ["in1()"], "")
-  , ("(2 4 >> pack) >> [odd] ... >> map >> any >> print", ["in2()"], "")
+  , ("(1 3 5 >> pack) >> [odd] ... >> map >> all >> print", ["alt1()"], "")
+  , ("(2 4 >> pack) >> [odd] ... >> map >> any >> print", ["alt2()"], "")
   , ("(1 2 3 >> pack) >> [odd?] ... >> map >> partitionSum >> len _ >> print _ >> len >> print", ["2", "1"], "")
   , ("(7 8 >> pack) >> printAll", ["7", "8"], "")
     -- fizzbuzz, the citizenship test
   , ("def fizzbuzz = (n -> (n 15 >> mod >> zero) [\"FizzBuzz\"] [(n 3 >> mod >> zero) [\"Fizz\"] [(n 5 >> mod >> zero) [\"Buzz\"] [n >> toStr] ... >> cond] ... >> cond] ... >> cond)\n15 >> fizzbuzz >> print\n9 >> fizzbuzz >> print\n4 >> fizzbuzz >> print", ["FizzBuzz", "Fizz", "4"], "")
     -- unparse / parse round trip; parse feeds evalCode
   , ("\"dup >> *\" >> parse >> (unparse >> print | print) >> forget", ["dup >> *"], "")
-  , ("\"dup >> *\" >> parse >> ((c -> [dup >> *] c (6) >> evalAs >> print) | print) >> forget", ["in1(36)"], "")
+  , ("\"dup >> *\" >> parse >> ((c -> [dup >> *] c (6) >> evalAs >> print) | print) >> forget", ["alt1(36)"], "")
   , ("\"dup >>\" >> parse >> (forget >> 0 >> print | forget >> 1 >> print) >> forget", ["1"], "")
     -- file IO round trip (railway edges)
   , ("\"/tmp/braid-sprint-test.txt\" \"hi\" >> writeFile >> (\"/tmp/braid-sprint-test.txt\" >> readFile >> (print | print) >> forget | print) >> forget", ["hi"], "")
@@ -1171,10 +1225,10 @@ evalTests =
   , ("(1 2 3 4 >> pack) >> 2 _ >> skip >> print", ["list(3, 4)"], "")
   , (".red >> symStr >> \"k=\" ... >> cat >> print", ["k=red"], "")
     -- Code v1: reflect / sections / evalCode / abstraction elimination
-  , ("[dup >> *] >> reflect >> ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget", ["in1(49)"], "")
-  , ("[dup >> * >> 1 ... >> +] >> reflect >> ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget", ["in1(36)"], "")
-  , ("[(x y -> x (2 y >> *) >> +)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["in1(11)"], "")
-  , ("[(x y -> y)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["in1(4)"], "")
+  , ("[dup >> *] >> reflect >> ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget", ["alt1(49)"], "")
+  , ("[dup >> * >> 1 ... >> +] >> reflect >> ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget", ["alt1(36)"], "")
+  , ("[(x y -> x (2 y >> *) >> +)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["alt1(11)"], "")
+  , ("[(x y -> y)] >> reflect >> ((c -> [+] c (3) (4) >> evalAs >> print) | print) >> forget", ["alt1(4)"], "")
     -- THE CLOSURE GATE IS LIFTED (stage 5a¾).  `(x -> [x])` is a true
     -- closure; elimination now compiles the quote's body against a copy
     -- of the parameter block laid deepest INSIDE the quote, then binds
@@ -1198,14 +1252,25 @@ evalTests =
   , ("[(w cd -> [(w) (cd) ... >> evalAs])] >> reflect >> ((c -> \"box\" >> print) | print) >> forget", ["box"], "")
   , ("[(p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])] >> reflect >> ((c -> \"whileFn\" >> print) | print) >> forget", ["whileFn"], "")
   , ("[(k -> [_ k >> equals?])] >> reflect >> ((c -> \"equalsTo\" >> print) | print) >> forget", ["equalsTo"], "")
-    -- THE TWO CORNERS THAT STAY REFUSED.  A residual row would need the
-    -- block on its passing tracks, and an open row's width is not a
-    -- type; and distributing over a flat N-track sum needs an N-ary
-    -- codiagonal, while `merge`/`case2` are binary.
-  , ("[(r x -> x >> ((y -> r >> (y ... >> cons | ...)) | miss) >> merge)] >> reflect >> ((c -> \"hit\" >> print) | print) >> merge",
-     ["reflect: parameter used inside a residual row `(p | q | ...)` — the passing tracks would need the parameter block too, and an open row's width is not a type Braid can write; close the row"], "")
-  , ("data Shape = (Int | Int Int | Int Int Int)\n[(x s -> s >> unShape >> (drop >> x | drop drop >> x | drop drop drop >> x))] >> reflect >> ((c -> \"hit\" >> print) | print) >> merge",
-     ["reflect: parameter used inside a row of 3 tracks — distributing the block over a coproduct is derived from `case2`/`merge`, which are binary, so only 2-track rows are covered; write it as nested 2-track rows"], "")
+    -- THE TWO CORNERS 5a3/4 PINNED AS REFUSALS, now positive (5a7/8).
+    -- Both emit the GENERATOR `#dist:K` rather than the derived `dist2`:
+    -- K is the width of the WRITTEN row, and the residual passes with no
+    -- block on it, which is the only thing that can be done with
+    -- alternatives nobody can name.
+    -- 1. a residual row mentioning a parameter (the prelude's own
+    --    `sequence` step is exactly this shape)
+  , ("[(r x -> x >> ((y -> r >> (y ... >> cons | ---)) | miss) >> merge)] >> reflect >> ((c -> c >> unparse >> print) | print) >> merge",
+     ["_ dup pass >> dup pass >> _ swap pass >> _ _ (dist2 >> (dup pass >> _ swap pass >> _ dup pass >> _ _ (#dist:1 >> (dup pass >> _ cons >> drop pass | ---)) >> _ drop pass >> drop pass | _ miss >> drop pass)) >> _ _ merge >> drop drop pass"], "")
+    -- and it RUNS, both on the handled track and through the residual
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [(x s -> s >> (x ... >> + | ---))] >> getCode\n(c) >> unparse >> print\n3 (5 >> alt1) >> [(x s -> s >> (x ... >> + | ---))] (c) ... >> evalAs >> (print | forget) >> merge\n3 (5 >> alt2) >> [(x s -> s >> (x ... >> + | ---))] (c) ... >> evalAs >> (print | forget) >> merge",
+     ["_ dup pass >> dup pass >> _ swap pass >> _ _ (#dist:1 >> (dup pass >> _ + >> drop pass | ---)) >> drop drop pass",
+      "alt1(8)", "alt2(5)"], "")
+    -- 2. a FLAT 3-track row mentioning a parameter: `merge`/`case2` are
+    --    binary, but `#dist:3` is not derived from them
+  , ("data Shape = (Int | Int Int | Int Int Int)\n[(x s -> s >> unShape >> (drop >> x | drop drop >> x | drop drop drop >> x))] >> reflect >> ((c -> c >> unparse >> print) | print) >> merge",
+     ["_ dup pass >> _ _ unShape >> dup pass >> _ swap pass >> _ _ (#dist:3 >> (_ drop >> dup pass >> drop pass | _ drop drop >> dup pass >> drop pass | _ drop drop drop >> dup pass >> drop pass)) >> drop drop pass"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndata Shape = (Int | Int Int | Int Int Int)\ndef pick = [(x s -> s >> unShape >> (drop >> x | drop drop >> x 100 >> + | drop drop drop >> x 200 >> +) >> mergeShape)]\ndef c = (pick) >> getCode\n9 (7 >> alt1 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge\n9 (7 8 >> alt2 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge\n9 (7 8 1 >> alt3 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge",
+     ["9", "109", "209"], "")
     -- `use F` over the `fix` IDIOM: the 5a½ demo that was refused
   , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef fac =\n    use Traced\n    [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...\n    fix ...\n    ev\n4 >> fac >> print",
      ["after [_ dup pass >> _ _ zero? >> dup pass >> _ swap pass >> _ _ (dist2 >> (_ _ 1 >> _ drop pass >> drop pass | _ dup pass >> _ dup pass >> _ _ swap pass >> dup pass >> _ swap pass >> _ _ swap pass >> _ _ _ (_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ ev >> _ drop pass >> drop pass) >> _ _ * >> _ drop pass >> drop pass)) >> _ _ merge >> drop drop pass] pass",
@@ -1214,12 +1279,12 @@ evalTests =
   , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef adder =\n    use Traced\n    (n -> [n ... >> +])\n7 >> adder >> _ 5 >> ev >> print",
      ["after dup pass", "after _ (_ [dup pass >> _ + >> drop pass] >> capture)", "after drop pass", "12"], "")
     -- dist2/undist2 are inverse at sample points
-  , ("7 (5 >> in1) >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
-  , ("7 (5 >> in2) >> dist2 >> (+ | -) >> merge >> print", ["2"], "")
-  , ("7 5 >> in1 >> undist2 >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
-  , ("7 5 >> in2 >> undist2 >> dist2 >> (+ | -) >> merge >> print", ["2"], "")
-  , ("7 (5 >> in1) >> dist2 >> undist2 >> _ merge >> + >> print", ["12"], "")
-  , ("7 (5 >> in1) >> _ merge >> + >> print", ["12"], "")
+  , ("7 (5 >> alt1) >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
+  , ("7 (5 >> alt2) >> dist2 >> (+ | -) >> merge >> print", ["2"], "")
+  , ("7 5 >> alt1 >> undist2 >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
+  , ("7 5 >> alt2 >> undist2 >> dist2 >> (+ | -) >> merge >> print", ["2"], "")
+  , ("7 (5 >> alt1) >> dist2 >> undist2 >> _ merge >> + >> print", ["12"], "")
+  , ("7 (5 >> alt1) >> _ merge >> + >> print", ["12"], "")
     -- partial application, the derived word elimination emits
   , ("7 [+] >> capture >> _ 5 >> ev >> print", ["12"], "")
   , ("[+] >> curry >> _ 7 >> ev >> _ 5 >> ev >> print", ["12"], "")
@@ -1233,7 +1298,7 @@ evalTests =
     -- ...an io witness permits io, and admits pure code too
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[dup >> print ...] ([dup >> print ...] >> getCode) (5) >> evalAs >> (print | print forget) >> merge\n[dup >> print ...] ([_] >> getCode) (6) >> evalAs >> (print | print forget) >> merge", ["5", "5", "6"], "")
     -- GLA: transpose of add is copy; linearity checked over reflected code
-  , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> in1 >> Atom)] [(n -> n >> in2 >> Atom)] [(t -> t >> in3 >> Atom)] [(y -> y >> in4 >> Atom)] [(c -> c >> in5 >> Atom)] [(l b -> l b >> in6 >> Atom)] [(c -> c >> in7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> [dup] (c >> transposeC) (5) >> evalAs >> print) | print) >> forget", ["in1(5, 5)"], "")
+  , ("def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)\ndef dualAtom = [(s -> s >> dualSym >> alt1 >> Atom)] [(n -> n >> alt2 >> Atom)] [(t -> t >> alt3 >> Atom)] [(y -> y >> alt4 >> Atom)] [(c -> c >> alt5 >> Atom)] [(l b -> l b >> alt6 >> Atom)] [(c -> c >> alt7 >> Atom)] ... >> foldAtom\ndef transposeC = reverse >> [[dualAtom] ... >> map] ... >> map\n[+] >> reflect >> ((c -> [dup] (c >> transposeC) (5) >> evalAs >> print) | print) >> forget", ["alt1(5, 5)"], "")
     -- matrices as diagrams: composition is matmul ([[1,2],[3,4]] squared)
   , ("def m = (x y -> x (2 y >> *) >> + >> _ ((3 x >> *) (4 y >> *) >> +))\n1 0 >> m >> m >> toStr _ >> _ toStr >> cat >> print", ["715"], "")
     -- split-ev-combine: dup broadcasts, filters split, folds ev
@@ -1251,52 +1316,52 @@ evalTests =
   , ("((1 2 >> pack) (3 >> pack) nil >> pack) >> [append] nil ... >> fold >> print", ["list(1, 2, 3)"], "")
     -- chunked fold + combine = whole fold (associativity licenses
     -- parallel reduce)
-  , ("def w = (1 2 3 4 5 6 >> pack) >> [*] 1 ... >> fold\ndef l = (1 2 3 >> pack) >> [*] 1 ... >> fold\ndef r = (4 5 6 >> pack) >> [*] 1 ... >> fold\nw >> _ (l >> _ r >> *) >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def w = (1 2 3 4 5 6 >> pack) >> [*] 1 ... >> fold\ndef l = (1 2 3 >> pack) >> [*] 1 ... >> fold\ndef r = (4 5 6 >> pack) >> [*] 1 ... >> fold\nw >> _ (l >> _ r >> *) >> eq? >> verdict >> print", ["alt1()"], "")
     -- laws as programs, presentations as enumerators
-  , ("def xs = (0 1 2 3 >> pack)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in1()"], "")
-  , ("def xs = (0 1 2 3 >> pack)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["in2()"], "")
+  , ("def xs = (0 1 2 3 >> pack)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["alt1()"], "")
+  , ("def xs = (0 1 2 3 >> pack)\nxs >> [(1 ... >> +) >> (2 _ >> *)] ... >> map >> _ (xs >> [(2 _ >> *) >> (1 ... >> +)] ... >> map) >> eq? >> verdict >> print", ["alt2()"], "")
     -- multi-line kleisli: newline absorption around >=> (either side)
-  , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less?\n    >=> double2 >> ok\n120 >> process >> print", ["in2(120)"], "")
-  , ("0 >> (even? >=>\nzero?) >> print", ["in1(0)"], "")
+  , ("def double2 = 2 _ >> *\ndef process =\n    even?\n    >=> _ 100 >> less?\n    >=> double2 >> ok\n120 >> process >> print", ["alt2(120)"], "")
+  , ("0 >> (even? >=>\nzero?) >> print", ["alt1(0)"], "")
     -- cleanup-baked comparison routers and quoted sections: predicates
     -- built inline, no lambda, no factory
-  , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals? >> print", ["in1(5)"], "")
-  , ("def both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> ev >> print", ["in1(5)"], "")
-  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\n6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> ev >> print", ["in2(6)"], "")
+  , ("def equals = eq? >> (_ drop | _ drop)\n5 >> _ 5 >> equals? >> print", ["alt1(5)"], "")
+  , ("def both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\n5 >> ([_ 5 >> equals?] [odd?] >> both) ... >> ev >> print", ["alt1(5)"], "")
+  , ("def equals = eq? >> (_ drop | _ drop)\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\n6 >> ([_ 5 >> equals?] [odd?] >> both) ... >> ev >> print", ["alt2(6)"], "")
   , ("def less = lt? >> (_ drop | _ drop)\ndef whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef double = 2 _ >> *\n7 >> [_ 100 >> less?] [double] ... >> while >> print", ["112"], "")
     -- user-built predicates: scaffold-test-cleanup, and factories that
     -- return quoted routers
-  , ("def five? = _ 5 >> eq? >> (_ drop | _ drop)\n5 >> five? >> print", ["in1(5)"], "")
-  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equalsK) ... >> ev >> print", ["in2(7)"], "")
-  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equalsK) ... >> ev >> print", ["in1(5)"], "")
+  , ("def five? = _ 5 >> eq? >> (_ drop | _ drop)\n5 >> five? >> print", ["alt1(5)"], "")
+  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n7 >> (5 >> equalsK) ... >> ev >> print", ["alt2(7)"], "")
+  , ("def equalsK = (k -> [_ k >> eq? >> (_ drop | _ drop)])\n5 >> (5 >> equalsK) ... >> ev >> print", ["alt1(5)"], "")
   , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef lessThan = (k -> [_ k >> lt? >> (_ drop | _ drop)])\ndef double = 2 _ >> *\n7 >> (100 >> lessThan) [double] ... >> while >> print", ["112"], "")
     -- value-level predicate combinators: negate/both/either on quoted
     -- routers (closures assemble the composed router)
-  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n4 >> ([even?] [small?] >> both) ... >> ev >> print", ["in1(4)"], "")
-  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n40 >> ([even?] [small?] >> both) ... >> ev >> print", ["in2(40)"], "")
-  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n7 >> ([even?] [small?] >> both) ... >> ev >> print", ["in2(7)"], "")
-  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n3 >> ([even?] [small?] >> either) ... >> ev >> print", ["in1(3)"], "")
-  , ("def negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | in2) >> merge])\ndef either = (p q -> [p ... >> ev >> (in1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n9 >> ([even?] [small?] >> both >> negate) ... >> ev >> print", ["in1(9)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (alt2 | alt1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\ndef either = (p q -> [p ... >> ev >> (alt1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n4 >> ([even?] [small?] >> both) ... >> ev >> print", ["alt1(4)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (alt2 | alt1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\ndef either = (p q -> [p ... >> ev >> (alt1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n40 >> ([even?] [small?] >> both) ... >> ev >> print", ["alt2(40)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (alt2 | alt1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\ndef either = (p q -> [p ... >> ev >> (alt1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n7 >> ([even?] [small?] >> both) ... >> ev >> print", ["alt2(7)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (alt2 | alt1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\ndef either = (p q -> [p ... >> ev >> (alt1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n3 >> ([even?] [small?] >> either) ... >> ev >> print", ["alt1(3)"], "")
+  , ("def negate = (p -> [p ... >> ev >> (alt2 | alt1) >> merge])\ndef both = (p q -> [p ... >> ev >> (q ... >> ev | alt2) >> merge])\ndef either = (p q -> [p ... >> ev >> (alt1 | q ... >> ev) >> merge])\ndef small? = _ 10 >> lt? >> (_ drop | _ drop)\n9 >> ([even?] [small?] >> both >> negate) ... >> ev >> print", ["alt1(9)"], "")
     -- until = while of the negated predicate, all in-language
-  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef negate = (p -> [p ... >> ev >> (in2 | in1) >> merge])\ndef until = (p f -> (p >> negate) f) ... >> while\ndef big? = _ 100 >> lt? >> (_ drop | _ drop) >> (in2 | in1) >> merge\ndef double = 2 _ >> *\n7 >> [big?] [double] ... >> until >> print", ["112"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef negate = (p -> [p ... >> ev >> (alt2 | alt1) >> merge])\ndef until = (p f -> (p >> negate) f) ... >> while\ndef big? = _ 100 >> lt? >> (_ drop | _ drop) >> (alt2 | alt1) >> merge\ndef double = 2 _ >> *\n7 >> [big?] [double] ... >> until >> print", ["112"], "")
     -- router boolean algebra: not = track swap; and/or = one-sided rows
-  , ("5 >> odd? >> (in2 | in1) >> merge >> print",  ["in2(5)"], "")
-  , ("0 >> even? >> (zero? | in2) >> merge >> print", ["in1(0)"], "")
-  , ("6 >> even? >> (zero? | in2) >> merge >> print", ["in2(6)"], "")
-  , ("2 >> even? >> (in1 | zero?) >> merge >> print", ["in1(2)"], "")
-  , ("7 >> even? >> (in1 | zero?) >> merge >> print", ["in2(7)"], "")
+  , ("5 >> odd? >> (alt2 | alt1) >> merge >> print",  ["alt2(5)"], "")
+  , ("0 >> even? >> (zero? | alt2) >> merge >> print", ["alt1(0)"], "")
+  , ("6 >> even? >> (zero? | alt2) >> merge >> print", ["alt2(6)"], "")
+  , ("2 >> even? >> (alt1 | zero?) >> merge >> print", ["alt1(2)"], "")
+  , ("7 >> even? >> (alt1 | zero?) >> merge >> print", ["alt2(7)"], "")
     -- Euclid's subtractive gcd: router negation is a track swap
-  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["6"], "")
-  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (in2 | in1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ...) >> merge >> _ dup >> - ...\n1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["21"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (alt2 | alt1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ---) >> merge >> _ dup >> - ...\n48 18 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["6"], "")
+  , ("def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])\ndef while = whileFn ... >> loop\ndef not = (alt2 | alt1) >> merge\ndef neq? = eq? >> not\ndef shrink = lt? >> (swap | ---) >> merge >> _ dup >> - ...\n1071 462 >> [neq?] [shrink] ... >> while >> drop ... >> print", ["21"], "")
     -- recursion: tail recursion replaces the loop harness; tree recursion is new
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\ndef double = 2 _ >> *\ndef until100 = [(self ... -> lt100? >> (double >> self ... >> ev | _) >> merge)] ... >> fix ... >> ev\n7 >> until100 >> print", ["112"], "")
   , ("def decr = _ 1 >> -\ndef sumTo = [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n0 5 >> sumTo >> print", ["15"], "")
   , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)) >> merge)] ... >> fix ... >> ev\n10 >> fib >> print", ["55"], "")
   , ("5 >> (_ 2 >> -) >> print",           ["3"],  "")
-  , ("2 2 >> eq?",                         [],     "in1(2, 2)")
-  , ("3 5 >> lt?",                         [],     "in1(3, 5)")
+  , ("2 2 >> eq?",                         [],     "alt1(2, 2)")
+  , ("3 5 >> lt?",                         [],     "alt1(3, 5)")
   , ("(1 2 >> pack) >> uncons",               [],     "list(1, 2)")
-  , ("nil >> uncons",                   [],     "in1()")
+  , ("nil >> uncons",                   [],     "alt1()")
     -- deferred peel builds a nested sum; case(…) folds the whole spine
   , ("def classify = negative? >> (drop >> \"neg\" | pass) >> (pass | zero?) >> [pass] [drop >> \"zero\"] [toStr] ... >> case3\n-4 >> classify >> print\n0 >> classify >> print\n7 >> classify >> print", ["neg", "zero", "7"], "")
     -- associator round-trip is identity on the routed value
@@ -1315,13 +1380,13 @@ evalTests =
     -- aligned track-columns: | no longer absorbs newlines, so each line
     -- is one complete row (pass sugar fills the empty arm) and the rows
     -- compose by newline-as->>.  Two rows here == the row (dup>>* | 1..+).
-  , ("5 >> in1\ndup >> * | pass\npass     | 1 ... >> +\nmerge >> print", ["25"], "")
+  , ("5 >> alt1\ndup >> * | pass\npass     | 1 ... >> +\nmerge >> print", ["25"], "")
     -- bare rows, line-scoped
-  , ("5 >> in1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
-  , ("3 4 >> in2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")
+  , ("5 >> alt1\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint",  ["11"], "")
+  , ("3 4 >> alt2\ndup | +\n+ | id\nmerge >> (x -> x 1 >> +)\nprint", ["8"], "")
 
     -- match2 as a DERIVED definition (spec: match = row of applies + merge)
-  , ("def match2 = (f g s -> s >> (f ... >> ev | g ... >> ev) >> merge)\n5 >> in1 >> [dup >> *] [1 ... >> +] ... >> match2 >> print",
+  , ("def match2 = (f g s -> s >> (f ... >> ev | g ... >> ev) >> merge)\n5 >> alt1 >> [dup >> *] [1 ... >> +] ... >> match2 >> print",
                                            ["25"], "")
 
     -- lists: the spec's sum-of-squares program
@@ -1359,10 +1424,10 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [1 2] >> getCode\n[0] (c) ... >> evalAs >> (print | forget) >> merge", [], "")
     -- …and the wrong TYPE at the right width, likewise: this is the
     -- smuggle the hole allowed — a Str reaching a List(Int)
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[0] ([ \"hi\" ] >> getCode) >> evalAs\n((x -> 1 x >> pack) | drop >> nil) >> merge\n[toStr] ... >> map >> print", ["in1()"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n[0] ([ \"hi\" ] >> getCode) >> evalAs\n((x -> 1 x >> pack) | drop >> nil) >> merge\n[toStr] ... >> map >> print", ["alt1()"], "")
     -- pack builds the same value as the list(…) literal; pack2 makes
     -- two-wire elements; the empty pack is nil
-  , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["in1()"], "")
+  , ("def a = 1 (2 (3 nil >> cons) >> cons) >> cons\ndef b = (1 2 3 >> pack)\na >> _ b >> eq? >> verdict >> print", ["alt1()"], "")
   , ("(1 2 3 >> pack) >> sum >> print\n(pack) >> len >> print", ["6", "0"], "")
   , ("(1 10 2 20 >> pack2) >> [0] [(acc bx -> bx >> unBox >> (a b -> (a b >> *) acc >> +))] ... >> foldList >> print", ["50"], "")
   , ("def fanout = [(x -> (x (10 x >> *) >> pack))]\nfanout 7 >> ev >> print", ["list(7, 70)"], "")
@@ -1403,10 +1468,10 @@ evalTests =
     -- group.  They eat upward from where they stand and the block sits
     -- below them, so nothing needs a width — a parameter fetched AFTER
     -- them included.  (Rejected outright under the params-on-top layout.)
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x -> x >> in1] >> getCode\n7 >> [x -> x >> in1] (c) ... >> evalAs >> (print | forget) >> merge", ["in1(7)"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x -> x >> alt1] >> getCode\n7 >> [x -> x >> alt1] (c) ... >> evalAs >> (print | forget) >> merge", ["alt1(7)"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [a b -> a b >> eq? >> (forget >> 1 | forget >> 0) >> merge] >> getCode\n3 3 >> [a b -> a b >> eq? >> (forget >> 1 | forget >> 0) >> merge] (c) ... >> evalAs >> (print | forget) >> merge\n3 4 >> [a b -> a b >> eq? >> (forget >> 1 | forget >> 0) >> merge] (c) ... >> evalAs >> (print | forget) >> merge", ["1", "0"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> dup >> in1 >> (forget >> 1 | forget >> 0) >> merge >> _ x >> +] >> getCode\n5 6 >> [x _ -> dup >> in1 >> (forget >> 1 | forget >> 0) >> merge >> _ x >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["6"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ... >> in2 >> (forget >> 0 | +) >> merge] >> getCode\n1 2 >> [x ... -> x ... >> in2 >> (forget >> 0 | +) >> merge] (c) ... >> evalAs >> (print | forget) >> merge", ["3"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x _ -> dup >> alt1 >> (forget >> 1 | forget >> 0) >> merge >> _ x >> +] >> getCode\n5 6 >> [x _ -> dup >> alt1 >> (forget >> 1 | forget >> 0) >> merge >> _ x >> +] (c) ... >> evalAs >> (print | forget) >> merge", ["6"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [x ... -> x ... >> alt2 >> (forget >> 0 | +) >> merge] >> getCode\n1 2 >> [x ... -> x ... >> alt2 >> (forget >> 0 | +) >> merge] (c) ... >> evalAs >> (print | forget) >> merge", ["3"], "")
     -- the naming binder is an open binder, so it reflects as wiring too
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> x ... >> * ...] >> getCode\n7 >> [-> x -> x ... >> * ...] (c) ... >> evalAs >> (print | forget) >> merge", ["49"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef c = [-> x -> drop >> x ...] >> getCode\n9 >> [-> x -> drop >> x ...] (c) ... >> evalAs >> (print | forget) >> merge", ["9"], "")
@@ -1416,7 +1481,7 @@ evalTests =
   , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> ev\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
     -- vertical track-columns: flat 3-sum via inject-and-collapse, then
     -- bare rows each touching one track (empty arms pass)
-  , ("def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
+  , ("def route3 = negative? >> (alt1 | zero? >> (alt2 | alt3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
     -- STAGE 4½: the receipt is a STAGE, so it reflects with the code it
     -- was minted onto, and code that carries a label needs a witness
     -- that carries it too — the sandbox reads provenance exactly as it
@@ -1496,7 +1561,7 @@ moduleFailTests =
     -- check now catches that AT the splice, so it rides the miss track
     -- instead of reaching the top-level width backstop — see evalTests.)
     -- the case(…) special form is gone: `case` is an ordinary unknown name
-  , ("1 >> in1 >> case(drop, drop)\n1", "Unclosed group")
+  , ("1 >> alt1 >> case(drop, drop)\n1", "Unclosed group")
     -- composition is exact: a word threading a resource the scope does
     -- not have (or in another order) is still a routing error, with the
     -- mismatch named on both sides
@@ -1561,6 +1626,15 @@ moduleFailTests =
   , ("type Pair(a, b) = (a | Int)\n1",           "must occur in the body")
   , ("data Bad(...) = (... Int)\n1", "must be the last thing in its stack")
   , ("data Bad2(..., a) = (a)\n1",   "must be the last type parameter")
+    -- `---` is the ROW tail and obeys the same placement rule as `...`
+  , ("data Bad(---, a) = (a | ---)\n1", "'---' must be the last type parameter")
+  , ("data Bad2(a) = (a | ---)\n1",     "'---' needs a `---` parameter on the declaration")
+  , ("type Bad3(---) = (--- Int)\n1",   "'---' must be the last alternative of its row")
+  , ("data Bad4(---) = (Int)\n1",       "every parameter must occur in the body")
+  , ("data Bad5(---) = (--- | Int)\n1", "'---' must be the last alternative of its row")
+    -- and in a TERM it is the residual, so the old `| ...` spelling is
+    -- refused at module level too
+  , ("def f = (dup | ...)\n1", "write `| ---` for more alternatives")
     -- a wire parameter given a stack: the mistake this change makes
     -- impossible, reported where you wrote it
   , ("type L = List(Int Str)\n1",    "takes one wire")
@@ -1657,7 +1731,7 @@ moduleFailTests =
     -- (`def x = x x ... >> +`); an open binder is the shortest now.
   , ("1 2 3 >> (x ... -> x x ... >> + >> +) 4",   "final atom of its tensor stage")
     -- nominal rigidity: a data type is NOT its unfolding
-  , ("type Nat = (• | Nat)\nin1 >> Nat >> unNat >> unNat", "Cannot unify types")
+  , ("type Nat = (• | Nat)\nalt1 >> Nat >> unNat >> unNat", "Cannot unify types")
   , ("type dup = (• | dup)\n1",                  "collides")
     -- list elements must be pure pushes (desugar makes it a unify error)
   , ("list(1, 2) >> len >> print",                  "Unclosed group")

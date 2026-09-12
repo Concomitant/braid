@@ -6,8 +6,8 @@ def small? = _ 10 >> less?
 def big? = _ 100 >> less? >> not
 def double = 2 _ >> *
 
-4 >> ([even?] [small?] >> both) ... >> ev >> print             # in1(4)
-40 >> ([even?] [small?] >> both) ... >> ev >> print            # in2(40)
-3 >> ([even?] [small?] >> either) ... >> ev >> print           # in1(3)
-9 >> ([even?] [small?] >> both >> negate) ... >> ev >> print   # NAND: in1(9)
+4 >> ([even?] [small?] >> both) ... >> ev >> print             # alt1(4)
+40 >> ([even?] [small?] >> both) ... >> ev >> print            # alt2(40)
+3 >> ([even?] [small?] >> either) ... >> ev >> print           # alt1(3)
+9 >> ([even?] [small?] >> both >> negate) ... >> ev >> print   # NAND: alt1(9)
 7 >> [big?] [double] ... >> until >> print                        # 112

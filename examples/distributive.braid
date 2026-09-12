@@ -28,20 +28,20 @@ theory Distributive(a) =
     other  : • ⇒ a
     # --- the coproduct's own two laws ---------------------------------
     # β: injecting then casing picks the branch you injected into.
-    law beta = (sample >> in1 >> (f | g) >> merge) (sample >> f) >> eq? >> (forget >> true | forget >> false) >> merge
+    law beta = (sample >> alt1 >> (f | g) >> merge) (sample >> f) >> eq? >> (forget >> true | forget >> false) >> merge
     # η: casing into the injections is the identity.
-    law eta = (sample >> in1 >> (in1 | in2) >> merge >> merge) (sample) >> eq? >> (forget >> true | forget >> false) >> merge
+    law eta = (sample >> alt1 >> (alt1 | alt2) >> merge >> merge) (sample) >> eq? >> (forget >> true | forget >> false) >> merge
     # --- dist and undist are inverse ----------------------------------
-    law distUndist = (sample (other >> in1) >> dist2 >> undist2 >> _ merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
-    law undistDist = (sample other >> in1 >> undist2 >> dist2 >> merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law distUndist = (sample (other >> alt1) >> dist2 >> undist2 >> _ merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law undistDist = (sample other >> alt1 >> undist2 >> dist2 >> merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
     # --- naturality ---------------------------------------------------
     # in the SUM: mapping the tracks commutes with distributing.
-    law natSum = (sample (other >> in1) >> _ (f | g) >> dist2 >> merge >> join) (sample (other >> in1) >> dist2 >> (_ f | _ g) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law natSum = (sample (other >> alt1) >> _ (f | g) >> dist2 >> merge >> join) (sample (other >> alt1) >> dist2 >> (_ f | _ g) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
     # in P: mapping the distributed wire commutes with distributing.
-    law natP = (sample (other >> in1) >> p _ >> dist2 >> merge >> join) (sample (other >> in1) >> dist2 >> (p _ | p _) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law natP = (sample (other >> alt1) >> p _ >> dist2 >> merge >> join) (sample (other >> alt1) >> dist2 >> (p _ | p _) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
     # --- coherence with the codiagonal --------------------------------
     # distributing and then merging is merging with P passing beneath.
-    law distMerge = (sample (other >> in1) >> dist2 >> merge >> join) (sample (other >> in1) >> _ merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law distMerge = (sample (other >> alt1) >> dist2 >> merge >> join) (sample (other >> alt1) >> _ merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
 instance IntD : Distributive(Int) =
     p      = _ 1 >> +
     f      = _ 10 >> *
@@ -59,15 +59,15 @@ instance StrD : Distributive(Str) =
 "-- seven laws, two models, all audited before main --" >> print
 
 # The words themselves, at sample points.
-7 (5 >> in1) >> dist2 >> (+ | -) >> merge >> print          # 12
-7 (5 >> in2) >> dist2 >> (+ | -) >> merge >> print          # 2
-7 5 >> in1 >> undist2 >> dist2 >> (+ | -) >> merge >> print  # 12
-7 5 >> in2 >> undist2 >> dist2 >> (+ | -) >> merge >> print  # 2
+7 (5 >> alt1) >> dist2 >> (+ | -) >> merge >> print          # 12
+7 (5 >> alt2) >> dist2 >> (+ | -) >> merge >> print          # 2
+7 5 >> alt1 >> undist2 >> dist2 >> (+ | -) >> merge >> print  # 12
+7 5 >> alt2 >> undist2 >> dist2 >> (+ | -) >> merge >> print  # 2
 
 # The nested family, following `caseN`: `dist3` distributes over
 # `(ρ0 | (ρ1 | ρ2))`, the shape `case3` eliminates.
-7 (5 >> in1) >> dist3 >> (+ | (- | *) >> merge) >> merge >> print   # 12
-7 (5 >> in2 >> in2) >> dist3 >> (+ | (- | *) >> merge) >> merge >> print  # 35
+7 (5 >> alt1) >> dist3 >> (+ | (- | *) >> merge) >> merge >> print   # 12
+7 (5 >> alt2 >> alt2) >> dist3 >> (+ | (- | *) >> merge) >> merge >> print  # 35
 
 # And the reason the stage needed them: a binder parameter used inside a
 # row now reifies, by distributing the parameter block over the row.

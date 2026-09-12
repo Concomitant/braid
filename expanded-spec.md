@@ -272,7 +272,7 @@ aliasing while the wire is still live, and the manual says so.
   whose RHS mentions its own name is a NOMINAL data type, not a
   transparent alias — `type Nat = (• | Nat)`,
   `type Tree(a) = (a | Tree(a) Tree(a))`. Iso-recursive: the declared
-  name in term position rolls (`in2 >> Tree` builds a node) and
+  name in term position rolls (`alt2 >> Tree` builds a node) and
   `unName` unrolls (the Haskell-newtype `un-` tradition; `uncons`
   already reads as un-cons). The pair is a lossless iso, both
   directions runtime no-ops. The explicit coercion is deliberate: an

@@ -88,7 +88,7 @@ kills argument-threading; only nesting or auto-framing kills
 push-framing.
 
 Uncommitted: pointful `ifP/elifP/otherwiseP` (`(c a -> c ... >> ev >>
-verdict >> (a ... >> ev >> in1 | in2) >> merge)` etc.) — tested,
+verdict >> (a ... >> ev >> alt1 | alt2) >> merge)` etc.) — tested,
 simpler than the stack versions, first guard needs no `_`; continuation
 guards still do. Add if the quoted-word style sees use with bound
 subjects.
@@ -114,7 +114,7 @@ could not before at any width: the only recourse was to hoist into a
 
 ### 6. Naming
 
-`ok`/`miss` (= `in1`/`in2`) read well in flow position. `then/elif/
+`ok`/`miss` (= `alt1`/`alt2`) read well in flow position. `then/elif/
 otherwise` are now claimed by the quoted-word combinators. The fishes
 have no word names (`mapHit`/`orElse` drafts dropped). `merge` barely
 appears in the final idioms; no alias needed. `hit/miss` as *track*
@@ -133,7 +133,7 @@ question.
 
 ### 8. Open row tails — hygiene issue
 
-`in1/in2/not/ok/miss` carry open tails (`σ`). Encountered concretely:
+`alt1/alt2/not/ok/miss` carry open tails (`σ`). Encountered concretely:
 `less >> not` failed to close against a 2-row Bool context in one
 draft (`(• | • | σ) vs Str`); `assocL/assocR` are isos only up to
 openness. Mostly harmless, occasionally bites. Consider: closed
@@ -241,3 +241,53 @@ the constructive direction survives.)
 The verified pair, plus its dual (`not(p ∨ q) = ¬p ∧ ¬q` via `>?>`/`>=>`
 swapped), belong in `examples/laws.braid` as operational laws — each one
 a license: reorder guards, flip chains, push `not` through a ladder.
+
+### `into` — the open eliminator, beside `otherwise` *(2026-09-12)*
+
+Everything above eliminates a **closed** sum: `merge` needs two tracks
+of one type, `caseN` needs one handler per alternative, `otherwise`
+needs the two-track `(decided | undecided)` state the ladder maintains.
+That is not an accident of taste — a copairing *is* one map per
+alternative, so a copairing over a row you have not written down cannot
+exist.
+
+Except for one. When the rest of the row is a residual, the only
+handler you can give the alternatives you cannot name is the identity,
+and `[h, id]` is then the whole space of choices. That map is now a
+word:
+
+```
+into : Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)
+```
+
+It handles the first alternative into the *remaining* row and shifts
+every other tag down one. So the ladder vocabulary gains a **step** to
+sit beside its **closer**:
+
+| | what it is | what it needs |
+|---|---|---|
+| `into` | `[h, id]` — handle one alternative, shift the rest | nothing: the rest may be a residual |
+| `otherwise` | `[id, a]` then un-sum — the ladder closer | a closed two-track row |
+| `merge` / `caseN` | the closed copairings | every alternative written |
+
+`s >> [h1 >> alt1] into >> [h2 >> alt1] into >> _ [d] >> otherwise` is
+the shape: peel from the front, close at the back.
+
+Two things this does **not** change. `>=>` is still `[q, alt2]` — a
+*closed* copairing with a written second handler, not an instance of
+`into`; the deferral table above is untouched (a row arm is still one of
+the three deferral forms, and `into`'s handler is a quote, which is
+another). And the closed two-track `[h, id]` needs no `into` at all: it
+is `(h | pass) >> merge`, which is what the guard ladder has always
+used. `into` earns its keep when what remains is a residual or more than
+one track.
+
+The payoff worth recording is the **Elgot identity**, which stage 5a½
+could state and not run because the right-hand side needed exactly this:
+
+```braid
+loop f  =  f >> [loop f] into          # up to un-summing
+```
+
+`examples/into.braid` runs both sides at sample points. Runnable, not
+decided — `sameCode` does not enter rows yet.

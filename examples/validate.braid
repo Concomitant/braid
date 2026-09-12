@@ -9,6 +9,6 @@ def process =
     >=> _ 100 >> less?
     >=> double >> ok
 
-4 >> process >> print     # in1(8)
-7 >> process >> print     # in2(7)
-120 >> process >> print   # in2(120)
+4 >> process >> print     # alt1(8)
+7 >> process >> print     # alt2(7)
+120 >> process >> print   # alt2(120)

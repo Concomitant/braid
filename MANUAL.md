@@ -37,6 +37,7 @@ the current stack is rejected with a message naming the stack.
 | `>>` , `;` , newline | composition — all three are the same operator |
 | `>>>` | compose, opening the previous stage's remainder (`a >>> b ≡ a pass >> b`) |
 | `...` (or `…`) | the explicit remainder (§4); must be the final atom of its stage |
+| `---` | the row tail (§5): the last alternative of a sum or a code row, and the fifth parameter kind |
 | `[` `]` | quotation |
 | `(` `)` | grouping / rows / type arguments / binders |
 | `\|` | row separator (rows / sum types) |
@@ -253,9 +254,35 @@ Type formers:
   *stacks*. Rigid nesting: `(A | (B | C))` never flattens.
   `Bool = (• | •)`, `Maybe(...) = (... | •)` are prelude aliases.
   **`Maybe` is payload-FIRST**, unlike Haskell's `Nothing | Just a`.
-  That order is arbitrary in Haskell but load-bearing here: `in1` is the
+  That order is arbitrary in Haskell but load-bearing here: `alt1` is the
   track `ok` builds and `>=>` threads, so a payload-second `Maybe`
   could not ride the railway at all (§7).
+
+  **The two tails.** A sum has two open ends and they are different
+  kinds. `...` continues a track's **wires** (a stack variable, `ρ`);
+  `---` continues a row's **alternatives** (a row variable, `σ`). One
+  glyph per kind, in every position — declaration heads, written types,
+  terms. The inferred types have always told them apart by letter:
+
+  ```
+  braid> :t (toStr | not | ---)
+  (a0 | (ρ0 | ρ1) | σ0) ⇒ (Str | (ρ1 | ρ0 | σ1) | σ0)
+
+  braid> :t (toStr | not | pass)
+  (a0 | (ρ0 | ρ1) | ρ2) ⇒ (Str | (ρ1 | ρ0 | σ0) | ρ2)
+  ```
+
+  The first row says *at least these two alternatives, maybe more* —
+  `σ0` is the residual, and it passes. The second says *exactly three
+  alternatives*, the third of which passes; `ρ2` is a track's contents,
+  not a row. Before 2026-09-12 `| ...` meant the residual and there was
+  no way to write the other one; `| ...` is now refused outright
+  (§14) so no row silently changes meaning.
+
+  A written `---` is an ordinary `σ` on display: `data Any2(---) =
+  (Int | Str | ---)` gives `Any2 : (Int | Str | σ0) ⇒ Any2((σ0))`
+  (§8). `(---)` — the sum that is all residual — is a legal type, and
+  it is `into`'s result shape (§6, §9).
 - **`Fn⟨Σ ⇒ Θ⟩`** — a reified program (quotation type). The internal
   hom: `ev` is modus ponens. The arrow inside carries its grade, and
   a declared one MEANS it: `Fn⟨Str ⇒ •⟩` refuses an io quotation
@@ -332,6 +359,22 @@ branch drop it. Both keep the original type, so nothing downstream
 changes. `capture` and `dist2` are the two prelude names a module may
 **not** shadow — reflected code names them, and shadowing one would be
 capture.
+
+`dist2` is the *derived* word, and it covers the closed two-track case
+only. A wider row, or one with a residual, emits the generator
+`#dist:K` instead — one member per written width, unspellable by
+construction (`#` opens a comment), so it needs no shadowing rule:
+
+```braid
+[(x s -> s >> (x ... >> + | ---))] >> reflect >> ((c -> c >> unparse >> print) | print) >> merge
+    _ dup pass >> dup pass >> _ swap pass
+      >> _ _ (#dist:1 >> (dup pass >> _ + >> drop pass | ---)) >> drop drop pass
+```
+
+`#dist:K : a (ρ1 | … | ρK | σ) ⇒ (a ρ1 | … | a ρK | σ)` pushes the wire
+into the first K alternatives and **passes the residual** — the only
+thing that can be done with alternatives nobody can name. With it,
+`reflect` is total on binder code (§12, §14).
 
 **A parameter list uses the stage vocabulary**, one slot per wire, in
 any order (slots align with wires exactly as atoms do — leftmost =
@@ -539,7 +582,8 @@ conditional). Sugar:
 | `(f \|)` | `(f \| pass)` — trailing bar passes the last track |
 | `(\| f)` | `(pass \| f)` — leading bar passes the first track |
 | `(\| f \|)`, `(f \| \|)`, … | **every** empty arm is `pass` — any track, any count |
-| `(f \| ...)` | open row: identity on all remaining alternatives (row residual σ) |
+| `(f \| ---)` | open row: identity on all remaining alternatives (row residual σ) |
+| `(f \| ...)` | **refused** — `...` continues wires, `---` continues alternatives (§14) |
 
 Rows are **line-scoped**: bare rows work without parens (`ok | guard`
 on its own line), and a row cannot span a line break. Each arm lives
@@ -561,16 +605,51 @@ forget
 
 Flat sums come from the inject-and-collapse idiom — each router arm
 injects into the *same* flat sum, `merge` collapses:
-`negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge`.
+`negative? >> (alt1 | zero? >> (alt2 | alt3) >> merge) >> merge`.
 
 `merge : (ρ0 | ρ0) ⇒ ρ0` rejoins agreeing tracks (the codiagonal).
 Arms must agree on the result type to merge.
 
+### The open eliminator: `into`
+`merge`, `case2` and `otherwise` all need a **closed** row — they are
+copairings, and a copairing needs one handler per alternative. Over a
+residual there is exactly one copairing you can write, `[h, id]`, and
+that is the prim:
+
+```
+into : Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)
+```
+
+It handles the **first** alternative by mapping it into the *remaining*
+row and shifts every other tag down one. Each `into` shortens the row
+by one, so a ladder peels alternatives off the front and the existing
+`otherwise` closes what is left:
+
+```braid
+s
+[h1 ; alt1] ... ; into        # handle track 1 into the rest
+[h2 ; alt1] ... ; into        # …then the next
+_ [d] ; otherwise             # two left: pass one, run the default on the other
+```
+
+The `...` is not decoration: `into` wants its handler **deepest** (as
+`ev`, `loop` and `caseN` do), and `[h] ...` is the stage that pushes a
+quote under the wires already on the stack. `otherwise` wants its
+default *shallowest*, hence `_ [d]`.
+
+With one alternative left the result is the 1-ary sum `(Θ)`;
+`there ; merge` is how a 1-ary sum comes back to a bare stack.
+`examples/into.braid` runs the whole ladder, and the Elgot identity
+`loop f = f >> [loop f] into` with it.
+
+`>=>` is `[q, alt2]` — a *closed* copairing, and not an instance of
+`into`.
+
 ### Injections
-`in1 : ρ0 ⇒ (ρ0 | σ0)`, `in2`, … `inN` — tag the whole input segment
-at position N (open row tail). Aliases: `ok`/`here`/`again` ≡ `in1`,
-`miss`/`done` ≡ `in2`. `there : (σ0) ⇒ (ρ0 | σ0)` shifts tags by one
-(`here >> there ≡ in2`).
+`alt1 : ρ0 ⇒ (ρ0 | σ0)`, `alt2`, … `altN` — tag the whole input segment
+at position N (open row tail). Aliases: `ok`/`here`/`again` ≡ `alt1`,
+`miss`/`done` ≡ `alt2`. `there : (σ0) ⇒ (ρ0 | σ0)` shifts tags by one
+(`here >> there ≡ alt2`).
 
 ### Building lists: `pack`
 The primary list introduction is a word, not syntax — `pack : aⁿ ⇒
@@ -626,8 +705,8 @@ Parse-time sugar, all one shape — next stage on one track, a default
 injector on the other:
 
 ```
-t1 >=> t2   ≡  t1 >> (t2   | in2) >> merge     -- Kleisli: thread the hit track
-t1 >?> t2   ≡  t1 >> (in1  | t2)  >> merge     -- elif: thread the miss track
+t1 >=> t2   ≡  t1 >> (t2   | alt2) >> merge     -- Kleisli: thread the hit track
+t1 >?> t2   ≡  t1 >> (alt1  | t2)  >> merge     -- elif: thread the miss track
 t1 >!> t2   ≡  t1 >> (pass | t2)  >> merge     -- close with a total default
 ```
 
@@ -719,18 +798,49 @@ data Tree(a) = (a | Tree(a) Tree(a))
 data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)  # codata: recursion THROUGH a Fn
 ```
 
-**Parameters are kinded**, three ways. A bare name stands for exactly
+**Parameters are kinded**, four ways. A bare name stands for exactly
 **one wire**; `...` stands for a whole **stack**, and may only be the
-last parameter (at most one); a name used under `^` in the body is a
-**width**. The `...`-last rule is what keeps every stack variable in
-tail position, so no declaration can spell a stack variable with wires
-after it:
+last parameter (at most one); `---` stands for a **row** — the tail of
+a sum's alternatives — and is also last (at most one, after the `...`
+if both are there); a name used under `^` in the body is a **width**.
+The last-position rules are what keep every stack and row variable in
+tail position, so no declaration can spell one with anything after it:
 
 ```braid
 data Pair(a, b) = (a b)        # two wires — inexpressible before kinds
 data Box(...)   = (...)        # a whole stack in one wire
 data Bad(...)   = (... Int)    # rejected: '...' must be last in its stack
 type L = List(Int Str)         # rejected: List's cell takes one wire
+```
+
+**Row parameters** *(2026-09-12)* say "at least these alternatives,
+maybe more" in a written type — the `σ` that inference has always
+minted, given a spelling. `---` is the last alternative of a row, never
+a bare element:
+
+```braid
+data Any2(---)   = (Int | Str | ---)             # Any2 : (Int | Str | σ0) ⇒ Any2((σ0))
+data Peeler(---) = Fn⟨(Int | ---) ⇒ (Str | ---)⟩ # a written residual inside an Fn
+type Rest(---)   = (---)                         # the all-residual sum: `into`'s result shape
+theory Recover(---) =
+    recover : (Str | ---) ⇒ (---)                # …and in a theory slot
+
+data Bad(---, a) = (a | ---)   # rejected: '---' must be the last type parameter
+data Bad2(a)     = (a | ---)   # rejected: '---' needs a `---` parameter on the declaration
+type Bad3(---)   = (--- Int)   # rejected: '---' must be the last alternative of its row
+```
+
+A row argument is written the way a row is written anywhere — as a
+parenthesized list of alternatives — which is why the argument list of
+a rolled `Any2` shows two sets of parens: the outer ones are the
+argument list, the inner ones the row. The `---` itself displays as the
+ordinary `σ` (§5). Roll and unroll are the ascription that forces a
+quotation to a written residual type, and that type is then usable as
+an `evalAs` witness:
+
+```braid
+[(s -> s >> (toStr | ---))] >> Peeler >> unPeeler
+    • ⇒ Fn⟨(Int | σ0) ⇒ (Str | σ0)⟩
 ```
 
 Widths are declared **by use**, not by annotation: the two roles are
@@ -1216,9 +1326,10 @@ Sums & control:
 
 | word | type |
 |---|---|
-| `in1`…`inN`, `ok`/`here`/`again`, `miss`/`done` | `ρ0 ⇒ (… \| ρ0 \| σ0)` |
+| `alt1`…`altN`, `ok`/`here`/`again`, `miss`/`done` | `ρ0 ⇒ (… \| ρ0 \| σ0)` — spelled `in1`…`inN` before 2026-09-12; renamed (one spelling, **no `inN` alias**) because `[h >> alt1] into` read badly and `in` is the prefix `into` lives beside |
 | `there` | `(σ0) ⇒ (ρ0 \| σ0)` |
 | `merge` | `(ρ0 \| ρ0) ⇒ ρ0` |
+| `into` | `Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 \| σ0) ⇒ (σ0)` — the **open** eliminator (§6): the copairing `[h, id]`, handling the first alternative into the remaining row and shifting the rest. Not derivable: over a residual it is the only copairing there is. |
 | `ev` | `Fn⟨ρ0 ⇒ ρ1⟩ ρ0 ⇒ ρ1` — the exponential's **counit**; spelled `apply` before 2026-09-12, renamed to match `curry` (§10). The only word that consumes an `Fn`, and not derivable: naming a value never runs it. |
 | `loop` | `Fn⟨Σ ⇒ (Σ\|Θ)⟩ Σ =Rec> Θ` — Elgot iteration (`again`/`done`); mints `Rec` (§3) |
 | `fix` | `Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — the knot; body takes it deepest, and the knot carries `Rec` (§8) |
@@ -1282,7 +1393,7 @@ exponent-shaped half; the rest:
 | `checkedAt` | `Int a0ⁿ ⇒ (Fin(n) a0ⁿ \| Int a0ⁿ)` — bounds-check and route |
 | `weaken` | `Fin(n) ⇒ Fin(n+1)` — runtime identity |
 | `finInt` | `Fin(n) ⇒ Int` — runtime identity; forgets the bound |
-| `fin0`, `fin1`, `fin2`, … | `• ⇒ Fin(n+k+1)` — index literals, like `inN` |
+| `fin0`, `fin1`, `fin2`, … | `• ⇒ Fin(n+k+1)` — index literals, like `altN` |
 
 **Every index introduction's `n` must be forced by a relevant input** —
 a literal's offset, or a live bundle on the stack. Hence two modes.
@@ -1435,8 +1546,10 @@ parameter; open-arity atoms eat upward and never reach it, a fetch is
 a `dup` on the block swapped up into place, and the block is dropped
 once at the end. **True closures reflect too** *(2026-09-12)*: a
 parameter used inside a quotation becomes a `capture` and one used
-inside a row becomes a `dist2` (§6), so `reflect` is total on binder
-code but for the two corners in §14. Code is an ordinary list — slice with `take`, transform
+inside a row becomes a `dist2` — or, for a wider row or one with a
+residual, the generator `#dist:K` (§6) — so `reflect` is **total on
+binder code**, full stop (the two corners §14 used to list closed with
+stage 5a⅞). Code is an ordinary list — slice with `take`, transform
 with `map`, reverse for the GLA transpose (`examples/transpose.braid`,
 `code.braid`). `evalAs` checks the code against a
 witness and runs it; failures ride the miss track *with the untouched
@@ -1536,9 +1649,11 @@ has wiring to translate a capture into: `capture` under a quote,
 `dist2` over a row (§6, §10). That is table row 2 (`P ⋉ –`) over the
 cartesian **closed** structure rather than the cartesian one, and it is
 a derivation, not three new primitives —
-`design-macros.md`, the 2026-09-12 amendment. What is left is two
-corners, both in §14: a **residual** row `(p | q | ...)`, and a flat
-row of three or more tracks. `sameCode` is unchanged: it normalizes the
+`design-macros.md`, the 2026-09-12 amendment. The two corners it left
+open — a **residual** row `(p | q | ---)`, and a flat row of three or
+more tracks — closed the same day with the generator `#dist:K` (§6), so
+`reflect` is now total on binder code, full stop.
+`sameCode` is unchanged: it normalizes the
 term it is handed and never runs elimination, so two spellings of a
 capturing binder are still *"outside the structural fragment: a
 binder"* — "I cannot tell" is not "they differ".
@@ -1751,15 +1866,23 @@ holds for them too: final atom of their stage (§9).
   arrow still accepts *non*-recursive code — an inferred row is open
   and absorbs the label — so the labelled spelling is the permissive
   one, and the bare spelling is the promise.
-- **`reflect` has two corners left** *(2026-09-12; a `use F` scope
-  containing the `fix` idiom used to be a third — it now works)*. A
-  parameter used inside a **residual** row is refused: *"the passing
-  tracks would need the parameter block too, and an open row's width is
-  not a type Braid can write; close the row"*. A parameter used inside
-  a flat row of **three or more tracks** is refused too: distributing
-  the block over a coproduct is derived from `case2`/`merge`, which are
-  binary — write it as nested 2-track rows, the shape `case3`/`case4`
-  already eliminate. Both messages name the fix.
+- **`reflect` is total on binder code** *(2026-09-12)*. It had three
+  corners that morning and has none by evening: a `use F` scope over the
+  `fix` idiom, a parameter inside a **residual** row, and a parameter
+  inside a flat row of **three or more tracks**. The first two were
+  wiring that did not exist yet (`capture`, `dist2`); the third was a
+  real coproduct limit — `case2`/`merge` are binary — and the generator
+  `#dist:K` (§6) is what lifts it, being a generator rather than a
+  derivation precisely because no handler can be written for the tracks
+  a residual hides. What `reflect` still refuses is not about binders:
+  a `...` before the end of a stage in a binder body, and a name the
+  body does not resolve.
+- **`| ...` no longer means the residual** *(2026-09-12)*. It is
+  refused, for one release, with the message *"`| ...` used to mean the
+  residual; write `| ---` for more alternatives, or `| pass` for a
+  third track that passes"*. `...` continues wires, `---` continues
+  alternatives (§5); an old row is one of the two and the compiler
+  cannot guess which, so it asks.
 - Several effectful atoms in one tensor stage are **legal**, and run
   left to right — deepest wire first, the order they are written in
   (`print print : a0 a1 =IO> •`). That order is decreed, not checked, so

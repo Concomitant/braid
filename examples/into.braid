@@ -1,0 +1,77 @@
+# `into` — the OPEN coproduct eliminator, and `---`, the written row
+# tail (stage 5a⅞, 2026-09-12).
+#
+# A sum has TWO tails and they are different things. `...` continues a
+# track's WIRES (a stack variable, ρ); `---` continues a row's
+# ALTERNATIVES (a row variable, σ). One glyph per kind, in every
+# position — declaration heads, written types, terms.
+#
+#   into : Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)
+#
+# It is the copairing [h, id]: handle the FIRST alternative by mapping
+# it INTO the remaining row, and shift every other tag down one. Over a
+# residual that is the only copairing anyone can write — a handler for a
+# track you cannot name does not exist — so `into` is a prim, while the
+# closed eliminators (`case2`, `merge`, `otherwise`) stay derived.
+#
+# NOTE `>=>` is `[q, alt2]`, a CLOSED copairing: not an instance of this.
+
+# ---------------------------------------------------------------------
+# 1. PEEL, then close the ladder. Each `into` handles one alternative
+#    and shortens the row by one; `otherwise` finishes once two are left.
+
+data Atom3 = (Int | Str | Sym)
+
+def render =
+    unAtom3
+    [toStr ; alt1] ...  ; into            # an Int renders as its digits
+    _ [drop ; "<sym>"] ; otherwise               # a Sym has no text form here
+
+7     ; alt1 ; Atom3 ; render ; print     # 7
+"hi"  ; alt2 ; Atom3 ; render ; print     # hi
+.tok  ; alt3 ; Atom3 ; render ; print     # <sym>
+
+# With one alternative left, `into` lands in the 1-ary sum `(Θ)`;
+# `there ; merge` is how a 1-ary sum comes back to a bare stack.
+5    ; alt1 ; [toStr ; alt1] ... ; into ; there ; merge ; print   # 5
+"x"  ; alt2 ; [toStr ; alt1] ... ; into ; there ; merge ; print   # x
+
+# ---------------------------------------------------------------------
+# 2. `---` in a TERM is the residual row; `---` in a DECLARATION HEAD is
+#    the fifth parameter kind. A written residual displays as the
+#    ordinary σ: `unCase : Case((σ0)) ⇒ (Int | σ0)`.
+
+data Case(---) = (Int | ---)
+
+def bump = unCase ; (1 ... ; + | ---) ; Case     # act on track 1, pass the rest
+
+(5      ; alt1 ; Case) ; bump ; unCase ; print   # alt1(6)
+("left" ; alt2 ; Case) ; bump ; unCase ; print   # alt2(left)
+
+# ---------------------------------------------------------------------
+# 3. THE ELGOT IDENTITY, as a runnable law.
+#
+#     loop f  =  f >> [loop f] into          (up to un-summing)
+#
+# This is the iteration axiom — stage 5a½ could state it and not run it,
+# because the right-hand side needs an eliminator for an OPEN row. With
+# `into` it is an ordinary program, and the two sides are compared at
+# sample points below.
+#
+# HONEST STATUS: RUNNABLE, NOT DECIDED. These are checks at chosen
+# inputs, not a proof; `sameCode` does not enter rows yet (5b). Note too
+# that the CLOSED two-track copairing needs no `into` at all — it is
+# `(h | pass) ; merge`; `into` earns its keep when what remains is a
+# residual, or more than one track.
+
+def step = [(n -> n 10 ; gt? ; (_ drop ; toStr ; alt2 | _ drop ; 2 ... ; * ; alt1) ; merge)]
+
+def iterate = (n -> step n ; loop)
+def unroll  = (n -> n ; step ... ; ev ; [(m -> step m ; loop ; alt1)] ... ; into ; there ; merge)
+
+def agree = (a b -> a b ; eq? ; (drop drop ; "same" | drop drop ; "DIFFER") ; merge)
+def sameAt = (n -> (n ; iterate) (n ; unroll) ; agree ; print)
+
+1  ; sameAt        # 16 both ways
+7  ; sameAt        # 14
+20 ; sameAt        # 20 — exits on the first step

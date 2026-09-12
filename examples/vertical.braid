@@ -6,7 +6,7 @@
 # route3 builds a flat 3-track sum with the inject-and-collapse idiom:
 # each router arm injects into the SAME flat sum, merge collapses.
 
-def route3 = negative? >> (in1 | zero? >> (in2 | in3) >> merge) >> merge
+def route3 = negative? >> (alt1 | zero? >> (alt2 | alt3) >> merge) >> merge
 ## route3 : Int ⇒ (Int | Int | Int)   — negative / zero / positive
 
 def describe =

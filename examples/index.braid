@@ -40,7 +40,7 @@ def lookup = checkedAt ; (at ; print | forget ; "out of range" ; print) ; merge
 # and the type says so rather than a sentinel saying it.
 def argmaxN =
     indicesN
-    [(acc i v -> acc ; (i v ; in2 | (bi bv -> (bv v ; less) [i v ; in2] [bi bv ; in2] ... ; cond)) ; merge)] in1 ...
+    [(acc i v -> acc ; (i v ; alt2 | (bi bv -> (bv v ; less) [i v ; alt2] [bi bv ; alt2] ... ; cond)) ; merge)] alt1 ...
     foldExp2
 
 def showRow = ("none" ; print | (i v -> v ; drop ; i ; finInt ; print)) ; merge
