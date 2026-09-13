@@ -9,6 +9,14 @@ copies where they exist.
 - Power & Robinson, *Premonoidal categories and notions of
   computation* — the state construction `C(E⊗Σ, E⊗Θ)` that every
   resource fiber is; non-interchange is our left-to-right decree.
+- Power & Thielecke, [*Closed Freyd- and κ-categories*](https://dblp.org/rec/conf/icalp/PowerT99.html)
+  (ICALP 1999, LNCS 1644, [doi](https://doi.org/10.1007/3-540-48523-6_59))
+  — a Freyd category is *closed* when `K(A ⊗ B, C) ≅ C(A, B ⇒ C)` with
+  the exponential living in the pure part: that is `Fn⟨Σ =L> Θ⟩`,
+  `curry` pure and `ev` graded, and the reason abstraction elimination
+  could be finished over the closed structure (5a¾). Their κ-categories
+  "correspond to an idealisation of stack-based intermediate languages"
+  — the concatenative presentation, named in 1999.
 - Jeffrey, *Premonoidal categories and a graphical view of programs*
   (1997) — string
   diagrams for premonoidal categories, with a **control wire** that
@@ -81,6 +89,21 @@ copies where they exist.
   "composition JOINS"). The contrast worth holding beside it is Koka's
   pure row unification, which is what Braid had before and which
   narrows a higher-order word's arguments the moment a row is shared.
+- Orchard & Petricek, [*Embedding effect systems in Haskell*](https://www.doc.ic.ac.uk/~dorchard/publ/haskell14-effects.pdf)
+  (Haskell 2014) — Fig. 2(a) is the Gifford–Lucassen system Braid's
+  grades now implement: sets, `(let)` unions, `(sub)` is the
+  filtration `K≤L ⊆ K≤M`; "a monoid of effects with a preorder" is the
+  general case.
+- Tate, [*The sequential semantics of producer effect systems*](https://rosstate.org/publications/productors/productors-tate-popl13.pdf)
+  (POPL 2013) — productors: the maximally general semantics of
+  sequential composition of effects; graded monads specialize it. The
+  reference for a NON-commutative grade (traces, typestate), which
+  Braid would add as a product component, never by making provenance
+  non-idempotent.
+- Gordon, [*A generic approach to flow-sensitive polymorphic effects*](https://arxiv.org/abs/1705.02264)
+  (ECOOP 2017) — sequential effect systems worked out with
+  polymorphism; the shape "order in the type" would take if a resource
+  ever needs typestate.
 - Gaboardi, Katsumata, Orchard & Breuvart, [*Combining effects and
   coeffects via
   grading*](https://www.cs.kent.ac.uk/people/staff/dao7/publ/combining-effects-and-coeffects-icfp16.pdf)
