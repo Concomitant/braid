@@ -262,7 +262,7 @@ arrIO i o = Arrow i o effIO
 -- IO is a LABEL like any other, so it rides in the manifest rather than
 -- decorating the arrow: `a0 =IO> •`, not `a0 ⇒! •`.  The bang was a
 -- leftover from when io was the only grade and could afford its own
--- glyph; with functors and modes minting labels beside it, one
+-- glyph; with functors and categories minting labels beside it, one
 -- spelling for all of them is the honest one (2026-09-06).
 arrowGlyph :: EffRow -> String
 arrowGlyph e
@@ -1190,7 +1190,8 @@ data Term
   | Over [String] Term    -- `over X` — a def's own header, declaring what
                           -- the def IS: a morphism of theory X (a
                           -- TEMPLATE, whose body waits for a model)
-                          -- or of mode X (a hand-built K-word).  It
+                          -- or of a model with a carrier (a hand-built
+                          -- word of that category).  It
                           -- applies nothing — that is `use`'s job — so
                           -- the elaborator consumes the header and
                           -- leaves the body exactly as written.  Like
@@ -1564,7 +1565,7 @@ parseProgramToks toks =
         [_] -> Right ()
         _   -> Left $ "`over " ++ unwords names ++ "`: an `over` header "
                    ++ "names exactly one theory (making this def a "
-                   ++ "template) or one mode (making it a K-word)"
+                   ++ "template) or one model with a carrier (making it a word of that category)"
       bodyToks <- headerBody "over" "there is nothing for it to be the \
                                     \morphism of" rest
       (body, rest') <- parseProgramToks bodyToks
@@ -1938,10 +1939,10 @@ data Transport = Transport
   { tpName     :: String          -- the model, which is also its label
   , tpTheory   :: String          -- the theory it models
   , tpCarrier  :: String          -- the hom-object's constructor
-  , tpCompose  :: Maybe String    -- k(a, b) k(b, c) => k(a, c)
-  , tpEmbed    :: Maybe String    -- Fn<a => b> => k(a, b)
+  , tpCompose  :: Maybe String    -- k(a, b) k(b, c) ⇒ k(a, c)
+  , tpEmbed    :: Maybe String    -- Fn⟨a ⇒ b⟩ ⇒ k(a, b)
   , tpStrength :: Maybe (String, String)
-                                  -- k(a, b) => k(P(a, c), P(b, c)), and P
+                                  -- k(a, b) ⇒ k(P(a, c), P(b, c)), and P
   , tpExits    :: [String]        -- slots taking the carrier, returning base
   , tpEnters   :: [String]        -- slots building a carrier out of base alone
   } deriving (Eq, Show)
@@ -2866,7 +2867,7 @@ bestAlias aliases t =
 -- the nominal resource names — which fold onto the arrow rather than
 -- onto a wire, so they cannot ride in the alias list.
 data Disp = Disp { dispAliases :: [Alias], dispResources :: [String]
-                 , dispModes :: [(String, String)] }  -- mode -> its carrier
+                 , dispModes :: [(String, String)] }  -- model -> its carrier
 
 noDisp :: Disp
 noDisp = Disp [] [] []
@@ -2940,7 +2941,7 @@ arrowBetween e [] = arrowGlyph e
 arrowBetween e ns = " =" ++ unwords (S.toList (eLabels e) ++ ns) ++ "> "
 
 showArrowA :: Disp -> Arrow -> String
--- THE MODE FOLD.  A carrier is what its label adds to the objects, so a
+-- THE CARRIER FOLD.  A carrier is what its label adds to the objects, so a
 -- word that builds exactly one `K(a, b)` out of nothing, carrying `K`,
 -- IS the arrow `a =K> b` — the same move that folds a threaded resource
 -- onto the glyph.  It is a FOLD, not inference: the label must be there
@@ -3920,7 +3921,7 @@ runTransport ctx tp body = do
           ++ "in and one wire out, and theory " ++ tpTheory tp ++ "'s hom-object "
           ++ tpCarrier tp ++ "(a, b) names ONE object on each side.  A wider "
           ++ "stage transports through the STRENGTH — a slot declared "
-          ++ "`k(a, b) => k(P(a, c), P(b, c))`, whose P is the pairing the "
+          ++ "`k(a, b) \8658 k(P(a, c), P(b, c))`, whose P is the pairing the "
           ++ "elaborator packs with — and this theory declares none.  Declare "
           ++ "one, or keep every stage of the scope one wire wide."
 
@@ -4011,7 +4012,7 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
                        ++ "a functor, and a theory is not one — write `over "
                        ++ n ++ "` to make this def a template"
         []      -> Right ()
-      -- a MODE is named here too, and is taken OUT of the functor list:
+      -- a TRANSPORT is named here too, and is taken OUT of the functor list:
       -- its rule is not a `Code ⇒ Code` word run over the spine but the
       -- carrier construction below, which needs the K-word table.
       -- a model WITH A CARRIER whose theory declares composition is a
@@ -4114,7 +4115,7 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
     go t               = Right t
 
     -- a Str literal rides as a Prim whose name begins with a quote, and
-    -- its TEXT is not a name: `"a@b"` is a string, and a generated mode
+    -- its TEXT is not a name: `"a@b"` is a string, and a generated
     -- word carries slot names inside literals it parses at runtime
     isLitAtom ('"' : _) = True
     isLitAtom _         = False
@@ -4169,7 +4170,7 @@ templateHeader _ _ = Nothing
 
 -- `over X` declares MEMBERSHIP, and there are exactly two things a def
 -- can be a morphism of: a THEORY (the def is a template, waiting for an
--- model to say what its slot names mean) and a MODE (the def is a
+-- model to say what its slot names mean) and a MODEL WITH A CARRIER (the def is a
 -- hand-built word of that category, entered without transport).  Every
 -- other name is refused here, by kind, with the word to write instead —
 -- because the confusion `over` exists to end is "declare" against
@@ -4203,8 +4204,8 @@ overTarget thNames trans slots funcs bases resources n
     internal = "internal: "
 
 -- What `over K` promises, checked against the arrow that came out.  A
--- word of a mode builds one carrier out of NOTHING — `• ⇒ K(a, b)` —
--- because that is the shape the mode pass pads with `_` and hands to
+-- word of a category builds one carrier out of NOTHING — `• ⇒ K(a, b)` —
+-- because that is the shape the transport pass whiskers and hands to
 -- `thenP`.  A WRITTEN expectation against an inferred arrow: invariant
 -- five's carve-out, the same one an exit's declared type gets.
 --
@@ -4582,7 +4583,7 @@ data Module = Module
   , modFunctors  :: [(String, String)]  -- `functor Name = word`
   , modTemplates :: TemplateTable       -- defs over a theory, awaiting one
   , modTrans     :: [Transport]         -- models with a carrier
-  , modKWords    :: [(String, String)]  -- def -> the mode it was declared in
+  , modKWords    :: [(String, String)]  -- def -> the category it is a word of
   , modBases     :: [BaseInstance]      -- `model Name : Base`
   }
 
@@ -4894,14 +4895,14 @@ parseFunctorLine l =
 -- five — the directing type is written), with `k` the theory's
 -- constructor parameter:
 --
---   composition   k(a, b) k(b, c) => k(a, c)
---   embedding     Fn<a => b> => k(a, b)
---   strength      k(a, b) => k(P(a, c), P(b, c))     — and P is the pairing
+--   composition   k(a, b) k(b, c) ⇒ k(a, c)
+--   embedding     Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+--   strength      k(a, b) ⇒ k(P(a, c), P(b, c))     — and P is the pairing
 --
 -- and, as 5c already did, EXITS (a carrier in, none out) and ENTRIES
 -- (nothing in, one carrier out).  Everything else is an ordinary slot.
 --
--- NOT admitted: a stack-shaped embedding `Fn<... => ...> => k(..., ...)`.
+-- NOT admitted: a stack-shaped embedding `Fn⟨... ⇒ ...⟩ ⇒ k(..., ...)`.
 -- A constructor parameter is applied to TYPES — `k(a, b)` names one wire
 -- on each side and `k(..., ...)` does not parse — so there is no shape
 -- for it to be declared at.  A wider stage transports through the
@@ -5465,7 +5466,7 @@ checkModuleWith base src = do
           -- `use` scopes are written out here, between parse and infer: a
           -- syntactic Term rewrite with the Env available for arities and
           -- resource signatures.
-          -- a def whose own header names a mode is a K-WORD: it produces
+          -- a def whose own header names a category is a K-WORD: it produces
           -- a carrier, and a later `use K` leaves it alone instead of
           -- embedding it.  Syntactic knowledge, recorded before the body
           -- is elaborated, in the same prefix scope every def lives in.
@@ -6163,7 +6164,7 @@ normTerm ctx defs seen term s0 = case term of
       -- (a RECEIPT is `pass` with a label — it moves no wire, so the
       -- normalizer erases it exactly as it erases `pass`.  Without this
       -- no law could be stated about a program written under any `use`
-      -- scope, mode scopes included: `use@F` has no closed arity.)
+      -- scope, transported scopes included: `use@F` has no closed arity.)
       -- the injections are open-arity in the same way: the whole
       -- remaining segment is the bundle when they end the stage
       | Just k <- injIndex n =

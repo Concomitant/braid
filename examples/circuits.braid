@@ -248,6 +248,29 @@ def running    = use Circuits ; sum0 ; dbl
 def runningOut = over Circuits ; running ; observe
 runningOut ; print          # 20 — 3 ⇒ 3 ⇒ 6, then 4 ⇒ 7 ⇒ 14
 
+# ---- over/use coherence, as a law -------------------------------------
+# `use` writes out what `over` writes by hand, so the two must denote
+# the same morphism.  Here is the statement at a stateful pair, where
+# the claim has teeth: `sum0` and `scale3` are both built by hand.
+def scale3 = over Circuits ; 3 ; scale
+
+def byHand = over Circuits ; sum0 scale3 ; thenP
+def byUse  = use Circuits ; sum0 ; scale3
+#   byHand : • =Rec> Circuit(Int, Int)   — no label: nothing was applied
+#   byUse  : Int =Circuits Rec> Int      — transported, so it folds
+
+def handObs = over Circuits ; byHand ; observe
+def useObs  = over Circuits ; byUse  ; observe
+handObs ; print             # 30 — 3 ⇒ 3 ⇒ 9, then 4 ⇒ 7 ⇒ 21
+useObs  ; print             # 30 — the same circuit, said two ways
+
+# `sameCode` cannot DECIDE it, and the reason is the same one the laws
+# hit below: composing circuits applies a program that arrived as a
+# wire, and `ev` of a value that is not a literal quotation is outside
+# the structural fragment.  So coherence is observed, not proved — the
+# honest state of the art for an Arrow, and exactly why `observe` is a
+# slot of the theory.
+
 # ---- the corollary: a SEALED category ---------------------------------
 # Exits are the only way out, so a theory that declares none is sealed:
 # every stage inside the scope is embedded and the only word that

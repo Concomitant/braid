@@ -34,7 +34,14 @@ copies where they exist.
   the transformer stacking the graded arrow dissolves.
 - Atkey, [*What is a Categorical Model of
   Arrows?*](https://bentnib.org/arrows.pdf) — Arrows vs Freyd
-  categories, with the two-input caveat.
+  categories, with the two-input caveat.  **This is the shape rule of
+  MANUAL §8** *(2026-09-13)*: the elaborator recognizes a transporting
+  model by the three declared slot shapes — composition, embedding
+  (`arr`), strength (`first`) — which is Hughes' interface, i.e. the
+  base's own Freyd structure made *declarable*.  A model of a theory
+  that declares them is a target with the structure the source has,
+  which is what a functor is; `examples/circuits.braid` declares it
+  and `theory Arrow(k(_, _))` is the statement.
 - Staton, [*Freyd categories are Enriched Lawvere
   Theories*](https://www.cs.ox.ac.uk/people/samuel.staton/papers/freyd-lawvere-2014.pdf)
   — arrows, theories, and effects are one object; why `theory` and the

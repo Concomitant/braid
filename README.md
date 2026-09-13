@@ -165,9 +165,9 @@ bare `use` leaves.
     (contrapose a chain, parallelize a fold, flip a weighting).
 
     Laws now have a front door. A **theory** declares named slots and
-    the laws they must satisfy; an **instance** supplies programs and
+    the laws they must satisfy; an **model** supplies programs and
     is *audited* by running them — at module start, before main, so a
-    failing model is not an instance and the module is rejected:
+    failing model is not a model and the module is rejected:
     ```text
     theory Monoid(a) =
         unit   : • ⇒ a
@@ -175,7 +175,7 @@ bare `use` leaves.
         sample : • ⇒ a
         law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
 
-    instance IntSum : Monoid(Int) =
+    model IntSum : Monoid(Int) =
         unit   = 0
         op     = +
         sample = 7
@@ -183,21 +183,21 @@ bare `use` leaves.
     def total = use IntSum ; [op] unit ... ; foldExp     # Intⁿ⁰ =IntSum> Int
     ```
     This is not typeclasses: nothing is inferred and nothing is
-    dispatched. `use IntSum` picks an instance **by name**, and the
+    dispatched. `use IntSum` picks a model **by name**, and the
     pick is a renaming at elaboration — once per scope, no dictionary
     per call. The trade is deliberate: you give up inferring *which*
-    instance, and keep annotation-freeness, coherence in a structural
+    model, and keep annotation-freeness, coherence in a structural
     type system, and freedom from higher kinds. The audit is
     signatures, completeness, and laws typed `• ⇒ Bool`; the honest
     limit is that a law runs on the samples it names — property
     testing's poor cousin, minus generation and shrinking, plus being
-    part of what it *means* to be an instance
+    part of what it *means* to be a model
     (`examples/theories.braid`). A theory parameter may also be a type
     **constructor** — `theory Arrow(k(_, _))`, with slots like
     `thenP : k(a, b) k(b, c) ⇒ k(a, c)` — which is enough to state the
     Arrow interface once and audit circuits and functions against it
     (`examples/circuits.braid`). That is still not higher kinds: `k`
-    lives in the signature, the instance head names a declared data
+    lives in the signature, the model head names a declared data
     type, and the substitution happens before inference ever runs.
 
     A body can be written **once over the theory**. Two header words
@@ -211,11 +211,11 @@ bare `use` leaves.
     under `use StrCat`, each with its own
     principal type and nothing passed at run time. It is ML's functor
     application spelled as scope: no new syntax, no parameter list, and
-    a template called outside every instance scope is an error naming
-    the theory (`examples/build.braid`). Instances point *into* the
-    base; modes, resources and functors point *out* of it; `over` is
-    the only way to declare membership and `use` the only way to apply
-    a functor.
+    a template called outside every model scope is an error naming
+    the theory (`examples/build.braid`). Models of base theories point
+    *into* the base; a model with a carrier, a resource and a functor
+    point *out* of it; `over` is the only way to declare membership and
+    `use` the only way to apply a functor.
 
     Laws about *functors* are the same idea one level up. A functor's
     output is `Code`, so `sameCodeC : Code Code ⇒ Bool` states them —
@@ -299,9 +299,9 @@ bare `use` leaves.
     by hand a receipt is an error, which is what makes it evidence.
     `over` mints nothing — it applies nothing.
 
-    An **instance of `Base`** is the declared, once-checked rewrite:
+    An **model of `Base`** is the declared, once-checked rewrite:
     `Base` is the ambient presentation — every word in scope, its own
-    scheme as the slot's declared type — and `instance Opt : Base =
+    scheme as the slot's declared type — and `model Opt : Base =
     dupInt = dup, twice = double` is a *partial* model of it, the
     generators it names reinterpreted and every other mapped to itself.
     Each binding is blessed where it is written, by *subsumption* —
@@ -311,25 +311,34 @@ bare `use` leaves.
     subsumption blesses a rule.* The renaming reaches through
     quotations, rows and `fix` bodies, and `use Opt` mints `=Opt>` —
     an optimizer you can audit rather than one you have to trust. (An
-    instance of `Base` whose images are *provably equal* to the
+    model of `Base` whose images are *provably equal* to the
     generators is an optimizer; one whose images merely satisfy the
     laws is a dialect — `examples/optimizer.braid` draws that line.)
 
-    A **mode** is the same mechanism pointed at composition itself:
-    `mode Circ = Circuits` names an instance of a theory with a carrier
-    (`theory Arrow(k(_, _))`) and `use Circ ; add1 ; dbl` elaborates
-    every stage to that instance's `arrP` and every `;` to its `thenP`,
-    so a block reads as the ordinary program it is and comes out a
-    circuit. The receipt is an ordinary label with a *carrier* — at the
-    base the word is `• ⇒ Circuit(Int, Int)` carrying `Circ`, and the
-    display folds the two into `Int =Circ Rec> Int`. Entering is a
-    marker, leaving is a model: the theory's eliminators are refused by
-    name inside the scope, which makes a theory with no eliminator a
-    **sealed** mode — abstract types for free. A morphism of the
-    category that is not the transport of any base program — a stateful
-    circuit, say — is declared instead of transported: `def sum0 = over
-    Circ ; 0 ; sumFrom`, checked to end in the carrier, and it composes
-    under `use Circ` like any other (`examples/circuits.braid`).
+    **Transport** is the same mechanism pointed at composition itself,
+    and it needs no keyword of its own. When a model's theory has a
+    hom-object (`theory Arrow(k(_, _))`) and declares slots at the
+    composition and embedding *shapes* — `k(a,b) k(b,c) ⇒ k(a,c)` and
+    `Fn⟨a ⇒ b⟩ ⇒ k(a,b)`, read off the written types, never off a slot's
+    name — then `use Circuits ; add1 ; dbl` elaborates every stage to
+    that model's embedding and every `;` to its composition, so a block
+    reads as the ordinary program it is and comes out a circuit. A third
+    shape, the **strength** `k(a,b) ⇒ k(P(a,c), P(b,c))`, names the
+    pairing that packs a wider stage, so `use Circuits ; dup ; *` is a
+    circuit that squares: `_`-padding with `first` in place of `_`.
+    That shape rule is the base's own doctrine — a Freyd category,
+    Hughes' `arr`/`>>>`/`first` — made declarable, so "a target must
+    have the structure the source has" is checked rather than assumed.
+    The receipt is an ordinary label with a *carrier* — at the base the
+    word is `• ⇒ Circuit(Int, Int)` carrying `Circuits`, and the display
+    folds the two into `Int =Circuits Rec> Int`. Entering is a marker,
+    leaving is a model: the theory's eliminators are refused inside the
+    scope, which makes a theory with no eliminator a **sealed**
+    category — abstract types for free. A morphism that is not the
+    transport of any base program — a stateful circuit, say — is
+    declared instead of transported: `def sum0 = over Circuits ; 0 ;
+    sumFrom`, recognized by its carrier, and it composes under `use
+    Circuits` like any other (`examples/circuits.braid`).
 
     `Code ⇒ Code` functors come **last** in that list on purpose. The
     rungs above are by generators, checked once, free at every use; the
@@ -338,8 +347,8 @@ bare `use` leaves.
     front door.
 15. **A file is a presentation, an import is the inclusion.**
     `import "geometry.braid"` puts one file's declarations — defs,
-    types, resources, theories, instances (including instances of
-    `Base`), functors and modes — in another file's
+    types, resources, theories, models (including models of
+    `Base`) and functors — in another file's
     scope. Objects are added, never merged: a clash is an error naming
     both files, a diamond includes the shared file once, a cycle is
     reported. What does not travel is the imported file's main program,
@@ -357,7 +366,7 @@ and `tree` (data types and folds), `lists`, `conditionals` and `case`
 the logged version of a function, game rules as lifted moves),
 `index` (Fin(n) and a small dataframe),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
-`laws`, `theories` (theories, instances, laws that run),
+`laws`, `theories` (theories, models, laws that run),
 `build` (one pipeline as a template, instantiated by two configurations),
 `arrows` (Control.Arrow's interface, as plain syntax) and `circuits`
 (the arrows that aren't: stream transducers as ordinary data),
@@ -377,7 +386,7 @@ There is **one arrow** — no `Arrow` class, no `Monad`, no higher kinds —
 so "a new kind of computation" is never a new arrow. It is a `data`
 (a new carrier, codata included), a `resource` (state threaded through a
 region), a plain `def` (a new combinator — loops and guards are already
-values), a `theory` + `instance` (a swappable interface with runnable
+values), a `theory` + `model` (a swappable interface with runnable
 laws), or, for a genuinely different category like a stream transducer,
 a `data` plus your own composition word. MANUAL §15 is the table, with a
 worked example for each row.
@@ -400,7 +409,7 @@ annotated bibliography behind all of them. Deliberately absent so
 far: floats, labeled record fields, totality checking (`Rec` marks
 what *may* recurse without bound — provenance, not a proof), and the
 last stage of the effects staging —
-`resource` wires, `use` scopes, and theories/instances with runnable
+`resource` wires, `use` scopes, and theories/models with runnable
 laws have shipped, but there is no resource mark, no linear `World`
 and no handlers (`design-effects.md` has the position, the staging,
 and the two decisions implementation reversed).

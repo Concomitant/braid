@@ -2371,7 +2371,10 @@ moduleFailTests =
     -- refused naming the strength that would carry it
   , (modeMod ++ "def bad = use Funcs ; dup ; *\nbad ; drop",
      "`use Funcs`: dup is not one wire in and one wire out, and theory \
-     \Arrow's hom-object Arr(a, b) names ONE object on each side.")
+     \Arrow's hom-object Arr(a, b) names ONE object on each side.  A wider \
+     \stage transports through the STRENGTH — a slot declared `k(a, b) \8658 \
+     \k(P(a, c), P(b, c))`, whose P is the pairing the elaborator packs \
+     \with — and this theory declares none.")
     -- and a stage that does not cover the stack it is handed
   , (wideMod ++ "def bad = use Wide ; dup ; add1 ; *\nbad ; drop",
      "`use Wide`: add1 takes 1 wire, but the scope is running 2 wires \

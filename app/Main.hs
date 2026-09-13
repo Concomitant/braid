@@ -67,9 +67,9 @@ data ReplState = ReplState
   , rsTheories :: [Theory]   -- theories `:import` brought in
   , rsTmpls    :: TemplateTable         -- templates awaiting a model
   , rsTrans    :: [Transport] -- carrier models `:import` brought in
-  , rsKWords   :: [(String, String)]   -- def -> the mode it was declared in
+  , rsKWords   :: [(String, String)]   -- def -> the category it is a word of
   , rsBases    :: [BaseInstance]        -- models of `Base` it imported
-    -- a session cannot DECLARE a theory, a functor or a mode, but
+    -- a session cannot DECLARE a theory, a model or a functor, but
     -- `:import` can bring them in, and then `use` must know them
   }
 
@@ -324,9 +324,9 @@ importLine st arg =
                        ++ intercalate ", " (filter (not . null)
                             [ count (length names) "def"
                             , count (length (modDatas m) + length (modAliases m)) "type"
-                            , count (length (modInstances m)) "model"
+                            , models (length (modInstances m))
+                                     (length (modTrans m))
                             , count (length (modFunctors m)) "functor"
-                            , count (length (modTrans m)) "transporting model"
                             , count (length (modTemplates m)
                                        - length (rsTmpls st)) "template" ])
                        ++ ")"
@@ -334,6 +334,11 @@ importLine st arg =
   where
     count 0 _    = ""
     count n what = show n ++ " " ++ what ++ (if n == 1 then "" else "s")
+    -- a model with a carrier is one of the models, not a second kind of
+    -- declaration: say so rather than counting it twice
+    models 0 _ = ""
+    models n 0 = count n "model"
+    models n k = count n "model" ++ " (" ++ show k ++ " with a carrier)"
 
 handleLine :: ReplState -> String -> IO ReplState
 handleLine st line
