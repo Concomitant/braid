@@ -290,7 +290,8 @@ free at every use, one checked per program:
    the log).
 4. models (`use Inst`; `atomwise` with typed generator images) —
    `checkInstance`;
-5. local rewrites `p ↦ q` with `scheme(q) ≥ scheme(p)` — the `rules`
+5. local rewrites `p ↦ q` with `scheme(q) ≥ scheme(p)` — the `instance
+   … : Base`
    declaration, **shipped 2026-09-13** (see the amendment below). **Unification blesses a call; subsumption
    blesses a rule.** A `replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ Code ⇒ Code`
    types, and the shared variables say only that p and q have a
@@ -1013,11 +1014,15 @@ why.*
        seed   : • ⇒ e
        unwrap : e ⇒ a
 
-   def collected = use Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
+   def collected = over Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
    ```
 
-   which comes out `Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩` under
-   `use Logs` and `Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩` under
+   *(spelled `use Collector` until 2026-09-13; the template header is
+   `over` now — see "`use` applies, `over` declares" below, and the
+   receipts on the types below are that amendment too.)*
+
+   which comes out `Fn⟨ρ0 =Log> ρ1⟩ =Logs> Fn⟨ρ0 ⇒ Str ρ1⟩` under
+   `use Logs` and `Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩` under
    `use Counts` (verified; `examples/resources.braid`). So the recipe
    *resource + macro + theory* discharges generically with the pieces
    already on the table, and the theory is doing the same job it does
@@ -1779,7 +1784,12 @@ the cartesian lift of `reflect`; the fixpoint and iteration laws
 
 *Stage 5b, part 1. What shipped: the `rules` declaration, the
 `rewrite` engine, `sameCodeC`, three law theories and
-`examples/optimizer.braid`.*
+`examples/optimizer.braid`. **Amended 2026-09-13 (stage 5c½):** the
+declaration is spelled `instance Opt : Base = p = q, …` — a partial
+instance of the ambient presentation — and the keyword `rules` is gone.
+Everything below is unchanged in substance; "rule set" reads "instance
+of `Base`" and "rule" reads "binding". See "`use` applies, `over`
+declares" at the end of this file.*
 
 **A rule set is a functor with a natural transformation attached.**
 Take a rule set `R = {p₁ ⇒ q₁, …, pₙ ⇒ qₙ}`. Its action on code is a
@@ -2131,8 +2141,12 @@ display fold, sealed modes. What follows is the record of where the
 implementation departed from items 4b and 4c, and of the one question
 those items left open.*
 
+*(Amended 2026-09-13, stage 5c½: `rules Opt = …` below reads `instance
+Opt : Base = …`, and the K-word table gained a second, written entry —
+`over K`. See the last amendment in this file.)*
+
 **What shipped, in one paragraph.** `mode Circ = Circuits` is a
-declaration line beside `functor` and `rules`. It requires `Circuits`
+declaration line beside `functor` and `instance`. It requires `Circuits`
 to model a theory with a two-argument constructor parameter, reads the
 carrier off the instance head, and reads two slots off the theory by
 NAME: `arrP : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` and `thenP : k(a, b) k(b, c) ⇒
@@ -2145,7 +2159,8 @@ arrP`, and the pieces are joined with `thenP`. A receipt `Circ` is
 minted by the ordinary path. The display folds `• ⇒ K(a, b)` carrying
 `K` to `a =K> b`, wanting exactly one carrier. `mode K` also declares
 a word `K : Code ⇒ Code` and a functor entry of that name, so the
-namespace is shared with `functor`/`rules` and `[K]`/`lift2 [K]` work.
+namespace is shared with `functor`/`instance` and `[K]`/`lift2 [K]`
+work.
 No field on `Arrow`; no change to inference.
 
 **Deviations from 4b.**
@@ -2176,7 +2191,12 @@ No field on `Arrow`; no change to inference.
    inside `use Circ`, because admitting it would mean reading an
    INFERRED type to decide a rewrite. The fix available to the user is
    to declare it as a theory slot (written type) or to write it under
-   `use K`. Recorded here rather than softened.
+   `use K`. Recorded here rather than softened. **CLOSED 2026-09-13
+   (5c½):** `def sum0 = over Circ ; 0 ; sumFrom` is the written
+   declaration — checked against the def's arrow, added to the K-word
+   table, and still `• =Rec> Circuit(Int, Int)` at the base, because
+   `over` mints nothing. The edge was real and the answer was a
+   keyword, not a change to inference.
 4. **One mode per header.** `use K1 K2` is refused; the second would
    `arrP` the first's carriers. Nesting or a declared composite is the
    spelling.
@@ -2238,6 +2258,123 @@ structural induction over an initial algebra and not normalization in
 a free category. The five laws stay finite tests of an infinite
 object, run through `observe` at sample points, which is what a
 theory asking for an `observe` slot was always admitting.
+
+## Amendment (2026-09-13): `use` applies, `over` declares — and the base is a theory
+
+*Shipped as stage 5c½. The vocabulary had drifted: `use` meant five
+different things, one of which was not application at all, and `rules`
+was a keyword for something the language already had a word for. Both
+are one idea, stated once.*
+
+**The one rule `use` obeys.** *What follows is written in the DOMAIN of
+X, and X is applied to it.* That is the whole of it, and every kind of
+name obeys it:
+
+| `use X` | the block is written in | X sends it | direction |
+|---|---|---|---|
+| an instance of theory T | T's vocabulary | to the model's words | **into** the base |
+| an instance of `Base` | the base | to the images it names | base to base |
+| a resource E | the base | to `E ⊗ –` | **out of** the base |
+| a functor F | the base | through F's `Code ⇒ Code` word | **out of** the base |
+| a mode K | the base | to `K`, `;` ↦ `thenP` | **out of** the base |
+
+Instances point into the base; modes, resources and functors point out
+of it. That is the table, and it is complete.
+
+The one row that broke the rule was `use Theory` for a template: it
+applied *nothing*, it bound a domain. So it is a different word.
+
+**`over X` declares membership.** "This def is a morphism of X." It
+applies nothing, opens no scope, writes no wires, and **mints nothing**.
+Two readings, and they are the same reading:
+
+- `over T` for a theory T — the def is a **template**, a morphism of
+  the theory, waiting for a model to interpret it.
+- `over K` for a mode K — the def is a **hand-built word of K**, a
+  morphism of the category the mode presents, entered without
+  transport. The elaborator checks the claim against the def's arrow
+  (`• ⇒ K(a, b)`, the shape the mode pass pads and hands to `thenP`)
+  and adds it to the K-word table.
+
+The second reading closes pragmatics item (A), the K-word wall: before
+it, a morphism of the category that is not the transport of any base
+program — a stateful circuit, the whole reason Arrows exist — was
+stranded, because the only alternative was to read an *inferred* type to
+decide what a word is, which is invariant five's sharpest edge. `over`
+is the written declaration, and invariant five's carve-out is exactly
+that: the directing type is written.
+
+**`over` mints nothing, and that matters.** A receipt is PROVENANCE —
+"this code went through F". A hand-built morphism did not go through
+anything; it may be a morphism no base program denotes. Labelling it
+`K` would claim membership in the functor's **image**, which is
+strictly stronger than membership in the category, and the two are
+exactly the gap the manifest is careful not to close (see "coeffects,
+and tagging the non-idempotent image"). So `sum0 : • =Rec>
+Circuit(Int, Int)` prints unfolded, the composite `use Circ ; sum0 ;
+dbl` prints `Int =Circ Rec> Int`, and "only a `use` mints, and every
+`use` mints" holds exactly. Membership in K is carried by the carrier
+in the type and by the K-word table; nothing else needs to carry it.
+
+**Every `use` mints — instances included.** Until now `use Duals ; poly`
+left no receipt, which was the one exception to the rule above. It
+mints now: `onDuals : Dual =Duals> Dual` says *which model interpreted
+this template*, which is provenance in exactly the sense a functor's
+receipt is. The consequence is that a theory slot declared without the
+label refuses a body written under another instance — the same sharp
+edge functors have always had, now uniform. The one exemption is an
+instance's own slot and law bodies: the `use I` that resolves their
+slot names is resolution, not application, and a model does not apply
+itself.
+
+**`rules` is a partial instance of the base.** `Base` is the reserved
+theory whose generators are *every word in scope*, each with its own
+scheme as the slot's declared type. `instance Opt : Base = dupInt =
+dup` is a partial model of it: the generators it names get images, and
+every generator it does not name maps to itself. The check is
+`checkInstance`'s subsumption, unchanged; `use Opt` is the renaming
+`use Inst` already performed, unchanged; the receipt is the receipt
+every scope leaves, unchanged. One keyword fewer, and nothing new.
+
+Keep the distinction that is *semantic* rather than syntactic: an
+instance of `Base` whose images are provably equal to the generators
+(`sameCode`) is an **optimizer**; one whose images merely satisfy the
+laws is a **reinterpretation**, a dialect. Both are instances of
+`Base`, and the language does not need to tell them apart — the laws
+do.
+
+**The base, stated.** Everything above assumes a thing that had never
+been written down: *the base is a theory*. `Base` is presented by its
+prims and their axioms. Then:
+
+- the **runtime** is `instance Runtime : Base` — the canonical model,
+  the one that actually computes;
+- the **prelude**, and every program, is a **template over `Base`** —
+  written in the base's vocabulary, waiting for a model, and almost
+  always getting `Runtime`;
+- **plain Braid is the identity mode** — `;` is `;`, `arrP` is the
+  identity, the carrier is the object itself;
+- an **optimizer** is another instance of `Base`, agreeing with
+  `Runtime` on meaning and disagreeing on cost;
+- a **mode** is an instance of `Arrow(k)` — a category presented by
+  hom-objects, with `use K` the functor into it;
+- **resources** are modes with carrier `Fn⟨E a ⇒ E b⟩` — the
+  Power–Robinson state construction read as a hom-object. This one is
+  conceptual until stage 7: routing is a separate pass today, and the
+  claim here is that it need not be.
+
+So the four kinds of label in the manifest table are four *instances*,
+and `use` is one verb. What differs is the carrier column, which is
+where it was already said.
+
+**A naming note, since it will come up.** An instance IS a functor in
+the textbook sense — a functor out of the theory's classifying
+category, given by its action on generators. The keyword `functor`
+names the *non-tabular* case: a program on syntax, a `Code ⇒ Code`
+word, checked by re-inference at the splice rather than once at a
+declaration. That is the escape hatch, not the front door, and the
+docs now order themselves that way: theory, template, instance/mode,
+receipts, and `Code` last, under "instrumentation and retrofit".
 
 ## Honest gaps
 

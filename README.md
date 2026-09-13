@@ -180,7 +180,7 @@ bare `use` leaves.
         op     = +
         sample = 7
 
-    def total = use IntSum ; [op] unit ... ; foldExp     # Intⁿ⁰ ⇒ Int
+    def total = use IntSum ; [op] unit ... ; foldExp     # Intⁿ⁰ =IntSum> Int
     ```
     This is not typeclasses: nothing is inferred and nothing is
     dispatched. `use IntSum` picks an instance **by name**, and the
@@ -200,15 +200,22 @@ bare `use` leaves.
     lives in the signature, the instance head names a declared data
     type, and the substitution happens before inference ever runs.
 
-    A body can be written **once over the theory**: a def whose `use`
-    names a theory is a **template**, and a def whose `use` names an
-    instance expands it there and re-infers it there — so `def fold1 =
-    use Monoid ; [op] unit ... ; foldExp` becomes `Intⁿ⁰ ⇒ Int` under
-    `use IntSum` and `Strⁿ⁰ ⇒ Str` under `use StrCat`, each with its own
+    A body can be written **once over the theory**. Two header words
+    say which side you are on: **`over X` declares** that this def is a
+    morphism of X, and **`use X` applies** X to the block that follows
+    — *what follows is written in the domain of X, and X is applied to
+    it*. So a def headed `over Monoid` is a **template**, and a def
+    headed `use IntSum` expands it there and re-infers it there:
+    `def fold1 = over Monoid ; [op] unit ... ; foldExp` becomes
+    `Intⁿ⁰ =IntSum> Int` under `use IntSum` and `Strⁿ⁰ =StrCat> Str`
+    under `use StrCat`, each with its own
     principal type and nothing passed at run time. It is ML's functor
     application spelled as scope: no new syntax, no parameter list, and
     a template called outside every instance scope is an error naming
-    the theory (`examples/build.braid`).
+    the theory (`examples/build.braid`). Instances point *into* the
+    base; modes, resources and functors point *out* of it; `over` is
+    the only way to declare membership and `use` the only way to apply
+    a functor.
 
     Laws about *functors* are the same idea one level up. A functor's
     output is `Code`, so `sameCodeC : Code Code ⇒ Bool` states them —
@@ -282,22 +289,31 @@ bare `use` leaves.
     (`ρ ⇒ ρ`, or `E ρ ⇒ E ρ` over a resource) — so metering a resource
     is one line, and the tracer that lifts everywhere is a marker, not
     a probe. `lift2` applies any such functor at run time with the
-    program as its own witness and fallback. And a functor leaves a
-    **receipt**: `use Traced` mints `Traced` onto the manifest of
-    everything it rewrote (`poly : Int =Traced> Int`), so the type says
-    which functors built a word and every caller inherits it. Only a
-    `use` can mint one — written by hand it is an error — which is what
-    makes it evidence.
+    program as its own witness and fallback.
 
-    A **rule set** is the declared, once-checked case: `rules Opt =
-    dupInt => dup, twice => double` blesses each rewrite where it is
-    written, by *subsumption* — `q` may stand wherever `p` stands iff
-    `scheme(q) ≥ scheme(p)`, a rank-2 statement no `Fn` type can hold,
-    which is why it is a declaration and not a word. *Unification
-    blesses a call; subsumption blesses a rule.* The set applies
-    atomwise through quotations, rows and `fix` bodies, and `use Opt`
-    mints `=Opt>` on everything it rewrote — an optimizer you can audit
-    rather than one you have to trust (`examples/optimizer.braid`).
+    **Every `use` leaves a receipt**, and only a `use` mints one:
+    `use IntSum` puts `IntSum` on the manifest of everything it read,
+    `use Traced` puts `Traced` on everything it rewrote
+    (`poly : Int =Traced> Int`), so the type says which models and
+    which functors built a word and every caller inherits it. Written
+    by hand a receipt is an error, which is what makes it evidence.
+    `over` mints nothing — it applies nothing.
+
+    An **instance of `Base`** is the declared, once-checked rewrite:
+    `Base` is the ambient presentation — every word in scope, its own
+    scheme as the slot's declared type — and `instance Opt : Base =
+    dupInt = dup, twice = double` is a *partial* model of it, the
+    generators it names reinterpreted and every other mapped to itself.
+    Each binding is blessed where it is written, by *subsumption* —
+    `q` may stand wherever `p` stands iff `scheme(q) ≥ scheme(p)`, a
+    rank-2 statement no `Fn` type can hold, which is why it is a
+    declaration and not a word. *Unification blesses a call;
+    subsumption blesses a rule.* The renaming reaches through
+    quotations, rows and `fix` bodies, and `use Opt` mints `=Opt>` —
+    an optimizer you can audit rather than one you have to trust. (An
+    instance of `Base` whose images are *provably equal* to the
+    generators is an optimizer; one whose images merely satisfy the
+    laws is a dialect — `examples/optimizer.braid` draws that line.)
 
     A **mode** is the same mechanism pointed at composition itself:
     `mode Circ = Circuits` names an instance of a theory with a carrier
@@ -309,11 +325,21 @@ bare `use` leaves.
     display folds the two into `Int =Circ Rec> Int`. Entering is a
     marker, leaving is a model: the theory's eliminators are refused by
     name inside the scope, which makes a theory with no eliminator a
-    **sealed** mode — abstract types for free (`examples/circuits.braid`).
+    **sealed** mode — abstract types for free. A morphism of the
+    category that is not the transport of any base program — a stateful
+    circuit, say — is declared instead of transported: `def sum0 = over
+    Circ ; 0 ; sumFrom`, checked to end in the carrier, and it composes
+    under `use Circ` like any other (`examples/circuits.braid`).
+
+    `Code ⇒ Code` functors come **last** in that list on purpose. The
+    rungs above are by generators, checked once, free at every use; the
+    `functor` keyword names the non-tabular case — a program on syntax,
+    re-inferred at the splice — and it is the escape hatch, not the
+    front door.
 15. **A file is a presentation, an import is the inclusion.**
     `import "geometry.braid"` puts one file's declarations — defs,
-    types, resources, theories, instances, functors, rule sets and
-    modes — in another file's
+    types, resources, theories, instances (including instances of
+    `Base`), functors and modes — in another file's
     scope. Objects are added, never merged: a clash is an error naming
     both files, a diamond includes the shared file once, a cycle is
     reported. What does not travel is the imported file's main program,
@@ -359,7 +385,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 951-case test suite, a full
+(typechecker, interpreter, REPL), a 967-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
