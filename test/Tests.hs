@@ -924,6 +924,103 @@ evalTests =
     -- disproof at any particular type.
   , ("[2 _ ; *] [dup ; +] ; sameCode ; (\"same\" | \"differ\") ; merge ; print",
      ["differ"], "")
+    -- STAGE 5b PART 2 (2026-09-13): the normalizer enters quotations
+    -- and rows.  `sameCode` now runs abstraction elimination first —
+    -- the path `reflect` takes — so it decides the binders it used to
+    -- refuse, and agrees with `sameCodeC` (§12.9).
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \[(x -> x x)] [dup] >> sameCode >> v >> print\n\
+     \[(a b -> b a)] [swap] >> sameCode >> v >> print\n\
+     \[(x -> [x])] [(y -> [y])] >> sameCode >> v >> print",
+     ["same", "same", "same"], "")
+    -- a QUOTATION is a VALUE the normalizer compares: two quotes are
+    -- equal when their captures are equal and their bodies are the same
+    -- morphism, decided one level down
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \[[dup]] [[dup]] >> sameCode >> v >> print\n\
+     \[[dup >> swap]] [[dup]] >> sameCode >> v >> print\n\
+     \[[+]] [[-]] >> sameCode >> v >> print",
+     ["same", "same", "differ"], "")
+    -- β for the EXPONENTIAL: `[p] ; ev = p`, and `capture ; ev` is
+    -- substitution (the body runs on its captures, then the segment)
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \[[dup] ... >> ev] [dup] >> sameCode >> v >> print\n\
+     \[[dup >> +] ... >> ev] [dup >> +] >> sameCode >> v >> print\n\
+     \[[+] ... >> ev] [-] >> sameCode >> v >> print\n\
+     \[(x -> x [(y z -> y z >> +)] >> capture >> _ x >> ev)] [(x -> x x >> +)] >> sameCode >> v >> print",
+     ["same", "same", "differ", "same"], "")
+    -- β for the COPRODUCT at an injection the normalizer knows: follow
+    -- the tag, run that track, re-tag.  No branching needed.
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \[dup >> alt1 >> (+ | -) >> merge] [dup >> +] >> sameCode >> v >> print\n\
+     \[dup >> alt2 >> (+ | -) >> merge] [dup >> -] >> sameCode >> v >> print\n\
+     \[dup >> alt2 >> (+ | -) >> merge] [dup >> +] >> sameCode >> v >> print\n\
+     \[toStr >> alt1 >> (alt1 | alt2) >> merge >> merge] [toStr] >> sameCode >> v >> print",
+     ["same", "same", "differ", "same"], "")
+    -- THE CASE SPLIT: a row over a sum whose injection is UNKNOWN
+    -- (`eq? : a a => (a a | a a)`, a closed two-track row).  η, the
+    -- track swap, the identity row, and the codiagonal's coherence —
+    -- each proved at EVERY input, not sampled.  The residual is
+    -- compared semantically: `(f | ---)` and `(f | pass)` are one
+    -- morphism here, and a different second track is not.
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \[eq? >> (alt1 | alt2) >> merge] [eq?] >> sameCode >> v >> print\n\
+     \[eq? >> (alt2 | alt1) >> merge] [eq?] >> sameCode >> v >> print\n\
+     \[eq? >> (pass | pass)] [eq?] >> sameCode >> v >> print\n\
+     \[eq? >> (+ | +) >> merge] [eq? >> merge >> +] >> sameCode >> v >> print\n\
+     \[eq? >> (toStr toStr | ---)] [eq? >> (toStr toStr | pass)] >> sameCode >> v >> print\n\
+     \[eq? >> (toStr toStr | ---)] [eq? >> (toStr toStr | toStr toStr)] >> sameCode >> v >> print",
+     ["same", "differ", "same", "same", "same", "differ"], "")
+    -- `into`'s own two equations, which is what pins a copairing:
+    -- [h, id] . alt1 = h, and [h, id] . alt(k+1) = alt(k)
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \[alt1 >> [toStr >> alt1] ... >> into] [toStr >> alt1] >> sameCode >> v >> print\n\
+     \[alt2 >> [toStr >> alt1] ... >> into] [alt1] >> sameCode >> v >> print\n\
+     \[alt1 >> [toStr >> alt1] ... >> into] [alt1] >> sameCode >> v >> print\n\
+     \[alt1 >> [toStr >> alt1] ... >> into >> there >> merge] [toStr] >> sameCode >> v >> print",
+     ["same", "same", "differ", "same"], "")
+    -- the prelude's coproduct layer, decided: `dist2`/`undist2` are
+    -- inverse where they are defined, and `case2`/`case3`/`cond`/
+    -- `otherwise` are the bare row they expand to.  `case2` is the one
+    -- that matters: eliminating its binders EMITS `dist2`, so this is
+    -- the closed structure checking its own derivation.
+  , ("data Pair = (Int Int | Int Int)\n\
+     \def v = (\"same\" | \"differ\") >> merge\n\
+     \def viaCase2 = (s -> [+] [-] s >> case2)\n\
+     \def viaRow   = (s -> s >> (+ | -) >> merge)\n\
+     \def viaCase3 = (s -> [+] [-] [*] s >> case3)\n\
+     \def viaRow3  = (s -> s >> (+ | (- | *) >> merge) >> merge)\n\
+     \def viaCond  = (b -> b [1] [2] >> condFn >> ev)\n\
+     \def viaRowC  = (b -> b >> (1 | 2) >> merge)\n\
+     \def viaOther = (s -> s [drop drop >> 1] >> otherwise)\n\
+     \def viaRowO  = (s -> s >> (pass | drop drop >> 1) >> merge)\n\
+     \[_ unPair >> dist2 >> merge] [_ unPair >> _ merge] >> sameCode >> v >> print\n\
+     \[unPair >> undist2 >> dist2 >> merge] [unPair >> merge] >> sameCode >> v >> print\n\
+     \[viaCase2] [viaRow] >> sameCode >> v >> print\n\
+     \[viaCase3] [viaRow3] >> sameCode >> v >> print\n\
+     \[viaCond] [viaRowC] >> sameCode >> v >> print\n\
+     \[viaOther] [viaRowO] >> sameCode >> v >> print",
+     ["same", "same", "same", "same", "same", "same"], "")
+    -- `sameCode` and `sameCodeC` are ONE procedure now, so they must
+    -- agree on every program: a dozen, spanning binders, quotations,
+    -- known injections, case splits, a residual, `into`, and the
+    -- arithmetic law neither can see
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \def agree = (a b -> (a b >> sameCode) ((a >> getCode) (b >> getCode) >> sameCodeC) >> eq? >> (drop drop >> \"agree\" | drop drop >> \"DISAGREE\") >> merge >> print)\n\
+     \[(x -> x x)] [dup] >> agree\n\
+     \[(a b -> b a)] [swap] >> agree\n\
+     \[(x -> [x])] [(y -> [y])] >> agree\n\
+     \[[dup >> swap]] [[dup]] >> agree\n\
+     \[[dup] ... >> ev] [dup] >> agree\n\
+     \[dup >> alt1 >> (+ | -) >> merge] [dup >> +] >> agree\n\
+     \[dup >> alt2 >> (+ | -) >> merge] [dup >> +] >> agree\n\
+     \[eq? >> (alt1 | alt2) >> merge] [eq?] >> agree\n\
+     \[eq? >> (alt2 | alt1) >> merge] [eq?] >> agree\n\
+     \[eq? >> (drop drop >> 1 | ---)] [eq? >> (drop drop >> 1 | pass)] >> agree\n\
+     \[alt1 >> [toStr >> alt1] ... >> into] [toStr >> alt1] >> agree\n\
+     \[2 _ >> *] [dup >> +] >> agree",
+     ["agree", "agree", "agree", "agree", "agree", "agree",
+      "agree", "agree", "agree", "agree", "agree", "agree"], "")
   ] ++
     -- forward reference across the instance boundary, at RUNTIME: the
     -- module's own defs are mutually visible, so a slot body calling a
@@ -1674,12 +1771,6 @@ moduleFailTests =
      "`capture` cannot be shadowed: abstraction elimination EMITS it")
   , ("def dist2 = dup\n1 >> print",
      "`dist2` cannot be shadowed: abstraction elimination EMITS it")
-    -- `sameCode` is UNCHANGED by 5a¾: it normalizes the term it is
-    -- given and does not run abstraction elimination, so two spellings
-    -- of a capturing binder are still refused rather than decided.
-    -- "I cannot tell" is not "they differ" (§12.9); deciding them is 5b.
-  , ("[(x -> [x])] [(y -> [y])] >> sameCode >> (forget >> \"same\" | forget >> \"differ\") >> merge >> print",
-     "sameCode: outside the structural fragment: a binder")
     -- a FALSE law rejects the module when it starts running
   , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
      "law 'leftUnit' fails for instance BadUnit")
@@ -1754,10 +1845,32 @@ moduleFailTests =
     -- expansion, and the error is an ordinary one
   , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef bad = use Metered >> dup >> +\n3 >> bad >> print",
      "Cannot unify types: Int vs Fuel")
-    -- outside the fragment `sameCode` reports, rather than guessing:
-    -- "I cannot tell" is not "they differ"
-  , ("[[dup]] [[dup]] ; sameCode ; drop ; 1", "outside the structural fragment")
-  , ("[(x -> x x)] [dup] ; sameCode ; drop ; 1", "outside the structural fragment")
+    -- outside the fragment `sameCode` REPORTS, rather than guessing:
+    -- "I cannot tell" is not "they differ".  Since 2026-09-13 the
+    -- boundary is narrower and each refusal names what stopped it.
+    -- `ev` of a WIRE: the Fn's input is an open stack variable, so
+    -- there is no segment width to hand it.  This is the one thing that
+    -- keeps transport of recursion syntactic.
+  , ("[ev] [ev] ; sameCode ; drop ; 1",
+     "outside the structural fragment: `ev` of a value that is not a \
+     \literal quotation")
+    -- `loop` is `fix`, and a fixpoint equation is an axiom of an
+    -- iteration theory, not an equation of the free category
+  , ("[loop] [loop] ; sameCode ; drop ; 1",
+     "outside the structural fragment: `loop` has no closed arity")
+    -- a sum whose injection is unknown AND whose row is a bare tail:
+    -- unnamed tracks have no widths, so there is no partition to split
+  , ("[merge] [merge] ; sameCode ; drop ; 1",
+     "outside the structural fragment: a sum whose injection is unknown \
+     \and whose row has no closed tracks")
+    -- THE TERMINATION GUARD.  Each `st` splits the case tree in two, so
+    -- seventeen of them would be 2^17 leaves; the normalizer stops at
+    -- sixteen splits and says so.  Running out of room is reported as
+    -- OUTSIDE the fragment, never as a verdict.
+  , ("def st = dup >> eq? >> (_ drop | _ drop) >> merge\n\
+     \[st >> st >> st >> st >> st >> st >> st >> st >> st >> st >> st \
+     \>> st >> st >> st >> st >> st >> st] [id] >> sameCode >> drop >> 1",
+     "outside the structural fragment: the case tree grew past 16 splits")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
@@ -1964,13 +2077,15 @@ moduleFailTests =
     -- a rule set is a functor, and shares the functor namespace
   , ("def idF = (c -> c)\nfunctor Opt = idF\nrules Opt = dup => dup\n1 >> print",
      "Duplicate functor declaration: Opt")
-    -- `sameCodeC` decides the wiring fragment and says so outside it,
-    -- exactly as `sameCode` does: a quotation and a row are still out
-    -- (that is the normalizer's next stage, not this one)
-  , ("([[dup]] >> getCode) ([[dup]] >> getCode) >> sameCodeC >> drop >> 1 >> print",
-     "sameCodeC: outside the structural fragment: a quotation")
-  , ("([(dup | drop 1)] >> getCode) ([(dup | drop 1)] >> getCode) >> sameCodeC >> drop >> 1 >> print",
-     "sameCodeC: outside the structural fragment: a row")
+    -- `sameCodeC` reports outside the fragment exactly as `sameCode`
+    -- does — they are one procedure — and a `fix` body that applies its
+    -- self wire is where the boundary now falls
+  , ("def dupSwap = dup >> swap\nrules Opt = dupSwap => dup\n\
+     \def slow = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) \
+     \>> (dupSwap >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]\n\
+     \(slow >> getCode >> Opt) (slow >> getCode) >> sameCodeC >> drop >> 1 >> print",
+     "sameCodeC: outside the structural fragment: `ev` of a value that \
+     \is not a literal quotation")
     -- the audit: an instance that fails a law is not an instance.
     -- `doubled` repeats every stage, so weaving twice weaves twice.
   , ("def doubled = [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise\n\

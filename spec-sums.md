@@ -197,7 +197,26 @@ loop f  =  f >> [loop f] into          # up to un-summing
 ```
 
 `examples/into.braid` checks both sides at sample points. Runnable, not
-decided.
+decided — and *permanently* so, which is worth saying precisely.
+
+**What `into` decides, and what it does not** *(amendment 2026-09-13)*.
+The normalizer now enters rows and quotations (MANUAL §12.9,
+`design-macros.md` "the normal form for sums"), so `into`'s own two
+equations are **decided** by `sameCode`: `[h, id] ∘ alt1 = h`, and
+`[h, id] ∘ alt(k+1) = alt(k)` — the tag shift *is* the identity half of
+the copairing, proved for every input rather than checked at three.
+The Elgot identity is not, and the reason is not a missing feature: a
+fixpoint equation is an axiom of an **iteration theory**, not an
+equation of the free distributive category the normalizer works in.
+`loop` is `fix`, `fix`'s argument is applied to itself, and asked
+directly `sameCode` refuses by name —
+
+```text
+sameCode: outside the structural fragment: `loop` has no closed arity
+```
+
+— which is the right answer. Deciding it would need a uniformity or
+unique-fixpoint rule, a different procedure.
 
 ## 4. Routers: predicates route
 

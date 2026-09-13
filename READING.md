@@ -131,7 +131,11 @@ copies where they exist.
   categories*](https://doi.org/10.1016/0022-4049(93)90035-R) (JPAA 84,
   1993) — extensivity as the condition that makes coproducts behave
   like disjoint unions, and the place to look when `sameCode` is asked
-  to enter a row (5b).
+  to enter a row. **Cashed in 2026-09-13:** the normalizer's case split
+  — one branch per track, the scrutinee refined for both programs at
+  once — is extensivity used as a rewrite, which is what makes the
+  branches a partition rather than a guess (`design-macros.md`, "the
+  normal form for sums").
 
 ## String diagrams, free categories, decidable rewriting
 
@@ -143,7 +147,11 @@ copies where they exist.
   multi-output generalization.
 - Lafont, [*Towards an algebraic theory of Boolean
   circuits*](https://www.i2m.univ-amu.fr/perso/yves.lafont/pub/circuits.pdf)
-  — presentations with canonical forms; where `sameCode` grows next.
+  — presentations with canonical forms; the style `sameCode` normalizes
+  in (run the generators on distinct symbolic inputs, read the answer
+  off), and as of 2026-09-13 that includes the coproduct's generators,
+  not only the cartesian ones. See Cockett above for the coherence, and
+  `design-macros.md` for the normal form Braid actually lands in.
 - Bonchi, Sobociński & Zanasi, [*Interacting Hopf
   Algebras*](https://arxiv.org/abs/1403.7048) — complete axioms for
   linear relations; the GLA fragment's normal forms.

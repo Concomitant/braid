@@ -633,6 +633,14 @@ injects into the *same* flat sum, `merge` collapses:
 `merge : (ρ0 | ρ0) ⇒ ρ0` rejoins agreeing tracks (the codiagonal).
 Arms must agree on the result type to merge.
 
+**Rows are decidable** *(2026-09-13)*. `sameCode` normalizes a row: it
+follows an injection it knows, and where it does not it *splits* — one
+branch per track — so `alt1 ; (f | g) ; merge = f` and `(alt1 | alt2) ;
+merge = id` are proved rather than sampled (§12.9,
+`examples/distributive.braid`). The residual is compared **semantically**,
+not as a flag: over a closed two-track sum, `(f | ---)` and `(f | pass)`
+are the same morphism, and `sameCode` says so.
+
 ### The open eliminator: `into`
 `merge`, `case2` and `otherwise` all need a **closed** row — they are
 copairings, and a copairing needs one handler per alternative. Over a
@@ -1300,12 +1308,20 @@ would generate them — `ListMonoid@append ; len = len len ; IntSum@+`,
 `ListMonoid@nil ; len = IntSum@zero` — and audit them at module start
 like instance laws. What blocks it is not the generator, it is the
 **verdict**: a generated square compares two programs, and an
-instance's slots are ordinary (often recursive) defs, which `sameCode`
-treats as opaque and therefore always reports unequal. Deciding them
-needs the normalizer through closures and rows; sampling them needs a
-`sample` slot the generator cannot conjure. Both are the next stage's
-work, and the sentence to keep either way is: *naturality over a free
-category is finite — the generators suffice*.
+instance's slots are ordinary (often recursive) defs.
+*Re-checked 2026-09-13, with the normalizer now through closures and
+rows, and the answer did not change.* `nil ; len` against `0` is
+decided — **`differ`** — because `len` is a structural recursor, opaque
+by necessity, and the free category cannot compute a fold; `append ;
+len` against `len len ; +` is refused outright, *outside the structural
+fragment: `ev` of a value that is not a literal quotation*, because a
+fold applies its handlers to a wire. The missing verdict has a name:
+**equality modulo the instance's defining equations**, which for an
+initial algebra means proof by structural induction. That is a
+different procedure from normalizing in a free category, not a bigger
+version of it. Sampling them instead needs a `sample` slot the
+generator cannot conjure. The sentence to keep either way is:
+*naturality over a free category is finite — the generators suffice*.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
@@ -1477,8 +1493,8 @@ Metaprogramming & IO (railway-typed edges):
 | `parse` | `Str ⇒ (Code \| Str)` |
 | `interpose` | `Code Code ⇒ Code` — `η c`: insert η after every stage of c; η must be `ρ ⇒ ρ` or `E ρ ⇒ E ρ`, checked (§12) |
 | `rewrite` | `List(Sym) List(Sym) Code ⇒ Code` — `froms tos c`: rename atoms by a table, through quotes, rows and groups. The rule-set engine, unchecked on its own: `rules` is where a table is blessed (§8) |
-| `sameCode` | `Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` — same morphism? decided by normalizing, errors outside the structural fragment (§12.9) |
-| `sameCodeC` | `Code Code ⇒ Bool` — the same question over Code values; decides more, because Code is post-abstraction-elimination (§12.9) |
+| `sameCode` | `Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` — same morphism? decided by normalizing to a case tree over the free bicartesian closed category; errors outside the structural fragment (§12.9) |
+| `sameCodeC` | `Code Code ⇒ Bool` — the same question over Code values, and the only form a law about a FUNCTOR can take. One procedure with `sameCode` since 2026-09-13; the two always agree (§12.9) |
 | `readLine` | `• =IO> (Str \| Str)` — io; one line from stdin, EOF misses |
 | `readFile` | `Str =IO> (Str \| Str)` — io |
 | `writeFile` | `Str Str =IO> (• \| Str)` — io; hit is the empty success, miss carries the error |
@@ -1822,10 +1838,9 @@ a derivation, not three new primitives —
 open — a **residual** row `(p | q | ---)`, and a flat row of three or
 more tracks — closed the same day with the generator `#dist:K` (§6), so
 `reflect` is now total on binder code, full stop.
-`sameCode` is unchanged: it normalizes the
-term it is handed and never runs elimination, so two spellings of a
-capturing binder are still *"outside the structural fragment: a
-binder"* — "I cannot tell" is not "they differ".
+`sameCode` caught up on 2026-09-13: it now runs
+elimination first, so two spellings of a capturing binder are
+*decided*, and it agrees with `sameCodeC` on every program (§12.9).
 
 **Why `interpose` checks what it checks.** The stage it inserts must
 type at *every* cut, and the cuts have different widths. A stage that
@@ -1904,20 +1919,39 @@ it yet (`design-macros.md`, the coeffect section).
 
 `sameCode : Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` answers whether two programs
 are the **same morphism**, by normalizing rather than testing.
+`sameCodeC : Code Code ⇒ Bool` asks the same question of two `Code`
+values — the form a law about a *functor* has to take, since a functor
+returns `Code`. Since 2026-09-13 they are **one procedure**: `sameCode`
+runs abstraction elimination first (the path `reflect` already took), so
+the two words agree on every program.
 
-A program built from wiring (`id`/`_`/`dup`/`drop`/`swap`/`pass`),
-composition and juxtaposition, over words treated as *uninterpreted*, is
-a morphism of the free cartesian category on those words. Its word
-problem is solvable: run the program on distinct symbolic inputs and
-read off the tuple of terms it returns. Two programs are equal exactly
-when they consume the same number of wires and return the same tuple.
-Defs inside the fragment are inlined (so `sameCode` sees through your
-own words); a def already being expanded is recursive and stays opaque.
+The fragment they decide is the free **bicartesian closed** category
+over the words a program mentions: wiring (`id`/`_`/`dup`/`drop`/`swap`/
+`pass`), composition and juxtaposition; literals as nullary constants;
+quotations with `capture` and `ev`; the coproduct's structure maps
+(`alt1`…`altN`, a code row, `merge`, `into`, `dist2`); and every word
+with a closed arity, treated as **uninterpreted**. Defs inside the
+fragment are inlined (so `sameCode` sees through your own words); a def
+already being expanded is recursive and stays opaque.
+
+The normal form is a **case tree**: follow an injection you know (β for
+the coproduct), run a quotation you hold (β for the exponential), and
+where a sum's injection is unknown, *split* — one branch per track,
+with the scrutinee refined for **both** programs at once. Leaves are
+tuples of symbolic terms; two programs are equal when they consume the
+same wires and agree at every leaf. The design record is
+`design-macros.md`, "the normal form for sums" (2026-09-13); the
+references are Cockett on distributive categories, Carboni–Lack–Walters
+on extensivity (which is what makes a split a partition), and Lafont on
+presentations with canonical forms.
 
 ```text
 [dup ; _ dup] [dup ; dup _]       ; sameCode   # true  — coassociativity
 [dup ; toStr toStr] [toStr ; dup] ; sameCode   # true  — copy is natural
 [toStr ; dup] [dup ; toStr _]     ; sameCode   # false
+[(x -> x x)] [dup]                ; sameCode   # true  — binders decided
+[[dup ; swap]] [[dup]]            ; sameCode   # true  — inside a quote
+[[dup] ... ; ev] [dup]            ; sameCode   # true  — β for ⇒
 ```
 
 The third line is the point: a law about *an arbitrary word* is proved
@@ -1933,52 +1967,28 @@ arithmetic, belong with the sampled laws — deciding those means
 normalizing modulo an equational theory (AC, ACU, a field) instead of a
 free one.
 
-Outside the fragment — a quotation, a row, a binder, a word with no
-closed arity — `sameCode` **errors** rather than answering, because "I
-cannot tell" is not "they differ". A binder is outside it whether or not
-it captures: `sameCode` normalizes the term it is handed and never runs
-abstraction elimination, so the closed structure (§6, 2026-09-12)
-decided nothing new here. Bringing the normalizer through a row, and
-with it `dist ; undist = id` and `capture ; ev = substitution`, is the
-next stage's work; `examples/distributive.braid` states those laws and
-*runs* them at sample points in the meantime.
-`examples/laws.braid` shows decided and sampled laws side by side.
+Outside the fragment `sameCode` **errors** rather than answering,
+because "I cannot tell" is not "they differ". Every refusal names what
+stopped it.
 
-**`sameCodeC : Code Code ⇒ Bool`** *(2026-09-13)* asks the same question
-of two `Code` values instead of two quotations. It exists because a
-functor **returns** `Code`: a law about a functor — functoriality,
-identity preservation, idempotence, an interaction with another functor
-— can be stated in no other form. It works on the **structure**, never
-on text, because the synthesized generators (`#dist:K`, `#fold:…`) do
-not round-trip through `unparse` — `#` lexes as a comment.
+**What is decided, exactly** *(2026-09-13)*:
 
-And it decides strictly more than `sameCode`, for a reason worth
-knowing: `Code` has already been through abstraction elimination, so the
-one thing `sameCode` refuses outright is gone before `sameCodeC` looks.
-
-```braid
-[(x -> x x)] [dup] ; sameCode                            # ERROR: a binder
-([(x -> x x)] ; getCode) ([dup] ; getCode) ; sameCodeC   # true
-([(a b -> b a)] ; getCode) ([swap] ; getCode) ; sameCodeC # true
-```
-
-So the boundary today, exactly:
-
-| stated over | decided by |
+| stated over | decided? |
 |---|---|
-| wiring, composition, juxtaposition, uninterpreted words with closed arity | `sameCodeC` — a theorem for every input and every interpretation |
-| **binders**, once through `getCode` | `sameCodeC` (`sameCode` still refuses them) |
-| a quotation — and therefore `fix`, `ev`, `map`, anything higher-order | **nobody yet**: *outside the structural fragment: a quotation* |
-| a row, residual or closed | **nobody yet**: *outside the structural fragment: a row* |
-| anything needing `+` to be commutative, or `Int` arithmetic | sampled laws — the free category cannot see it |
+| wiring, composition, juxtaposition, uninterpreted words with closed arity | **yes** — a theorem for every input and every interpretation |
+| binders, with or without capture | **yes** — `sameCode` eliminates them first, so it and `sameCodeC` agree |
+| a quotation: `[p] ; ev = p`, `capture ; ev` as substitution, two quotes compared by their bodies' normal forms | **yes** |
+| the coproduct's β and η, the track swap, `dist2`/`undist2`, `into`'s two equations, `case2`…`case4`, `cond`, `otherwise` | **yes** — `examples/distributive.braid` has seven of them as audited laws |
+| a row over an **arbitrary** sum, residual or closed, when the row's tracks are closed stacks | **yes** — by case split; the residual is compared *semantically*, so `(f \| ---)` and `(f \| pass)` at a closed two-track sum are the same morphism |
+| `[b] ; fix` — two `fix` bodies compared in normal form | **yes**, provided the body does not apply the self wire |
+| `ev` of a wire (`self ... ; ev` in a `fix` body; a handler slot) | **no**: its segment is an open stack variable, so there is no arity to give it |
+| `loop`, and the Elgot identity `loop f = f ; [loop f] into` | **no**: a fixpoint equation is an axiom of an iteration theory, not an equation of the free category — `examples/into.braid` runs it at sample points |
+| a sum whose injection is unknown and whose row has **no closed tracks** (an open row variable σ) | **no**: unnamed tracks have no widths, so there is no partition |
+| anything needing `+` to be commutative, or `Int` arithmetic | **no** — sampled laws; the free category cannot see it |
 
-The last three are why some laws in `examples/optimizer.braid` are
-stated with `eq?` on `Code` — **syntactic** equality, labelled as such —
-rather than with `sameCodeC`. Transport of recursion, `F(fix b) =
-fix (F b)`, is the clearest case: it is *run* at a sample point and
-compared spine-to-spine, because `fix` takes a quotation and the
-normalizer stops at one. When the normalizer enters rows and closures,
-those laws become decidable and the `eq?` goes away.
+The two bounds — a tick budget per run, and 16 nested case splits — are
+also reported as *outside the structural fragment*. Running out of room
+is not a verdict.
 
 **Two kinds of claim, kept apart.** *Idempotence* — `F(F p) = F p` — is
 a **functor law**: it is about `F`, at every program, and it belongs in
@@ -2132,13 +2142,14 @@ holds for them too: final atom of their stage (§9).
   (it has no type until an instance supplies one), not a name with `@`
   in it. And v1 rules are single words — `dup ; * => square` is *a v1
   rule rewrites one WORD to one word*.
-- **`sameCodeC` decides binders; `sameCode` still does not**
-  *(2026-09-13)*. `[(x -> x x)] [dup] ; sameCode` errors with *a
-  binder*, while `([(x -> x x)] ; getCode) ([dup] ; getCode) ;
-  sameCodeC` answers `true` — because `getCode` runs abstraction
-  elimination and `sameCode` does not. If a law you want is refused for
-  carrying a binder, route it through `getCode` and ask `sameCodeC`.
-  Quotations and rows are still outside both (§12.9).
+- **`sameCode` and `sameCodeC` are one procedure** *(2026-09-13)*.
+  `sameCode` runs abstraction elimination before normalizing, so it
+  decides the binders it used to refuse and never disagrees with
+  `sameCodeC`. Both enter quotations and rows. What is left outside is
+  narrow and specific — `ev` of a WIRE, `loop`/`fix`'s own equation, a
+  sum whose row is a bare tail — and each refusal names itself (§12.9).
+  If a law you want is refused, read the message: it says which of
+  those it is.
 - **`| ...` no longer means the residual** *(2026-09-12)*. It is
   refused, for one release, with the message *"`| ...` used to mean the
   residual; write `| ---` for more alternatives, or `| pass` for a

@@ -1170,7 +1170,13 @@ def unroll = [fac] ... >> facBody
 the type as well as in the values. What is **not** true: nothing in the
 repo runs these laws, and nothing decides them. `sameCode` refuses the
 pair outright (*sameCode: outside the structural fragment: [facBody]*),
-as it must: one unrolling is not a structural rewrite. Running them the
+as it must: one unrolling is not a structural rewrite. *(2026-09-13:
+the refusal survives the new normalizer — its wording changed, the
+answer did not — and it now has a name. A fixpoint equation is an axiom
+of an iteration theory, not an equation of the free bicartesian closed
+category the normalizer works in; `[loop] [loop] ; sameCode` says*
+outside the structural fragment: `loop` has no closed arity. *See "the
+normal form for sums".)* Running them the
 way `theory` law blocks run associativity — extensionally, at sample
 points, audited — would need `fix` to be reachable as a theory slot,
 which nobody has tried. And the payoff the plan wanted from this —
@@ -1434,6 +1440,10 @@ binder are still *"outside the structural fragment: a binder"* — and "I
 cannot tell" is not "they differ". `dist ; undist = id` and
 `capture ; ev = substitution` are stated and *run* at sample points in
 `examples/distributive.braid`; **deciding** them is 5b.
+*(SUPERSEDED 2026-09-13: 5b part 2 routed `sameCode` through
+`elimAbsTerm` and taught the normalizer quotations and rows. All three
+of those sentences are now false, which was the point of the stage —
+see "the normal form for sums".)*
 
 **Hygiene, and its one new edge.** Code still carries no captured
 values: a captured parameter reifies as a wire at the push, not as a
@@ -1487,7 +1497,7 @@ POSITIONAL.*
 | terminal / initial | `• `, `forget : ρ ⇒ •` | the empty row — unwritable, and nothing needs it |
 | symmetry | `swap` | `(alt2 \| alt1) >> merge` (the track swap; the prelude's `not`) |
 | distributivity | — | `dist2` derived, `#dist:K` a generator |
-| decided or run | `sameCode` decides the wiring fragment | rows are outside it; laws run at sample points |
+| decided or run | `sameCode` decides the wiring fragment | **decided too** (2026-09-13): a known injection is followed, an unknown one is split — see "the normal form for sums" |
 
 **The dual pairs, read off the table.** `dup`/`merge` (diagonal and
 codiagonal). `forget`/the-initial-map (terminal and initial; Braid has
@@ -1861,11 +1871,19 @@ did not anticipate: `Code` is post-abstraction-elimination, so the
 binder `sameCode` refuses outright is already gone —
 `([(x -> x x)] ; getCode) ([dup] ; getCode) ; sameCodeC` is `true`
 where `[(x -> x x)] [dup] ; sameCode` is an error. It still stops at a
-**quotation** and a **row**, which is the next stage's work. Laws that
+**quotation** and a **row**, which is the next stage's work.
+*(SUPERSEDED the same day by part 2: `sameCode` runs elimination too,
+so the gap closed and the two are one procedure; quotations and rows
+are inside the fragment. The list below shrank to its last two items —
+see "the normal form for sums".)* Laws that
 had to be stated syntactically, with `eq?`, and labelled as such:
 
 - **transport of recursion**, `F(fix b) = fix (F b)` — `fix` takes a
   quotation, so the comparison is spine-to-spine at a sample point;
+  *(2026-09-13: decided when the body does not call itself, since `fix`
+  has a closed arity and its argument's body is now compared in normal
+  form; still syntactic when it does, because `self ... ; ev` is `ev`
+  of a WIRE)*;
 - any **image assertion about a higher-order program** — same reason;
 - anything needing `+` to be commutative or `Int` arithmetic to be
   arithmetic, which is the older and permanent boundary of the free
@@ -1898,6 +1916,214 @@ crossing fibres needs a handler first (a grade-decrementing model
 morphism). Non-local functors get no generator check — they are not by
 generators — and stay sampled.
 
+## Amendment (2026-09-13): the normal form for sums
+
+*Written before the code, revised after it ran. The question this
+stage had to answer is not "can the normalizer be made to enter a
+row" — it can — but "what is the normal form it lands in, and what
+does landing there prove". The answer below is a case tree over a
+free distributive category, and the honest boundary is stated at the
+end, because the fragment that has a normal form is smaller than the
+language and saying so is the whole value of the word `decided`.*
+
+### The fragment
+
+A Braid program is in the **structural fragment** when every atom it
+executes is one of:
+
+- **cartesian wiring** — `id`/`_`, `dup`, `drop`, `swap`, `pass`,
+  composition `>>`, juxtaposition (a tensor stage);
+- a **literal** (`1`, `"x"`, `.sym`), read as a nullary constant, with
+  distinct literals distinct constants;
+- an **uninterpreted word** with a closed arity — any prim or def whose
+  scheme fixes how many wires it eats and returns, including a def that
+  is recursive (opaque by necessity) or that abstraction elimination
+  refuses;
+- a **quotation** `[p]`, together with `capture` and `ev`;
+- the **coproduct's structure maps**: `alt1`…`altN`, a code row
+  `(p₁ | … | pₙ [| ---])`, `merge`, `into`, `dist2`/`#dist:K`;
+- any **def in the fragment**, which is inlined (so the normalizer sees
+  through your own words) after abstraction elimination is run on its
+  body. `undist2`, `case2`…`case4`, `otherwise`, `dist3`/`dist4`,
+  `condFn`, `cond`, `when`, `unless` and the rest of the prelude's
+  coproduct layer normalize by inlining; `dist2` and `capture` are
+  interpreted directly because their own bodies would loop back through
+  the words they define (`case2` eliminates to `dist2`, `capture` to
+  `curry`).
+
+That is the free **bicartesian closed** structure — products, the
+exponential, coproducts, and the distributivity that follows from the
+first two — over a signature of uninterpreted words. It is the setting
+of Cockett's *Introduction to distributive categories* (READING): the
+distributive law is coherent, `dist` is an isomorphism onto its image,
+and a morphism of the free distributive category has a canonical form.
+Carboni–Lack–Walters is the neighbouring statement — extensivity is what
+makes the case split below a *partition* rather than a guess — and
+Lafont's *Towards an algebraic theory of Boolean circuits* (also in
+READING) is the presentation-with-canonical-forms style the symbolic
+evaluator imitates: run the generators on distinct symbolic inputs and
+read the result off.
+
+### The normal form: a case tree over symbolic tuples
+
+A symbolic value is
+
+```
+v ::= xᵢ                       an input wire
+    | w(v₁ … v_k)ⱼ             the j-th output of an uninterpreted word
+    | inⱼ(v₁ … v_m)            a KNOWN injection: tag plus bundle
+    | ⟨v₁ … v_c ; p⟩           a quotation: captured arguments, then a body
+```
+
+The normal form of a program is a **case tree**: internal nodes are
+labelled by a symbolic value of sum type whose injection is *not*
+known, each node has one child per track of that sum, and each leaf
+carries the pair (number of input wires consumed, tuple of symbolic
+values returned). This is the sum-of-products shape the task asked
+for: rows are pushed outward, `dist` pushes wires through them, and a
+branch that is reached under a known injection is never built at all.
+
+Two programs are the **same morphism** when their case trees agree:
+the same splits, and equal tuples at every leaf. Equality of leaves is
+structural, except on quotations, where `⟨c⃗ ; p⟩ = ⟨d⃗ ; q⟩` iff the
+captures are equal and `p` and `q` are the same morphism — decided by
+the same procedure, one level down. That is the only place the
+definition is recursive, and it terminates because a quotation's body
+is a strictly smaller term.
+
+**Three rewrites do all the work**, and each is an equation of the free
+bicartesian closed category, so the procedure is sound by construction:
+
+1. **β for the coproduct.** `altK >> (p₁ | … | pₙ)` is `p_K` re-tagged
+   at `K`; `altK >> merge` is the bundle; `altK >> dist2` pushes the
+   wire into the bundle; `alt1 >> [h] into` is `h`, and `altK >> [h]
+   into` for `K > 1` is `alt(K−1)`. No branching: an injection that is
+   known is simply followed.
+2. **β for the exponential.** `[p] >> ev = p`, and `x [p] >> capture`
+   is the quotation `⟨x ; p⟩` — so `capture ; ev` IS substitution, by
+   running the body on the captured arguments followed by the segment.
+   This is the operational semantics, used as a rewrite.
+3. **The case split.** When an eliminator (`merge`, a row, `into`,
+   `dist2`) meets a sum whose injection is *not* known, the tree
+   branches: one child per track, with the scrutinee **refined** to
+   `inᵢ(b₁ … b_w)` for fresh bundle wires, and the refinement applied
+   to *both* programs. Splitting a coproduct into its tracks is exactly
+   extensivity, hence sound; applying the refinement to both sides is
+   what lets a program that branches be compared with one that does
+   not — which is how `dist2 >> undist2 = id` gets decided at an
+   arbitrary sum, where one side has a case tree and the other is the
+   identity.
+
+The two programs are therefore normalized **jointly**, under a shared
+refinement, rather than separately and then compared. A split requested
+by either side is taken by both. That is the one departure from
+"normalize, then compare", and it is what makes the trees line up.
+
+**Where a split's width comes from.** A track's width is a *type*
+question, so the normalizer asks the typechecker. An input wire's type
+comes from the program's own inferred arrow; `w(…)ⱼ`'s comes from `w`'s
+declared scheme; and a wire typed by a *declared* `data` name is read
+through that declaration's `unName` scheme, because `unName` is the
+identity at runtime and the normalizer has already inlined it away. A
+row all of whose tracks are closed stacks gives the widths; a row whose
+tail is a **row variable** gives none, and the normalizer refuses rather
+than guesses.
+
+Two consequences worth writing down, because both were found by running
+the thing:
+
+- **Both sides are seeded alike.** The two programs are re-inferred
+  *independently* — the unification the call site did is long gone — so
+  one can come out with a closed input stack and the other open
+  (`alt1` alone is `ρ0 ⇒ (ρ0 | σ0)`; `toStr ; alt1` is `Str ⇒ (Str |
+  σ0)`). Seeding each at its own width would then compare them at
+  different arities and report `differ` for two equal programs. So both
+  are seeded with the SAME number of wires, the larger of the two,
+  which is whiskering by an identity and preserves equality in both
+  directions.
+- **A residual is compared semantically, not as a flag.** The `Bool` on
+  `Alts` decides what the normalizer *does* with a tag past the written
+  tracks (pass it), not what it *reports*. Over a closed two-track sum
+  `(f | ---)` and `(f | pass)` are therefore one morphism, and
+  `sameCode` says `same`; `(f | ---)` against `(f | g)` with `g ≠ id` is
+  `differ`. That is the right answer, and it is a stronger claim than
+  comparing the flag would be.
+
+### Soundness
+
+Every step is a directed use of an equation that holds in the free
+bicartesian closed category over the signature: wiring is the cartesian
+structure (`dup` natural, `drop` the counit, `swap` the symmetry),
+inlining a def is unfolding a definition, β for `+` and for `⇒` are the
+two triangle identities, and a case split is extensivity. Nothing in
+the procedure uses a property of any *particular* word: `+` and `*` are
+opaque, so the verdict `same` means *equal under every interpretation of
+the words* — a theorem — while `differ` means only *not equal in the
+free category*, which is not a counterexample at any concrete type.
+That asymmetry is unchanged from 2026-09-12 and is the first thing
+§12.9 says.
+
+### Termination
+
+Three measures, one per source of recursion.
+
+1. **Inlining** terminates on the `seen` list: a def already being
+   expanded is recursive and becomes an uninterpreted word, so the
+   unfolded term is finite.
+2. **The case tree** terminates because along any path each split
+   consumes one *dynamic* elimination site, and a single run executes
+   finitely many atoms (bounded by a per-run tick budget); depth is
+   therefore bounded, and width is the number of tracks, which is
+   finite because a split is refused unless the row is closed. A hard
+   depth cap (16) and tick budget turn "finite" into "fast", and
+   exceeding either is reported as *outside the structural fragment*,
+   never as a verdict.
+3. **Quotation comparison** terminates on the structural measure: the
+   bodies compared are proper subterms of the terms that carried them.
+
+### The honest boundary — what stays outside
+
+- **Words with semantics.** `+`, `*`, `cat`, `lt?` are uninterpreted.
+  `dup >> +` and `2 _ >> *` are still `differ`. Deciding those means
+  normalizing modulo an equational theory (AC, ACU, a ring), not a free
+  one, and that is a different procedure.
+- **`fix`, and therefore `loop`.** `fix` has a closed arity, so
+  `[b] >> fix` normalizes and *two `fix` bodies are compared in normal
+  form* — that much is new. But `fix`'s defining property is a fixpoint
+  equation, not an equation of the free category, so the **Elgot
+  identity** `loop f = f >> [loop f] into` is **not** decided: it is an
+  axiom of an iteration theory, and a normalizer for a free bicartesian
+  closed category has no business proving it. It stays runnable at
+  sample points in `examples/into.braid`, labelled.
+- **`ev` of a wire.** `ev` is interpreted only on a *literal*
+  quotation — one the normalizer built with `[…]` or `capture`. `ev` of
+  a quotation that arrived as an input wire (`self ... >> ev` inside a
+  `fix` body; a handler slot) is outside, because its segment width is
+  an open stack variable and there is no arity to give it. This is the
+  single reason `examples/optimizer.braid`'s transport-of-recursion law
+  is still syntactic.
+- **Residual rows under an unknown injection.** `(f | ---)` applied to
+  a sum we cannot see into: the unnamed tracks have no widths, so there
+  is no partition to split on.
+- **`curry` standing alone** — which surfaces as the same message,
+  since `curry`'s body ends in `ev` of its parameter — and any word
+  whose input stack is an open variable when it is not the final atom
+  of its stage. `there` is *not* outside: on an injection it knows it
+  shifts the tag, and on one it does not it stays an uninterpreted
+  word, which decides less but never wrongly.
+- **A binder abstraction elimination refuses** — the two corners 5a¾
+  pinned (a residual row, or a flat 3+-track row, mentioning a
+  parameter). `sameCode` now runs `elimAbsTerm` first, so ordinary
+  binders are decided; these two are reported with elimination's own
+  message.
+
+### What this changes elsewhere
+
+`sameCode` and `sameCodeC` are now **one procedure**: `sameCode` runs
+abstraction elimination before normalizing, which is the path `reflect`
+already took, so the two words agree on every program. The line in the
+products/coproducts table above is updated accordingly.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and
@@ -1910,14 +2136,22 @@ generators — and stay sampled.
 - The **stage-6 flagships lean on the row arc** (`=Shadow>` and
   friends assume rows); scope them down or sequence them after.
 - **`eq?` on Code is syntactic** — that has not changed, but
-  `sameCodeC` (2026-09-13) is now the semantic alternative wherever the
-  wiring fragment reaches. It does not reach a quotation or a row, so
-  every law about a higher-order program — transport of recursion is
-  the flagship — is still stated with `eq?` and labelled syntactic.
-- **`morphism` is designed and not built** (2026-09-13): the law
-  *generator* is straightforward and the freeness argument makes it
-  complete, but a generated square has no verdict — an instance's slots
-  are recursive defs the normalizer treats as opaque, and there is no
-  sample supply for a generated law. See the 2026-09-13 amendment.
+  `sameCodeC` is the semantic alternative wherever the fragment
+  reaches, and since 2026-09-13 that includes quotations and rows. What
+  is left outside is narrower and sharper: `ev` of a WIRE. A fix body
+  that calls itself, a fold that applies its handler, a handler slot —
+  each applies an `Fn` whose input stack is an open variable, so there
+  is no arity to give it. Those laws are still stated with `eq?` and
+  labelled syntactic.
+- **`morphism` is designed and not built** (2026-09-13, re-checked the
+  same day against the new normalizer): the law *generator* is
+  straightforward and the freeness argument makes it complete, but a
+  generated square still has no verdict. `nil ; len = zero` normalizes
+  and comes out **differ** — `len` is a structural recursor, opaque by
+  necessity — and `append ; len = len len ; +` is refused for `ev` of a
+  wire. The missing verdict is *equality modulo the instance's defining
+  equations*: structural induction over an initial algebra, a different
+  procedure from normalizing in a free category. See the 2026-09-13
+  amendments.
 - The **image-tagging question above is open**, and the coeffect
   decision with it.

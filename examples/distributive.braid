@@ -11,52 +11,69 @@
 # binder parameter used inside a ROW by distributing the parameter block
 # over the row's tracks with exactly this word (MANUAL §6).
 #
-# HONEST STATUS. The runtime holds every law below DEFINITIONALLY — the
-# sample points are checks, not proofs, and they run at module start
-# before main. DECIDING them (`sameCode` entering rows, `rule`/`rewrite`,
-# the normalizer on the closed structure) is stage 5b; `sameCode` today
-# refuses a row outright ("outside the structural fragment").
+# STATUS, 2026-09-13: DECIDED. Every law below was a check at sample
+# points until the normalizer learned to enter quotations and rows
+# (§12.9). It is now a proof: `sameCode` normalizes both sides to a case
+# tree over the free distributive category — following a known injection
+# is β, and splitting an unknown one is extensivity — so `true` here
+# means the law holds at EVERY input and under every reading of the
+# slots, not that it held at the three numbers we tried.
+
+# The router each model supplies for `pick`: a sum wire whose injection
+# nobody knows, which is what makes the laws below theorems about an
+# arbitrary sum rather than about `alt1`.  Polymorphic, so both models
+# use the same one.
+def router = dup >> eq? >> (_ drop | _ drop)
 
 theory Distributive(a) =
     # a map on the distributed wire, and one per track of the sum
     p      : a ⇒ a
     f      : a ⇒ a
     g      : a ⇒ a
-    # two wires observed as one, so a law can end in a single `eq?`
-    join   : a a ⇒ a
-    sample : • ⇒ a
-    other  : • ⇒ a
+    # an ARBITRARY sum: the normalizer must split on it, not follow it
+    pick   : a ⇒ (a | a)
     # --- the coproduct's own two laws ---------------------------------
     # β: injecting then casing picks the branch you injected into.
-    law beta = (sample >> alt1 >> (f | g) >> merge) (sample >> f) >> eq? >> (forget >> true | forget >> false) >> merge
+    law beta = [alt1 >> (f | g) >> merge] [f] >> sameCode
     # η: casing into the injections is the identity.
-    law eta = (sample >> alt1 >> (alt1 | alt2) >> merge >> merge) (sample) >> eq? >> (forget >> true | forget >> false) >> merge
+    law eta = [pick >> (alt1 | alt2) >> merge] [pick] >> sameCode
     # --- dist and undist are inverse ----------------------------------
-    law distUndist = (sample (other >> alt1) >> dist2 >> undist2 >> _ merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
-    law undistDist = (sample other >> alt1 >> undist2 >> dist2 >> merge >> join) (sample other >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law distUndist = [_ pick >> dist2 >> undist2 >> _ merge] [_ pick >> _ merge] >> sameCode
+    law undistDist = [pick >> undist2 >> dist2 >> merge] [pick >> merge] >> sameCode
     # --- naturality ---------------------------------------------------
     # in the SUM: mapping the tracks commutes with distributing.
-    law natSum = (sample (other >> alt1) >> _ (f | g) >> dist2 >> merge >> join) (sample (other >> alt1) >> dist2 >> (_ f | _ g) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law natSum = [_ pick >> _ (f | g) >> dist2 >> merge] [_ pick >> dist2 >> (_ f | _ g) >> merge] >> sameCode
     # in P: mapping the distributed wire commutes with distributing.
-    law natP = (sample (other >> alt1) >> p _ >> dist2 >> merge >> join) (sample (other >> alt1) >> dist2 >> (p _ | p _) >> merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law natP = [_ pick >> p _ >> dist2 >> merge] [_ pick >> dist2 >> (p _ | p _) >> merge] >> sameCode
     # --- coherence with the codiagonal --------------------------------
     # distributing and then merging is merging with P passing beneath.
-    law distMerge = (sample (other >> alt1) >> dist2 >> merge >> join) (sample (other >> alt1) >> _ merge >> join) >> eq? >> (forget >> true | forget >> false) >> merge
+    law distMerge = [_ pick >> dist2 >> merge] [_ pick >> _ merge] >> sameCode
 instance IntD : Distributive(Int) =
     p      = _ 1 >> +
     f      = _ 10 >> *
     g      = _ 100 >> *
-    join   = +
-    sample = 3
-    other  = 4
+    pick   = router
 instance StrD : Distributive(Str) =
     p      = _ "!" >> cat
     f      = _ "-f" >> cat
     g      = _ "-g" >> cat
-    join   = cat
-    sample = "x"
-    other  = "y"
-"-- seven laws, two models, all audited before main --" >> print
+    pick   = router
+"-- seven laws, two models, all DECIDED before main --" >> print
+
+# The same verdicts, printed rather than audited, so you can see them.
+def v = ("same" | "differ") >> merge
+def f10 = _ 10 >> *
+def g100 = _ 100 >> *
+"beta      " >> print
+[alt1 >> (f10 | g100) >> merge] [f10] >> sameCode >> v >> print
+"eta       " >> print
+[router >> (alt1 | alt2) >> merge] [router] >> sameCode >> v >> print
+"distMerge " >> print
+[_ router >> dist2 >> merge] [_ router >> _ merge] >> sameCode >> v >> print
+# and the track swap, which is NOT the identity — the procedure answers,
+# it does not merely fail to object
+"track swap" >> print
+[router >> (alt2 | alt1) >> merge] [router] >> sameCode >> v >> print
 
 # The words themselves, at sample points.
 7 (5 >> alt1) >> dist2 >> (+ | -) >> merge >> print          # 12

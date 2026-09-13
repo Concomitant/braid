@@ -1191,7 +1191,9 @@ data Term
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
                           -- the remaining alternatives
-  deriving (Eq, Show)
+  -- Ord because a quotation is a symbolic VALUE in the normalizer
+  -- (§12.9) and a case split keys a map on symbolic values.
+  deriving (Eq, Ord, Show)
 
 --------------------------------------------------------------------------------
 -- 6.0 Tokenizer
@@ -5281,12 +5283,61 @@ type VarEnv = Map String Value
 -- the fragment is honest about the difference.
 --------------------------------------------------------------------------------
 
--- The i-th output of a word applied to arguments; variables are inputs.
-data SymV = SVar !Int | SApp String [SymV] !Int
+-- A symbolic value.  `SVar` is an input wire and `SBnd` a bundle wire
+-- invented by a case split; `SApp` is the j-th output of an
+-- uninterpreted word; `SInj` an injection whose tag is KNOWN, carrying
+-- its bundle; `SQuo` a quotation, carrying the arguments captured into
+-- it (deepest first) and the body it will run on them.
+data SymV
+  = SVar !Int
+  | SBnd !Int
+  | SApp String [SymV] !Int
+  | SInj !Int [SymV]
+  | SQuo [SymV] Term
   deriving (Eq, Ord)
 
--- fresh-variable counter and the working stack (front wire first)
-type NState = (Int, [SymV])
+-- The working state: a tick budget (a bound, not a proof), the
+-- fresh-input counter, and the stack (deepest wire first).
+data NState = NState
+  { nsFuel  :: !Int
+  , nsFresh :: !Int
+  , nsStack :: [SymV]
+  }
+
+-- Either the program left the fragment, or an eliminator met a sum
+-- whose injection is unknown and the tree has to branch.  A split
+-- carries the scrutinee and the row's track stacks, which is what
+-- fixes how many wires each branch's bundle has.
+data NErr = NOut String | NSplit SymV [SType]
+
+-- The shared half of a decision: the typing environment, the defs to
+-- inline for a QUOTE body (the union of both sides'), the refinement
+-- built by the splits taken so far, the wire types a split reads its
+-- widths from, and the next free bundle-wire id.
+data NCtx = NCtx
+  { ncEnv   :: Env
+  , ncDefs  :: RunDefs
+  , ncRef   :: Map SymV SymV
+  , ncTypes :: Map SymV Ty
+  , ncNext  :: !Int
+  }
+
+-- One side of a decision: the term, the defs IT resolves names against,
+-- and the pre-seeded input stack (plus the counter that continues it).
+data NProg = NProg
+  { npTerm  :: Term
+  , npDefs  :: RunDefs
+  , npSeed  :: [SymV]
+  , npFresh :: !Int
+  }
+
+-- Bounds.  Both are reported as "outside the structural fragment",
+-- never as a verdict: running out of room is not an answer.
+normFuel :: Int
+normFuel = 40000
+
+normDepthCap :: Int
+normDepthCap = 16
 
 -- Count the wires of a CLOSED stack type; an open tail has no width.
 closedWidth :: SType -> Maybe Int
@@ -5294,57 +5345,225 @@ closedWidth SEnd        = Just 0
 closedWidth (SCons _ r) = (1 +) <$> closedWidth r
 closedWidth _           = Nothing
 
+-- The wires of a stack type, deepest first (an open tail contributes
+-- nothing, which is why every caller pairs this with `closedWidth`).
+stackWires :: SType -> [Ty]
+stackWires (SCons t r) = t : stackWires r
+stackWires _           = []
+
+stackWireAt :: Int -> SType -> Maybe Ty
+stackWireAt 0 (SCons t _) = Just t
+stackWireAt k (SCons _ r) = stackWireAt (k - 1) r
+stackWireAt _ _           = Nothing
+
 -- Pull n wires off the front, inventing fresh inputs when the stack is
 -- short: a program is normalized as a morphism on however many wires it
 -- turns out to need.
 takeSym :: Int -> NState -> ([SymV], NState)
 takeSym 0 s = ([], s)
-takeSym n (fr, x : st) = let (xs, s') = takeSym (n - 1) (fr, st) in (x : xs, s')
-takeSym n (fr, [])     =
-  let (xs, s') = takeSym (n - 1) (fr + 1, []) in (SVar fr : xs, s')
+takeSym n s = case nsStack s of
+  x : st -> let (xs, s') = takeSym (n - 1) s { nsStack = st } in (x : xs, s')
+  []     -> let v = SVar (nsFresh s)
+                (xs, s') = takeSym (n - 1) s { nsFresh = nsFresh s + 1 }
+            in (v : xs, s')
 
-normTerm :: Env -> RunDefs -> [String] -> Term -> NState -> Either String NState
-normTerm env defs seen term s0 = case term of
-  Seq a b        -> normTerm env defs seen a s0 >>= normTerm env defs seen b
-  Tensor ts      -> goAtoms ts s0
-  p@(Prim _)     -> goAtoms [p] s0
-  Quote _        -> outside "a quotation"
-  Alts _ _       -> outside "a row"
-  OpenAbs {}     -> outside "a binder"
-  Use _ _        -> outside "an unelaborated `use`"
+-- Apply the refinement a case split built.  Keys are values that were
+-- unresolvable when the split was taken and images are fresh
+-- injections, so this cannot cycle; the depth bound is belt and braces.
+resolveSym :: Map SymV SymV -> SymV -> SymV
+resolveSym r = go (64 :: Int)
   where
-    outside what = Left ("outside the structural fragment: " ++ what)
+    go 0 v = v
+    go d v = case M.lookup v r of
+      Just u  -> go (d - 1) u
+      Nothing ->
+        let v' = case v of
+                   SApp n as j -> SApp n (map (go (d - 1)) as) j
+                   SInj t bs   -> SInj t (map (go (d - 1)) bs)
+                   SQuo cs b   -> SQuo (map (go (d - 1)) cs) b
+                   _           -> v
+        in if v' == v then v else go (d - 1) v'
+
+-- The track stacks of a sum-typed value, when the type says so and
+-- every track is closed.  `Nothing` is a refusal, never a guess: an
+-- open row tail (`---`, a row variable σ) has tracks with no names and
+-- therefore no widths, and there is no partition to split on.
+sumTracks :: NCtx -> SymV -> Maybe [SType]
+sumTracks ctx v = case v of
+  SApp n _ j
+    | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup n (ncEnv ctx)
+    , Just t <- stackWireAt j o -> fromTy t
+  _ -> M.lookup v (ncTypes ctx) >>= fromTy
+  where
+    fromTy (TSum row) = do
+      sts <- closedRow row
+      _   <- mapM closedWidth sts
+      Just sts
+    -- a declared nominal type is its body up to the `unName` wrapper,
+    -- which the normalizer has already inlined away (it is the
+    -- identity); the scheme of `unName` is where the row still is
+    fromTy (TData n _) = do
+      Forall _ _ _ _ _ _ (Arrow _ o _) <- M.lookup ("un" ++ n) (ncEnv ctx)
+      t <- stackWireAt 0 o
+      case t of
+        TSum row -> fromTy (TSum row)
+        _        -> Nothing
+    fromTy _ = Nothing
+    closedRow RNil        = Just []
+    closedRow (RTail _)   = Nothing
+    closedRow (RCons s r) = (s :) <$> closedRow r
+
+-- Does this term still carry a binder?  Abstraction elimination is not
+-- free (it re-infers), so it is run only where it can do something.
+hasOpenAbs :: Term -> Bool
+hasOpenAbs (OpenAbs {}) = True
+hasOpenAbs (Seq a b)    = hasOpenAbs a || hasOpenAbs b
+hasOpenAbs (Tensor ts)  = any hasOpenAbs ts
+hasOpenAbs (Quote t)    = hasOpenAbs t
+hasOpenAbs (Alts cs _)  = any hasOpenAbs cs
+hasOpenAbs (Use _ b)    = hasOpenAbs b
+hasOpenAbs _            = False
+
+normTerm :: NCtx -> RunDefs -> [String] -> Term -> NState -> Either NErr NState
+normTerm ctx defs seen term s0 = case term of
+  Seq a b   -> normTerm ctx defs seen a s0 >>= normTerm ctx defs seen b
+  Tensor ts -> goAtoms ts s0
+  Use _ _   -> outside "an unelaborated `use`"
+  t         -> goAtoms [t] s0
+  where
+    env = ncEnv ctx
+    outside what = Left (NOut ("outside the structural fragment: " ++ what))
 
     -- mirrors evalTerm's goAtoms: each atom's outputs accumulate, the
     -- leftover stack flows through the last one
     goAtoms [] s = Right s
-    goAtoms (a : more) (fr, st) = do
-      (out, (fr1, st1)) <- atom (null more) a (fr, st)
-      (fr2, rest) <- goAtoms more (fr1, st1)
-      Right (fr2, out ++ rest)
+    goAtoms (a : more) s
+      | nsFuel s <= 0 = outside "the normalizer ran out of steps"
+      | otherwise = do
+          (out, s1) <- atom (null more) a s { nsFuel = nsFuel s - 1 }
+          s2 <- goAtoms more s1
+          Right s2 { nsStack = out ++ nsStack s2 }
+
+    -- the refinement the splits so far have built
+    scrut v = resolveSym (ncRef ctx) v
+
+    splitOn v = case sumTracks ctx v of
+      Just tracks -> Left (NSplit v tracks)
+      Nothing     -> outside "a sum whose injection is unknown and whose \
+                             \row has no closed tracks"
+
+    wire k f s = let (args, s') = takeSym k s in (f args, s')
+    -- takeSym always returns exactly what it was asked for; the second
+    -- alternative is there so the match is total, not because it happens.
+    one s = let (xs, s') = takeSym 1 s
+            in (case xs of { x : _ -> x ; [] -> SVar (nsFresh s') }, s')
+    two s = let (xs, s') = takeSym 2 s
+            in case xs of
+                 x : y : _ -> (x, y, s')
+                 _         -> (SVar (nsFresh s'), SVar (nsFresh s'), s')
+
+    -- a quotation is a VALUE: the body, with nothing captured yet
+    atom _ (Quote b) s = Right ([SQuo [] b], s)
+
+    -- A code row eliminates one sum wire.  Under a known injection it
+    -- is β for the coproduct: follow the tag, run that track, re-tag.
+    -- Under an unknown one the tree branches.
+    atom _ (Alts comps residual) s =
+      let (v, s1) = one s in case scrut v of
+        SInj t bundle
+          | t < length comps -> do
+              s2 <- normTerm ctx defs seen (comps !! t) s1 { nsStack = bundle }
+              Right ([SInj t (nsStack s2)], s2 { nsStack = nsStack s1 })
+          | residual  -> Right ([SInj t bundle], s1)
+          | otherwise -> outside "a row applied to a tag it has no track for"
+        u -> splitOn u
 
     atom isFinal (Prim n) s
-      | n == "id" || n == "_" = Right (wire 1 (\[x]    -> [x])    s)
-      | n == "dup"            = Right (wire 1 (\[x]    -> [x, x]) s)
-      | n == "drop"           = Right (wire 1 (\_      -> [])     s)
-      | n == "swap"           = Right (wire 2 (\[x, y] -> [y, x]) s)
+      | n == "id" || n == "_" = Right (wire 1 (\ws -> ws)          s)
+      | n == "dup"            = Right (wire 1 (\ws -> ws ++ ws)    s)
+      | n == "drop"           = Right (wire 1 (const [])           s)
+      | n == "swap"           = Right (wire 2 reverse              s)
       -- `pass` is the open remainder: everything as the final atom, and
       -- closed to nothing by the typechecker anywhere else
       | n == "pass" =
-          let (fr, st) = s
-          in Right (if isFinal then (st, (fr, [])) else ([], s))
+          Right (if isFinal then (nsStack s, s { nsStack = [] }) else ([], s))
+      -- the injections are open-arity in the same way: the whole
+      -- remaining segment is the bundle when they end the stage
+      | Just k <- injIndex n =
+          Right (if isFinal
+                   then ([SInj (k - 1) (nsStack s)], s { nsStack = [] })
+                   else ([SInj (k - 1) []], s))
+      -- the codiagonal: under a known injection, hand back the bundle
+      | n == "merge", not (M.member n defs) =
+          let (v, s1) = one s in case scrut v of
+            SInj _ bundle -> Right (bundle, s1)
+            u             -> splitOn u
+      -- `into` is the copairing [h, id]: tag 0 runs the handler on its
+      -- own bundle, every other tag shifts down one
+      | n == "into", not (M.member n defs) =
+          let (h, sm, s1) = two s in case scrut sm of
+            SInj 0 bundle -> case scrut h of
+              SQuo caps body -> do
+                s2 <- normTerm ctx defs seen body s1 { nsStack = caps ++ bundle }
+                case nsStack s2 of
+                  [r] -> Right ([r], s2 { nsStack = nsStack s1 })
+                  _   -> outside "`into`'s handler did not land in one wire"
+              _ -> outside "`into` of a value that is not a literal quotation"
+            SInj t bundle -> Right ([SInj (t - 1) bundle], s1)
+            u             -> splitOn u
+      -- β for the exponential: `[p] >> ev = p`, and since `capture`
+      -- builds the quotation by pushing onto its captures, `capture ;
+      -- ev` IS substitution — the body runs on captures ++ segment
+      | n == "ev", not (M.member n defs) =
+          let (v, s1) = one s in case scrut v of
+            SQuo caps body -> do
+              let seg = if isFinal then nsStack s1 else []
+              s2 <- normTerm ctx defs seen body s1 { nsStack = caps ++ seg }
+              Right ( nsStack s2
+                    , s2 { nsStack = if isFinal then [] else nsStack s1 } )
+            _ -> outside "`ev` of a value that is not a literal quotation"
+      -- the 1-ary re-tag: on an injection we know, shift the tag; on one
+      -- we do not, `there` stays an uninterpreted word (its row is a
+      -- bare tail, so there is nothing to split on)
+      | n == "there", not (M.member n defs) =
+          let (x, s1) = one s in case scrut x of
+            SInj t b -> Right ([SInj (t + 1) b], s1)
+            u        -> Right ([SApp "there" [u] 0], s1)
+      -- `capture` and `dist2` are interpreted rather than inlined:
+      -- their own bodies go back through the words they define
+      -- (`capture` through `curry`, `dist2` through `case2`, whose
+      -- elimination emits `dist2`), so inlining them would stall on the
+      -- `seen` list.  They are also the two prelude names a module may
+      -- not shadow, which is what makes reading them by name sound.
+      | n == "capture" =
+          let (x, f, s1) = two s in case scrut f of
+            SQuo caps body -> Right ([SQuo (caps ++ [x]) body], s1)
+            _ -> outside "`capture` of a value that is not a literal quotation"
+      | n == "dist2" || isJust (distPrimArity n) =
+          let k = fromMaybe 2 (distPrimArity n)
+              (x, sm, s1) = two s
+          in case scrut sm of
+               SInj t bundle
+                 | t < k     -> Right ([SInj t (x : bundle)], s1)
+                 | otherwise -> Right ([SInj t bundle], s1)
+               u -> splitOn u
       -- a def in the fragment is INLINED, which decides strictly more;
-      -- one already being expanded is recursive, so treat it as opaque
+      -- one already being expanded is recursive, so treat it as opaque.
+      -- Binders in the body are eliminated first — the same path
+      -- `reflect` takes — so a def is no less decidable than its Code.
       | Just de <- M.lookup n defs, not (deOpen de), n `notElem` seen
-      , not (isRecursorEntry de) =
-          let (args, (fr, st)) = takeSym (deArity de) s
-          in do (fr', outs) <- normTerm env defs (n : seen) (deBody de) (fr, args)
-                Right (outs, (fr', st))
+      , not (isRecursorEntry de)
+      , Right body <- (if hasOpenAbs (deBody de)
+                         then elimAbsTerm env (deBody de)
+                         else Right (deBody de)) =
+          let (args, s1) = takeSym (deArity de) s
+          in do s2 <- normTerm ctx defs (n : seen) body s1 { nsStack = args }
+                Right (nsStack s2, s2 { nsStack = nsStack s1 })
       -- literals are nullary constants, and distinct literals are
       -- distinct constants (that is what makes `[1 ...]` and `[2 ...]`
       -- decidably different rather than merely untested)
       | isIntLiteral n || isStrLiteral n || isSymLiteral n =
-          let (fr, st) = s in Right ([SApp n [] 0], (fr, st))
+          Right ([SApp n [] 0], s)
       -- any other word is uninterpreted: it needs a closed arity so we
       -- know how many wires it eats and how many it returns
       | Just (Forall _ _ _ _ _ _ (Arrow i o _)) <- M.lookup n env
@@ -5352,9 +5571,22 @@ normTerm env defs seen term s0 = case term of
       , Just m <- closedWidth o =
           let (args, s') = takeSym k s
           in Right ([SApp n args j | j <- [0 .. m - 1]], s')
-      | otherwise = Left ("outside the structural fragment: `" ++ n
-                          ++ "` has no closed arity")
-    atom _ t _ = Left ("outside the structural fragment: " ++ renderTerm t)
+      | otherwise = outside ("`" ++ n ++ "` has no closed arity")
+    -- A grouped compound operand (a Seq/Tensor standing as one atom),
+    -- exactly as evalTerm treats it: final, it runs on the whole
+    -- remaining stack; non-final, it was typed closed, so take its
+    -- arity.
+    atom isFinal t s
+      | isFinal = do
+          s2 <- normTerm ctx defs seen t s
+          Right (nsStack s2, s2 { nsStack = [] })
+      | otherwise = case inferTermIn env t of
+          Right (Arrow i _ _) ->
+            let (args, s1) = takeSym (closedArity i) s
+            in do s2 <- normTerm ctx defs seen t s1 { nsStack = args }
+                  Right (nsStack s2, s2 { nsStack = nsStack s1 })
+          Left e -> outside ("a grouped program whose arity is unknown: "
+                             ++ e)
 
     -- a structural recursor has no body to inline; it has a closed
     -- scheme, so it decides as an uninterpreted word instead
@@ -5362,16 +5594,145 @@ normTerm env defs seen term s0 = case term of
       Prim p -> isJust (foldPrimSpec p)
       _      -> False
 
-    wire k f (fr, st) =
-      let (args, s') = takeSym k (fr, st) in (f args, s')
+-- The pre-seeded input for ONE comparison.  Lazy invention alone is
+-- enough to get equality right when both sides are inferred alike, but
+-- a sum arriving as an input wire needs a TYPE before it can be split
+-- on, and that comes from the program's own arrow.  The two sides are
+-- inferred INDEPENDENTLY (the unification the call site did is gone by
+-- now), so one can come out closed and the other open; both are
+-- therefore seeded with the SAME number of wires, the larger of what
+-- they ask for.  Seeding both with extra wires is whiskering by an
+-- identity, which preserves equality in both directions.
+seedPair :: Env -> [SymV] -> Int -> Term -> Term -> ([SymV], Int, Map SymV Ty)
+seedPair env caps base b1 b2 =
+  ( caps ++ ws, base + k, mergeTypes (tysFor i1) (tysFor i2) )
+  where
+    c   = length caps
+    inp t = case inferTermIn env t of
+      Right (Arrow i _ _) | isJust (closedWidth i) -> Just i
+      _                                            -> Nothing
+    own i = drop c (stackWires i)
+    i1  = inp b1
+    i2  = inp b2
+    k   = max (maybe 0 (length . own) i1) (maybe 0 (length . own) i2)
+    ws  = [ SVar (base + j) | j <- [0 .. k - 1] ]
+    tysFor Nothing  = M.empty
+    tysFor (Just i) = M.fromList (zip caps (stackWires i))
+                        `M.union` M.fromList (zip ws (own i))
 
--- A program's normal form: how many inputs it consumes, and the tuple of
--- terms it returns.  `Left` means the program is outside the fragment,
--- which is a different answer from "not equal".
-normalForm :: Env -> RunDefs -> Term -> Either String (Int, [SymV])
-normalForm env defs t = do
-  (fr, out) <- normTerm env defs [] t (0, [])
-  Right (fr, out)
+-- Two type maps merged; a wire the two sides disagree about is marked
+-- with a type nothing can read a row off, so a split is refused there
+-- rather than taken on one side's say-so.
+mergeTypes :: Map SymV Ty -> Map SymV Ty -> Map SymV Ty
+mergeTypes = M.unionWith (\x y -> if x == y then x else TVarTy (TV "#clash"))
+
+allOk :: (a -> Either String Bool) -> [a] -> Either String Bool
+allOk _ []       = Right True
+allOk f (x : xs) = do b <- f x
+                      if b then allOk f xs else Right False
+
+maxVarIn :: [SymV] -> Int
+maxVarIn = foldr (\v m -> max m (go v)) (-1)
+  where
+    go (SVar i)      = i
+    go (SApp _ as _) = maxVarIn as
+    go (SInj _ bs)   = maxVarIn bs
+    go (SQuo cs _)   = maxVarIn cs
+    go _             = -1
+
+-- Decide whether two programs are the same morphism.  They are
+-- normalized JOINTLY under a shared refinement: a case split requested
+-- by either side is taken by BOTH, which is what lets a program that
+-- branches be compared with one that does not (`dist2 >> undist2` and
+-- `id` at an arbitrary sum is the case that needs it).
+sameProgram :: Env -> RunDefs -> RunDefs -> Term -> Term -> Either String Bool
+sameProgram env d1 d2 t1 t2 = do
+  u1 <- prep t1
+  u2 <- prep t2
+  let (seed, fr, tys) = seedPair env [] 0 u1 u2
+      ctx = NCtx { ncEnv   = env
+                 , ncDefs  = M.union d1 d2
+                 , ncRef   = M.empty
+                 , ncTypes = tys
+                 , ncNext  = 0 }
+  decideProgs 0 ctx (NProg u1 d1 seed fr) (NProg u2 d2 seed fr)
+  where
+    prep t
+      | hasOpenAbs t =
+          either (Left . ("outside the structural fragment: a binder \
+                          \abstraction elimination refuses — " ++))
+                 Right (elimAbsTerm env t)
+      | otherwise = Right t
+
+decideProgs :: Int -> NCtx -> NProg -> NProg -> Either String Bool
+decideProgs depth ctx p q =
+  case runProg ctx p of
+    Left (NSplit u tracks) -> branchOn depth ctx p q u tracks
+    Left (NOut m)          -> Left m
+    Right n1 -> case runProg ctx q of
+      Left (NSplit u tracks) -> branchOn depth ctx p q u tracks
+      Left (NOut m)          -> Left m
+      Right n2               -> eqLeaf depth ctx n1 n2
+
+-- One side, run to a leaf: how many input wires it consumed, and the
+-- tuple it returns with the refinement applied.
+runProg :: NCtx -> NProg -> Either NErr (Int, [SymV])
+runProg ctx p = do
+  s <- normTerm ctx (npDefs p) []  (npTerm p)
+         (NState normFuel (npFresh p) (npSeed p))
+  Right (nsFresh s, map (resolveSym (ncRef ctx)) (nsStack s))
+
+-- The case split.  Splitting a coproduct into its tracks is
+-- extensivity (Carboni–Lack–Walters), so the branches are a partition
+-- and the conjunction over them is the verdict.
+branchOn :: Int -> NCtx -> NProg -> NProg -> SymV -> [SType]
+         -> Either String Bool
+branchOn depth ctx p q u tracks
+  | depth >= normDepthCap =
+      Left ("outside the structural fragment: the case tree grew past "
+            ++ show normDepthCap ++ " splits")
+  | otherwise = allOk branch (zip [0 ..] tracks)
+  where
+    branch (i, st) =
+      let ws  = stackWires st
+          bs  = [ SBnd (ncNext ctx + j) | j <- [0 .. length ws - 1] ]
+          ctx' = ctx { ncRef   = M.insert u (SInj i bs) (ncRef ctx)
+                     , ncTypes = M.union (M.fromList (zip bs ws)) (ncTypes ctx)
+                     , ncNext  = ncNext ctx + length ws }
+      in decideProgs (depth + 1) ctx' p q
+
+eqLeaf :: Int -> NCtx -> (Int, [SymV]) -> (Int, [SymV]) -> Either String Bool
+eqLeaf depth ctx (k1, o1) (k2, o2)
+  | k1 /= k2 || length o1 /= length o2 = Right False
+  | otherwise = allOk (eqSym depth ctx) (zip o1 o2)
+
+-- Structural, except on quotations: a quote equals a quote when their
+-- captures are equal and their bodies are the same morphism, decided by
+-- the same procedure one level down.  The recursion terminates because
+-- a body is a proper subterm of the term that carried it.
+eqSym :: Int -> NCtx -> (SymV, SymV) -> Either String Bool
+eqSym depth ctx (a, b) = case (a, b) of
+  (SQuo c1 b1, SQuo c2 b2)
+    | length c1 == length c2 -> do
+        ok <- allOk (eqSym depth ctx) (zip c1 c2)
+        if not ok then Right False
+          else if depth >= normDepthCap
+            then Left ("outside the structural fragment: quotations nested \
+                       \past " ++ show normDepthCap ++ " levels")
+            else
+              let base = 1 + maxVarIn (c1 ++ c2)
+                  defs = ncDefs ctx
+                  (seed, fr, tys) = seedPair (ncEnv ctx) c1 base b1 b2
+                  ctx' = ctx { ncRef = M.empty, ncTypes = tys }
+              in decideProgs (depth + 1) ctx'
+                   (NProg b1 defs seed fr) (NProg b2 defs seed fr)
+  (SApp n1 as1 j1, SApp n2 as2 j2)
+    | n1 == n2, j1 == j2, length as1 == length as2 ->
+        allOk (eqSym depth ctx) (zip as1 as2)
+  (SInj t1 x1, SInj t2 x2)
+    | t1 == t2, length x1 == length x2 ->
+        allOk (eqSym depth ctx) (zip x1 x2)
+  _ -> Right (a == b)
 
 data Value
   = VInt Int
@@ -6040,11 +6401,9 @@ runBuiltin env defs "sameCode" [VFn s1 v1 t1, VFn s2 v2 t2]
       Left "sameCode: a quotation that captured a bound name is outside \
            \the structural fragment"
   | otherwise =
-      case (normalForm env (M.union s1 defs) t1,
-            normalForm env (M.union s2 defs) t2) of
-        (Right n1, Right n2) -> Right ([VSum (if n1 == n2 then 0 else 1) []], [])
-        (Left e, _)          -> Left ("sameCode: " ++ e)
-        (_, Left e)          -> Left ("sameCode: " ++ e)
+      case sameProgram env (M.union s1 defs) (M.union s2 defs) t1 t2 of
+        Right same -> Right ([VSum (if same then 0 else 1) []], [])
+        Left e     -> Left ("sameCode: " ++ e)
 -- The same question asked of CODE.  Two differences from `sameCode`,
 -- both in `sameCodeC`'s favour: a functor's output is Code, so this is
 -- the only form in which a law about a functor can be stated at all;
@@ -6054,9 +6413,8 @@ runBuiltin env defs "sameCode" [VFn s1 v1 t1, VFn s2 v2 t2]
 runBuiltin env defs "sameCodeC" [c1, c2] = do
   t1 <- inC (codeToTermV c1)
   t2 <- inC (codeToTermV c2)
-  n1 <- inC (normalForm env defs t1)
-  n2 <- inC (normalForm env defs t2)
-  Right ([VSum (if n1 == n2 then 0 else 1) []], [])
+  same <- inC (sameProgram env defs defs t1 t2)
+  Right ([VSum (if same then 0 else 1) []], [])
   where inC = either (Left . ("sameCodeC: " ++)) Right
 -- The rule-set engine.  Atomwise on NAMES, because Code carries names
 -- and `Fn` values do not, and structural rather than textual because

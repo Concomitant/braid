@@ -126,10 +126,10 @@ functor Doubled = doubled
 #    instance that fails one is not an instance, and the module stops.
 #
 #    `sameCodeC` is `sameCode` over Code values.  Code is what a functor
-#    RETURNS, so a law about a functor can be stated in no other way —
-#    and Code has already been through abstraction elimination, so
-#    `sameCodeC` decides programs `sameCode` refuses for carrying a
-#    binder (§12.9).
+#    RETURNS, so a law about a functor can be stated in no other way.
+#    Since 2026-09-13 the two words are ONE procedure: `sameCode` runs
+#    abstraction elimination first, so both decide binders, quotations
+#    and rows alike (§12.9).
 # ---------------------------------------------------------------------
 theory Functor
     ap      : Code ⇒ Code
@@ -206,8 +206,7 @@ instance OptSpacedCommute : Commuting
 # is.  Its meaningfulness DEPENDS on the idempotence law above: without
 # it, `F(p) = p` says only that F happened to leave p alone.
 # ---------------------------------------------------------------------
-def inImage      = sameCodeC >> ("in the image of Opt" | "NOT in the image of Opt") >> merge
-def sameMorphism = sameCodeC >> ("the same morphism" | "a different morphism") >> merge
+def inImage = sameCodeC >> ("in the image of Opt" | "NOT in the image of Opt") >> merge
 
 "-- image membership --" >> print
 ([double] >> getCode >> Opt) ([double] >> getCode) >> inImage >> print
@@ -223,25 +222,44 @@ def sameMorphism = sameCodeC >> ("the same morphism" | "a different morphism") >
 # 8. Transport of recursion: F(fix b) = fix (F b).
 #
 # It holds for `Opt` because the engine recurses into quotes, so it
-# meets `fix`'s body where the body is.  It is RUN at a sample point,
-# not decided: `sameCodeC` refuses a program carrying a quotation, and
-# `fix` takes one.  So the comparison here is `eq?` on Code — SYNTACTIC
-# equality, which is sound for "the same spine" and says nothing about
-# two different spines denoting the same morphism.  (Agent-2 territory:
-# when the normalizer enters rows and closures, this law becomes
-# decidable and the `eq?` goes away.)
+# meets `fix`'s body where the body is.  Since 2026-09-13 the normalizer
+# enters quotations, and `fix` has a closed arity, so `[b] ; fix` is an
+# uninterpreted operator applied to a value whose BODY is compared in
+# normal form.  Transport is therefore DECIDED for a fix body that does
+# not call itself:
 # ---------------------------------------------------------------------
+def sameMorphism = sameCodeC >> ("the same morphism" | "a different morphism") >> merge
+
+def slowFix = [[drop ... >> dupInt >> +] ... >> fix ...]
+def fastFix = [[drop ... >> dup    >> +] ... >> fix ...]
+
+"-- transport of recursion, decided --" >> print
+(slowFix >> getCode >> Opt) (fastFix >> getCode) >> sameMorphism >> print
+(slowFix >> getCode)        (fastFix >> getCode) >> sameMorphism >> print
+
+# The SELF-CALLING body is the honest boundary, and it is one word wide.
+# `self` is a binder parameter, so abstraction elimination turns it into
+# a wire, and `self ... ; ev` is `ev` of a WIRE — an Fn whose type is
+# `Fn⟨Σf =Rec> Θf⟩`, an open stack variable, so there is no segment
+# width to hand it.  `sameCodeC` says so by name rather than guessing:
+#
+#   sameCodeC: outside the structural fragment: `ev` of a value that is
+#   not a literal quotation
+#
+# So this pair is still compared SPINE to SPINE, which is sound for "the
+# same spine" and says nothing about two spines denoting one morphism.
 def sameSpine = eq? >> (forget >> "same spine" | forget >> "different spine") >> merge
 
-"-- transport of recursion, syntactically --" >> print
+"-- a self-calling body, still syntactic --" >> print
 def slowLoop = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) >> (dupSwap >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]
 def fastLoop = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) >> (dup     >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]
 
 (slowLoop >> getCode >> Opt) (fastLoop >> getCode) >> sameSpine >> print
 
-# `spaced` is the counterpoint: same morphism, different spine.
+# `spaced` is the counterpoint that needs no recursion at all: same
+# morphism, different spine, and both verdicts are printed side by side.
 "-- spaced: same morphism, different spine --" >> print
-([dupSwap >> +] >> getCode >> spaced) ([dupSwap >> +] >> getCode) >> sameSpine   >> print
+([dupSwap >> +] >> getCode >> spaced) ([dupSwap >> +] >> getCode) >> sameSpine    >> print
 ([dupSwap >> +] >> getCode >> spaced) ([dupSwap >> +] >> getCode) >> sameMorphism >> print
 
 # ---------------------------------------------------------------------

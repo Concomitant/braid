@@ -18,7 +18,9 @@ samples >> lhs >> _ (samples >> rhs) >> eq? >> verdict >> print   # alt1() = law
 # treated as uninterpreted, is a morphism of the free cartesian category
 # on those words — and that category's word problem is solvable. So
 # `sameCode` normalizes both sides and compares, which proves the law
-# for every input and every interpretation at once.
+# for every input and every interpretation at once. (Since 2026-09-13
+# the fragment is the free BICARTESIAN CLOSED category: quotations and
+# rows are in it too. The last section shows one.)
 
 def verdict2 = ("proved" | "not proved") ; merge
 
@@ -47,3 +49,20 @@ def verdict2 = ("proved" | "not proved") ; merge
 # belongs with the sampled laws above. Deciding those means normalizing
 # modulo an equational theory (AC, ACU, a field) rather than a free one.
 [double] [dup ; +] ; sameCode ; verdict2 ; print                  # not proved
+
+# ---- and the coproduct, decided the same way (2026-09-13) ------------
+# A row over a sum whose injection nobody knows is normalized to a CASE
+# TREE — one branch per track — so the coproduct's own laws are proved
+# rather than sampled. `eq? : a a => (a a | a a)` supplies the unknown
+# sum; nothing below mentions a sample point.
+
+# eta: casing into the injections is the identity
+[eq? ; (alt1 | alt2) ; merge] [eq?] ; sameCode ; verdict2 ; print   # proved
+# and the TRACK SWAP is not
+[eq? ; (alt2 | alt1) ; merge] [eq?] ; sameCode ; verdict2 ; print   # not proved
+# beta at an injection we DO know: follow the tag
+[dup ; alt1 ; (+ | -) ; merge] [dup ; +] ; sameCode ; verdict2 ; print   # proved
+# quotations are values, compared by their bodies' normal forms
+[[dup ; swap]] [[dup]] ; sameCode ; verdict2 ; print               # proved
+# and beta for the exponential: [p] ; ev = p
+[[dup] ... ; ev] [dup] ; sameCode ; verdict2 ; print               # proved

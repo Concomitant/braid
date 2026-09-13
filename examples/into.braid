@@ -58,11 +58,19 @@ def bump = unCase ; (1 ... ; + | ---) ; Case     # act on track 1, pass the rest
 # `into` it is an ordinary program, and the two sides are compared at
 # sample points below.
 #
-# HONEST STATUS: RUNNABLE, NOT DECIDED. These are checks at chosen
-# inputs, not a proof; `sameCode` does not enter rows yet (5b). Note too
-# that the CLOSED two-track copairing needs no `into` at all — it is
-# `(h | pass) ; merge`; `into` earns its keep when what remains is a
-# residual, or more than one track.
+# HONEST STATUS: RUNNABLE, NOT DECIDED — and since 2026-09-13 that is a
+# statement about `fix`, not about rows. `sameCode` now enters rows and
+# quotations, and `into`'s own two equations are DECIDED below. What it
+# cannot decide is this one, because `loop` is `fix` and a fixpoint
+# equation is not an equation of the free distributive category: it is
+# the axiom of an iteration theory. Asked directly, the normalizer says
+# so rather than guessing —
+#
+#   sameCode: outside the structural fragment: `loop` has no closed arity
+#
+# Note too that the CLOSED two-track copairing needs no `into` at all —
+# it is `(h | pass) ; merge`; `into` earns its keep when what remains is
+# a residual, or more than one track.
 
 def step = [(n -> n 10 ; gt? ; (_ drop ; toStr ; alt2 | _ drop ; 2 ... ; * ; alt1) ; merge)]
 
@@ -75,3 +83,22 @@ def sameAt = (n -> (n ; iterate) (n ; unroll) ; agree ; print)
 1  ; sameAt        # 16 both ways
 7  ; sameAt        # 14
 20 ; sameAt        # 20 — exits on the first step
+
+# ---------------------------------------------------------------------
+# 4. `into`'s OWN two equations, decided.
+#
+# `into` is the copairing [h, id], and a copairing is pinned by what it
+# does to each injection.  Both sides of each line below are normalized
+# to a case tree and compared; `same` is a proof for every input, not a
+# check at one (§12.9).
+
+def v = ("same" | "differ") >> merge
+
+"-- [h, id] . alt1 = h --" >> print
+[alt1 ; [toStr ; alt1] ... ; into] [toStr ; alt1] ; sameCode ; v ; print
+
+"-- [h, id] . alt(k+1) = alt(k): the tag shift IS the identity half --" >> print
+[alt2 ; [toStr ; alt1] ... ; into] [alt1] ; sameCode ; v ; print
+
+"-- and it is not the other one --" >> print
+[alt1 ; [toStr ; alt1] ... ; into] [alt1] ; sameCode ; v ; print
