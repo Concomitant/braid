@@ -3484,6 +3484,22 @@ primEnv =
            (arrPure (SCons (TFn (arrEps (STail gam) (STail del)))
                           (one (TFn (arrEps (STail gam) (STail del)))))
                     (one tBool)))
+       -- the Code-level twin (§12.9).  A functor's output IS Code, so a
+       -- law about a functor can only be stated over Code; and Code has
+       -- already been through abstraction elimination, so `sameCodeC`
+       -- DECIDES programs `sameCode` refuses for carrying a binder.
+       , ("sameCodeC", Forall [] [] [] [] [] []
+           (arrPure (SCons codeStructTy (one codeStructTy)) (one tBool)))
+       -- `froms tos c >> rewrite` — rename atoms by a table, everywhere
+       -- in the spine: quotes, rows (the residual flag is carried) and
+       -- groups included.  The ENGINE of a rule set, and unchecked on
+       -- its own: `rules` is where the table is blessed (§8), exactly
+       -- as `interposeRaw` is the unchecked half of `interpose`.
+       , ("rewrite",   Forall [] [] [] [] [] []
+           (arrPure (SCons (TData "List" [one TSym])
+                      (SCons (TData "List" [one TSym])
+                        (one codeStructTy)))
+                    (one codeStructTy)))
        , ("ev",        evTy)
        , ("into",      intoTy)
        , ("there",     thereTy)
@@ -4231,9 +4247,13 @@ splitDefs src = do
       | ("functor" : _) <- words l = do
           (ds, ts, bs, is, ps) <- go Nothing rest
           pure (ds, ts, (l, [], doc) : bs, is, ps)
-      | (kw : _) <- words l, kw `elem` ["theory", "instance"] = do
+      -- `rules Name = p => q, r => s`, or the same rules one per line
+      -- in an indented block: BOTH forms, exactly as `def` has both.
+      -- `spanBlock` returns nothing for the inline form, so one branch
+      -- serves.
+      | (kw : _) <- words l, kw `elem` ["theory", "instance", "rules"] = do
           let (block, rest') = spanBlock 0 rest
-          if null block
+          if null block && kw /= "rules"
             then Left $ "Empty " ++ kw ++ " body: " ++ l
             else do
               (ds, ts, bs, is, ps) <- go Nothing rest'
@@ -4302,6 +4322,141 @@ splitDefs src = do
 codeTy :: Ty
 codeTy = TData "List"
            [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
+
+--------------------------------------------------------------------------------
+-- 10.3b Rule sets: a declared, named, once-checked rewrite
+--
+-- `rules Opt = dupInt => dup, sumViaFold => sumN` declares a WORD
+-- `Opt : Code ⇒ Code` (the table, handed to the `rewrite` engine) and a
+-- FUNCTOR of the same name, so `use Opt` applies it and mints `=Opt>`
+-- like any other scope.  There is no separate machinery: a rule set IS
+-- a by-generators functor whose action on a generator is a rename.
+--
+-- Why a declaration and not a type.  `replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩
+-- Code ⇒ Code` types, but the shared variables are UNIFICATION — "p
+-- and q have a common instance" — and that is symmetric, while "q may
+-- stand wherever p stands" is not.  The property that IS sufficient is
+-- `scheme(q) ≥ scheme(p)`, a rank-2 statement no rank-1 `Fn` can hold.
+-- The routine that states it already exists: `subsumes`.  So the rule
+-- is checked ONCE, where it is written, and is free at every use.
+--
+--   *Unification blesses a call; subsumption blesses a rule.*
+--
+-- v1 rules are single WORDS on both sides, because Code carries names
+-- and `Fn` values do not.  Multi-atom patterns wait for a use.
+--------------------------------------------------------------------------------
+
+-- `rules Name = p => q, …` plus any indented `p => q` lines.
+parseRulesLine :: String -> [String] -> Either String (String, [(String, String)])
+parseRulesLine header body = do
+  (nm, inline) <-
+    case break (== '=') (uncomment header) of
+      (lhs, rest) ->
+        case (words lhs, rest) of
+          (["rules", nm], '=' : r) -> Right (nm, r)
+          (["rules", nm], "")      -> Right (nm, "")
+          _ -> Left $ "Malformed rule set (want `rules Name = p => q, …`): "
+                   ++ dropWhile isSpace header
+  let pieces = [ r | r <- splitOnChar ',' inline ++ map uncomment body
+                   , not (all isSpace r) ]
+  case pieces of
+    [] -> Left $ "rules " ++ nm ++ " declares no rules: write `rules "
+              ++ nm ++ " = p => q`, or one `p => q` per indented line"
+    _  -> Right ()
+  rs <- mapM (parseOneRule nm) pieces
+  case [ p | (p, _) <- rs, length [ () | (p', _) <- rs, p' == p ] > 1 ] of
+    (p : _) -> Left $ "rules " ++ nm ++ ": two rules rewrite `" ++ p
+                   ++ "`, and a rule set is applied in one pass, so the "
+                   ++ "second could never fire"
+    []      -> Right ()
+  pure (nm, rs)
+  where
+    uncomment = takeWhile (/= '#')
+
+parseOneRule :: String -> String -> Either String (String, String)
+parseOneRule setNm piece =
+  case splitOnStr "=>" piece of
+    Just (l, r) ->
+      case (words l, words r) of
+        ([p], [q]) -> Right (p, q)
+        _ -> Left $ "rules " ++ setNm ++ ": `" ++ trimSpace piece
+                 ++ "` — a v1 rule rewrites one WORD to one word "
+                 ++ "(multi-atom patterns are not shipped)"
+    Nothing -> Left $ "rules " ++ setNm ++ ": `" ++ trimSpace piece
+                   ++ "` is missing `=>` (a rule reads `p => q`)"
+
+trimSpace :: String -> String
+trimSpace = dropWhile isSpace . reverse . dropWhile isSpace . reverse
+
+splitOnChar :: Char -> String -> [String]
+splitOnChar c str = case break (== c) str of
+  (pre, _ : rest) -> pre : splitOnChar c rest
+  (pre, [])       -> [pre]
+
+splitOnStr :: String -> String -> Maybe (String, String)
+splitOnStr pat = go ""
+  where
+    go _   []           = Nothing
+    go acc r@(ch : chs)
+      | take (length pat) r == pat = Just (reverse acc, drop (length pat) r)
+      | otherwise                  = go (ch : acc) chs
+
+-- The generated word: the table, then the engine.  A rule set is
+-- ordinary user code from here on, which is what lets `lift2 [Opt]`
+-- apply it at RUNTIME with the program as its own fallback.
+ruleSetDefSrc :: [(String, String)] -> String
+ruleSetDefSrc rs =
+  "(c -> (" ++ unwords [ '.' : p | (p, _) <- rs ] ++ " >> pack) ("
+            ++ unwords [ '.' : q | (_, q) <- rs ] ++ " >> pack) c >> rewrite)"
+
+-- The blessing, once, at the declaration.  `q` may stand wherever `p`
+-- stands iff `scheme(q) ≥ arrow(p)`: instantiate p, skolemize it (which
+-- `subsumes` does), and require q's scheme to cover it.  Grades ride
+-- along by the semilattice order — a pure `q` under an io `p` passes
+-- because ∅ is the bottom — so no separate effect rule is needed.
+checkRuleSet :: Env -> TemplateTable -> [String] -> [(String, [String])]
+             -> (String, [(String, String)]) -> Either String ()
+checkRuleSet env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
+  where
+    one (p, q) = do
+      scP <- wordScheme p
+      scQ <- wordScheme q
+      let arrP = runInfer0 (instantiate scP)
+          arrQ = runInfer0 (instantiate scQ)
+      case subsumes scQ arrP of
+        Right () -> Right ()
+        Left e   ->
+          Left $ here ++ "`" ++ p ++ " => " ++ q ++ "` is refused: " ++ p
+              ++ " is used at " ++ show (normalizeArrow arrP) ++ " but "
+              ++ q ++ " is " ++ show (normalizeArrow arrQ) ++ " (" ++ e
+              ++ ").  A rule may only GENERALIZE — the replacement's "
+              ++ "scheme must be at least as general as the replaced "
+              ++ "word's type, or a program that typed before the "
+              ++ "rewrite would not type after it."
+    here = "rules " ++ setNm ++ ": "
+    wordScheme n
+      | '@' `elem` n =
+          Left $ here ++ "`" ++ n ++ "` is the compiler's spelling of a "
+              ++ "slot: a slot is not a word outside `use`, so it can be "
+              ++ "neither side of a rule"
+      | n `elem` concatMap snd slotsOf =
+          Left $ here ++ n ++ " is a slot of theory "
+              ++ head ([ t | (t, ns) <- slotsOf, n `elem` ns ] ++ ["?"])
+              ++ ", and a slot is not a word outside `use`: name the "
+              ++ "instance's word instead"
+      | n `elem` thNames =
+          Left $ here ++ n ++ " is a theory, not a word"
+      | isJust (lookup n tmpls) =
+          Left $ here ++ n ++ " is a template over theory "
+              ++ maybe "?" fst (lookup n tmpls)
+              ++ ", and a template has no type until an instance "
+              ++ "supplies one: a rule is checked once, so it needs a "
+              ++ "word with a scheme"
+      | otherwise =
+          maybe (Left $ here ++ n ++ " is not defined at this point (a "
+                     ++ "rule names two words, and both must already be "
+                     ++ "in scope)")
+                Right (M.lookup n env)
 
 -- `functor Name = word` — a declaration line, no block.
 parseFunctorLine :: String -> Either String (String, String)
@@ -4570,7 +4725,12 @@ checkModuleWith base src = do
                        | (h, b, _) <- declLines, take 8 h == "instance" ]
   ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]
-  let funcs = ownFuncs ++ mbFuncs base
+  -- A rule set declares a WORD of its own name and a FUNCTOR of that
+  -- name: `use Opt` then runs through exactly the path `use Traced`
+  -- does, receipt included, and `[Opt]` is an ordinary quote.
+  ownRules <- sequence [ parseRulesLine h b
+                       | (h, b, _) <- declLines, take 5 h == "rules" ]
+  let funcs = ownFuncs ++ [ (n, n) | (n, _) <- ownRules ] ++ mbFuncs base
   case [ n | (n, i) <- zip (map fst funcs) [0 :: Int ..]
            , n `elem` take i (map fst funcs) ] of
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
@@ -4585,16 +4745,30 @@ checkModuleWith base src = do
   -- instance bodies and main are all inferred with it in scope
   let envSig = foldr (\(n, sc) e -> M.insert n sc e) (receiptEnv funcs env1)
                      slotSigs
+  -- The rule-set words are hoisted ABOVE the module's own defs: their
+  -- bodies mention nothing but the prelude, and `use Opt` inside a def
+  -- needs the word to be runnable by then (the ordering rule).
+  let ruleDefs = [ ( nm, ruleSetDefSrc rs
+                   , Just ("rule set " ++ nm ++ ": "
+                            ++ intercalate ", " [ p ++ " => " ++ q
+                                                | (p, q) <- rs ]) )
+                 | (nm, rs) <- ownRules ]
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls) <-
     foldM (addDef slotTable funcs thNames)
           (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0,
            mbTemplates base)
-          (defSrcs ++ instDefs)
+          (ruleDefs ++ defSrcs ++ instDefs)
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
   mapM_ (checkInstance env' theories) insts
+  -- Every rule is blessed ONCE, here, over the finished environment —
+  -- so a rule may name a word declared anywhere in the module, exactly
+  -- as an instance slot may.
+  mapM_ (checkRuleSet env' tmpls (map thName theories)
+           [ (thName th, map fst (thSlots th)) | th <- theories ])
+        ownRules
   mapM_ (checkLawType env') [ n | (n, _, _) <- instDefs, isJust (lawParts n) ]
   mainPart <-
     if all isSpace mainSrc
@@ -5871,6 +6045,35 @@ runBuiltin env defs "sameCode" [VFn s1 v1 t1, VFn s2 v2 t2]
         (Right n1, Right n2) -> Right ([VSum (if n1 == n2 then 0 else 1) []], [])
         (Left e, _)          -> Left ("sameCode: " ++ e)
         (_, Left e)          -> Left ("sameCode: " ++ e)
+-- The same question asked of CODE.  Two differences from `sameCode`,
+-- both in `sameCodeC`'s favour: a functor's output is Code, so this is
+-- the only form in which a law about a functor can be stated at all;
+-- and Code has already been through abstraction elimination, so a
+-- program that `sameCode` refuses for carrying a binder is decided here
+-- once it has been through `getCode`.
+runBuiltin env defs "sameCodeC" [c1, c2] = do
+  t1 <- inC (codeToTermV c1)
+  t2 <- inC (codeToTermV c2)
+  n1 <- inC (normalForm env defs t1)
+  n2 <- inC (normalForm env defs t2)
+  Right ([VSum (if n1 == n2 then 0 else 1) []], [])
+  where inC = either (Left . ("sameCodeC: " ++)) Right
+-- The rule-set engine.  Atomwise on NAMES, because Code carries names
+-- and `Fn` values do not, and structural rather than textual because
+-- the synthesized generators (`#dist:K`, `#fold:…`) do not round-trip
+-- through `unparse` — `#` lexes as a comment.
+runBuiltin _ _ "rewrite" [froms, tos, c] = do
+  fs <- decodeListV froms >>= mapM symName
+  ts <- decodeListV tos   >>= mapM symName
+  if length fs /= length ts
+    then Left "rewrite: the two name lists have different lengths"
+    else do
+      c' <- rewriteCode (zip fs ts) c
+      Right ([c'], [])
+  where
+    symName (VSym s) = Right s
+    symName v        = Left $ "rewrite: a rule's two sides are symbols, "
+                           ++ "but this one is " ++ show v
 runBuiltin _ _ "true"  []               = Right ([VSum 0 []], [])
 runBuiltin _ _ "false" []               = Right ([VSum 1 []], [])
 runBuiltin _ _ "eq?"  [x, y]            = Right ([VSum (if x == y then 0 else 1) [x, y]], [])
@@ -5965,6 +6168,26 @@ checkInterposed env t = do
       want = Arrow side side (Eff S.empty (Just (EV "ε")))
   either (\err -> Left (shown ++ "; " ++ rule ++ " (" ++ err ++ ")"))
          Right (subsumesShape (generalizeWith M.empty asubs arr) want)
+
+-- Substitute atom names through a whole spine.  This is `use Inst`'s
+-- `renameSlotsT` seen from the Code side: a rule set is a by-generators
+-- functor whose action on a generator is a rename and whose action on
+-- everything else is congruence.  Quotes, rows and groups recurse; a
+-- row's residual flag is carried, never inspected.
+rewriteCode :: [(String, String)] -> Value -> Either String Value
+rewriteCode tbl = go
+  where
+    go code = do
+      stages <- decodeListV code
+      encodeListV <$> mapM stage stages
+    stage sv = encodeListV <$> (decodeListV sv >>= mapM atom)
+    atom a@(VSum 0 [VSym s]) = Right (maybe a (\s' -> VSum 0 [VSym s']) (lookup s tbl))
+    atom (VSum 4 [c])        = (\c' -> VSum 4 [c']) <$> go c
+    atom (VSum 5 [csV, bV])  = do
+      cs <- decodeListV csV >>= mapM go
+      Right (VSum 5 [encodeListV cs, bV])
+    atom (VSum 6 [c])        = (\c' -> VSum 6 [c']) <$> go c
+    atom a                   = Right a
 
 encodeListV :: [Value] -> Value
 encodeListV = foldr (\v r -> VSum 1 [v, r]) (VSum 0 [])

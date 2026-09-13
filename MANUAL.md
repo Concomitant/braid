@@ -1211,6 +1211,102 @@ this is a functor out of the free category of programs, selected by
 name. §12 has what a functor may and may not do; `examples/traced.braid`
 and `metered.braid` are the two idioms.
 
+**`rules Name = p => q, r => s`** *(2026-09-13)* declares a **rule
+set**: a named, once-checked, atomwise rewrite over WORDS. It is the
+same declaration in a block, one rule per indented line, exactly as
+`def` has both forms:
+
+```braid
+rules Opt = dupInt => dup, twice => double
+
+rules Opt
+    dupInt => dup
+    twice  => double
+```
+
+The declaration produces two things of the same name: a word
+`Opt : Code ⇒ Code` (the table, handed to the `rewrite` engine) and a
+**functor** `Opt`. So `use Opt` applies the set to a scope's wiring and
+mints `=Opt>` like any other functor scope, and `lift2 [Opt]` applies
+it at run time with the program as its own fallback (§12). There is no
+separate machinery: a rule set *is* a by-generators functor whose action
+on a generator is a rename and whose action on everything else is
+congruence — it descends into quotations (so a `fix` body is rewritten
+where it lives), into a row's tracks, into a residual row's written
+tracks, and into groups.
+
+**Why a declaration and not a type.** A word `replace : Fn⟨a ⇒ b⟩
+Fn⟨a ⇒ b⟩ Code ⇒ Code` types — but its shared variables are
+**unification**, "p and q have a common instance", and that is
+symmetric, while "q may stand wherever p stands" is not. The property
+that *is* sufficient is `scheme(q) ≥ scheme(p)`, a rank-2 statement no
+rank-1 `Fn` can hold. The routine that states it already exists, with
+three other consumers (`checkInstance`, `runAs`, `interpose`):
+`subsumes`. So a rule is checked **once**, where it is written, and is
+free at every use:
+
+> *Unification blesses a call; subsumption blesses a rule.*
+
+Direction matters: a rule may only **generalize**, never narrow.
+
+```text
+rules Bad: `dup => dupInt` is refused: dup is used at a0 ⇒ a0 a0 but
+dupInt is Int ⇒ Int Int ('a0' is universally quantified in the expected
+type but this code requires it to be Int — …).  A rule may only
+GENERALIZE — the replacement's scheme must be at least as general as
+the replaced word's type, or a program that typed before the rewrite
+would not type after it.
+```
+
+The parametricity case is the one worth staring at. With `two : a ⇒ Int
+Int`, `two => dup` would *run* perfectly well wherever it fired — and it
+narrows `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else, so it is
+refused: *two is used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0*.
+
+**Grades ride along** for free, because `subsumes` compares them by ⊆
+and `∅` is the bottom of the semilattice: a **pure** replacement under
+an **io** pattern passes (the rewrite can only remove effects), and an
+io replacement under a pure pattern is refused — *Cannot unify effects:
+IO vs pure (the expected type fixes the grade; this code must stay
+pure)*.
+
+**What may not be a rule's side.** A theory **slot** (*a slot is not a
+word outside `use`*), a name containing `@` (*the compiler's spelling
+of a slot*), a **theory** name, a **template** (it has no type until an
+instance supplies one, and a rule is checked once), or a word not yet
+defined. A rule set shares the functor namespace, so `rules Opt` beside
+`functor Opt = …` is a *Duplicate functor declaration*.
+
+**v1 rules are single words on both sides.** Multi-atom patterns —
+`dup ; * => square` — are **not shipped**: they need a matcher over
+spines and a story about what a pattern variable is, and no example has
+asked for one yet. The engine itself is exposed as the unchecked prim
+`rewrite : List(Sym) List(Sym) Code ⇒ Code`, the same way `interposeRaw`
+is the unchecked half of `interpose`; nothing blesses a table you build
+by hand, which is exactly why `lift2`'s fallback exists.
+
+`examples/optimizer.braid` is the worked example: four interchangeable
+words, a rule set, the two rules `sameCode` can prove and the two it
+honestly cannot, the receipt on the arrow, the laws as theories, and
+image membership.
+
+**`morphism Len : ListMonoid -> IntSum = len` — still PROPOSED**
+*(2026-09-13)*. A natural transformation between two models of one
+theory is a homomorphism, and because the base is the **free** category
+on the theory's generators, naturality is finite and complete: the
+squares for composites paste from the squares for generators, so
+checking one square per slot checks every program. The declaration
+would generate them — `ListMonoid@append ; len = len len ; IntSum@+`,
+`ListMonoid@nil ; len = IntSum@zero` — and audit them at module start
+like instance laws. What blocks it is not the generator, it is the
+**verdict**: a generated square compares two programs, and an
+instance's slots are ordinary (often recursive) defs, which `sameCode`
+treats as opaque and therefore always reports unequal. Deciding them
+needs the normalizer through closures and rows; sampling them needs a
+`sample` slot the generator cannot conjure. Both are the next stage's
+work, and the sentence to keep either way is: *naturality over a free
+category is finite — the generators suffice*.
+
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
 like any type stack (params splice, `•` is empty, `Fn` nests). The
@@ -1318,14 +1414,14 @@ one term with two spellings. Derived-but-primitive-looking words
 `lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
-**There are 46 primitives** *(2026-09-12)*. A word keeps its place here
+**There are 48 primitives** *(2026-09-13)*. A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), recursion (`fix`), the open
 coproduct (`into`), the exponent eliminators over `Aⁿ` — or if it
 **touches the implementation**: arithmetic and strings, `eq?`, the four
 io edges, reflection (`parse`/`unparse`/`reflect`/`evalAs`/`sameCode`/
-`interpose`), and the type-level `weaken`/`finInt`. Everything else is
+`sameCodeC`/`interpose`/`rewrite`), and the type-level `weaken`/`finInt`. Everything else is
 a prelude def with its derivation visible.
 
 Wiring (cartesian structure):
@@ -1380,6 +1476,9 @@ Metaprogramming & IO (railway-typed edges):
 | `unparse` | `Code ⇒ Str` |
 | `parse` | `Str ⇒ (Code \| Str)` |
 | `interpose` | `Code Code ⇒ Code` — `η c`: insert η after every stage of c; η must be `ρ ⇒ ρ` or `E ρ ⇒ E ρ`, checked (§12) |
+| `rewrite` | `List(Sym) List(Sym) Code ⇒ Code` — `froms tos c`: rename atoms by a table, through quotes, rows and groups. The rule-set engine, unchecked on its own: `rules` is where a table is blessed (§8) |
+| `sameCode` | `Fn⟨Σ ⇒ Θ⟩ Fn⟨Σ ⇒ Θ⟩ ⇒ Bool` — same morphism? decided by normalizing, errors outside the structural fragment (§12.9) |
+| `sameCodeC` | `Code Code ⇒ Bool` — the same question over Code values; decides more, because Code is post-abstraction-elimination (§12.9) |
 | `readLine` | `• =IO> (Str \| Str)` — io; one line from stdin, EOF misses |
 | `readFile` | `Str =IO> (Str \| Str)` — io |
 | `writeFile` | `Str Str =IO> (• \| Str)` — io; hit is the empty success, miss carries the error |
@@ -1701,7 +1800,7 @@ per use:
 | `use E` for a resource `E` | tensoring, `E ⋉ –` — and a binder's parameter block is the same functor, `P ⋉ –` (§12 above) | the elaborator's routing |
 | `interpose [η]` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `interpose` itself, by subsumption |
 | `use Inst` for an instance | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
-| a local rewrite `p ↦ q` with `scheme(q) ≥ scheme(p)` | a typed generator image | `subsumes` — the `rule` declaration, not yet shipped |
+| a rule set `rules Opt = p => q, …` | a typed generator image, applied atomwise | `subsumes`, once per rule at the declaration (§8) |
 | `lift2 [m]` on any `Code ⇒ Code` `m` | the runtime lift | per program, at run time; never fails — it falls back |
 
 Everything not in the table — delete a stage, reorder, reverse,
@@ -1763,7 +1862,9 @@ leaves the original running (`examples/metered.braid`). The type
 system blesses exactly that and nothing weaker: it cannot say "this
 rewrite preserves every program's type" as a rank-1 `Fn` type, because
 *unification blesses a call; subsumption blesses a rule* — and a rule
-is a declaration, checked once.
+is a declaration, checked once. That declaration is `rules` (§8): the
+rung of the ladder where a rewrite stops being audited and becomes
+guaranteed, at the cost of saying *which* rewrites, by name, up front.
 
 `stagewise`/`atomwise` are `flatMap` on the spine: functorial by
 construction (a stage's image depends on that stage alone), which is a
@@ -1842,6 +1943,55 @@ with it `dist ; undist = id` and `capture ; ev = substitution`, is the
 next stage's work; `examples/distributive.braid` states those laws and
 *runs* them at sample points in the meantime.
 `examples/laws.braid` shows decided and sampled laws side by side.
+
+**`sameCodeC : Code Code ⇒ Bool`** *(2026-09-13)* asks the same question
+of two `Code` values instead of two quotations. It exists because a
+functor **returns** `Code`: a law about a functor — functoriality,
+identity preservation, idempotence, an interaction with another functor
+— can be stated in no other form. It works on the **structure**, never
+on text, because the synthesized generators (`#dist:K`, `#fold:…`) do
+not round-trip through `unparse` — `#` lexes as a comment.
+
+And it decides strictly more than `sameCode`, for a reason worth
+knowing: `Code` has already been through abstraction elimination, so the
+one thing `sameCode` refuses outright is gone before `sameCodeC` looks.
+
+```braid
+[(x -> x x)] [dup] ; sameCode                            # ERROR: a binder
+([(x -> x x)] ; getCode) ([dup] ; getCode) ; sameCodeC   # true
+([(a b -> b a)] ; getCode) ([swap] ; getCode) ; sameCodeC # true
+```
+
+So the boundary today, exactly:
+
+| stated over | decided by |
+|---|---|
+| wiring, composition, juxtaposition, uninterpreted words with closed arity | `sameCodeC` — a theorem for every input and every interpretation |
+| **binders**, once through `getCode` | `sameCodeC` (`sameCode` still refuses them) |
+| a quotation — and therefore `fix`, `ev`, `map`, anything higher-order | **nobody yet**: *outside the structural fragment: a quotation* |
+| a row, residual or closed | **nobody yet**: *outside the structural fragment: a row* |
+| anything needing `+` to be commutative, or `Int` arithmetic | sampled laws — the free category cannot see it |
+
+The last three are why some laws in `examples/optimizer.braid` are
+stated with `eq?` on `Code` — **syntactic** equality, labelled as such —
+rather than with `sameCodeC`. Transport of recursion, `F(fix b) =
+fix (F b)`, is the clearest case: it is *run* at a sample point and
+compared spine-to-spine, because `fix` takes a quotation and the
+normalizer stops at one. When the normalizer enters rows and closures,
+those laws become decidable and the `eq?` goes away.
+
+**Two kinds of claim, kept apart.** *Idempotence* — `F(F p) = F p` — is
+a **functor law**: it is about `F`, at every program, and it belongs in
+a `theory` that instances are audited against. *Image membership* —
+`F(p) = p` — is a **program assertion**: it is about one particular
+program, so it is written where that program is. The second is only
+*meaningful* because the first holds, which is why a theory offering
+image assertions must declare idempotence. And image membership
+inherits the boundary above exactly: `twice = dup ; +` and `double =
+2 _ ; *` agree on every `Int`, so a rule `twice => double` changes no
+meaning — but it is visible in the free category, and `twice` is
+therefore reported outside the image. Both kinds are shown, side by
+side, in `examples/optimizer.braid`.
 
 ## 13. Open arity and exponents (summary)
 
@@ -1968,6 +2118,27 @@ holds for them too: final atom of their stage (§9).
   a residual hides. What `reflect` still refuses is not about binders:
   a `...` before the end of a stage in a binder body, and a name the
   body does not resolve.
+- **A rule may only generalize** *(2026-09-13)*. `rules Opt = p => q`
+  is refused unless `scheme(q) ≥ scheme(p)` — and the refusal that
+  surprises people is the one that would have *run*: with `two : a ⇒
+  Int Int`, `two => dup` fires happily on an `Int` and silently narrows
+  `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else. The type check is
+  about every OTHER program, not about the one in front of you. Grades
+  obey the same asymmetry in the direction people expect backwards: a
+  **pure** replacement for an **io** word is fine (the rewrite removes
+  an effect), an io replacement for a pure word is not.
+- **A rule's two sides must be WORDS with schemes** *(2026-09-13)*. Not
+  a theory slot (*a slot is not a word outside `use`*), not a template
+  (it has no type until an instance supplies one), not a name with `@`
+  in it. And v1 rules are single words — `dup ; * => square` is *a v1
+  rule rewrites one WORD to one word*.
+- **`sameCodeC` decides binders; `sameCode` still does not**
+  *(2026-09-13)*. `[(x -> x x)] [dup] ; sameCode` errors with *a
+  binder*, while `([(x -> x x)] ; getCode) ([dup] ; getCode) ;
+  sameCodeC` answers `true` — because `getCode` runs abstraction
+  elimination and `sameCode` does not. If a law you want is refused for
+  carrying a binder, route it through `getCode` and ask `sameCodeC`.
+  Quotations and rows are still outside both (§12.9).
 - **`| ...` no longer means the residual** *(2026-09-12)*. It is
   refused, for one release, with the message *"`| ...` used to mean the
   residual; write `| ---` for more alternatives, or `| pass` for a

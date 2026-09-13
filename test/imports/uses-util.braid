@@ -10,6 +10,13 @@ def scored =
 ## the imported template, instantiated on this side of the boundary
 def loudTwice = use Loud >> emitTwice
 
+## the imported rule set, applied on this side of the boundary
+def optimised =
+    use Opt
+    dupInt
+    +
+
 7 >> quadruple >> print
+6 >> optimised >> print
 3 >> loudTwice >> print
 (0 >> Tally) 5 >> scored >> _ print >> unTally >> print

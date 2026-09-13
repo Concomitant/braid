@@ -15,6 +15,11 @@ instance Loud : Sink(Int) =
 def idF = (c -> c)
 functor Same = idF
 
+## a RULE SET travels like any other declaration: the word it declares
+## and the functor of the same name both cross the boundary
+def dupInt = dup >> _ _ 0 >> _ +
+rules Opt = dupInt => dup
+
 ## a TEMPLATE over Sink: no instance here, so it is not a def yet —
 ## it travels as a template and the importer instantiates it
 def emitTwice = use Sink ; emit ; emit

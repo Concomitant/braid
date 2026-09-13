@@ -29,11 +29,11 @@ runExample name = do
 -- (path, expected print log, expected final stack rendering)
 importTests :: [(String, [String], String)]
 importTests =
-    -- defs, a resource, an instance and a functor, all imported; the
-    -- imported file's own main does NOT run
+    -- defs, a resource, an instance, a functor and a RULE SET, all
+    -- imported; the imported file's own main does NOT run
     -- …and a TEMPLATE: declared over a theory in one file, instantiated
     -- by a `use` in another
-  [ ("uses-util.braid", ["28", "81", "50", "0"], "")
+  [ ("uses-util.braid", ["28", "12", "81", "50", "0"], "")
     -- a diamond includes the shared file once
   , ("diamond.braid",   ["7", "8", "10"], "")
     -- a library file still runs as a program, main and all
@@ -341,6 +341,20 @@ moduleTypeTests =
     -- distributivity is a THEOREM here (`P × –` is a left adjoint), and
     -- `dist2`'s body is the derivation; `undist2` needs no closure
   , ("dist2",    "a0 (ρ0 | ρ1) ⇒ (a0 ρ0 | a0 ρ1 | σ0)")
+    -- STAGE 5b: the Code-level twin of `sameCode`, and the rule engine
+  , ("sameCodeC", "Code Code ⇒ Bool")
+  , ("rewrite",   "List(Sym) List(Sym) Code ⇒ Code")
+    -- STAGE 5b: a rule set declares a WORD of its own name and a
+    -- FUNCTOR of that name.  `use Opt` mints `=Opt>` like any other
+    -- scope, and unions with `Rec` when the body ties a knot.
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Opt = dupInt => dup\nOpt",
+     "Code ⇒ Code")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Opt = dupInt => dup\n\
+     \def p =\n    use Opt\n    dupInt\n    +\np", "Int =Opt> Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Opt = dupInt => dup\n\
+     \def sumTo =\n    use Opt\n\
+     \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
+     \    fix ...\n    ev\nsumTo", "Int Int =Opt Rec> Int")
   , ("undist2",  "(a0 ρ0 | a0 ρ1) ⇒ a0 (ρ0 | ρ1 | σ0)")
     -- distN follows caseN's arity family, and like caseN the sums nest
   , ("dist3",    "a0 (ρ0 | (ρ1 | ρ2)) ⇒ (a0 ρ0 | (a0 ρ1 | a0 ρ2 | σ0))")
@@ -1567,7 +1581,87 @@ evalTests =
      \def tick =\n    use Counter\n    dup ; *\n    bump\n\
      \def collectCount = use Counts ; collected\n\
      \[tick] ; collectCount ; _ 7 ; ev\nprint print", ["1", "49"], "")
+
+    -- STAGE 5b: RULE SETS.  `rules Opt = p => q` declares a word
+    -- `Opt : Code ⇒ Code` and a functor of the same name; `use Opt`
+    -- applies it atomwise and mints `=Opt>`.  The rule itself is
+    -- blessed ONCE, at the declaration, by `subsumes` — unification
+    -- blesses a call, subsumption blesses a rule.
+  , (ruleMod ++ "def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
+    -- the inline and the block form declare the same set
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
+     \rules Opt\n    dupInt => dup\n    twice => double\n\
+     \def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
+    -- a rule fires inside a QUOTATION: the engine recurses into quotes,
+    -- rows (residual flag carried) and groups
+  , (ruleMod ++ "def mapped =\n    use Opt\n    [dupInt >> +] ... >> map\n\
+     \(1 2 3 >> pack) >> mapped >> print", ["list(2, 4, 6)"], "")
+    -- ... and therefore into a `fix` body, where the recursion lives
+  , (ruleMod ++ "def sumTo =\n    use Opt\n\
+     \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
+     \    fix ...\n    ev\n0 5 >> sumTo >> print", ["15"], "")
+    -- a row, and a RESIDUAL row, both rewrite
+  , (ruleMod ++ "data Case(---) = (Int | ---)\n\
+     \def bump = use Opt ; unCase ; (dupInt ; + | ---) ; Case\n\
+     \(3 >> alt1 >> Case) >> bump >> unCase >> (pass | forget >> 0) >> merge >> print",
+     ["6"], "")
+    -- a PURE replacement under an IO pattern passes: ∅ is the bottom of
+    -- the grade semilattice, so subeffecting comes free with `subsumes`
+  , ("def noisy = toStr >> print\ndef quiet = drop\nrules G = noisy => quiet\n\
+     \def prog =\n    use G\n    noisy\n\"ran\" >> print\n5 >> prog", ["ran"], "")
+    -- `lift2` applies the same word at RUNTIME, with the program as its
+    -- own witness and its own fallback
+  , (ruleMod ++ "[Opt] [dupInt >> +] >> lift2 >> _ 5 >> ev >> print", ["10"], "")
+    -- a hand-rolled table CAN narrow (nothing blessed it), and then the
+    -- witness refuses the rewrite and the original runs
+  , ("def two = drop 1 1\n\
+     \def narrow = (c -> (.two >> pack) (.dup >> pack) c >> rewrite)\n\
+     \[narrow] [two >> +] >> lift2 >> _ \"the original ran\" >> ev >> print",
+     ["2"], "")
+
+    -- STAGE 5b: `sameCodeC`.  Code has already been through abstraction
+    -- elimination, so it DECIDES what `sameCode` refuses for carrying a
+    -- binder — `[(x -> x x)]` and `[dup]` are the same morphism.
+  , ("def v = (\"same\" | \"differ\") >> merge\n\
+     \([(x -> x x)] >> getCode) ([dup] >> getCode) >> sameCodeC >> v >> print\n\
+     \([(a b -> b a)] >> getCode) ([swap] >> getCode) >> sameCodeC >> v >> print\n\
+     \([dup >> _ dup] >> getCode) ([dup >> dup _] >> getCode) >> sameCodeC >> v >> print\n\
+     \([toStr >> dup] >> getCode) ([dup >> toStr _] >> getCode) >> sameCodeC >> v >> print",
+     ["same", "same", "same", "differ"], "")
+    -- a functor law, decided: F(id) = id and F(p;q) = F(p);F(q) for a
+    -- rule set (composition of Code is `append`)
+  , (ruleMod ++ "def v = (\"holds\" | \"fails\") >> merge\n\
+     \(nil >> Opt) nil >> sameCodeC >> v >> print\n\
+     \((([dupInt] >> getCode) ([twice] >> getCode) >> append) >> Opt) \
+     \((([dupInt] >> getCode >> Opt) ([twice] >> getCode >> Opt)) >> append) >> sameCodeC >> v >> print",
+     ["holds", "holds"], "")
+    -- IDEMPOTENCE as a functor law, and IMAGE MEMBERSHIP as a program
+    -- assertion: two different kinds of claim, the second meaningful
+    -- only because the first holds
+  , (ruleMod ++ "def v = (\"yes\" | \"no\") >> merge\n\
+     \def s = [twice >> dupInt >> +] >> getCode\n\
+     \(s >> Opt >> Opt) (s >> Opt) >> sameCodeC >> v >> print\n\
+     \([double] >> getCode >> Opt) ([double] >> getCode) >> sameCodeC >> v >> print\n\
+     \([twice] >> getCode >> Opt) ([twice] >> getCode) >> sameCodeC >> v >> print",
+     ["yes", "yes", "no"], "")
+    -- the laws as a THEORY, audited at module start: an instance that
+    -- fails one stops the module before main runs
+  , (ruleMod ++ optimizerTheory ++ "instance OptIsOpt : Optimizer\n\
+     \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
+     ["audited"], "")
   ]
+
+-- a rule set over four interchangeable words, reused by the 5b tests
+ruleMod :: String
+ruleMod =
+  "def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
+  \rules Opt = dupInt => dup, twice => double\n"
+
+optimizerTheory :: String
+optimizerTheory =
+  "theory Optimizer\n    ap     : Code ⇒ Code\n    sample : • ⇒ Code\n\
+  \    law preservesId = (nil >> ap) nil >> sameCodeC\n\
+  \    law idempotent  = (sample >> ap >> ap) (sample >> ap) >> sameCodeC\n"
 
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
@@ -1822,6 +1916,68 @@ moduleFailTests =
      "is the compiler's spelling of a slot")
     -- a template shares the def namespace
   , (tmplMod ++ "def fold1 = dup\n1 ; print", "Duplicate definition: fold1")
+    -- STAGE 5b: RULE DECLARATIONS.  `q` may stand wherever `p` stands
+    -- iff scheme(q) >= arrow(p).  That is rank-2, so no `Fn` type holds
+    -- it and no call site checks it: it is checked ONCE, here, by the
+    -- routine `checkInstance` and `runAs` already share.
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Bad = dup => dupInt\n1 >> print",
+     "rules Bad: `dup => dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Bad = dup => dupInt\n1 >> print",
+     "A rule may only GENERALIZE")
+    -- the parametricity case: `two => dup` would RUN on an Int and
+    -- narrows `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else
+  , ("def two = drop 1 1\nrules Bad = two => dup\n1 >> print",
+     "rules Bad: `two => dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
+  , ("def two = drop 1 1\nrules Bad = two => dup\n1 >> print",
+     "must stay parametric in it")
+    -- GRADES ride along by the semilattice order: an io replacement
+    -- under a pure pattern is refused (the other direction passes)
+  , ("def noisy = toStr >> print\ndef quiet = drop\nrules Bad = quiet => noisy\n1 >> print",
+     "rules Bad: `quiet => noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
+  , ("def noisy = toStr >> print\ndef quiet = drop\nrules Bad = quiet => noisy\n1 >> print",
+     "the expected type fixes the grade; this code must stay pure")
+    -- a slot is not a word outside `use`, so it is neither side of a
+    -- rule; nor is a theory, nor a template (which has no type until an
+    -- instance supplies one)
+  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
+     \rules Bad = op => +\n1 >> print",
+     "op is a slot of theory Mon, and a slot is not a word outside `use`")
+  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
+     \rules Bad = Plus@op => +\n1 >> print",
+     "is the compiler's spelling of a slot")
+  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
+     \rules Bad = Mon => +\n1 >> print",
+     "rules Bad: Mon is a theory, not a word")
+  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
+     \def twice = use Mon ; op\nrules Bad = twice => +\n1 >> print",
+     "twice is a template over theory Mon")
+  , ("rules Bad = nowhere => dup\n1 >> print",
+     "rules Bad: nowhere is not defined at this point")
+    -- the shape of a rule: v1 rewrites one WORD to one word
+  , ("rules Bad = dup dup => dup\n1 >> print",
+     "a v1 rule rewrites one WORD to one word")
+  , ("rules Bad = dup\n1 >> print", "is missing `=>` (a rule reads `p => q`)")
+  , ("rules Bad\n1 >> print", "rules Bad declares no rules")
+  , ("rules Bad = dup => swap, dup => drop\n1 >> print",
+     "two rules rewrite `dup`")
+  , ("rule Bad = dup\n1 >> print", "Unknown primitive: rule")
+    -- a rule set is a functor, and shares the functor namespace
+  , ("def idF = (c -> c)\nfunctor Opt = idF\nrules Opt = dup => dup\n1 >> print",
+     "Duplicate functor declaration: Opt")
+    -- `sameCodeC` decides the wiring fragment and says so outside it,
+    -- exactly as `sameCode` does: a quotation and a row are still out
+    -- (that is the normalizer's next stage, not this one)
+  , ("([[dup]] >> getCode) ([[dup]] >> getCode) >> sameCodeC >> drop >> 1 >> print",
+     "sameCodeC: outside the structural fragment: a quotation")
+  , ("([(dup | drop 1)] >> getCode) ([(dup | drop 1)] >> getCode) >> sameCodeC >> drop >> 1 >> print",
+     "sameCodeC: outside the structural fragment: a row")
+    -- the audit: an instance that fails a law is not an instance.
+    -- `doubled` repeats every stage, so weaving twice weaves twice.
+  , ("def doubled = [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise\n\
+     \theory Optimizer\n    ap     : Code \8658 Code\n    sample : \8226 \8658 Code\n\
+     \    law idempotent = (sample >> ap >> ap) (sample >> ap) >> sameCodeC\n\
+     \instance Dbl : Optimizer\n    ap     = doubled\n    sample = [dup >> swap] >> getCode\n1 >> print",
+     "law 'idempotent' fails for instance Dbl")
   ]
 
 runPass :: (String, String) -> Maybe String

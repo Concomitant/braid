@@ -369,10 +369,11 @@ handleLine st line =
     Right ([], [(tyLine, _)], [], [], rest)
       | all isSpace rest -> typeLine tyLine
     Right ([], [], [], [], _) -> programLine
-    -- theory/instance are block declarations: they need a whole module
+    -- theory/instance/functor/rules are block declarations: they need a
+    -- whole module
     Right (_, _, (_ : _), _, _) ->
-      report "theory and instance are file declarations — put them in a \
-             \.braid file rather than a REPL line"
+      report "theory, instance, functor and rules are file declarations — \
+             \put them in a .braid file rather than a REPL line"
     Right (_, _, _, (_ : _), _) ->
       report "import is a file declaration — `:import \"path.braid\"` brings \
              \one into a session"

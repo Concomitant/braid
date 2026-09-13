@@ -290,8 +290,8 @@ free at every use, one checked per program:
    the log).
 4. models (`use Inst`; `atomwise` with typed generator images) —
    `checkInstance`;
-5. local rewrites `p ↦ q` with `scheme(q) ≥ scheme(p)` — the `rule`
-   design of stage 5b. **Unification blesses a call; subsumption
+5. local rewrites `p ↦ q` with `scheme(q) ≥ scheme(p)` — the `rules`
+   declaration, **shipped 2026-09-13** (see the amendment below). **Unification blesses a call; subsumption
    blesses a rule.** A `replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ Code ⇒ Code`
    types, and the shared variables say only that p and q have a
    common instance — symmetric, where "q may stand wherever p stands"
@@ -400,9 +400,9 @@ reads better for it.
 
 Functor laws are *easier* than value-level laws, because functor
 outputs are `Code` — ordinary list data. So structural `eq?` gives
-syntactic equality today; `sameCodeC` (planned) gives semantic
-equality on the free-cartesian wiring fragment, where the word problem
-is decidable. Law kinds:
+syntactic equality, and `sameCodeC` (**shipped 2026-09-13**) gives
+semantic equality on the free-cartesian wiring fragment, where the word
+problem is decidable. Law kinds:
 
 1. **Functoriality** — free (unviolatable by construction) at level
    2a; audited only for raw whole-spine functors.
@@ -419,6 +419,13 @@ is decidable. Law kinds:
    that the fixed-point test does NOT characterize interposing
    functors (weaving twice interposes twice) — their image can be
    remembered, not detected. See the open question below.
+
+All five are shipped and worked in `examples/optimizer.braid`
+(2026-09-13): 1–4 as three theories (`Functor`, `Optimizer`,
+`Commuting`) whose instances are audited at module start, 5 as program
+assertions beside the programs. What `sameCodeC` decides, and what had
+to fall back to syntactic `eq?`, is recorded in the 2026-09-13
+amendment below.
 
 The audited-optimizer position is worth naming: rewrite rules proved
 by the language's own normalizer at module start sit between GHC
@@ -1758,6 +1765,139 @@ Believed, not proved: totality of fix-free code; principal typing as
 the cartesian lift of `reflect`; the fixpoint and iteration laws
 (runnable at points, not decided).
 
+## Amendment (2026-09-13): rules, laws, and the 2-cell
+
+*Stage 5b, part 1. What shipped: the `rules` declaration, the
+`rewrite` engine, `sameCodeC`, three law theories and
+`examples/optimizer.braid`.*
+
+**A rule set is a functor with a natural transformation attached.**
+Take a rule set `R = {p₁ ⇒ q₁, …, pₙ ⇒ qₙ}`. Its action on code is a
+functor out of the free category `Free(G)` on the generators `G`
+(prims plus defined words): defined on generators — `pᵢ ↦ qᵢ`,
+everything else to itself — and extended by congruence, which is
+exactly what `rewrite` does as it descends through quotations, rows and
+groups. Being *by generators* is what makes functoriality free: a
+generator's image depends on that generator alone, so `R(p ; q) =
+R(p) ; R(q)` holds by construction and `R(id) = id` trivially. The law
+is still written and still runs (`theory Functor` in
+`examples/optimizer.braid`), because "cannot fail by construction" is a
+claim about the construction and a law is how a claim gets checked.
+
+**The 2-cell is what the type check buys.** Let `principal : Free(G) →
+Types` send a program to its principal scheme, and order `Types` by
+subsumption (the instance preorder: `σ ≤ τ` iff `τ ≥ σ`, "τ is at least
+as general"). The rule check is exactly the requirement that
+
+> `principal ∘ R ⇒ principal`
+
+is a **lax natural transformation** into that preorder — a 2-cell,
+whose component at a program `p` is the statement "the rewritten
+program's scheme is at least as general as the original's". Because the
+base is FREE, this is checkable on generators alone: the squares for
+composites paste from the squares for generators, so `n` checks at
+declaration cover every program the rewrite will ever meet. That is the
+whole content of `rules`, and it is why the check is finite,
+once, and complete rather than per-use and approximate.
+
+Equivalently, in Melliès–Zeilberger's language, `principal` is a
+**refinement system** (a functor into a category of types, fibred over
+programs) and the rule check makes `R` a **morphism of refinement
+systems** — it lifts along `principal`. That is the same statement with
+the 2-category flattened, and it is the reading that explains the
+asymmetry below.
+
+**Direction matters, and it is not symmetric.** The 2-cell points one
+way: generalize, never narrow. This is precisely why the naive typing
+fails. A word
+
+```
+replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ Code ⇒ Code
+```
+
+types, and its shared `a`, `b` say only that `p` and `q` have a
+*common instance* — **unification**, which is symmetric. "q may stand
+wherever p stands" is **subsumption**, which is not. With `two : a ⇒
+Int Int`, `dupInt : Int ⇒ Int Int`, `dup : a ⇒ a a`, all three of
+`dupInt ↦ dup`, `dup ↦ dupInt` and `two ↦ dup` pass unification, and
+only the first is sound. Hence the slogan, which is the entire reason
+`rules` is a keyword and not a type:
+
+> **Unification blesses a call; subsumption blesses a rule.**
+
+Grades come along at no cost, because `subsumes` compares them by ⊆ and
+the grade semilattice has `∅` at the bottom: a pure `q` under an io `p`
+passes (the rewrite *removes* an effect and the 2-cell still points the
+right way), and an io `q` under a pure `p` is refused. That is
+subeffecting in the type-and-effect sense (Talpin–Jouvelot), not
+absorption — it became free when composition started joining
+(5a⁹⁄₁₀).
+
+**The railway operators are unaffected.** `>=>`, `>>=` and friends are
+ordinary words: they are *in* `G`, not *over* it, so a rule set either
+rewrites them by name or leaves them alone. Nothing about the 2-cell
+touches how the sum monad composes, and no rule can change the shape of
+a railway without being a rule *about* `>=>`, which would be checked
+like any other.
+
+**Receipts make the 2-cell auditable.** `use Opt` mints `Opt` on the
+manifest of everything it rewrote, so the type of a word records which
+rewrites were applied to build it, and an unlabelled written type
+refuses optimized code (*Cannot unify effects: Opt vs pure*). This is
+the difference between an optimizer you can audit and one you must
+trust, and it is the reason the plan chose `use Rules` over a
+`rewrite : List(Rule) Code ⇒ Code` word: a word leaves no evidence.
+The engine still exists as that word (`rewrite`, over two symbol
+lists), unchecked, the way `interposeRaw` is the unchecked half of
+`interpose` — and `lift2`'s fallback is what keeps *that* honest.
+
+**What `sameCodeC` decides, and what it does not.** `sameCodeC : Code
+Code ⇒ Bool` is `sameCode` over `Code` values. It had to exist, because
+a functor returns `Code` and a law about a functor is a claim about
+`Code`; and it works on structure rather than text because `#dist:K`
+and `#fold:…` do not round-trip through `unparse` (`#` lexes as a
+comment). It decides strictly *more* than `sameCode`, for a reason we
+did not anticipate: `Code` is post-abstraction-elimination, so the
+binder `sameCode` refuses outright is already gone —
+`([(x -> x x)] ; getCode) ([dup] ; getCode) ; sameCodeC` is `true`
+where `[(x -> x x)] [dup] ; sameCode` is an error. It still stops at a
+**quotation** and a **row**, which is the next stage's work. Laws that
+had to be stated syntactically, with `eq?`, and labelled as such:
+
+- **transport of recursion**, `F(fix b) = fix (F b)` — `fix` takes a
+  quotation, so the comparison is spine-to-spine at a sample point;
+- any **image assertion about a higher-order program** — same reason;
+- anything needing `+` to be commutative or `Int` arithmetic to be
+  arithmetic, which is the older and permanent boundary of the free
+  category (`2 _ ; *` and `dup ; +`).
+
+**Natural transformations, the three readings** (recorded 2026-09-08,
+now partly cashed). (1) *Model homomorphisms* — `morphism Len :
+ListMonoid -> IntSum = len`, one generated law per slot, naturality
+finite because the base is free. Designed, not shipped: the generator
+is easy, the **verdict** is not (slots are recursive defs the
+normalizer sees as opaque, and a generated law has no sample supply).
+The sentence to keep: *naturality over a free category is finite — the
+generators suffice.* (2) *Harmlessness of instrumentation*
+(Dantas–Walker; the handler direction of Plotkin–Pretnar): for a
+functor `F` with discharge `ε : F(Σ) ⇒ Σ`, naturality `F(p) ; ε = ε ; p`
+says stripping the instrumentation changes no value. It holds for
+`Metered` with `ε = drop the fuel`; `install : Σ ⇒ Fuel Σ` is **not**
+natural, and that failed square IS the meter — the receipt on the arrow
+is the obstruction to naturality of `install`. (3) *Parametricity* —
+already the strongest guarantee available: a `∀a. List(a) ⇒ List(a)`
+word is natural in `a` by its type (Wadler), checked by nothing because
+it needs no check.
+
+**The limit, written down: naturality lives in a FIBRE.** `traced(p) ;
+ε = ε ; p` holds on values and fails on the log; an io `∀ρ. ρ ⇒ ρ`
+stage is not central, so it is not a transformation `Id ⇒ Id` even
+though its type says so — a pure one is, and is the identity.
+Transformations are stated between functors into the *same* fibre;
+crossing fibres needs a handler first (a grade-decrementing model
+morphism). Non-local functors get no generator check — they are not by
+generators — and stay sampled.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and
@@ -1769,7 +1909,15 @@ the cartesian lift of `reflect`; the fixpoint and iteration laws
 - **Elaboration can diverge**; fuel is a bound, not a proof.
 - The **stage-6 flagships lean on the row arc** (`=Shadow>` and
   friends assume rows); scope them down or sequence them after.
-- **`eq?` on Code is syntactic**; two α-equivalent spellings of one
-  rewrite differ until `sameCodeC` lands.
+- **`eq?` on Code is syntactic** — that has not changed, but
+  `sameCodeC` (2026-09-13) is now the semantic alternative wherever the
+  wiring fragment reaches. It does not reach a quotation or a row, so
+  every law about a higher-order program — transport of recursion is
+  the flagship — is still stated with `eq?` and labelled syntactic.
+- **`morphism` is designed and not built** (2026-09-13): the law
+  *generator* is straightforward and the freeness argument makes it
+  complete, but a generated square has no verdict — an instance's slots
+  are recursive defs the normalizer treats as opaque, and there is no
+  sample supply for a generated law. See the 2026-09-13 amendment.
 - The **image-tagging question above is open**, and the coeffect
   decision with it.

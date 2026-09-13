@@ -6,8 +6,8 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (**46 morphisms**, counted
-2026-09-12) and prove it spans everything else **in the language
+The design bet: keep the primitive set tiny (**48 morphisms**, counted
+2026-09-13) and prove it spans everything else **in the language
 itself**. A word keeps its place in the kernel only if it is a
 structure map of the doctrine — cartesian, coproduct, exponential,
 recursion — or if it touches the implementation (arithmetic, io,
@@ -209,6 +209,16 @@ bare `use` leaves.
     application spelled as scope: no new syntax, no parameter list, and
     a template called outside every instance scope is an error naming
     the theory (`examples/build.braid`).
+
+    Laws about *functors* are the same idea one level up. A functor's
+    output is `Code`, so `sameCodeC : Code Code ⇒ Bool` states them —
+    functoriality, identity preservation, the interaction of two
+    functors, and **idempotence**, `F(F p) = F p`, which is what makes
+    an optimizer an optimizer. Idempotence is a functor law and belongs
+    to a theory; *image membership*, `F(p) = p`, is a claim about one
+    particular program and is written beside that program — the two are
+    kept apart because the second only means anything when the first
+    holds (`examples/optimizer.braid`).
 12. **Effects are wires.** State, logs, readers, exceptions,
     nondeterminism — the whole effect zoo decomposes into structure
     the language already has: a threaded wire, a captured closure, the
@@ -278,6 +288,16 @@ bare `use` leaves.
     which functors built a word and every caller inherits it. Only a
     `use` can mint one — written by hand it is an error — which is what
     makes it evidence.
+
+    A **rule set** is the declared, once-checked case: `rules Opt =
+    dupInt => dup, twice => double` blesses each rewrite where it is
+    written, by *subsumption* — `q` may stand wherever `p` stands iff
+    `scheme(q) ≥ scheme(p)`, a rank-2 statement no `Fn` type can hold,
+    which is why it is a declaration and not a word. *Unification
+    blesses a call; subsumption blesses a rule.* The set applies
+    atomwise through quotations, rows and `fix` bodies, and `use Opt`
+    mints `=Opt>` on everything it rewrote — an optimizer you can audit
+    rather than one you have to trust (`examples/optimizer.braid`).
 15. **A file is a presentation, an import is the inclusion.**
     `import "geometry.braid"` puts one file's declarations — defs,
     types, resources, theories, instances, functors — in another file's
@@ -326,7 +346,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), an 886-case test suite, a full
+(typechecker, interpreter, REPL), a 924-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
