@@ -68,6 +68,7 @@ data ReplState = ReplState
   , rsTmpls    :: TemplateTable         -- templates awaiting an instance
   , rsModes    :: [Mode]     -- modes `:import` brought in
   , rsKWords   :: [(String, String)]   -- def -> the mode it was declared in
+  , rsBases    :: [BaseInstance]        -- instances of `Base` it imported
     -- a session cannot DECLARE a theory, a functor or a mode, but
     -- `:import` can bring them in, and then `use` must know them
   }
@@ -79,7 +80,7 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] [] [] [] [] [] [] []
+            [] SEnd [] [] [] [] [] [] [] [] []
 
 repl :: IO ()
 repl = do
@@ -159,7 +160,8 @@ baseOf st =
               (rsDatas st))
     { mbSlots = rsSlots st, mbFuncs = rsFuncs st
     , mbTheories = rsTheories st, mbTemplates = rsTmpls st
-    , mbModes = rsModes st, mbKWords = rsKWords st }
+    , mbModes = rsModes st, mbKWords = rsKWords st
+    , mbBases = rsBases st }
 
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
@@ -267,7 +269,7 @@ elabIn st src = do
   term0 <- parseProgram src
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
-                       (rsModes st) (rsKWords st))
+                       (rsModes st) (rsKWords st) (rsBases st) Nothing)
     (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -316,6 +318,7 @@ importLine st arg =
                     , rsTmpls    = modTemplates m
                     , rsModes    = modModes m
                     , rsKWords   = modKWords m
+                    , rsBases    = modBases m
                     }
               putStrLn $ "imported " ++ path ++ "   ("
                        ++ intercalate ", " (filter (not . null)
@@ -346,15 +349,16 @@ handleLine st line
           pure st { rsUse = [] }
         _ | (t : _) <- [ n | n <- names
                               , n `elem` map thName (rsTheories st) ] -> do
-              putStrLn $ "error: `use`: " ++ t ++ " is a theory, and only a \
-                         \def's own header may name one — that is what makes \
-                         \the def a template"
+              putStrLn $ "error: `use " ++ t ++ "` names a theory: `use` \
+                         \applies a functor, and a theory is not one — a def \
+                         \whose own header is `over " ++ t ++ "` is a \
+                         \template over it"
               pure st
           | Just bad <- firstUnknown names -> do
               putStrLn $ "error: `use`: " ++ bad ++ " is not a resource, \
                          \instance, functor or mode in scope (a session \
-                         \cannot declare theories, functors or modes — \
-                         \`:import` a file that does)"
+                         \cannot declare theories, instances, functors or \
+                         \modes — `:import` a file that does)"
               pure st
           | otherwise -> do
               putStrLn ("ambient: use " ++ unwords names
@@ -366,7 +370,8 @@ handleLine st line
       case [ n | n <- ns
                , not (any (\d -> dName d == n && dResource d) (rsDatas st))
                , n `notElem` map fst (rsSlots st)
-               , n `notElem` map fst (rsFuncs st) ] of
+               , n `notElem` map fst (rsFuncs st)
+               , n `notElem` map fst (rsBases st) ] of
         (n : _) -> Just n
         []      -> Nothing
 

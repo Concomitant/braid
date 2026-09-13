@@ -3,15 +3,19 @@
 # A rewrite is only safe if the word it puts IN is at least as general
 # as the word it takes OUT.  That property — `scheme(q) ≥ scheme(p)` —
 # is rank-2, so no `Fn` type can hold it and no call site can check it.
-# It is checked ONCE, where the rule is written, by the same routine
-# that checks an instance against its theory: `subsumes`.
+# It is checked ONCE, where the binding is written, by the routine that
+# checks any instance against its theory: `subsumes`.
 #
 #     unification blesses a call; subsumption blesses a rule.
 #
-# So a rule set is a DECLARATION.  `rules Opt = …` declares a word
-# `Opt : Code ⇒ Code` and a functor of the same name, and `use Opt`
-# applies it and mints `=Opt>` on everything it rewrote — which is what
-# makes an optimizer auditable rather than merely convenient.
+# So an optimizer IS AN INSTANCE.  `Base` is the ambient presentation —
+# every word in scope, each with its own scheme as the slot's declared
+# type — and `instance Opt : Base = …` is a PARTIAL model of it: the
+# generators it names get new images, and every generator it does not
+# name maps to itself.  It declares a word `Opt : Code ⇒ Code` for
+# runtime use, and `use Opt` renames and mints `=Opt>` on everything it
+# rewrote — which is what makes an optimizer auditable rather than
+# merely convenient.
 
 # ---------------------------------------------------------------------
 # 1. Four words, pairwise interchangeable in four different ways.
@@ -23,38 +27,42 @@ def twice    = dup >> +              # Int ⇒ Int
 def double   = 2 _ >> *              # Int ⇒ Int
 
 # ---------------------------------------------------------------------
-# 2. The rule set.  Each rule is blessed at this line, not at its uses.
+# 2. The instance.  Each binding is blessed at this line, not at its uses.
 # ---------------------------------------------------------------------
-rules Opt = dupSwap => dup, copyDrop => id, dupInt => dup, twice => double
+instance Opt : Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
 
 # The refusals, each with its reason.  Uncomment one to see it:
 #
-#   rules No = dup => dupInt
+#   instance No : Base = dup = dupInt
 #     dup is used at a0 ⇒ a0 a0 but dupInt is Int ⇒ Int Int — the
-#     replacement is narrower, so a Str program would stop typing.
+#     image is narrower, so a Str program would stop typing.
 #
-#   rules No = two => dup            (with `def two = drop 1 1`)
+#   instance No : Base = two = dup   (with `def two = drop 1 1`)
 #     two is used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0 — this one
 #     would RUN on an Int, and narrows `a ⇒ Int` to `Int ⇒ Int`
 #     everywhere else.  The parametricity message refuses it.
 #
-#   rules No = quiet => noisy        (with quiet : a ⇒ •, noisy : a =IO> •)
+#   instance No : Base = quiet = noisy   (quiet : a ⇒ •, noisy : a =IO> •)
 #     the expected type fixes the grade; this code must stay pure.
 #     The other direction PASSES: ∅ is the bottom of the grade
-#     semilattice, so a pure replacement fits under an io pattern.
+#     semilattice, so a pure image fits under an io generator.
+#
+# An instance of `Base` whose images are PROVABLY EQUAL to the
+# generators is an OPTIMIZER; one whose images merely satisfy the laws
+# is a REINTERPRETATION — a dialect.  Section 3 is exactly that line.
 
 # ---------------------------------------------------------------------
 # 3. What is PROVED, and what is merely typed.
 #
-# A rule's type check says the rewrite keeps programs typing.  It does
-# NOT say the rewrite keeps them MEANING the same thing — that is a law,
+# A binding's type check says the rewrite keeps programs typing.  It
+# does NOT say it keeps them MEANING the same thing — that is a law,
 # and `sameCode` decides it for the wiring fragment: programs built from
 # id/_/dup/drop/swap/pass, composition and juxtaposition, over words
 # treated as uninterpreted.  Two of our four rules are inside it.
 # ---------------------------------------------------------------------
 def proved = ("proved" | "NOT proved — see below") >> merge
 
-"-- the rules, as laws --" >> print
+"-- the bindings, as laws --" >> print
 [dupSwap]  [dup]    >> sameCode >> proved >> print   # proved: cocommutativity
 [copyDrop] [id]     >> sameCode >> proved >> print   # proved: the counit law
 [dupInt]   [dup]    >> sameCode >> proved >> print   # NOT proved
@@ -80,7 +88,7 @@ def poly =
 "-- use Opt --" >> print
 5 >> poly >> print                       # 100
 
-# A rule fires wherever an atom stands, quotations included.
+# A binding fires wherever an atom stands, quotations included.
 def mapped =
     use Opt
     [dupInt >> +] ... >> map

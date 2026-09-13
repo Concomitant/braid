@@ -99,10 +99,10 @@ instance Counts : Collector(Counter, Int) =
     seed   = 0 ; Counter
     unwrap = unCounter
 
-def collected = use Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
+def collected = over Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
 
 def collectCount = use Counts ; collected
-# collectCount : Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩
+# collectCount : Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩
 
 def tick =
     use Counter

@@ -347,11 +347,11 @@ moduleTypeTests =
     -- STAGE 5b: a rule set declares a WORD of its own name and a
     -- FUNCTOR of that name.  `use Opt` mints `=Opt>` like any other
     -- scope, and unions with `Rec` when the body ties a knot.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Opt = dupInt => dup\nOpt",
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\nOpt",
      "Code ⇒ Code")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Opt = dupInt => dup\n\
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\n\
      \def p =\n    use Opt\n    dupInt\n    +\np", "Int =Opt> Int")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Opt = dupInt => dup\n\
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\n\
      \def sumTo =\n    use Opt\n\
      \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
      \    fix ...\n    ev\nsumTo", "Int Int =Opt Rec> Int")
@@ -693,42 +693,42 @@ moduleTypeTests =
     -- `use`, resolution as a renaming at elaboration.  Generic code is
     -- written once; only the scope differs.
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance IntSum : Monoid(Int) =\n    unit = 0\n    op   = +\ndef total = use IntSum ; [op] unit ... ; foldExp\ntotal",
-     "Intⁿ⁰ ⇒ Int")
+     "Intⁿ⁰ =IntSum> Int")
     -- an instance's carrier is a full type EXPRESSION, not a bare name.
     -- Every structure worth having a theory of is parameterized, so
     -- scraping identifiers out of the head read `T(List(Int))` as two
     -- arguments and rejected it.
   , ("theory Wrap(a) =\n    wrap : a ⇒ a\ninstance L : Wrap(List(Int)) =\n    wrap = id\ndef w = use L ; wrap\nw",
-     "List(Int) ⇒ List(Int)")
+     "List(Int) =L> List(Int)")
   , ("theory Wrap(a) =\n    wrap : a ⇒ a\ninstance F : Wrap(Fn⟨Int ⇒ Int⟩) =\n    wrap = id\ndef w = use F ; wrap\nw",
-     "Fn⟨Int ⇒ Int⟩ ⇒ Fn⟨Int ⇒ Int⟩")
+     "Fn⟨Int ⇒ Int⟩ =F> Fn⟨Int ⇒ Int⟩")
     -- a slot body may call the module's OWN defs: a theory declaration
     -- is a signature, so slots are forward-declared and the two
     -- directions (def calls slot, slot calls def) both work
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\ninstance S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\ntotal",
-     "Intⁿ⁰ ⇒ Int")
+     "Intⁿ⁰ =S> Int")
     -- STAGE 5a, item 0: SLOT-LOCAL VARIABLES.  A slot may name variables
     -- the theory does not declare, and is generalized over its own —
     -- `box : b ⇒ a` under `theory Wrap(a)` is `∀b. b ⇒ a`.  Nothing in
     -- the checker changed: `declaredSlots` already generalized the slot
     -- and `checkInstance` already compared bodies by subsumption.
   , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = toStr\ndef w = use W ; box\nw",
-     "a0 ⇒ Str")
+     "a0 =W> Str")
     -- a `...` in a slot of a theory with no stack parameter is a
     -- slot-local STACK, so a theory can ask for `∀ρ. ρ ⇒ ρ`
   , ("theory Endo =\n    around : ... ⇒ ...\ninstance E : Endo =\n    around = ...\ndef a2 = use E ; around\na2",
-     "ρ0 ⇒ ρ0")
+     "ρ0 =E> ρ0")
     -- STAGE 5a, item 1: CONSTRUCTOR PARAMETERS.  `k` is written with its
     -- arity visible (`k(_, _)`), applied in the slots, and substituted
     -- away at the instance — so what comes out is an ordinary type and
     -- inference never meets a constructor variable.
   , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = use P ; thenP\nt",
-     "K(a0, a1) K(a1, a2) ⇒ K(a0, a2)")
+     "K(a0, a1) K(a1, a2) =P> K(a0, a2)")
     -- the substitution reaches inside an Fn type in a slot too
   , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = use P ; arrP\nar",
-     "Fn⟨a0 ⇒ a1⟩ ⇒ K(a0, a1)")
+     "Fn⟨a0 ⇒ a1⟩ =P> K(a0, a1)")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
-     "Strⁿ⁰ ⇒ Str")
+     "Strⁿ⁰ =StrCat> Str")
     -- the grade is inferred through defs, not read off a name
   , ("def shout = toStr >> print\nshout",          "a0 =IO> •")
   , ("def quiet = toStr >> drop\nquiet",           "a0 ⇒ •")
@@ -786,24 +786,25 @@ moduleTypeTests =
     -- TEMPLATES: one body, two instantiations, two PRINCIPAL types.
     -- Nothing is dispatched and nothing is passed; the expansion is
     -- re-inferred where it lands, so there is no rank-1 wall.
-  , (tmplMod ++ "use IntSum ; fold1", "Intⁿ⁰ ⇒ Int")
-  , (tmplMod ++ "use StrCat ; fold1", "Strⁿ⁰ ⇒ Str")
+  , (tmplMod ++ "use IntSum ; fold1", "Intⁿ⁰ =IntSum> Int")
+  , (tmplMod ++ "use StrCat ; fold1", "Strⁿ⁰ =StrCat> Str")
     -- a template calling a template: the instantiating scope
     -- instantiates the whole chain
-  , (tmplMod ++ "use IntSum ; quad", "Int ⇒ Int")
-  , (tmplMod ++ "use StrCat ; quad", "Str ⇒ Str")
-    -- through a def, and nested scopes resolve innermost-first
+  , (tmplMod ++ "use IntSum ; quad", "Int =IntSum> Int")
+  , (tmplMod ++ "use StrCat ; quad", "Str =StrCat> Str")
+    -- through a def, and nested scopes resolve innermost-first — and
+    -- BOTH scopes are on the receipt, because both were entered
   , (tmplMod ++ "def a = use IntSum ; twice\ndef b = use StrCat ; twice\n\
-     \def c = use IntSum ; use StrCat ; twice\nc", "Str ⇒ Str")
+     \def c = use IntSum ; use StrCat ; twice\nc", "Str =IntSum StrCat> Str")
     -- the handler: an effectful arrow is a resource + a macro + a
     -- theory, and this is the macro half.  `=Log>` is discharged.
   , (handlerMod ++ "collectLog", "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
     -- and generically: a template over a theory naming the two words a
     -- handler needs, at two different resources
   , (collectorMod ++ "use Logs ; collected",
-     "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
+     "Fn⟨ρ0 =Log> ρ1⟩ =Logs> Fn⟨ρ0 ⇒ Str ρ1⟩")
   , (collectorMod ++ "use Counts ; collected",
-     "Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩")
+     "Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩")
     -- MODES (5c).  THE DISPLAY FOLD: at the base a K-word is
     -- `• ⇒ Arr(Int, Int)` carrying `K`, and a carrier the label
     -- owns folds onto the glyph exactly as a threaded resource does.
@@ -822,9 +823,40 @@ moduleTypeTests =
     -- the receipt is an ordinary label: it unions with io by the same
     -- semilattice as everything else
   , (modeMod ++ "def obs = use Funcs ; chain ; observe\nobs ; print",
-     "• =IO K> •")
+     "• =Funcs IO K> •")
     -- a sealed mode: same fold, and no exit to fold back through
   , (sealedMod ++ "guarded", "Int =Safe> Int")
+    -- STAGE 5c½.  `over K` — a HAND-BUILT word of a mode.  It applies
+    -- nothing (no `arrP`, no `thenP`) and so MINTS nothing: the def
+    -- displays as the carrier it is, unfolded, because `=K>` is
+    -- provenance and this code did not go through the functor.
+    -- Membership is the carrier in the type plus the K-word table.
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over K ; hand\nbyHand",
+     "• ⇒ Arr(Int, Int)")
+    -- and it composes under the marker like any other word of K — THAT
+    -- composite went through the functor, so it carries K and folds
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over K ; hand\n\
+     \def mix = use K ; byHand ; add1\nmix", "Int =K> Int")
+    -- a base def that merely PRODUCES a carrier is not a K-word, and
+    -- its type is the same as `byHand`'s: the difference is the written
+    -- header, never an inferred type.  Used inside `use K` it is
+    -- `arrP`ed, which is a type error, not a silent embedding.
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\nhand", "• ⇒ Arr(Int, Int)")
+    -- `over T` is the template header; the def's own type is the
+    -- instantiation's, and `over` leaves no receipt of its own here
+    -- either — the `use IntSum` is what minted
+  , (tmplMod ++ "use IntSum ; twice", "Int =IntSum> Int")
+    -- STAGE 5c½: EVERY `use` MINTS.  An instance of `Base` leaves its
+    -- name on everything it renamed, exactly as a functor does.
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\n\
+     \def p = use Opt ; dupInt ; +\np", "Int =Opt> Int")
+    -- it recurses into quotations, and the receipt rides out with them
+  , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
+     \instance Opt : Base = twice = double\n\
+     \def q = use Opt ; [twice] ... ; map\nq", "List(Int) =Opt> List(Int)")
+    -- the generated word is an ordinary `Code ⇒ Code`, for `[Opt]`
+  , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
+     \instance Opt : Base = twice = double\nOpt", "Code ⇒ Code")
   ]
 
 -- TEMPLATES (stage 5a).  A def whose `use` names a THEORY is a body
@@ -842,9 +874,9 @@ tmplMod =
   \instance StrCat : Monoid(Str) =\n\
   \    unit = \"\"\n\
   \    op   = cat\n\
-  \def fold1 = use Monoid ; [op] unit ... ; foldExp\n\
-  \def twice = use Monoid ; dup ; op\n\
-  \def quad  = use Monoid ; twice ; twice\n"
+  \def fold1 = over Monoid ; [op] unit ... ; foldExp\n\
+  \def twice = over Monoid ; dup ; op\n\
+  \def quad  = over Monoid ; twice ; twice\n"
 
 -- the handler of stage 5a item 3: seed the resource, run the program,
 -- unroll the wire — the arrow loses `=Log>` across it
@@ -869,7 +901,7 @@ collectorMod =
   \instance Counts : Collector(Counter, Int) =\n\
   \    seed   = 0 ; Counter\n\
   \    unwrap = unCounter\n\
-  \def collected = use Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])\n"
+  \def collected = over Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])\n"
 
 -- a trivial functor: the identity on Code.  Enough to ask what `use`
 -- leaves behind, without a rewrite getting in the way.
@@ -1741,7 +1773,7 @@ evalTests =
      \def collectCount = use Counts ; collected\n\
      \[tick] ; collectCount ; _ 7 ; ev\nprint print", ["1", "49"], "")
 
-    -- STAGE 5b: RULE SETS.  `rules Opt = p => q` declares a word
+    -- STAGE 5b: RULE SETS.  `instance Opt : Base = p = q` declares a word
     -- `Opt : Code ⇒ Code` and a functor of the same name; `use Opt`
     -- applies it atomwise and mints `=Opt>`.  The rule itself is
     -- blessed ONCE, at the declaration, by `subsumes` — unification
@@ -1749,7 +1781,7 @@ evalTests =
   , (ruleMod ++ "def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
     -- the inline and the block form declare the same set
   , ("def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
-     \rules Opt\n    dupInt => dup\n    twice => double\n\
+     \instance Opt : Base\n    dupInt = dup\n    twice = double\n\
      \def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
     -- a rule fires inside a QUOTATION: the engine recurses into quotes,
     -- rows (residual flag carried) and groups
@@ -1766,7 +1798,7 @@ evalTests =
      ["6"], "")
     -- a PURE replacement under an IO pattern passes: ∅ is the bottom of
     -- the grade semilattice, so subeffecting comes free with `subsumes`
-  , ("def noisy = toStr >> print\ndef quiet = drop\nrules G = noisy => quiet\n\
+  , ("def noisy = toStr >> print\ndef quiet = drop\ninstance G : Base = noisy = quiet\n\
      \def prog =\n    use G\n    noisy\n\"ran\" >> print\n5 >> prog", ["ran"], "")
     -- `lift2` applies the same word at RUNTIME, with the program as its
     -- own witness and its own fallback
@@ -1845,7 +1877,7 @@ evalTests =
 ruleMod :: String
 ruleMod =
   "def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
-  \rules Opt = dupInt => dup, twice => double\n"
+  \instance Opt : Base = dupInt = dup, twice = double\n"
 
 optimizerTheory :: String
 optimizerTheory =
@@ -2100,16 +2132,20 @@ moduleFailTests =
      \instance IntPt : Pointed(Int) =\n    pt = 9\n\
      \def bad = use IntPt ; fold1\n1 2 ; bad ; print",
      "fold1 needs an instance of Monoid in scope")
-    -- a theory may be named only in a def's OWN header — that is what
-    -- makes the def a template
-  , (tmplMod ++ "def f =\n    1\n    use Monoid\n    op\n1 ; f ; print",
-     "`use Monoid` names a theory, and only a def's own header may")
-    -- one instance is waited for, so at most one theory is named
+    -- `over` declares what the def IS, so it may only be its own header
+  , (tmplMod ++ "def f =\n    1\n    over Monoid\n    op\n1 ; f ; print",
+     "`over Monoid` may only be a def's own header")
+    -- and `use` no longer takes a theory at all: it applies a functor,
+    -- and a theory is not one
+  , (tmplMod ++ "def f = use Monoid ; op\n1 ; print",
+     "`use Monoid` names a theory: `use` applies a functor, and a theory \
+     \is not one — write `over Monoid` to make this def a template")
+    -- one instance is waited for, so exactly one name is `over`ed
   , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
-     \def f = use Monoid Pointed ; op\n1 ; print",
-     "a `use` header may name at most one theory")
+     \def f = over Monoid Pointed ; op\n1 ; print",
+     "an `over` header names exactly one theory")
     -- expansion is inlining, so a template cannot recurse
-  , (tmplMod ++ "def loopy = use Monoid ; dup ; op ; loopy\n\
+  , (tmplMod ++ "def loopy = over Monoid ; dup ; op ; loopy\n\
      \def go = use IntSum ; loopy\n1 ; go ; print",
      "template loopy calls itself")
     -- `@` IS THE COMPILER'S (stage 5a item 2a).  A slot's generated
@@ -2122,58 +2158,91 @@ moduleFailTests =
      "is the compiler's spelling of a slot")
     -- a template shares the def namespace
   , (tmplMod ++ "def fold1 = dup\n1 ; print", "Duplicate definition: fold1")
-    -- STAGE 5b: RULE DECLARATIONS.  `q` may stand wherever `p` stands
-    -- iff scheme(q) >= arrow(p).  That is rank-2, so no `Fn` type holds
-    -- it and no call site checks it: it is checked ONCE, here, by the
-    -- routine `checkInstance` and `runAs` already share.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Bad = dup => dupInt\n1 >> print",
-     "rules Bad: `dup => dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nrules Bad = dup => dupInt\n1 >> print",
-     "A rule may only GENERALIZE")
-    -- the parametricity case: `two => dup` would RUN on an Int and
+    -- STAGE 5b/5c½: INSTANCES OF `Base`.  `q` may stand wherever `p`
+    -- stands iff scheme(q) >= arrow(p).  That is rank-2, so no `Fn` type
+    -- holds it and no call site checks it: it is checked ONCE, here, by
+    -- the routine `checkInstance` and `runAs` already share.
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Bad : Base = dup = dupInt\n1 >> print",
+     "instance Bad : Base: `dup = dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Bad : Base = dup = dupInt\n1 >> print",
+     "A binding may only GENERALIZE")
+    -- the parametricity case: `two = dup` would RUN on an Int and
     -- narrows `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else
-  , ("def two = drop 1 1\nrules Bad = two => dup\n1 >> print",
-     "rules Bad: `two => dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
-  , ("def two = drop 1 1\nrules Bad = two => dup\n1 >> print",
+  , ("def two = drop 1 1\ninstance Bad : Base = two = dup\n1 >> print",
+     "instance Bad : Base: `two = dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
+  , ("def two = drop 1 1\ninstance Bad : Base = two = dup\n1 >> print",
      "must stay parametric in it")
-    -- GRADES ride along by the semilattice order: an io replacement
-    -- under a pure pattern is refused (the other direction passes)
-  , ("def noisy = toStr >> print\ndef quiet = drop\nrules Bad = quiet => noisy\n1 >> print",
-     "rules Bad: `quiet => noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
-  , ("def noisy = toStr >> print\ndef quiet = drop\nrules Bad = quiet => noisy\n1 >> print",
+    -- GRADES ride along by the semilattice order: an io image under a
+    -- pure generator is refused (the other direction passes)
+  , ("def noisy = toStr >> print\ndef quiet = drop\ninstance Bad : Base = quiet = noisy\n1 >> print",
+     "instance Bad : Base: `quiet = noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
+  , ("def noisy = toStr >> print\ndef quiet = drop\ninstance Bad : Base = quiet = noisy\n1 >> print",
      "the expected type fixes the grade; this code must stay pure")
     -- a slot is not a word outside `use`, so it is neither side of a
-    -- rule; nor is a theory, nor a template (which has no type until an
-    -- instance supplies one)
+    -- binding; nor is a theory, nor a template (which has no type until
+    -- an instance supplies one)
   , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \rules Bad = op => +\n1 >> print",
+     \instance Bad : Base = op = +\n1 >> print",
      "op is a slot of theory Mon, and a slot is not a word outside `use`")
   , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \rules Bad = Plus@op => +\n1 >> print",
+     \instance Bad : Base = Plus@op = +\n1 >> print",
      "is the compiler's spelling of a slot")
   , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \rules Bad = Mon => +\n1 >> print",
-     "rules Bad: Mon is a theory, not a word")
+     \instance Bad : Base = Mon = +\n1 >> print",
+     "instance Bad : Base: Mon is a theory, not a word")
   , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \def twice = use Mon ; op\nrules Bad = twice => +\n1 >> print",
+     \def twice = over Mon ; op\ninstance Bad : Base = twice = +\n1 >> print",
      "twice is a template over theory Mon")
-  , ("rules Bad = nowhere => dup\n1 >> print",
-     "rules Bad: nowhere is not defined at this point")
-    -- the shape of a rule: v1 rewrites one WORD to one word
-  , ("rules Bad = dup dup => dup\n1 >> print",
-     "a v1 rule rewrites one WORD to one word")
-  , ("rules Bad = dup\n1 >> print", "is missing `=>` (a rule reads `p => q`)")
-  , ("rules Bad\n1 >> print", "rules Bad declares no rules")
-  , ("rules Bad = dup => swap, dup => drop\n1 >> print",
-     "two rules rewrite `dup`")
-  , ("rule Bad = dup\n1 >> print", "Unknown primitive: rule")
-    -- a rule set is a functor, and shares the functor namespace
-  , ("def idF = (c -> c)\nfunctor Opt = idF\nrules Opt = dup => dup\n1 >> print",
-     "Duplicate functor declaration: Opt")
+  , ("instance Bad : Base = nowhere = dup\n1 >> print",
+     "instance Bad : Base: nowhere is not defined at this point")
+    -- the shape of a binding: v1 sends one WORD to one word
+  , ("instance Bad : Base = dup dup = dup\n1 >> print",
+     "a v1 binding sends one WORD to one word")
+  , ("instance Bad : Base = dup\n1 >> print",
+     "is missing `=` (a binding reads `p = q`)")
+  , ("instance Bad : Base\n1 >> print", "instance Bad : Base: no bindings")
+  , ("instance Bad : Base = dup = swap, dup = drop\n1 >> print",
+     "two bindings give `dup` an image")
+    -- STAGE 5c½: `over` names a theory or a mode, and nothing else.
+    -- Each other kind is refused by kind, with the word to write.
+  , (modeMod ++ "def bad = over Funcs ; add1\n1 ; print",
+     "`over Funcs` names an instance of theory Arrow, and an instance is \
+     \a MODEL of a theory, not a theory")
+  , (modeMod ++ "def idF = (c -> c)\nfunctor Same = idF\n\
+     \def bad = over Same ; add1\n1 ; print",
+     "`over Same` names a functor, and a functor is applied to a body, \
+     \not inhabited by one.  Write `use Same`.")
+  , (modeMod ++ "resource Log = Str\ndef bad = over Log ; add1\n1 ; print",
+     "`over Log` names a resource, and a resource is threaded through a \
+     \body.  Write `use Log`.")
+  , (modeMod ++ "def bad = over Nope ; add1\n1 ; print",
+     "`over Nope` names nothing declared at this point")
+  , ("def dupInt = dup\ninstance Opt : Base = dupInt = dup\n\
+     \def bad = over Opt ; dupInt\n1 ; print",
+     "`over Opt` names an instance of Base — a rewriting of the ambient \
+     \presentation, which is applied, not inhabited.  Write `use Opt`.")
+    -- the K-word ascription is a WRITTEN expectation, checked against
+    -- the arrow: one carrier out of nothing, or it is refused
+  , (modeMod ++ "def bad = over K ; add1\n1 ; print",
+     "`over K`: a word of a mode builds one Arr out of nothing — \
+     \`• ⇒ Arr(a, b)` — but bad is Int ⇒ Int")
+  , (modeMod ++ "def bad = over K ; 5\n1 ; print",
+     "Take the inputs inside the carrier (arrP embeds a program), or \
+     \drop the header and let `use K` transport the def.")
+    -- the keyword that is gone, and where it went
+  , ("rules Bad = dup => dup\n1 >> print",
+     "`rules` is gone: a rule set is a PARTIAL INSTANCE of the ambient \
+     \presentation, so it is written `instance Name : Base = p = q")
+    -- `Base` is the ambient presentation and is not written down
+  , ("theory Base =\n    op : a \8658 a\n1 >> print",
+     "`Base` is the ambient presentation and may not be declared")
+    -- an instance of `Base` shares one namespace with functors and modes
+  , ("def idF = (c -> c)\nfunctor Opt = idF\ninstance Opt : Base = dup = dup\n1 >> print",
+     "Duplicate instance declaration: Opt")
     -- `sameCodeC` reports outside the fragment exactly as `sameCode`
     -- does — they are one procedure — and a `fix` body that applies its
     -- self wire is where the boundary now falls
-  , ("def dupSwap = dup >> swap\nrules Opt = dupSwap => dup\n\
+  , ("def dupSwap = dup >> swap\ninstance Opt : Base = dupSwap = dup\n\
      \def slow = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) \
      \>> (dupSwap >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]\n\
      \(slow >> getCode >> Opt) (slow >> getCode) >> sameCodeC >> drop >> 1 >> print",

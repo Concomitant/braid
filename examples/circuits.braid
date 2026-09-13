@@ -190,6 +190,38 @@ def pair    = easy easy
 def pairOut = use Circuits ; pair ; thenP ; observe
 pairOut ; print             # 40 — the same composite, spelled by hand
 
+# ---- a carrier built BY HAND: `over Circ` -----------------------------
+# `sumFrom` is the whole reason the Arrow exists — a stateful circuit
+# that is not `arrP` of anything.  Before 5c½ a def like `0 ; sumFrom`
+# was STRANDED: it produces a `Circuit(Int, Int)` at the base, but the
+# elaborator would not treat it as a word of the mode, because doing so
+# would mean reading an INFERRED type to decide what a word is.
+#
+# `over Circ` is the written declaration that closes it.  It applies
+# nothing — no `arrP`, no `thenP`, no transport — it says "this def is a
+# morphism of Circ", and the elaborator CHECKS the claim against the
+# def's arrow: a word of a mode builds one carrier out of nothing.  The
+# claim is written, the check is mechanical, and the def joins the
+# K-word table beside the ones `use Circ` transported.
+def sum0 = over Circ ; 0 ; sumFrom
+#   sum0 : • =Rec> Circuit(Int, Int) — UNFOLDED, and no `Circ` on it.
+#
+# That is the honest reading and it is worth the sentence.  A receipt is
+# PROVENANCE: `=Circ>` says this code went through the functor.  `sum0`
+# did not — it is a circuit no base program denotes, which is the whole
+# reason Arrows exist — so claiming the label would claim membership in
+# the functor's IMAGE, which is a strictly stronger thing.  `over` mints
+# nothing, because `over` applies nothing; only a `use` mints, and every
+# `use` does.  Membership in Circ is carried by the carrier in the type
+# and the entry in the K-word table.
+#
+# Under the marker it composes like any other word of the category, and
+# THAT composite went through the functor, so it folds:
+def running    = use Circ ; sum0 ; dbl
+#   running : Int =Circ Rec> Int
+def runningOut = use Circuits ; running ; observe
+runningOut ; print          # 20 — 3 ⇒ 3 ⇒ 6, then 4 ⇒ 7 ⇒ 14
+
 # ---- the corollary: a SEALED mode -------------------------------------
 # Exits are the only way out, so a theory that declares none is sealed:
 # every stage inside the scope becomes `arrP` and the only word that

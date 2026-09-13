@@ -39,15 +39,18 @@ instance StrCat : Monoid(Str) =
     sample = "x"
 
 # ---- generic code, written once --------------------------------------
-# A def whose `use` names the THEORY is a TEMPLATE: its body waits for an
-# instance, and is not a def at all until one arrives. A def whose `use`
-# names an INSTANCE supplies one — the body is expanded there, renamed by
-# that instance, and re-inferred there.
-def fold1 = use Monoid ; [op] unit ... ; foldExp
+# A def whose header is `over THEORY` is a TEMPLATE: it is a morphism of
+# the theory, its body waits for an instance, and it is not a def at all
+# until one arrives. A def whose `use` names an INSTANCE supplies one —
+# the body is expanded there, renamed by that instance, and re-inferred
+# there.  `over` declares; `use` applies.
+def fold1 = over Monoid ; [op] unit ... ; foldExp
 
 # so each instantiation has its OWN principal type — `total` is
-# `Intⁿ⁰ ⇒ Int` and `joined` is `Strⁿ⁰ ⇒ Str` — with no dictionary
-# passed and no rank-1 wall met.
+# `Intⁿ⁰ =IntSum> Int` and `joined` is `Strⁿ⁰ =StrCat> Str` — with no
+# dictionary passed and no rank-1 wall met.  The label is the scope's
+# RECEIPT: every `use` mints, so the arrow records which model read the
+# template.  `over Monoid` mints nothing — it applied nothing.
 def total  = use IntSum  ; fold1
 def prod   = use IntProd ; fold1
 def joined = use StrCat  ; fold1

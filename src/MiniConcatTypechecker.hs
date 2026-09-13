@@ -1187,6 +1187,14 @@ data Term
                           -- the elaborator (`elabUse`), which runs
                           -- between parse and infer.  This node never
                           -- reaches inference.
+  | Over [String] Term    -- `over X` — a def's own header, declaring what
+                          -- the def IS: a morphism of theory X (a
+                          -- TEMPLATE, whose body waits for an instance)
+                          -- or of mode X (a hand-built K-word).  It
+                          -- applies nothing — that is `use`'s job — so
+                          -- the elaborator consumes the header and
+                          -- leaves the body exactly as written.  Like
+                          -- `Use`, it never reaches inference.
   | Alts [Term] Bool      -- (p₁ | … | pₙ [| ---]): code row — the sum
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
@@ -1440,6 +1448,9 @@ parseProgramToks toks =
     -- `use R1 R2` opens an AMBIENT SCOPE, taking the rest of the scope
     -- as its body exactly as the binders do
     (TokIdent "use" : ts) | Just (rs, r) <- usePrefix ts -> mkUse rs r
+    -- `over X` is the other header word: it opens no scope and applies
+    -- nothing, it says what this def is a morphism OF
+    (TokIdent "over" : ts) | Just (rs, r) <- usePrefix ts -> mkOver rs r
     -- a leading arrow names the wires this scope was handed
     (TokArrow : ts) -> mkName ts
     _ ->
@@ -1457,6 +1468,9 @@ parseProgramToks toks =
     loop acc (TokNewline : rest)
       | (TokIdent "use" : ts) <- rest, Just (rs, r) <- usePrefix ts = do
           (u, r') <- mkUse rs r
+          Right (Seq acc u, r')
+      | (TokIdent "over" : ts) <- rest, Just (rs, r) <- usePrefix ts = do
+          (u, r') <- mkOver rs r
           Right (Seq acc u, r')
       | (TokArrow : ts) <- rest = do
           (nm, r') <- mkName ts
@@ -1520,20 +1534,41 @@ parseProgramToks toks =
     isUseTok (TokIdent n) = n /= "_"
     isUseTok _            = False
 
+    -- the body of a header word: everything after the stage break.  One
+    -- routine, because `use` and `over` take their body the same way and
+    -- differ only in what they then do with it.
+    headerBody word noBody rest =
+      case rest of
+        (TokArrow : more)   -> Right more
+        (TokSeq : more)     -> Right more
+        (TokNewline : more) -> Right more
+        (t : _) | not (endsScope (t : [])) ->
+          Left $ "'" ++ word ++ " …' must be followed by its body (a \
+                 \newline, ';' or '->'), got: " ++ show t
+        _ -> Left $ "'" ++ word ++ " …' ends its scope: " ++ noBody
+
     mkUse names rest = do
       case [ n | (n, i) <- zip names [0 :: Int ..], n `elem` take i names ] of
         (n : _) -> Left $ "Duplicate resource in `use`: " ++ n
         []      -> Right ()
-      bodyToks <- case rest of
-        (TokArrow : more)   -> Right more
-        (TokSeq : more)     -> Right more
-        (TokNewline : more) -> Right more
-        r | endsScope r -> Left "'use …' ends its scope: there is no body \
-                                \for the resources to be ambient in"
-        (t : _) -> Left $ "'use …' must be followed by its body (a newline, \
-                          \';' or '->'), got: " ++ show t
+      bodyToks <- headerBody "use" "there is no body for the resources to \
+                                   \be ambient in" rest
       (body, rest') <- parseProgramToks bodyToks
       Right (Use names body, rest')
+
+    -- `over X ; body` reads exactly as `use` does — one header word, the
+    -- rest of the scope as its body — so the two are one shape and the
+    -- difference is entirely in what the elaborator does with it.
+    mkOver names rest = do
+      case names of
+        [_] -> Right ()
+        _   -> Left $ "`over " ++ unwords names ++ "`: an `over` header "
+                   ++ "names exactly one theory (making this def a "
+                   ++ "template) or one mode (making it a K-word)"
+      bodyToks <- headerBody "over" "there is nothing for it to be the \
+                                    \morphism of" rest
+      (body, rest') <- parseProgramToks bodyToks
+      Right (Over names body, rest')
 
     slotOf (TokIdent "_") = Right Nothing
     slotOf (TokIdent n)   = Right (Just n)
@@ -2990,6 +3025,9 @@ infer :: Env -> Term -> Infer (Arrow, [Constraint])
 infer _   (Use _ _)      = pure ( arrPure SEnd SEnd
                                 , [CFail "`use` reached inference \
                                     \unelaborated (internal)"] )
+infer _   (Over _ _)     = pure ( arrPure SEnd SEnd
+                                , [CFail "`over` reached inference \
+                                    \unelaborated (internal)"] )
 infer env p@(Prim _)     = inferOperand env True p
 infer env q@(Quote _)    = inferOperand env True q
 infer env o@(OpenAbs {}) = inferOperand env True o
@@ -3569,6 +3607,7 @@ primsIn (OpenAbs slots _ t) =
   [ n | n <- primsIn t, n `notElem` [ x | Just x <- slots ] ]
 primsIn (Alts comps _)  = concatMap primsIn comps
 primsIn (Use _ b)      = primsIn b
+primsIn (Over _ b)     = primsIn b
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
@@ -3699,7 +3738,22 @@ data ElabCtx = ElabCtx
   , ecThs   :: [String]          -- theory names, so `use T` is read right
   , ecModes :: [Mode]              -- declared modes
   , ecKWords :: [(String, String)] -- def name -> the mode it was declared in
+  , ecBases :: [BaseInstance]      -- partial instances of the ambient
+                                   -- presentation: word -> its image
+  , ecSelf  :: Maybe String        -- the instance this def is a COMPONENT
+                                   -- of, if any: its own `use` resolves
+                                   -- slot names and mints nothing, because
+                                   -- a model does not apply itself
   }
+
+-- `instance Opt : Base = dupInt = dup` — a PARTIAL instance of the
+-- ambient presentation.  `Base` is the theory whose generators are every
+-- word in scope, each with its own scheme as the slot's declared type;
+-- a binding names a generator and gives its image; every generator not
+-- named maps to itself.  So the table is the bindings, and `use Opt` is
+-- the same renaming `use Inst` performs — with the image a word that
+-- already exists, so no slot def is generated.
+type BaseInstance = (String, [(String, String)])
 
 -- What a `use` scope needs to know about an instance: the THEORY it
 -- models, and the slot names that rename to it.  The theory is what
@@ -3716,7 +3770,7 @@ type SlotTable = [(String, (String, [String]))]
 type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
-elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] []
+elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] [] [] Nothing
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -3852,9 +3906,9 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
       -- fully renamed, fully routed code, and an expanded template body
       -- is routed by the scopes it landed in.
       case [ n | n <- ns, n `elem` ecThs ctx ] of
-        (n : _) -> Left $ "`use " ++ n ++ "` names a theory, and only a "
-                       ++ "def's own header may: that is what makes the "
-                       ++ "def a template, waiting for an instance"
+        (n : _) -> Left $ "`use " ++ n ++ "` names a theory: `use` applies "
+                       ++ "a functor, and a theory is not one — write `over "
+                       ++ n ++ "` to make this def a template"
         []      -> Right ()
       -- a MODE is named here too, and is taken OUT of the functor list:
       -- its rule is not a `Code ⇒ Code` word run over the spine but the
@@ -3867,9 +3921,17 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
                            ++ "arrP the first's carriers.  Nest the scopes, "
                            ++ "or declare the composite category."
         _           -> Right ()
-      let fs   = [ (n, w) | n <- ns, n `notElem` mns
+      -- a BASE instance is a renaming, not a `Code ⇒ Code` word run over
+      -- the spine: it maps generators of the ambient presentation to
+      -- their images, and every generator it does not name maps to
+      -- itself.  Same phase as `use Inst`, because it is one.
+      let bs   = [ (n, tbl) | n <- ns, n `notElem` mns
+                            , Just tbl <- [lookup n (ecBases ctx)] ]
+          fs   = [ (n, w) | n <- ns, n `notElem` mns
+                          , isNothing (lookup n (ecBases ctx))
                           , Just w <- [lookup n (ecFuncs ctx)] ]
           rest = [ n | n <- ns, n `notElem` mns
+                     , isNothing (lookup n (ecBases ctx))
                      , isNothing (lookup n (ecFuncs ctx)) ]
           (is, rs) = partitionEithers
                        [ maybe (Right n) (\(_, sl) -> Left (n, sl))
@@ -3880,7 +3942,9 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
           -- instance's word, which is how the mode is spelled at all.
           mis = [ (mdInst md, sl) | md <- ms
                 , Just (_, sl) <- [lookup (mdInst md) (ecSlots ctx)] ]
-          b'' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' (is ++ mis)
+          b'' = foldr (\tbl t -> renameWordsT tbl t)
+                      (foldr (\(i, sl) t -> renameSlotsT i sl t) b' (is ++ mis))
+                      (map snd bs)
       routed0 <- case rs of
                    [] -> pure b''
                    _  -> elabScope (ecEnv ctx) rs b''
@@ -3904,10 +3968,25 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
       let wordLabels w = case M.lookup w (ecEnv ctx) of
             Just (Forall _ _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
             Nothing                                        -> []
-          marks = nub (map receiptName mns
+          -- Every `use` mints, instances included: `use Duals ; poly`
+          -- says WHICH model read the template, which is provenance in
+          -- exactly the sense a functor's receipt is.  The one scope
+          -- that does not mint is an instance's own component (`ecSelf`)
+          -- — the `use I` wrapping a slot body resolves names, it does
+          -- not apply the model to itself, and a slot's declared arrow
+          -- carries no label.
+          mine  = [ n | n <- map fst is ++ map fst bs, Just n /= ecSelf ctx ]
+          marks = nub (map receiptName (mns ++ mine)
                        ++ concat [ receiptName f : map receiptName (wordLabels w)
                                  | (f, w) <- fs ])
       pure (foldr (Seq . Prim) expanded marks)
+    -- `over` declares what a def IS, so it is consumed where a def is
+    -- recorded (`addDef`) and never reaches here except out of place.
+    go (Over ns _) = Left $ "`over " ++ unwords ns ++ "` may only be a def's "
+                         ++ "own header — the first thing in its body: it "
+                         ++ "says what the def is a morphism of, and a def "
+                         ++ "is one thing.  `use` is the word that opens a "
+                         ++ "scope."
     go (Seq a b)       = Seq <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
     go (Quote t)       = Quote <$> go t
@@ -3954,6 +4033,7 @@ expandTemplates ctx scope busy = go
     go (Use ns b) =
       let inner = [ (n, th) | n <- ns, Just (th, _) <- [lookup n (ecSlots ctx)] ]
       in Use ns <$> expandTemplates ctx (inner ++ scope) busy b
+    go (Over ns b) = Over ns <$> expandTemplates ctx scope busy b
     go (Prim n)
       | Just (th, body) <- lookup n (ecTmpls ctx) =
           if n `elem` busy
@@ -3971,22 +4051,74 @@ expandTemplates ctx scope busy = go
     go (OpenAbs sl h b) = OpenAbs sl h <$> go b
     go t                = Right t
 
--- A def whose `use` header names a theory is a TEMPLATE over it.  The
--- theory name is consumed here; the rest of the header stays, so `use
--- Monoid Log` is a template that also threads a resource.  The body is
--- recorded unelaborated — what its slot names mean is not known until a
--- `use Inst` expands it.
-templateHeader :: [String] -> Term -> Either String (Maybe (String, Term))
-templateHeader thNames (Use ns b) =
-  case [ n | n <- ns, n `elem` thNames ] of
-    []  -> Right Nothing
-    [t] -> Right (Just (t, case [ n | n <- ns, n /= t ] of
-                            [] -> b
-                            r  -> Use r b))
-    ts  -> Left $ "a `use` header may name at most one theory (a template "
-                ++ "waits for one instance), but this one names "
-                ++ unwords ts
-templateHeader _ _ = Right Nothing
+-- A def whose `over` header names a theory is a TEMPLATE over it: it is
+-- a morphism of the theory, and `over` applies nothing, so the header is
+-- consumed here and the body is recorded EXACTLY as written.  What its
+-- slot names mean is not known until a `use Inst` expands it.  A
+-- template that also threads a resource writes both headers — `over
+-- Monoid ; use Log ; …` — because the two words do different jobs.
+templateHeader :: [String] -> Term -> Maybe (String, Term)
+templateHeader thNames (Over [t] b) | t `elem` thNames = Just (t, b)
+templateHeader _ _ = Nothing
+
+-- `over X` declares MEMBERSHIP, and there are exactly two things a def
+-- can be a morphism of: a THEORY (the def is a template, waiting for an
+-- instance to say what its slot names mean) and a MODE (the def is a
+-- hand-built word of that category, entered without transport).  Every
+-- other name is refused here, by kind, with the word to write instead —
+-- because the confusion `over` exists to end is "declare" against
+-- "apply", and `use` is the verb that applies.
+overTarget :: [String] -> [Mode] -> SlotTable -> [(String, String)]
+           -> [BaseInstance] -> [String] -> String -> Either String Mode
+overTarget thNames modes slots funcs bases resources n
+  | (m : _) <- [ m | m <- modes, mdName m == n ] = Right m
+  | n `elem` thNames = Left $ internal ++ "a theory reached overTarget"
+  | Just (th, _) <- lookup n slots =
+      Left $ pre ++ "names an instance of theory " ++ th ++ ", and an "
+          ++ "instance is a MODEL of a theory, not a theory: `over` "
+          ++ "declares what this def is a morphism of, `use` applies a "
+          ++ "model to it.  Write `use " ++ n ++ "`, or `over " ++ th
+          ++ "` to make this def a template."
+  | isJust (lookup n bases) =
+      Left $ pre ++ "names an instance of Base — a rewriting of the "
+          ++ "ambient presentation, which is applied, not inhabited.  "
+          ++ "Write `use " ++ n ++ "`."
+  | isJust (lookup n funcs) =
+      Left $ pre ++ "names a functor, and a functor is applied to a body, "
+          ++ "not inhabited by one.  Write `use " ++ n ++ "`."
+  | n `elem` resources =
+      Left $ pre ++ "names a resource, and a resource is threaded through "
+          ++ "a body.  Write `use " ++ n ++ "`."
+  | otherwise =
+      Left $ pre ++ "names nothing declared at this point.  `over` takes a "
+          ++ "THEORY (this def is then a template, instantiated by whatever "
+          ++ "`use <instance>` calls it) or a MODE (this def is then a word "
+          ++ "of that category, built by hand)."
+  where
+    pre      = "`over " ++ n ++ "` "
+    internal = "internal: "
+
+-- What `over K` promises, checked against the arrow that came out.  A
+-- word of a mode builds one carrier out of NOTHING — `• ⇒ K(a, b)` —
+-- because that is the shape the mode pass pads with `_` and hands to
+-- `thenP`.  A WRITTEN expectation against an inferred arrow: invariant
+-- five's carve-out, the same one an exit's declared type gets.
+--
+-- Note what is NOT here: a label.  A hand-built word displays as the
+-- carrier it is (`• ⇒ Circuit(Int, Int)`), unfolded, because the fold
+-- says "this went through K" and this one did not.  Membership is the
+-- carrier in the type plus the entry in the K-word table.
+checkKWordShape :: Mode -> String -> Arrow -> Either String ()
+checkKWordShape md nm arr@(Arrow i o _) =
+  case (i, o) of
+    (SEnd, SCons (TData c [_, _]) SEnd) | c == mdCarrier md -> Right ()
+    _ -> Left $ "`over " ++ mdName md ++ "`: a word of a mode builds one "
+             ++ mdCarrier md ++ " out of nothing — `• ⇒ "
+             ++ mdCarrier md ++ "(a, b)` — but " ++ nm ++ " is "
+             ++ show (normalizeArrow arr) ++ ".  Take the inputs inside "
+             ++ "the carrier (" ++ modeArrSlot ++ " embeds a program), or "
+             ++ "drop the header and let `use " ++ mdName md
+             ++ "` transport the def."
 
 -- the Term-level twin of renameSlots: within a `use Inst` scope every
 -- occurrence of one of the theory's operations means THIS instance's
@@ -3994,14 +4126,24 @@ partitionEithers :: [Either a b] -> ([a], [b])
 partitionEithers xs = ([ a | Left a <- xs ], [ b | Right b <- xs ])
 
 renameSlotsT :: String -> [String] -> Term -> Term
-renameSlotsT inst slots = go
+renameSlotsT inst slots = renameWordsT [ (n, slotDefName inst n) | n <- slots ]
+
+-- The renaming itself, over an arbitrary word table: `use Inst` sends a
+-- slot name to that instance's def, and `use Opt` (an instance of
+-- `Base`) sends a generator to its image.  ONE walk for both, so both
+-- enter quotations and rows — and a row's RESIDUAL flag rides across
+-- untouched, since renaming a word cannot change which alternatives are
+-- covered.
+renameWordsT :: [(String, String)] -> Term -> Term
+renameWordsT tbl = go
   where
-    go (Prim n) | n `elem` slots = Prim (slotDefName inst n)
+    go (Prim n) | Just n' <- lookup n tbl = Prim n'
     go (Seq a b)        = Seq (go a) (go b)
     go (Tensor ts)      = Tensor (map go ts)
     go (Quote t)        = Quote (go t)
     go (Alts cs r)      = Alts (map go cs) r
     go (Use ns b)       = Use ns (go b)
+    go (Over ns b)      = Over ns (go b)
     go (OpenAbs sl h b) = OpenAbs sl h (go b)
     go t                = t
 
@@ -4328,6 +4470,7 @@ data Module = Module
   , modTemplates :: TemplateTable       -- defs over a theory, awaiting one
   , modModes     :: [Mode]              -- `mode Name = Instance`
   , modKWords    :: [(String, String)]  -- def -> the mode it was declared in
+  , modBases     :: [BaseInstance]      -- `instance Name : Base`
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -4370,13 +4513,19 @@ splitDefs src = do
       | (kw : _) <- words l, kw `elem` ["functor", "mode"] = do
           (ds, ts, bs, is, ps) <- go Nothing rest
           pure (ds, ts, (l, [], doc) : bs, is, ps)
-      -- `rules Name = p => q, r => s`, or the same rules one per line
-      -- in an indented block: BOTH forms, exactly as `def` has both.
-      -- `spanBlock` returns nothing for the inline form, so one branch
-      -- serves.
-      | (kw : _) <- words l, kw `elem` ["theory", "instance", "rules"] = do
+      -- `rules` was a keyword until 2026-09-13; it is an instance now.
+      | ("rules" : _) <- words l =
+          Left $ "`rules` is gone: a rule set is a PARTIAL INSTANCE of the "
+              ++ "ambient presentation, so it is written `instance Name : "
+              ++ "Base = p = q, …` (or one `p = q` per indented line).  "
+              ++ "MANUAL §8."
+      -- `instance Opt : Base = p = q, r = s`, or the same bindings one
+      -- per line in an indented block: BOTH forms, exactly as `def` has
+      -- both.  `spanBlock` returns nothing for the inline form, so one
+      -- branch serves.
+      | (kw : _) <- words l, kw `elem` ["theory", "instance"] = do
           let (block, rest') = spanBlock 0 rest
-          if null block && kw /= "rules"
+          if null block && isNothing (baseInstanceName l)
             then Left $ "Empty " ++ kw ++ " body: " ++ l
             else do
               (ds, ts, bs, is, ps) <- go Nothing rest'
@@ -4447,13 +4596,25 @@ codeTy = TData "List"
            [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
 
 --------------------------------------------------------------------------------
--- 10.3b Rule sets: a declared, named, once-checked rewrite
+-- 10.3b Instances of `Base`: a declared, named, once-checked rewrite
 --
--- `rules Opt = dupInt => dup, sumViaFold => sumN` declares a WORD
--- `Opt : Code ⇒ Code` (the table, handed to the `rewrite` engine) and a
--- FUNCTOR of the same name, so `use Opt` applies it and mints `=Opt>`
--- like any other scope.  There is no separate machinery: a rule set IS
--- a by-generators functor whose action on a generator is a rename.
+-- `instance Opt : Base = dupInt = dup, sumViaFold = sumN` is a PARTIAL
+-- instance of the ambient presentation.  `Base` is the reserved theory
+-- whose generators are every word in scope, each with its own scheme as
+-- the slot's declared type; a binding gives a generator its image, and
+-- every generator not named maps to itself.  `use Opt` is then the
+-- renaming `use Inst` already performs, and it mints `=Opt>` like any
+-- other scope.  The declaration also generates a WORD `Opt : Code ⇒
+-- Code` (the table, handed to the `rewrite` engine) so `[Opt]` and
+-- `lift2 [Opt]` can apply the same reinterpretation at runtime.
+--
+-- There is no separate machinery, and no separate keyword: a rewriting
+-- of the base IS an instance, a by-generators functor whose action on a
+-- generator is a rename.  The distinction worth keeping is semantic,
+-- not syntactic — an instance of `Base` whose images are PROVABLY EQUAL
+-- to the generators (`sameCode`) is an optimizer; one whose images
+-- merely satisfy the laws is a reinterpretation, a dialect.  Both are
+-- instances of `Base`.
 --
 -- Why a declaration and not a type.  `replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩
 -- Code ⇒ Code` types, but the shared variables are UNIFICATION — "p
@@ -4465,48 +4626,67 @@ codeTy = TData "List"
 --
 --   *Unification blesses a call; subsumption blesses a rule.*
 --
--- v1 rules are single WORDS on both sides, because Code carries names
--- and `Fn` values do not.  Multi-atom patterns wait for a use.
+-- v1 bindings are single WORDS on both sides, because Code carries
+-- names and `Fn` values do not.  Multi-atom patterns wait for a use.
 --------------------------------------------------------------------------------
 
--- `rules Name = p => q, …` plus any indented `p => q` lines.
-parseRulesLine :: String -> [String] -> Either String (String, [(String, String)])
-parseRulesLine header body = do
-  (nm, inline) <-
-    case break (== '=') (uncomment header) of
-      (lhs, rest) ->
-        case (words lhs, rest) of
-          (["rules", nm], '=' : r) -> Right (nm, r)
-          (["rules", nm], "")      -> Right (nm, "")
-          _ -> Left $ "Malformed rule set (want `rules Name = p => q, …`): "
-                   ++ dropWhile isSpace header
-  let pieces = [ r | r <- splitOnChar ',' inline ++ map uncomment body
+-- Is this declaration head `instance Nm : Base`?  `Base` is reserved, so
+-- the test is exact and needs no theory table.
+baseInstanceName :: String -> Maybe String
+baseInstanceName header =
+  case break (== ':') (takeWhile (/= '=') (takeWhile (/= '#') header)) of
+    (lhs, ':' : rhs)
+      | ["instance", nm] <- words lhs, [t] <- words rhs
+      , t == baseTheoryName -> Just nm
+    _ -> Nothing
+
+-- The ambient presentation.  Reserved: a user may not declare it,
+-- because its generators are not written down — they are every word in
+-- scope, each with its own scheme as the slot's declared type.
+baseTheoryName :: String
+baseTheoryName = "Base"
+
+-- `instance Nm : Base = p = q, …` plus any indented `p = q` lines —
+-- BOTH forms, exactly as every other instance body has both.
+parseBaseInstance :: String -> [String]
+                  -> Either String (String, [(String, String)])
+parseBaseInstance header body = do
+  nm <- maybe (Left $ "Malformed instance head (want `instance Name : Base "
+                   ++ "= p = q, …`): " ++ dropWhile isSpace header)
+              Right (baseInstanceName header)
+  let inline = drop 1 (dropWhile (/= '=') (uncomment header))
+      pieces = [ r | r <- splitOnChar ',' inline ++ map uncomment body
                    , not (all isSpace r) ]
   case pieces of
-    [] -> Left $ "rules " ++ nm ++ " declares no rules: write `rules "
-              ++ nm ++ " = p => q`, or one `p => q` per indented line"
+    [] -> Left $ baseHere nm ++ "no bindings: write `instance " ++ nm
+              ++ " : Base = p = q`, or one `p = q` per indented line (a "
+              ++ "partial instance names only the generators it "
+              ++ "reinterprets — but it must name one)"
     _  -> Right ()
-  rs <- mapM (parseOneRule nm) pieces
+  rs <- mapM (parseOneBinding nm) pieces
   case [ p | (p, _) <- rs, length [ () | (p', _) <- rs, p' == p ] > 1 ] of
-    (p : _) -> Left $ "rules " ++ nm ++ ": two rules rewrite `" ++ p
-                   ++ "`, and a rule set is applied in one pass, so the "
-                   ++ "second could never fire"
+    (p : _) -> Left $ baseHere nm ++ "two bindings give `" ++ p
+                   ++ "` an image, and an instance sends each generator to "
+                   ++ "one thing"
     []      -> Right ()
   pure (nm, rs)
   where
     uncomment = takeWhile (/= '#')
 
-parseOneRule :: String -> String -> Either String (String, String)
-parseOneRule setNm piece =
-  case splitOnStr "=>" piece of
-    Just (l, r) ->
+baseHere :: String -> String
+baseHere nm = "instance " ++ nm ++ " : Base: "
+
+parseOneBinding :: String -> String -> Either String (String, String)
+parseOneBinding nm piece =
+  case break (== '=') piece of
+    (l, '=' : r) ->
       case (words l, words r) of
         ([p], [q]) -> Right (p, q)
-        _ -> Left $ "rules " ++ setNm ++ ": `" ++ trimSpace piece
-                 ++ "` — a v1 rule rewrites one WORD to one word "
+        _ -> Left $ baseHere nm ++ "`" ++ trimSpace piece
+                 ++ "` — a v1 binding sends one WORD to one word "
                  ++ "(multi-atom patterns are not shipped)"
-    Nothing -> Left $ "rules " ++ setNm ++ ": `" ++ trimSpace piece
-                   ++ "` is missing `=>` (a rule reads `p => q`)"
+    _ -> Left $ baseHere nm ++ "`" ++ trimSpace piece
+             ++ "` is missing `=` (a binding reads `p = q`)"
 
 trimSpace :: String -> String
 trimSpace = dropWhile isSpace . reverse . dropWhile isSpace . reverse
@@ -4516,19 +4696,11 @@ splitOnChar c str = case break (== c) str of
   (pre, _ : rest) -> pre : splitOnChar c rest
   (pre, [])       -> [pre]
 
-splitOnStr :: String -> String -> Maybe (String, String)
-splitOnStr pat = go ""
-  where
-    go _   []           = Nothing
-    go acc r@(ch : chs)
-      | take (length pat) r == pat = Just (reverse acc, drop (length pat) r)
-      | otherwise                  = go (ch : acc) chs
-
--- The generated word: the table, then the engine.  A rule set is
--- ordinary user code from here on, which is what lets `lift2 [Opt]`
+-- The generated word: the table, then the engine.  An instance of `Base`
+-- is ordinary user code from here on, which is what lets `lift2 [Opt]`
 -- apply it at RUNTIME with the program as its own fallback.
-ruleSetDefSrc :: [(String, String)] -> String
-ruleSetDefSrc rs =
+baseInstDefSrc :: [(String, String)] -> String
+baseInstDefSrc rs =
   "(c -> (" ++ unwords [ '.' : p | (p, _) <- rs ] ++ " >> pack) ("
             ++ unwords [ '.' : q | (_, q) <- rs ] ++ " >> pack) c >> rewrite)"
 
@@ -4537,9 +4709,9 @@ ruleSetDefSrc rs =
 -- `subsumes` does), and require q's scheme to cover it.  Grades ride
 -- along by the semilattice order — a pure `q` under an io `p` passes
 -- because ∅ is the bottom — so no separate effect rule is needed.
-checkRuleSet :: Env -> TemplateTable -> [String] -> [(String, [String])]
-             -> (String, [(String, String)]) -> Either String ()
-checkRuleSet env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
+checkBaseInstance :: Env -> TemplateTable -> [String] -> [(String, [String])]
+                  -> (String, [(String, String)]) -> Either String ()
+checkBaseInstance env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
   where
     one (p, q) = do
       scP <- wordScheme p
@@ -4549,19 +4721,19 @@ checkRuleSet env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
       case subsumes scQ arrP of
         Right () -> Right ()
         Left e   ->
-          Left $ here ++ "`" ++ p ++ " => " ++ q ++ "` is refused: " ++ p
+          Left $ here ++ "`" ++ p ++ " = " ++ q ++ "` is refused: " ++ p
               ++ " is used at " ++ show (normalizeArrow arrP) ++ " but "
               ++ q ++ " is " ++ show (normalizeArrow arrQ) ++ " (" ++ e
-              ++ ").  A rule may only GENERALIZE — the replacement's "
-              ++ "scheme must be at least as general as the replaced "
-              ++ "word's type, or a program that typed before the "
-              ++ "rewrite would not type after it."
-    here = "rules " ++ setNm ++ ": "
+              ++ ").  A binding may only GENERALIZE — the image's scheme "
+              ++ "must be at least as general as the generator's type, or "
+              ++ "a program that typed before the reinterpretation would "
+              ++ "not type after it."
+    here = baseHere setNm
     wordScheme n
       | '@' `elem` n =
           Left $ here ++ "`" ++ n ++ "` is the compiler's spelling of a "
               ++ "slot: a slot is not a word outside `use`, so it can be "
-              ++ "neither side of a rule"
+              ++ "neither side of a binding"
       | n `elem` concatMap snd slotsOf =
           Left $ here ++ n ++ " is a slot of theory "
               ++ head ([ t | (t, ns) <- slotsOf, n `elem` ns ] ++ ["?"])
@@ -4573,12 +4745,12 @@ checkRuleSet env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
           Left $ here ++ n ++ " is a template over theory "
               ++ maybe "?" fst (lookup n tmpls)
               ++ ", and a template has no type until an instance "
-              ++ "supplies one: a rule is checked once, so it needs a "
+              ++ "supplies one: a binding is checked once, so it needs a "
               ++ "word with a scheme"
       | otherwise =
           maybe (Left $ here ++ n ++ " is not defined at this point (a "
-                     ++ "rule names two words, and both must already be "
-                     ++ "in scope)")
+                     ++ "binding names two words, and both must already "
+                     ++ "be in scope)")
                 Right (M.lookup n env)
 
 -- `functor Name = word` — a declaration line, no block.
@@ -4907,11 +5079,12 @@ data ModuleBase = ModuleBase
   , mbTemplates :: TemplateTable      -- templates it brought with them
   , mbModes     :: [Mode]             -- modes it brought with them
   , mbKWords    :: [(String, String)] -- and their K-words
+  , mbBases     :: [BaseInstance]     -- and its instances of `Base`
   }
 
 moduleBase :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl] -> ModuleBase
 moduleBase env run shadow aliases datas =
-  ModuleBase env run shadow aliases datas [] [] [] [] [] []
+  ModuleBase env run shadow aliases datas [] [] [] [] [] [] []
 
 checkModuleWith :: ModuleBase -> String -> Either String Module
 checkModuleWith base src = do
@@ -4940,19 +5113,32 @@ checkModuleWith base src = do
   -- what gives them file-wide scope.
   ownTheories <- sequence [ parseTheory allAliases sigs h b
                           | (h, b, _) <- declLines, take 6 h == "theory" ]
+  -- `Base` is the ambient presentation: its generators are every word in
+  -- scope, which is not something a user can write down.
+  case [ () | th <- ownTheories, thName th == baseTheoryName ] of
+    (_ : _) -> Left $ "`" ++ baseTheoryName ++ "` is the ambient "
+                   ++ "presentation and may not be declared: its "
+                   ++ "generators are every word in scope, each with its "
+                   ++ "own scheme.  `instance X : " ++ baseTheoryName
+                   ++ "` is how it is modelled."
+    []      -> Right ()
   -- a session cannot declare a theory, but `:import` carries one in, and
   -- an instance or a template checked here may name it
   let theories = ownTheories ++ mbTheories base
       thNames  = map thName theories
   insts    <- sequence [ parseInstance allAliases sigs theories h b
-                       | (h, b, _) <- declLines, take 8 h == "instance" ]
+                       | (h, b, _) <- declLines, take 8 h == "instance"
+                       , isNothing (baseInstanceName h) ]
   ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]
-  -- A rule set declares a WORD of its own name and a FUNCTOR of that
-  -- name: `use Opt` then runs through exactly the path `use Traced`
-  -- does, receipt included, and `[Opt]` is an ordinary quote.
-  ownRules <- sequence [ parseRulesLine h b
-                       | (h, b, _) <- declLines, take 5 h == "rules" ]
+  -- An instance of `Base` declares a WORD of its own name (so `[Opt]`
+  -- is an ordinary quote and `lift2 [Opt]` lifts it at runtime); the
+  -- scope itself is the renaming every `use Inst` performs, receipt
+  -- included.
+  ownBases0 <- sequence [ parseBaseInstance h b
+                        | (h, b, _) <- declLines, take 8 h == "instance"
+                        , isJust (baseInstanceName h) ]
+  let ownBases = ownBases0 ++ mbBases base
   -- A MODE declares a word of its own name and a functor entry of that
   -- name, exactly as a rule set does — so the namespace is shared, the
   -- receipt is minted by the ordinary path, and `:import` carries it.
@@ -4960,15 +5146,19 @@ checkModuleWith base src = do
                            | (h, _, _) <- declLines, take 1 (words h) == ["mode"] ]
   ownModes <- mapM (buildMode theories insts) ownModeLines
   let modes = ownModes ++ mbModes base
-      funcs = ownFuncs ++ [ (n, n) | (n, _) <- ownRules ]
-                      ++ [ (mdName m, mdName m) | m <- ownModes ]
+      funcs = ownFuncs ++ [ (mdName m, mdName m) | m <- ownModes ]
                       ++ mbFuncs base
-  case [ n | (n, i) <- zip (map fst funcs) [0 :: Int ..]
-           , n `elem` take i (map fst funcs) ] of
+      -- one namespace for every name a `use` header may carry
+      useNames = map fst funcs ++ map fst ownBases
+                 ++ [ inName i | i <- insts ]
+  case [ n | (n, i) <- zip useNames [0 :: Int ..]
+           , n `elem` take i useNames ] of
     (n : _) | n `elem` map mdName ownModes ->
-      Left $ "Duplicate mode declaration: " ++ n ++ " (a functor, a rule set "
-          ++ "and a mode share one namespace — each declares a name a `use` "
-          ++ "header may carry)"
+      Left $ "Duplicate mode declaration: " ++ n ++ " (a functor, an "
+          ++ "instance and a mode share one namespace — each declares a "
+          ++ "name a `use` header may carry)"
+    (n : _) | n `elem` map fst ownBases || n `elem` map inName insts ->
+      Left $ "Duplicate instance declaration: " ++ n
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories) insts
@@ -4981,39 +5171,41 @@ checkModuleWith base src = do
   -- instance bodies and main are all inferred with it in scope
   let envSig = foldr (\(n, sc) e -> M.insert n sc e) (receiptEnv funcs env1)
                      slotSigs
-  -- The rule-set words are hoisted ABOVE the module's own defs: their
-  -- bodies mention nothing but the prelude, and `use Opt` inside a def
-  -- needs the word to be runnable by then (the ordering rule).
+  -- The Base-instance words are hoisted ABOVE the module's own defs:
+  -- their bodies mention nothing but the prelude, and `use Opt` inside a
+  -- def needs the word to be runnable by then (the ordering rule).
   let modeDefs = [ ( mdName m, modeDefSrc m
                    , Just ("mode " ++ mdName m ++ " = " ++ mdInst m
                             ++ ": `;` is " ++ modeThenSlot ++ ", a stage is "
                             ++ modeArrSlot ++ ", the carrier is "
                             ++ mdCarrier m) )
                  | m <- ownModes ]
-      ruleDefs = [ ( nm, ruleSetDefSrc rs
-                   , Just ("rule set " ++ nm ++ ": "
-                            ++ intercalate ", " [ p ++ " => " ++ q
+      baseDefs = [ ( nm, baseInstDefSrc rs
+                   , Just ("instance " ++ nm ++ " : Base — "
+                            ++ intercalate ", " [ p ++ " = " ++ q
                                                 | (p, q) <- rs ]) )
-                 | (nm, rs) <- ownRules ]
+                 | (nm, rs) <- ownBases0 ]
+      resNames = [ dName d | d <- allDatas, dResource d ]
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
-    foldM (addDef slotTable funcs thNames modes)
+    foldM (addDef slotTable funcs thNames modes ownBases resNames
+                  (map inName insts))
           (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0,
            mbTemplates base, mbKWords base)
-          (ruleDefs ++ modeDefs ++ defSrcs ++ instDefs)
+          (baseDefs ++ modeDefs ++ defSrcs ++ instDefs)
   -- the generated mode word is checked like any other functor's word:
   -- if a mode's slots ever stop composing, the message says so here
   mapM_ (\m -> checkFunctorWord env' (mdName m) (mdName m)) ownModes
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
   mapM_ (checkInstance env' theories) insts
-  -- Every rule is blessed ONCE, here, over the finished environment —
-  -- so a rule may name a word declared anywhere in the module, exactly
-  -- as an instance slot may.
-  mapM_ (checkRuleSet env' tmpls (map thName theories)
+  -- Every binding is blessed ONCE, here, over the finished environment
+  -- — so an instance of `Base` may name a word declared anywhere in the
+  -- module, exactly as an instance slot may.
+  mapM_ (checkBaseInstance env' tmpls (map thName theories)
            [ (thName th, map fst (thSlots th)) | th <- theories ])
-        ownRules
+        ownBases0
   mapM_ (checkLawType env') [ n | (n, _, _) <- instDefs, isJust (lawParts n) ]
   mainPart <-
     if all isSpace mainSrc
@@ -5021,13 +5213,13 @@ checkModuleWith base src = do
       else do
         term0 <- parseProgram mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
-                                      thNames modes kwords)
+                                      thNames modes kwords ownBases Nothing)
                              term0
         arr <- inferTermIn env' term1
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
-                theories insts funcs tmpls modes kwords)
+                theories insts funcs tmpls modes kwords ownBases)
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
@@ -5072,7 +5264,7 @@ checkModuleWith base src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
-    addDef slotTable funcs thNames modes
+    addDef slotTable funcs thNames modes bases resources instNames
            (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) = do
       if name `elem` elimEmits && M.member name env
         then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
@@ -5085,7 +5277,7 @@ checkModuleWith base src = do
         then Left $ "Duplicate definition: " ++ name
         else Right ()
       term0 <- either (Left . inDef) Right (parseProgram bodySrc)
-      tmplHdr <- either (Left . inDef) Right (templateHeader thNames term0)
+      let tmplHdr = templateHeader thNames term0
       case tmplHdr of
         -- A TEMPLATE is recorded, not defined.  It has no body that runs
         -- without an instance, so it enters neither the environment nor
@@ -5096,6 +5288,15 @@ checkModuleWith base src = do
                , maybe docs (\d -> M.insert name d docs) doc
                , (name, (th, tbody)) : tmpls, kws )
         Nothing -> do
+          -- `over K` — a HAND-BUILT morphism of a mode, registered as a
+          -- K-word without transport.  The header applies nothing, so it
+          -- is consumed here and the body is the def exactly as written.
+          (asc, termH) <- case term0 of
+            Over (n : _) b ->
+              either (Left . inDef) (\m -> Right (Just m, b))
+                     (overTarget thNames modes slotTable funcs bases
+                                 resources n)
+            _ -> Right (Nothing, term0)
           let env1 = M.delete name env   -- a shadowed def must not leak in
           -- `use` scopes are written out here, between parse and infer: a
           -- syntactic Term rewrite with the Env available for arities and
@@ -5104,15 +5305,32 @@ checkModuleWith base src = do
           -- a carrier, and a later `use K` leaves it alone instead of
           -- embedding it.  Syntactic knowledge, recorded before the body
           -- is elaborated, in the same prefix scope every def lives in.
-          let kws' = case term0 of
-                Use ns _ | (k : _) <- [ mdName m | m <- modes
-                                                 , mdName m `elem` ns ] ->
-                  (name, k) : kws
-                _ -> kws
+          -- `use K` transports it; `over K` declares it built by hand.
+          let kws' = case asc of
+                Just m  -> (name, mdName m) : kws
+                Nothing -> case termH of
+                  Use ns _ | (k : _) <- [ mdName m | m <- modes
+                                                   , mdName m `elem` ns ] ->
+                    (name, k) : kws
+                  _ -> kws
+              -- an instance's own slot and law defs are wrapped in `use
+              -- I` to resolve slot names; that scope applies nothing and
+              -- mints nothing (see `ecSelf`)
+              self = case break (== '@') name of
+                (i, '@' : _) | i `elem` instNames -> Just i
+                _                                 -> Nothing
+          -- `over` MINTS NOTHING, ever.  A receipt is provenance — "this
+          -- code went through the functor" — and a hand-built morphism
+          -- is by definition not the functor's image; it may be a
+          -- circuit no base program denotes.  Putting `K` on it would
+          -- over-claim in exactly the gap between "went through F" and
+          -- "is in the image of F".  Membership is carried by the TYPE
+          -- (checked below) and by the K-word table, and nothing else:
+          -- only a `use` mints, and every `use` does.
           term <- either (Left . inDef) Right
                     (elabUseWith (ElabCtx env1 run slotTable funcs tmpls
-                                          thNames modes kws)
-                                 term0)
+                                          thNames modes kws bases self)
+                                 termH)
           -- self-reference is refused AFTER expansion, so a functor that
           -- splices the name in is caught too
           let mentions = primsIn term
@@ -5123,6 +5341,10 @@ checkModuleWith base src = do
             then Left (selfReferenceError name True)
             else Right ()
           (arr, dsubs) <- either (Left . inDef) Right (inferTermSub env1 term)
+          case asc of
+            Just m  -> either (Left . inDef) Right
+                              (checkKWordShape m name (normalizeArrow arr))
+            Nothing -> Right ()
           let sc = generalizeWith env1 dsubs arr
           pure ( M.insert name sc env
                , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
@@ -5676,6 +5898,7 @@ hasOpenAbs (Tensor ts)  = any hasOpenAbs ts
 hasOpenAbs (Quote t)    = hasOpenAbs t
 hasOpenAbs (Alts cs _)  = any hasOpenAbs cs
 hasOpenAbs (Use _ b)    = hasOpenAbs b
+hasOpenAbs (Over _ b)   = hasOpenAbs b
 hasOpenAbs _            = False
 
 normTerm :: NCtx -> RunDefs -> [String] -> Term -> NState -> Either NErr NState
@@ -5683,6 +5906,7 @@ normTerm ctx defs seen term s0 = case term of
   Seq a b   -> normTerm ctx defs seen a s0 >>= normTerm ctx defs seen b
   Tensor ts -> goAtoms ts s0
   Use _ _   -> outside "an unelaborated `use`"
+  Over _ _  -> outside "an unelaborated `over`"
   t         -> goAtoms [t] s0
   where
     env = ncEnv ctx
@@ -6849,6 +7073,11 @@ renderTerm t =
     rAtom (OpenAbs slots hasRest b) =
       "(" ++ unwords (map (maybe "_" id) slots ++ ["..." | hasRest])
           ++ " -> " ++ renderTerm b ++ ")"
+    -- headers are written out before reflection, so these are reached
+    -- only when an error renders an unelaborated term — but the group
+    -- wildcard below would rebuild them forever, so say them plainly
+    rAtom (Use ns b)  = "(use " ++ unwords ns ++ " ; " ++ renderTerm b ++ ")"
+    rAtom (Over ns b) = "(over " ++ unwords ns ++ " ; " ++ renderTerm b ++ ")"
     rAtom g = "(" ++ renderTerm g ++ ")"
     esc '"'  = "\\\""
     esc '\\' = "\\\\"
@@ -6888,6 +7117,8 @@ termToCodeV env t = do
     -- group wildcard below would loop forever rebuilding it
     atomVal (Use _ _) =
       Left "internal: an unelaborated `use` reached code reification"
+    atomVal (Over _ _) =
+      Left "internal: an unelaborated `over` reached code reification"
     atomVal g = do
       c <- termToCodeV env g
       pure (VSum 6 [c])
@@ -6940,6 +7171,7 @@ groundTerm env cv = go cv
     go vars (Quote t)    = Quote <$> go vars t
     go vars (Alts cs r)  = Alts <$> mapM (go vars) cs <*> pure r
     go vars (Use rs b)   = Use rs <$> go vars b
+    go vars (Over rs b)  = Over rs <$> go vars b
     go vars (OpenAbs slots hasRest b) =
       OpenAbs slots hasRest
         <$> go (foldr M.delete vars [ n | Just n <- slots ]) b
@@ -6973,6 +7205,7 @@ elimAbsTerm env = go []
     go o (Quote t)      = Quote <$> go o t
     go o (Alts cs r)    = Alts <$> mapM (go o) cs <*> pure r
     go o (Use rs b)     = Use rs <$> go o b
+    go o (Over rs b)    = Over rs <$> go o b
     go o (OpenAbs slots _ b) = do
       let ps = [ n | Just n <- slots ]
       b' <- go (ps ++ o) b
@@ -7012,6 +7245,7 @@ freeNamesIn = go
     go (Quote t)      = go t
     go (Alts cs _)    = concatMap go cs
     go (Use _ b)      = go b
+    go (Over _ b)     = go b
     go (OpenAbs slots _ b) =
       filter (`notElem` [ n | Just n <- slots ]) (go b)
 
