@@ -22,26 +22,26 @@ def hire = unBooks ; _ (1 ... ; +) ; Books
 # The law is the point: a policy that charges for zero hours is not a
 # model of this theory, and the module will not start. `Salaried` with
 # `pay = drop ; 5000` is rejected at module start with
-#   law 'nothingForNothing' fails for instance Salaried: an instance
+#   law 'nothingForNothing' fails for model Salaried: a model
 #   must be an audited model of its theory
 theory Policy(a) =
     pay  : a ⇒ Int
     none : • ⇒ a
     law nothingForNothing = (none ; pay) 0 ; eq? ; (forget ; true | forget ; false) ; merge
 
-instance Hourly : Policy(Int) =
+model Hourly : Policy(Int) =
     pay  = 20 _ ; *
     none = 0
 
-instance Overtime : Policy(Int) =
+model Overtime : Policy(Int) =
     pay  = 30 _ ; *
     none = 0
 
 # ---- one timesheet ---------------------------------------------------
 # Inside `use` nothing is threaded by hand: `pay` is pure, `say` and
 # `hire` touch Books, and the elaborator writes every `_` and `...`.
-# The scope names a resource AND an instance in one header — the
-# resource contributes a wire, the instance contributes a renaming.
+# The scope names a resource AND a model in one header — the
+# resource contributes a wire, the model contributes a renaming.
 def step =
     use Books Hourly
     pay

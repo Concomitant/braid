@@ -21,7 +21,7 @@ runExample name = do
         Left err -> Just ("examples/" ++ name ++ ": " ++ err)
 
 -- IMPORTS (stage 4¾).  A file's declarations in another file's scope:
--- textual inclusion, so a type, a resource, a theory, an instance and a
+-- textual inclusion, so a type, a resource, a theory, a model and a
 -- functor all cross the boundary with no machinery of their own —
 -- and so does a template, since it is a table entry like the rest.
 -- Fixtures live in test/imports/ and are loaded from disk, since the
@@ -29,7 +29,7 @@ runExample name = do
 -- (path, expected print log, expected final stack rendering)
 importTests :: [(String, [String], String)]
 importTests =
-    -- defs, a resource, an instance, a functor and a RULE SET, all
+    -- defs, a resource, a model, a functor and a RULE SET, all
     -- imported; the imported file's own main does NOT run
     -- …and a TEMPLATE: declared over a theory in one file, instantiated
     -- by a `use` in another
@@ -347,11 +347,11 @@ moduleTypeTests =
     -- STAGE 5b: a rule set declares a WORD of its own name and a
     -- FUNCTOR of that name.  `use Opt` mints `=Opt>` like any other
     -- scope, and unions with `Rec` when the body ties a knot.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\nOpt",
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\nOpt",
      "Code ⇒ Code")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\n\
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
      \def p =\n    use Opt\n    dupInt\n    +\np", "Int =Opt> Int")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\n\
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
      \def sumTo =\n    use Opt\n\
      \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
      \    fix ...\n    ev\nsumTo", "Int Int =Opt Rec> Int")
@@ -689,45 +689,45 @@ moduleTypeTests =
     -- folding it over data is the ordinary `fold`
   , ("resource Books = Str\ndef say = unBooks _ >> cat >> Books\ndef step = use Books >> toStr >> say\n[step]",
      "• ⇒ Fn⟨a0 ρ0 =Books> ρ0⟩")
-    -- THEORIES (stage 3): named slots, instances selected BY NAME with
+    -- THEORIES (stage 3): named slots, models selected BY NAME with
     -- `use`, resolution as a renaming at elaboration.  Generic code is
     -- written once; only the scope differs.
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance IntSum : Monoid(Int) =\n    unit = 0\n    op   = +\ndef total = use IntSum ; [op] unit ... ; foldExp\ntotal",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel IntSum : Monoid(Int) =\n    unit = 0\n    op   = +\ndef total = use IntSum ; [op] unit ... ; foldExp\ntotal",
      "Intⁿ⁰ =IntSum> Int")
-    -- an instance's carrier is a full type EXPRESSION, not a bare name.
+    -- a model's carrier is a full type EXPRESSION, not a bare name.
     -- Every structure worth having a theory of is parameterized, so
     -- scraping identifiers out of the head read `T(List(Int))` as two
     -- arguments and rejected it.
-  , ("theory Wrap(a) =\n    wrap : a ⇒ a\ninstance L : Wrap(List(Int)) =\n    wrap = id\ndef w = use L ; wrap\nw",
+  , ("theory Wrap(a) =\n    wrap : a ⇒ a\nmodel L : Wrap(List(Int)) =\n    wrap = id\ndef w = use L ; wrap\nw",
      "List(Int) =L> List(Int)")
-  , ("theory Wrap(a) =\n    wrap : a ⇒ a\ninstance F : Wrap(Fn⟨Int ⇒ Int⟩) =\n    wrap = id\ndef w = use F ; wrap\nw",
+  , ("theory Wrap(a) =\n    wrap : a ⇒ a\nmodel F : Wrap(Fn⟨Int ⇒ Int⟩) =\n    wrap = id\ndef w = use F ; wrap\nw",
      "Fn⟨Int ⇒ Int⟩ =F> Fn⟨Int ⇒ Int⟩")
     -- a slot body may call the module's OWN defs: a theory declaration
     -- is a signature, so slots are forward-declared and the two
     -- directions (def calls slot, slot calls def) both work
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\ninstance S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\ntotal",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\nmodel S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\ntotal",
      "Intⁿ⁰ =S> Int")
     -- STAGE 5a, item 0: SLOT-LOCAL VARIABLES.  A slot may name variables
     -- the theory does not declare, and is generalized over its own —
     -- `box : b ⇒ a` under `theory Wrap(a)` is `∀b. b ⇒ a`.  Nothing in
     -- the checker changed: `declaredSlots` already generalized the slot
     -- and `checkInstance` already compared bodies by subsumption.
-  , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = toStr\ndef w = use W ; box\nw",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = toStr\ndef w = use W ; box\nw",
      "a0 =W> Str")
     -- a `...` in a slot of a theory with no stack parameter is a
     -- slot-local STACK, so a theory can ask for `∀ρ. ρ ⇒ ρ`
-  , ("theory Endo =\n    around : ... ⇒ ...\ninstance E : Endo =\n    around = ...\ndef a2 = use E ; around\na2",
+  , ("theory Endo =\n    around : ... ⇒ ...\nmodel E : Endo =\n    around = ...\ndef a2 = use E ; around\na2",
      "ρ0 =E> ρ0")
     -- STAGE 5a, item 1: CONSTRUCTOR PARAMETERS.  `k` is written with its
     -- arity visible (`k(_, _)`), applied in the slots, and substituted
-    -- away at the instance — so what comes out is an ordinary type and
+    -- away at the model — so what comes out is an ordinary type and
     -- inference never meets a constructor variable.
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = use P ; thenP\nt",
-     "K(a0, a1) K(a1, a2) =P> K(a0, a2)")
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = over P ; thenP\nt",
+     "K(a0, a1) K(a1, a2) ⇒ K(a0, a2)")
     -- the substitution reaches inside an Fn type in a slot too
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = use P ; arrP\nar",
-     "Fn⟨a0 ⇒ a1⟩ =P> K(a0, a1)")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = over P ; arrP\nar",
+     "Fn⟨a0 ⇒ a1⟩ ⇒ K(a0, a1)")
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ =StrCat> Str")
     -- the grade is inferred through defs, not read off a name
   , ("def shout = toStr >> print\nshout",          "a0 =IO> •")
@@ -805,62 +805,72 @@ moduleTypeTests =
      "Fn⟨ρ0 =Log> ρ1⟩ =Logs> Fn⟨ρ0 ⇒ Str ρ1⟩")
   , (collectorMod ++ "use Counts ; collected",
      "Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩")
-    -- MODES (5c).  THE DISPLAY FOLD: at the base a K-word is
-    -- `• ⇒ Arr(Int, Int)` carrying `K`, and a carrier the label
-    -- owns folds onto the glyph exactly as a threaded resource does.
-  , (modeMod ++ "chain", "Int =K> Int")
+    -- TRANSPORT (5c, 5c½).  THE DISPLAY FOLD: at the base a word of a
+    -- category is `• ⇒ Arr(Int, Int)` carrying `Funcs`, and a carrier
+    -- the label owns folds onto the glyph exactly as a threaded
+    -- resource does.
+  , (modeMod ++ "chain", "Int =Funcs> Int")
     -- the fold wants EXACTLY ONE carrier, so two of them side by side
     -- print unfolded: honest, well-typed, and visibly not composition
-    -- in K.  Composition in K is written under the marker.
-  , (modeMod ++ "chain chain", "• =K> Arr(Int, Int) Arr(Int, Int)")
-    -- and under the marker it composes: a K-word inside `use K` is left
-    -- alone and the `;` around it is `thenP`
-  , (modeMod ++ "def two = use K ; chain ; chain\ntwo", "Int =K> Int")
+    -- in the category, which is written under the marker.
+  , (modeMod ++ "chain chain", "• =Funcs> Arr(Int, Int) Arr(Int, Int)")
+    -- and under the marker it composes: a word of the category inside
+    -- `use Funcs` is left alone and the `;` around it is the composition
+  , (modeMod ++ "def two = use Funcs ; chain ; chain\ntwo", "Int =Funcs> Int")
     -- an ENTRY slot (`sample`: no carrier in, one carrier out) is
-    -- already a stage of the mode, so it is left alone too.  Its type
-    -- said so in WRITING, which is what keeps this out of inference.
-  , (modeMod ++ "def s2 = use K ; sample ; sample\ns2", "Int =K> Int")
+    -- already a stage of the category, so it is left alone too.  Its
+    -- type said so in WRITING, which keeps this out of inference.
+  , (modeMod ++ "def s2 = use Funcs ; sample ; sample\ns2", "Int =Funcs> Int")
     -- the receipt is an ordinary label: it unions with io by the same
-    -- semilattice as everything else
-  , (modeMod ++ "def obs = use Funcs ; chain ; observe\nobs ; print",
-     "• =Funcs IO K> •")
-    -- a sealed mode: same fold, and no exit to fold back through
-  , (sealedMod ++ "guarded", "Int =Safe> Int")
-    -- STAGE 5c½.  `over K` — a HAND-BUILT word of a mode.  It applies
-    -- nothing (no `arrP`, no `thenP`) and so MINTS nothing: the def
-    -- displays as the carrier it is, unfolded, because `=K>` is
-    -- provenance and this code did not go through the functor.
-    -- Membership is the carrier in the type plus the K-word table.
-  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over K ; hand\nbyHand",
+    -- semilattice as everything else.  `over` mints nothing, so the
+    -- only label here is the one `chain` already wore.
+  , (modeMod ++ "def obs = over Funcs ; chain ; observe\nobs ; print",
+     "• =Funcs IO> •")
+    -- a sealed category: same fold, and no exit to fold back through
+  , (sealedMod ++ "guarded", "Int =Sealed> Int")
+    -- STAGE 5c½.  `over M` — a HAND-BUILT word of the category.  It
+    -- applies nothing and so MINTS nothing: the def displays as the
+    -- carrier it is, unfolded, because `=Funcs>` is provenance and this
+    -- code did not go through the functor.  Membership is the carrier
+    -- in the type plus the K-word table.
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over Funcs ; hand\nbyHand",
      "• ⇒ Arr(Int, Int)")
-    -- and it composes under the marker like any other word of K — THAT
-    -- composite went through the functor, so it carries K and folds
-  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over K ; hand\n\
-     \def mix = use K ; byHand ; add1\nmix", "Int =K> Int")
-    -- a base def that merely PRODUCES a carrier is not a K-word, and
-    -- its type is the same as `byHand`'s: the difference is the written
-    -- header, never an inferred type.  Used inside `use K` it is
-    -- `arrP`ed, which is a type error, not a silent embedding.
+    -- and it composes under the marker like any other word of the
+    -- category — THAT composite went through the functor, so it folds
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over Funcs ; hand\n\
+     \def mix = use Funcs ; byHand ; add1\nmix", "Int =Funcs> Int")
+    -- a base def that merely PRODUCES a carrier is not a word of the
+    -- category, and its type is the same as `byHand`'s: the difference
+    -- is the written header, never an inferred type.
   , (modeMod ++ "def hand = [dup ; +] ; Arr\nhand", "• ⇒ Arr(Int, Int)")
+    -- LEVEL THREE: with a strength declared, a wider stage transports
+    -- by being packed with the pairing the strength names
+  , (wideMod ++ "def sq = use Wide ; dup ; *\nsq", "Int =Wide> Int")
+    -- and a narrow stage is whiskered: `...` is what `firstP` becomes
+  , (wideMod ++ "def w = use Wide ; dup ; add1 ... ; *\nw", "Int =Wide> Int")
+    -- LEVEL ONE: composition alone.  `over` composes carriers built by
+    -- hand, and the def is a word of the category like any other.
+  , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; f f ; thenP\ng",
+     "• ⇒ H(Int, Int)")
     -- `over T` is the template header; the def's own type is the
     -- instantiation's, and `over` leaves no receipt of its own here
     -- either — the `use IntSum` is what minted
   , (tmplMod ++ "use IntSum ; twice", "Int =IntSum> Int")
-    -- STAGE 5c½: EVERY `use` MINTS.  An instance of `Base` leaves its
+    -- STAGE 5c½: EVERY `use` MINTS.  A model of `Base` leaves its
     -- name on everything it renamed, exactly as a functor does.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Opt : Base = dupInt = dup\n\
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
      \def p = use Opt ; dupInt ; +\np", "Int =Opt> Int")
     -- it recurses into quotations, and the receipt rides out with them
   , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
-     \instance Opt : Base = twice = double\n\
+     \model Opt : Base = twice = double\n\
      \def q = use Opt ; [twice] ... ; map\nq", "List(Int) =Opt> List(Int)")
     -- the generated word is an ordinary `Code ⇒ Code`, for `[Opt]`
   , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
-     \instance Opt : Base = twice = double\nOpt", "Code ⇒ Code")
+     \model Opt : Base = twice = double\nOpt", "Code ⇒ Code")
   ]
 
 -- TEMPLATES (stage 5a).  A def whose `use` names a THEORY is a body
--- waiting for an instance; a def whose `use` names an INSTANCE expands
+-- waiting for a model; a def whose `use` names a MODEL expands
 -- it there, renames it there, and RE-INFERS it there — so every
 -- instantiation has its own principal type.
 tmplMod :: String
@@ -868,10 +878,10 @@ tmplMod =
   "theory Monoid(a) =\n\
   \    unit : • ⇒ a\n\
   \    op   : a a ⇒ a\n\
-  \instance IntSum : Monoid(Int) =\n\
+  \model IntSum : Monoid(Int) =\n\
   \    unit = 0\n\
   \    op   = +\n\
-  \instance StrCat : Monoid(Str) =\n\
+  \model StrCat : Monoid(Str) =\n\
   \    unit = \"\"\n\
   \    op   = cat\n\
   \def fold1 = over Monoid ; [op] unit ... ; foldExp\n\
@@ -895,10 +905,10 @@ collectorMod =
   \theory Collector(e, a) =\n\
   \    seed   : • ⇒ e\n\
   \    unwrap : e ⇒ a\n\
-  \instance Logs : Collector(Log, Str) =\n\
+  \model Logs : Collector(Log, Str) =\n\
   \    seed   = \"\" ; Log\n\
   \    unwrap = unLog\n\
-  \instance Counts : Collector(Counter, Int) =\n\
+  \model Counts : Collector(Counter, Int) =\n\
   \    seed   = 0 ; Counter\n\
   \    unwrap = unCounter\n\
   \def collected = over Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])\n"
@@ -908,11 +918,15 @@ collectorMod =
 idF :: String
 idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 
--- MODES (stage 5c).  A mode is a label with a CARRIER: `mode K = Funcs`
--- declares the functor that sends every stage to this instance's `arrP`
--- and every `;` to its `thenP`.  The boring model is enough to pin the
--- whole mechanism, and unlike `Circuit` it is pure, so the expected
--- arrows carry nothing but the receipt.
+-- TRANSPORT (5c, reshaped in 5c\189).  A model whose theory has a
+-- hom-object `k(_, _)` and slots at the composition and embedding
+-- SHAPES is a label with a CARRIER: `use Funcs` sends every stage to
+-- this model's embedding and every `;` to its composition.  No `mode`
+-- line, and no slot NAME is read — `arrP`/`thenP` are this fixture's
+-- taste.  `Arrow` here declares NO strength, which is what pins the
+-- one-wire level.  The boring model is enough for the whole mechanism,
+-- and unlike `Circuit` it is pure, so the expected arrows carry nothing
+-- but the receipt.
 modeMod :: String
 modeMod = unlines
   [ "data Arr(a, b) = Fn⟨a ⇒ b⟩"
@@ -923,18 +937,62 @@ modeMod = unlines
   , "    sample  : • ⇒ k(Int, Int)"
   , "def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)"
   , "def runA  = (f x -> f ; unArr ; _ x ; ev)"
-  , "instance Funcs : Arrow(Arr) ="
+  , "model Funcs : Arrow(Arr) ="
   , "    arrP    = Arr"
   , "    thenP   = thenA"
   , "    observe = (f -> f 7 ; runA)"
   , "    sample  = [dup ; +] ; Arr"
-  , "mode K = Funcs"
   , "def add1 = _ 1 ; +"
   , "def dbl  = 2 _ ; *"
-  , "def chain = use K ; add1 ; dbl"
+  , "def chain = use Funcs ; add1 ; dbl"
+    -- a SECOND category over the same carrier, for the two-in-a-header
+    -- and word-of-another-category refusals
+  , "model Funcs2 : Arrow(Arr) ="
+  , "    arrP    = Arr"
+  , "    thenP   = thenA"
+  , "    observe = (f -> f 7 ; runA)"
+  , "    sample  = [dup ; +] ; Arr"
   ]
--- a SEALED mode: a theory with no eliminator, so nothing written in the
--- scope can leave it by any route the mode offers
+
+-- LEVEL ONE: composition and nothing else.  `over HW` composes carriers
+-- built by hand; `use HW` has no embedding to transport a stage with.
+halfMod :: String
+halfMod = unlines
+  [ "data H(a, b) = Fn\10216a \8658 b\10217"
+  , "theory Half(k(_, _)) ="
+  , "    thenP : k(a, b) k(b, c) \8658 k(a, c)"
+  , "def thenH = (f g -> [(x -> f ; unH ; _ x ; ev ; (y -> g ; unH ; _ y ; ev))] ; H)"
+  , "model HW : Half(H) ="
+  , "    thenP = thenH"
+  , "def inc = _ 1 ; +"
+  , "def dbl = 2 _ ; *"
+  ]
+
+-- LEVEL THREE: composition, embedding AND a strength, so the elaborator
+-- can pack a wide stage with the pairing the strength names (`P`) and
+-- whisker a narrow one with `firstP`.
+wideMod :: String
+wideMod = unlines
+  [ "data W(a, b) = Fn\10216a \8658 b\10217"
+  , "data P(a, b) = a b"
+  , "theory Wider(k(_, _)) ="
+  , "    arrP   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
+  , "    thenP  : k(a, b) k(b, c) \8658 k(a, c)"
+  , "    firstP : k(a, b) \8658 k(P(a, c), P(b, c))"
+  , "    runW   : k(a, b) a \8658 b"
+  , "def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)"
+  , "def firstW = (f -> [(q -> q ; unP ; (x d -> f ; unW ; _ x ; ev ; (y -> y d ; P)))] ; W)"
+  , "def runWi = (f x -> f ; unW ; _ x ; ev)"
+  , "model Wide : Wider(W) ="
+  , "    arrP   = W"
+  , "    thenP  = thenW"
+  , "    firstP = firstW"
+  , "    runW   = runWi"
+  , "def add1 = _ 1 ; +"
+  , "def dbl  = 2 _ ; *"
+  ]
+-- a SEALED category: a theory with no eliminator, so nothing written in
+-- the scope can leave it by any route the model offers
 sealedMod :: String
 sealedMod = unlines
   [ "data Cap(a, b) = Fn⟨a ⇒ b⟩"
@@ -942,12 +1000,11 @@ sealedMod = unlines
   , "    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
   , "    thenP : k(a, b) k(b, c) ⇒ k(a, c)"
   , "def capThen = (f g -> [(x -> f ; unCap ; _ x ; ev ; (y -> g ; unCap ; _ y ; ev))] ; Cap)"
-  , "instance Sealed : Vault(Cap) ="
+  , "model Sealed : Vault(Cap) ="
   , "    arrP  = Cap"
   , "    thenP = capThen"
-  , "mode Safe = Sealed"
   , "def inc = _ 1 ; +"
-  , "def guarded = use Safe ; inc ; inc"
+  , "def guarded = use Sealed ; inc ; inc"
   ]
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
@@ -961,9 +1018,9 @@ evalTests =
     -- an identity functor changes nothing
   , ("def idF = (c -> c)\nfunctor Same = idF\ndef p = use Same ; 1 ... >> +\n3 >> p >> print",
      ["4"], "")
-    -- three kinds of name in ONE header: instance renames, resource
+    -- three kinds of name in ONE header: model renames, resource
     -- routes, functor rewrites — in that order
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\ninstance Loud : Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run =\n    use Log Loud Same\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud : Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run =\n    use Log Loud Same\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
      ["25"], "")
     -- STAGE 4: the checked interposition.  A marker reads no wire —
     -- `ρ =IO> ρ` — so `interpose` admits it at every cut
@@ -1116,10 +1173,10 @@ evalTests =
      ["agree", "agree", "agree", "agree", "agree", "agree",
       "agree", "agree", "agree", "agree", "agree", "agree"], "")
   ] ++
-    -- forward reference across the instance boundary, at RUNTIME: the
+    -- forward reference across the model boundary, at RUNTIME: the
     -- module's own defs are mutually visible, so a slot body calling a
     -- def written after it resolves
-  [ ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\ninstance S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\n1 2 3 >> total >> print",
+  [ ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\nmodel S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\n1 2 3 >> total >> print",
      ["6"], "")
   ] ++
   [ ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", ["6"],  "")   -- succ, double
@@ -1158,16 +1215,16 @@ evalTests =
     -- grades are erased: several effectful atoms run left-to-right,
     -- deepest wire first — the order they are written in
   , ("1 2 3 >> print print print",        ["1","2","3"], "")
-    -- laws RUN at module start; a passing instance is transparent
-  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance Good : M(Int) =\n    unit = 0\n    op = +\n    sample = 7\ndef t = use Good ; [op] unit ... ; foldExp\n1 2 3 >> t >> print", ["6"], "")
+    -- laws RUN at module start; a passing model is transparent
+  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel Good : M(Int) =\n    unit = 0\n    op = +\n    sample = 7\ndef t = use Good ; [op] unit ... ; foldExp\n1 2 3 >> t >> print", ["6"], "")
     -- STAGE 5a: a LAW that uses a slot-local variable.  `box : b ⇒ a`
     -- is polymorphic in b, so the law may call it at Int while the
     -- theory's own parameter is Str — which is the point of the
     -- variable being local to the slot rather than to the theory.
-  , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance W : Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w = use W ; box\n5 >> w >> print",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel W : Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w = use W ; box\n5 >> w >> print",
      ["5"], "")
     -- STAGE 5a: a theory over a type CONSTRUCTOR, composed and run
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\ninstance P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 = use P ; [_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; unK ; _ 5 ; ev\nrun2 >> print",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 = over P ; [_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; unK ; _ 5 ; ev\nrun2 >> print",
      ["12"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
@@ -1195,12 +1252,12 @@ evalTests =
     -- GENERAL as the scheme its prim ancestor had, by the one routine
     -- that states that question (`subsumes`, reached here through
     -- `checkInstance`): a theory whose slots ARE the old schemes, and
-    -- an instance filling each with today's word.  Written at wire
+    -- a model filling each with today's word.  Written at wire
     -- granularity because a theory slot has one slot-local stack; the
     -- grades, which is what this stage moved, are exact.
     -- Under unifying grades `loopD`, `whileD` and `untilD` all failed
     -- here ("Rec vs pure ... written and fixed").
-  , ("theory Derived =\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Rec> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Rec> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Rec> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\ninstance D : Derived =\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
+  , ("theory Derived =\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Rec> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Rec> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Rec> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\nmodel D : Derived =\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
     -- …and the consequence, run: a WRITTEN pure `Fn⟨Int ⇒ (Int|Int)⟩`
     -- in a data field reaches `loop`, which no derived word could take
     -- while composition unified grades.
@@ -1568,7 +1625,7 @@ evalTests =
   , ("5 >> single >> print", ["list(5)"], "")
   , ("(1 2 3 4 >> pack) >> [odd?] ... >> filter >> print", ["list(1, 3)"], "")
   , ("(1 2 3 >> pack) >> [dup >> _ single >> cons] ... >> flatMap >> print", ["list(1, 1, 2, 2, 3, 3)"], "")
-    -- one generic reduction, two Monoid instances (dictionaries as wires)
+    -- one generic reduction, two Monoid models (dictionaries as wires)
   , ("(1 2 3 4 >> pack) >> [+] 0 ... >> fold >> print", ["10"], "")
   , ("((1 2 >> pack) (3 >> pack) nil >> pack) >> [append] nil ... >> fold >> print", ["list(1, 2, 3)"], "")
     -- chunked fold + combine = whole fold (associativity licenses
@@ -1750,16 +1807,16 @@ evalTests =
   , (idF ++ "def q = [use Same >> dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
      ["Cannot unify effects: Same vs pure (the expected type fixes the grade; this code must stay pure)"], "")
 
-    -- TEMPLATES run: one body, two instances, two answers
+    -- TEMPLATES run: one body, two models, two answers
   , (tmplMod ++ "def total  = use IntSum ; fold1\n\
      \def joined = use StrCat ; fold1\n\
      \1 2 3 4 ; total ; print\n\
      \\"a\" \"b\" \"c\" ; joined ; print", ["10", "abc"], "")
-    -- a template calling a template, at both instances
+    -- a template calling a template, at both models
   , (tmplMod ++ "def a = use IntSum ; quad\ndef b = use StrCat ; quad\n\
      \5 ; a ; print\n\"z\" ; b ; print", ["20", "zzzz"], "")
     -- a template is expanded where it LANDS: a resource scope between
-    -- the instance and the call routes the expanded body too
+    -- the model and the call routes the expanded body too
   , (tmplMod ++ "resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
      \def p =\n    use IntSum\n    use Log\n    twice\n    \"done\"\n    note\n\
      \(\"\" ; Log) 3 ; p ; unLog _ ; print ... ; print", ["done", "6"], "")
@@ -1767,13 +1824,13 @@ evalTests =
   , (handlerMod ++ "def square =\n    use Log\n    dup ; *\n    \"squared \"\n    note\n\
      \[square] ; collectLog ; _ 7 ; ev\nprint print",
      ["squared ", "49"], "")
-    -- the generic handler, at the resource its instance names
+    -- the generic handler, at the resource its model names
   , (collectorMod ++ "def bump = unCounter ; 1 ... ; + ; Counter\n\
      \def tick =\n    use Counter\n    dup ; *\n    bump\n\
      \def collectCount = use Counts ; collected\n\
      \[tick] ; collectCount ; _ 7 ; ev\nprint print", ["1", "49"], "")
 
-    -- STAGE 5b: RULE SETS.  `instance Opt : Base = p = q` declares a word
+    -- STAGE 5b: RULE SETS.  `model Opt : Base = p = q` declares a word
     -- `Opt : Code ⇒ Code` and a functor of the same name; `use Opt`
     -- applies it atomwise and mints `=Opt>`.  The rule itself is
     -- blessed ONCE, at the declaration, by `subsumes` — unification
@@ -1781,7 +1838,7 @@ evalTests =
   , (ruleMod ++ "def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
     -- the inline and the block form declare the same set
   , ("def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
-     \instance Opt : Base\n    dupInt = dup\n    twice = double\n\
+     \model Opt : Base\n    dupInt = dup\n    twice = double\n\
      \def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
     -- a rule fires inside a QUOTATION: the engine recurses into quotes,
     -- rows (residual flag carried) and groups
@@ -1798,7 +1855,7 @@ evalTests =
      ["6"], "")
     -- a PURE replacement under an IO pattern passes: ∅ is the bottom of
     -- the grade semilattice, so subeffecting comes free with `subsumes`
-  , ("def noisy = toStr >> print\ndef quiet = drop\ninstance G : Base = noisy = quiet\n\
+  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel G : Base = noisy = quiet\n\
      \def prog =\n    use G\n    noisy\n\"ran\" >> print\n5 >> prog", ["ran"], "")
     -- `lift2` applies the same word at RUNTIME, with the program as its
     -- own witness and its own fallback
@@ -1835,34 +1892,65 @@ evalTests =
      \([double] >> getCode >> Opt) ([double] >> getCode) >> sameCodeC >> v >> print\n\
      \([twice] >> getCode >> Opt) ([twice] >> getCode) >> sameCodeC >> v >> print",
      ["yes", "yes", "no"], "")
-    -- the laws as a THEORY, audited at module start: an instance that
+    -- the laws as a THEORY, audited at module start: a model that
     -- fails one stops the module before main runs
-  , (ruleMod ++ optimizerTheory ++ "instance OptIsOpt : Optimizer\n\
+  , (ruleMod ++ optimizerTheory ++ "model OptIsOpt : Optimizer\n\
      \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
      ["audited"], "")
-    -- MODES (5c).  The scope runs: `use K ; add1 ; dbl` is
-    -- `thenP (arrP [add1]) (arrP [dbl])`, and the EXIT is called
-    -- outside, under the ordinary instance scope.
-  , (modeMod ++ "def obs = use Funcs ; chain ; observe\nobs ; print",
+    -- TRANSPORT (5c, reshaped 5c½).  The scope runs: `use Funcs ; add1
+    -- ; dbl` is `thenP (arrP [add1]) (arrP [dbl])`, and the EXIT is
+    -- called under `over`, which transports nothing.
+  , (modeMod ++ "def obs = over Funcs ; chain ; observe\nobs ; print",
      ["16"], "")
     -- what the scope EMITS, read back off the elaborated spine
-  , (modeMod ++ "[use K ; add1 ; dbl] ; getCode ; unparse ; print",
-     ["use@K >> [add1] >> Funcs@arrP >> _ [dbl] >> _ Funcs@arrP >> Funcs@thenP"], "")
-    -- `mode K` declares a WORD of its own name as well as a functor
-    -- entry, so the same functor is a value: `[K]` is a quote and the
-    -- code it returns splices and runs.  It seeds with an identity
-    -- carrier (`leftId` is the law that says the seed is free), which
-    -- is the one way it differs from the scope.
-  , (modeMod ++ "[add1] ; getCode ; K ; unparse ; print",
+  , (modeMod ++ "[use Funcs ; add1 ; dbl] ; getCode ; unparse ; print",
+     ["use@Funcs >> [add1] >> Funcs@arrP >> _ [dbl] >> _ Funcs@arrP >> Funcs@thenP"], "")
+    -- a transporting model declares a WORD of its own name as well, so
+    -- the same functor is a value: `[Funcs]` is a quote and the code it
+    -- returns splices and runs.  It seeds with an identity carrier
+    -- (`leftId` is the law that says the seed is free), which is the one
+    -- way it differs from the scope.
+  , (modeMod ++ "[add1] ; getCode ; Funcs ; unparse ; print",
      ["[_] >> Funcs@arrP >> _ [add1] >> _ Funcs@arrP >> Funcs@thenP"], "")
-    -- and `lift2 [K]` applies it at RUNTIME with the program as its own
-    -- witness: a mode CHANGES the type, so the witness refuses the
-    -- rewrite and the original runs.  That is the fallback working, not
-    -- failing.
-  , (modeMod ++ "([K] [add1] ; lift2) 5 ; ev ; print", ["6"], "")
-    -- a SEALED mode composes inside and cannot be left: the only door
-    -- is the carrier's own unroller, an ordinary base word
-  , (sealedMod ++ "def g2 = use Safe ; guarded ; inc\n\
+    -- and `lift2 [Funcs]` applies it at RUNTIME with the program as its
+    -- own witness: transport CHANGES the type, so the witness refuses
+    -- the rewrite and the original runs.  That is the fallback working,
+    -- not failing.
+  , (modeMod ++ "([Funcs] [add1] ; lift2) 5 ; ev ; print", ["6"], "")
+    -- STAGE 5c½, THE ROUTING.  A hom-object names ONE wire on each
+    -- side, so a wide stage is PACKED with the pairing the strength
+    -- names — read off `firstP`'s declared type, nothing built in — and
+    -- a narrow one is whiskered with `firstP` once per wire above it.
+  , (wideMod ++ "def sq = use Wide ; dup ; *\n\
+     \def run = over Wide ; sq ; _ 5 ; runW\nrun ; print", ["25"], "")
+  , (wideMod ++ "[use Wide ; dup ; *] ; getCode ; unparse ; print",
+     ["use@Wide >> [dup >> P] >> Wide@arrP >> _ [unP >> *] >> _ Wide@arrP \
+      \>> Wide@thenP"], "")
+    -- a three-wire stage, and a stage that acts on a wire that is not
+    -- the deepest
+  , (wideMod ++ "def poly = use Wide ; dup ; _ dup ; _ _ add1 ; _ * ; +\n\
+     \def run = over Wide ; poly ; _ 5 ; runW\nrun ; print", ["35"], "")
+    -- `...` is what the strength becomes: `add1 ...` acts on the deepest
+    -- wire and the one above it rides along, which is `firstP`
+  , (wideMod ++ "[use Wide ; dup ; add1 ... ; *] ; getCode ; unparse ; print",
+     ["use@Wide >> [dup >> P] >> Wide@arrP >> _ [add1 pass] >> _ Wide@arrP \
+      \>> _ Wide@firstP >> Wide@thenP >> _ [unP >> *] >> _ Wide@arrP \
+      \>> Wide@thenP"], "")
+  , (wideMod ++ "def w = use Wide ; dup ; add1 ... ; *\n\
+     \def run = over Wide ; w ; _ 5 ; runW\nrun ; print", ["30"], "")
+    -- LEVEL ONE, composition alone: carriers built by hand compose, and
+    -- the composite is a word of the category with no label on it
+  , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; [dbl] ; H\n\
+     \def fg = over HW ; f g ; thenP\nfg ; unH ; _ 5 ; ev ; print", ["12"], "")
+    -- OVER/USE COHERENCE: the transport writes out what `over` writes
+    -- by hand, so the two denote the same morphism
+  , (wideMod ++ "def byHand = over Wide ; [add1] ; arrP ; _ [dbl] ; _ arrP ; thenP\n\
+     \def byUse = use Wide ; add1 ; dbl\n\
+     \def h5 = over Wide ; byHand ; _ 5 ; runW\n\
+     \def u5 = over Wide ; byUse ; _ 5 ; runW\n\
+     \h5 u5 ; eq? ; (forget ; \"same\" | forget ; \"differ\") ; merge ; print",
+     ["same"], "")
+  , (sealedMod ++ "def g2 = use Sealed ; guarded ; inc\n\
      \g2 ; unCap ; _ 5 ; ev ; print", ["8"], "")
     -- A RECEIPT IS `pass` WITH A LABEL, so the normalizer erases it as
     -- it erases `pass`.  Without this no law could be stated about a
@@ -1877,7 +1965,7 @@ evalTests =
 ruleMod :: String
 ruleMod =
   "def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
-  \instance Opt : Base = dupInt = dup, twice = double\n"
+  \model Opt : Base = dupInt = dup, twice = double\n"
 
 optimizerTheory :: String
 optimizerTheory =
@@ -1897,8 +1985,8 @@ moduleFailTests =
   , ("def dist2 = dup\n1 >> print",
      "`dist2` cannot be shadowed: abstraction elimination EMITS it")
     -- a FALSE law rejects the module when it starts running
-  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\ninstance BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
-     "law 'leftUnit' fails for instance BadUnit")
+  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
+     "law 'leftUnit' fails for model BadUnit")
     -- the evalCode arity gap: spliced code produces 2 wires but the
     -- context typed the hit track as 0 (Δ is existential, chosen by the
     -- caller). Used to leak silently (a value on a stack typed empty);
@@ -1908,11 +1996,11 @@ moduleFailTests =
     -- is an ordinary arity/type error rather than anything exotic
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\n(2 ([1 2 >> + >> dup >> *] >> getCode) >> take) >> box\nev >> (print | forget) >> merge",
      "Cannot unify types")
-    -- an instance body must SUBSUME its slot's declared type, effect row
+    -- a model body must SUBSUME its slot's declared type, effect row
     -- included: an io body under a pure-declared slot used to pass the
     -- stack-only check, and `functor F = <that slot>` then carried IO
     -- into elaboration, breaking the phase invariant.
-  , ("theory Rewriter =\n    rw : Code ⇒ Code\n\ninstance Loud : Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud = use Loud ; rw\n1",
+  , ("theory Rewriter =\n    rw : Code ⇒ Code\n\nmodel Loud : Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud = use Loud ; rw\n1",
      "Cannot unify effects: IO vs pure")
     -- a witness is not optional: `evalAs` without one is an arity error
     -- (there is no longer any way to splice without stating the type)
@@ -1957,7 +2045,7 @@ moduleFailTests =
     -- `interpose` (stage 4) admits only unit endomorphisms — `ρ ⇒ ρ`,
     -- or `E ρ ⇒ E ρ` over resource wires — and refuses by name, with
     -- the stage's actual type, before inserting it anywhere.  Checked
-    -- by SUBSUMPTION: `Int ρ ⇒ Int ρ` is an instance of `ρ ⇒ ρ` but
+    -- by SUBSUMPTION: `Int ρ ⇒ Int ρ` is a model of `ρ ⇒ ρ` but
     -- not as general as it, and fails at any empty cut.
   , ("def peek = [dup ... >> print ...] >> getCode\ndef peeked = peek ... >> interpose\nfunctor Peeked = peeked\ndef bad = use Peeked >> dup >> +\n3 >> bad >> print",
      "interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a wire")
@@ -2028,45 +2116,45 @@ moduleFailTests =
   , ("type Fin = Int\n1",             "Malformed type declaration")
     -- a resource is unrolled, not eliminated by points: no fold
   , ("resource Log = Str\nfoldLog",   "Unknown primitive: foldLog")
-    -- an instance is AUDITED: its slots must match the theory's
-    -- signatures, read at the instance's own argument
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Bad : Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
+    -- a model is AUDITED: its slots must match the theory's
+    -- signatures, read at the model's own argument
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Bad : Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
      "slot 'unit' is • ⇒ Str but theory Monoid declares • ⇒ Int")
     -- STAGE 5a, item 0: a slot-local variable is UNIVERSALLY quantified,
-    -- so an instance body that is too specific for it is refused, and
+    -- so a model body that is too specific for it is refused, and
     -- the refusal names the slot
-  , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
      "slot 'box' is Int ⇒ Str but theory Wrap declares a0 ⇒ Str")
-  , ("theory Wrap(a) =\n    box : b ⇒ a\ninstance W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
      "must stay parametric in it")
     -- STAGE 5a, item 1: the four ways a constructor parameter goes wrong
   , ("theory Arrow(k(_, _)) =\n    thenP : k ⇒ k\n1",
      "Type parameter k is a type constructor of arity 2: it is not a wire, write it applied — k(_, _)")
   , ("theory Arrow(k(_, _)) =\n    thenP : k(a) ⇒ k(a)\n1",
      "Type constructor parameter 'k' takes 2 argument(s), but was given 1")
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(Nope) =\n    thenP = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(Nope) =\n    thenP = _\n1",
      "declares 'k' as a type constructor of arity 2, so its argument names a declared data type; 'Nope' is not one")
-  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(One) =\n    thenP = _\n1",
+  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(One) =\n    thenP = _\n1",
      "declares 'k' with arity 2, but One takes 1 argument(s)")
     -- `Fn` is built in and takes an arrow, not wires: the refusal says
     -- so, and names the one-line wrapper that works
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance F : Arrow(Fn) =\n    thenP = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel F : Arrow(Fn) =\n    thenP = _\n1",
      "`Fn` is built in and takes an arrow, not wires")
     -- a constructor argument is a NAME, not a type expression
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(List(Int)) =\n    thenP = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(List(Int)) =\n    thenP = _\n1",
      "must be a bare constructor name")
     -- and every parameter of the named constructor must be a wire, or
     -- the substitution would not be sound
-  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\ninstance Bad : Arrow(T) =\n    thenP = _\n1",
+  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(T) =\n    thenP = _\n1",
      "every parameter of a constructor argument must be a wire")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Partial : Monoid(Int) =\n    unit = 0\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Partial : Monoid(Int) =\n    unit = 0\n1",
      "no binding for 'op'")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance Extra : Monoid(Int) =\n    unit = 0\n    op   = +\n    huh  = 1\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Extra : Monoid(Int) =\n    unit = 0\n    op   = +\n    huh  = 1\n1",
      "'huh' is not an operation of theory Monoid")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ninstance I : NoSuch(Int) =\n    unit = 0\n    op = +\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel I : NoSuch(Int) =\n    unit = 0\n    op = +\n1",
      "Unknown theory: NoSuch")
     -- a law must be a program that can run on nothing and answer yes
-  , ("theory T(a) =\n    f : a ⇒ a\n    law silly = 5\ninstance I : T(Int) =\n    f = id\n1",
+  , ("theory T(a) =\n    f : a ⇒ a\n    law silly = 5\nmodel I : T(Int) =\n    f = id\n1",
      "must be a program with type `• ⇒ Bool`")
     -- one resource operation per stage; the elaborator says so
   , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f = use Log Counter >> \"x\" >> note bump\n1",
@@ -2085,11 +2173,11 @@ moduleFailTests =
     -- a NESTED written Fn keeps its grade through the `k := <data>`
     -- substitution: substituting theory parameters used to rebuild every
     -- nested Fn pure, which silently dropped the declared manifest
-  , ("theory Emb(k(_, _)) =\n    arrP : Fn⟨a =Rec> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\ninstance A : Emb(Arr) =\n    arrP = Arr\n\ndef go = use A ; arrP\n[dup >> *] >> go >> drop",
+  , ("theory Emb(k(_, _)) =\n    arrP : Fn⟨a =Rec> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A : Emb(Arr) =\n    arrP = Arr\n\ndef go = use A ; arrP\n[dup >> *] >> go >> drop",
      "slot 'arrP' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Rec> a1⟩ ⇒ Arr(a0, a1)")
     -- a theory slot declared pure refuses a `fix`-built body — the same
     -- rule that already refused an io body under a pure slot
-  , ("theory Stepper =\n    step : Int ⇒ Int\n\ninstance Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go = use Fixed ; step\n5 >> go >> drop",
+  , ("theory Stepper =\n    step : Int ⇒ Int\n\nmodel Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go = use Fixed ; step\n5 >> go >> drop",
      "slot 'step' is Int =Rec> Int but theory Stepper declares Int ⇒ Int (Cannot unify effects: Rec vs pure")
     -- the bound must agree with the bundle's actual width
   , ("fin0 >> 1 2 >> at",             "Cannot unify")
@@ -2122,16 +2210,16 @@ moduleFailTests =
   , ("def 5 = id\n1",                             "Malformed definition")
   , ("+",                                         "main requires a nonempty input stack")
 
-    -- TEMPLATES: a template called outside every instance scope of its
+    -- TEMPLATES: a template called outside every model scope of its
     -- theory names the THEORY, not a missing word
   , (tmplMod ++ "1 2 ; fold1 ; print",
-     "fold1 needs an instance of Monoid in scope")
-    -- an instance of the WRONG theory in scope is the same error:
+     "fold1 needs a model of Monoid in scope")
+    -- a model of the WRONG theory in scope is the same error:
     -- selection is by theory and nothing is searched for
   , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
-     \instance IntPt : Pointed(Int) =\n    pt = 9\n\
+     \model IntPt : Pointed(Int) =\n    pt = 9\n\
      \def bad = use IntPt ; fold1\n1 2 ; bad ; print",
-     "fold1 needs an instance of Monoid in scope")
+     "fold1 needs a model of Monoid in scope")
     -- `over` declares what the def IS, so it may only be its own header
   , (tmplMod ++ "def f =\n    1\n    over Monoid\n    op\n1 ; f ; print",
      "`over Monoid` may only be a def's own header")
@@ -2140,7 +2228,7 @@ moduleFailTests =
   , (tmplMod ++ "def f = use Monoid ; op\n1 ; print",
      "`use Monoid` names a theory: `use` applies a functor, and a theory \
      \is not one — write `over Monoid` to make this def a template")
-    -- one instance is waited for, so exactly one name is `over`ed
+    -- one model is waited for, so exactly one name is `over`ed
   , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
      \def f = over Monoid Pointed ; op\n1 ; print",
      "an `over` header names exactly one theory")
@@ -2158,56 +2246,54 @@ moduleFailTests =
      "is the compiler's spelling of a slot")
     -- a template shares the def namespace
   , (tmplMod ++ "def fold1 = dup\n1 ; print", "Duplicate definition: fold1")
-    -- STAGE 5b/5c½: INSTANCES OF `Base`.  `q` may stand wherever `p`
+    -- STAGE 5b/5c½: MODELS OF `Base`.  `q` may stand wherever `p`
     -- stands iff scheme(q) >= arrow(p).  That is rank-2, so no `Fn` type
     -- holds it and no call site checks it: it is checked ONCE, here, by
     -- the routine `checkInstance` and `runAs` already share.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Bad : Base = dup = dupInt\n1 >> print",
-     "instance Bad : Base: `dup = dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\ninstance Bad : Base = dup = dupInt\n1 >> print",
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Bad : Base = dup = dupInt\n1 >> print",
+     "model Bad : Base: `dup = dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Bad : Base = dup = dupInt\n1 >> print",
      "A binding may only GENERALIZE")
     -- the parametricity case: `two = dup` would RUN on an Int and
     -- narrows `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else
-  , ("def two = drop 1 1\ninstance Bad : Base = two = dup\n1 >> print",
-     "instance Bad : Base: `two = dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
-  , ("def two = drop 1 1\ninstance Bad : Base = two = dup\n1 >> print",
+  , ("def two = drop 1 1\nmodel Bad : Base = two = dup\n1 >> print",
+     "model Bad : Base: `two = dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
+  , ("def two = drop 1 1\nmodel Bad : Base = two = dup\n1 >> print",
      "must stay parametric in it")
     -- GRADES ride along by the semilattice order: an io image under a
     -- pure generator is refused (the other direction passes)
-  , ("def noisy = toStr >> print\ndef quiet = drop\ninstance Bad : Base = quiet = noisy\n1 >> print",
-     "instance Bad : Base: `quiet = noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
-  , ("def noisy = toStr >> print\ndef quiet = drop\ninstance Bad : Base = quiet = noisy\n1 >> print",
+  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel Bad : Base = quiet = noisy\n1 >> print",
+     "model Bad : Base: `quiet = noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
+  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel Bad : Base = quiet = noisy\n1 >> print",
      "the expected type fixes the grade; this code must stay pure")
     -- a slot is not a word outside `use`, so it is neither side of a
     -- binding; nor is a theory, nor a template (which has no type until
-    -- an instance supplies one)
-  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \instance Bad : Base = op = +\n1 >> print",
+    -- a model supplies one)
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
+     \model Bad : Base = op = +\n1 >> print",
      "op is a slot of theory Mon, and a slot is not a word outside `use`")
-  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \instance Bad : Base = Plus@op = +\n1 >> print",
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
+     \model Bad : Base = Plus@op = +\n1 >> print",
      "is the compiler's spelling of a slot")
-  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \instance Bad : Base = Mon = +\n1 >> print",
-     "instance Bad : Base: Mon is a theory, not a word")
-  , ("theory Mon(a) =\n    op : a a \8658 a\ninstance Plus : Mon(Int) =\n    op = +\n\
-     \def twice = over Mon ; op\ninstance Bad : Base = twice = +\n1 >> print",
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
+     \model Bad : Base = Mon = +\n1 >> print",
+     "model Bad : Base: Mon is a theory, not a word")
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
+     \def twice = over Mon ; op\nmodel Bad : Base = twice = +\n1 >> print",
      "twice is a template over theory Mon")
-  , ("instance Bad : Base = nowhere = dup\n1 >> print",
-     "instance Bad : Base: nowhere is not defined at this point")
+  , ("model Bad : Base = nowhere = dup\n1 >> print",
+     "model Bad : Base: nowhere is not defined at this point")
     -- the shape of a binding: v1 sends one WORD to one word
-  , ("instance Bad : Base = dup dup = dup\n1 >> print",
+  , ("model Bad : Base = dup dup = dup\n1 >> print",
      "a v1 binding sends one WORD to one word")
-  , ("instance Bad : Base = dup\n1 >> print",
+  , ("model Bad : Base = dup\n1 >> print",
      "is missing `=` (a binding reads `p = q`)")
-  , ("instance Bad : Base\n1 >> print", "instance Bad : Base: no bindings")
-  , ("instance Bad : Base = dup = swap, dup = drop\n1 >> print",
+  , ("model Bad : Base\n1 >> print", "model Bad : Base: no bindings")
+  , ("model Bad : Base = dup = swap, dup = drop\n1 >> print",
      "two bindings give `dup` an image")
-    -- STAGE 5c½: `over` names a theory or a mode, and nothing else.
-    -- Each other kind is refused by kind, with the word to write.
-  , (modeMod ++ "def bad = over Funcs ; add1\n1 ; print",
-     "`over Funcs` names an instance of theory Arrow, and an instance is \
-     \a MODEL of a theory, not a theory")
+    -- STAGE 5c½: `over` names a theory or a model with a carrier, and
+    -- nothing else.  Each other kind is refused by kind, with the word
+    -- to write.
   , (modeMod ++ "def idF = (c -> c)\nfunctor Same = idF\n\
      \def bad = over Same ; add1\n1 ; print",
      "`over Same` names a functor, and a functor is applied to a body, \
@@ -2217,80 +2303,102 @@ moduleFailTests =
      \body.  Write `use Log`.")
   , (modeMod ++ "def bad = over Nope ; add1\n1 ; print",
      "`over Nope` names nothing declared at this point")
-  , ("def dupInt = dup\ninstance Opt : Base = dupInt = dup\n\
+  , ("def dupInt = dup\nmodel Opt : Base = dupInt = dup\n\
      \def bad = over Opt ; dupInt\n1 ; print",
-     "`over Opt` names an instance of Base — a rewriting of the ambient \
+     "`over Opt` names a model of Base — a rewriting of the ambient \
      \presentation, which is applied, not inhabited.  Write `use Opt`.")
+    -- `over` of a model with NO carrier: there is nothing to build
+  , ("theory Ring(a) =\n    add : a a ⇒ a\nmodel Ints : Ring(Int) =\n\
+     \    add = +\ndef bad = over Ints ; 1\n1 ; print",
+     "`over Ints` names a model of Ring in the base: it has no carrier \
+     \to build — write `use Ints`, or `over Ring` for a template.")
     -- the K-word ascription is a WRITTEN expectation, checked against
     -- the arrow: one carrier out of nothing, or it is refused
-  , (modeMod ++ "def bad = over K ; add1\n1 ; print",
-     "`over K`: a word of a mode builds one Arr out of nothing — \
-     \`• ⇒ Arr(a, b)` — but bad is Int ⇒ Int")
-  , (modeMod ++ "def bad = over K ; 5\n1 ; print",
-     "Take the inputs inside the carrier (arrP embeds a program), or \
-     \drop the header and let `use K` transport the def.")
-    -- the keyword that is gone, and where it went
+  , (modeMod ++ "def bad = over Funcs ; add1\n1 ; print",
+     "`over Funcs`: bad neither builds one of Funcs's carriers — \
+     \`• ⇒ Arr(a, b)`, which is what a morphism of the category is — \
+     \nor uses any of Funcs's words, so the header did nothing: bad is \
+     \Int ⇒ Int")
+  , (modeMod ++ "def bad = over Funcs ; 5\n1 ; print",
+     "drop the header and let `use Funcs` transport the def.")
+    -- the keywords that are gone, and where they went
   , ("rules Bad = dup => dup\n1 >> print",
-     "`rules` is gone: a rule set is a PARTIAL INSTANCE of the ambient \
-     \presentation, so it is written `instance Name : Base = p = q")
+     "`rules` is gone: a rule set is a PARTIAL MODEL of the ambient \
+     \presentation, so it is written `model Name : Base = p = q")
+  , ("instance Bad : Base = dup = dup\n1 >> print",
+     "`instance` is spelled `model` since 2026-09-13: write \
+     \`model Bad : Base = dup = dup`.  MANUAL §8.")
+  , (modeMod ++ "mode K = Funcs\n1 ; print",
+     "`mode` is gone: a model whose theory has a hom-object `k(_, _)` \
+     \transports when it is USED, so the model IS the declaration — \
+     \write `use Funcs` where you wrote `use K`")
     -- `Base` is the ambient presentation and is not written down
   , ("theory Base =\n    op : a \8658 a\n1 >> print",
      "`Base` is the ambient presentation and may not be declared")
-    -- an instance of `Base` shares one namespace with functors and modes
-  , ("def idF = (c -> c)\nfunctor Opt = idF\ninstance Opt : Base = dup = dup\n1 >> print",
-     "Duplicate instance declaration: Opt")
+    -- a model of `Base` shares one namespace with functors
+  , ("def idF = (c -> c)\nfunctor Opt = idF\nmodel Opt : Base = dup = dup\n1 >> print",
+     "Duplicate model declaration: Opt")
     -- `sameCodeC` reports outside the fragment exactly as `sameCode`
     -- does — they are one procedure — and a `fix` body that applies its
     -- self wire is where the boundary now falls
-  , ("def dupSwap = dup >> swap\ninstance Opt : Base = dupSwap = dup\n\
+  , ("def dupSwap = dup >> swap\nmodel Opt : Base = dupSwap = dup\n\
      \def slow = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) \
      \>> (dupSwap >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]\n\
      \(slow >> getCode >> Opt) (slow >> getCode) >> sameCodeC >> drop >> 1 >> print",
      "sameCodeC: outside the structural fragment: `ev` of a value that \
      \is not a literal quotation")
-    -- the audit: an instance that fails a law is not an instance.
+    -- the audit: a model that fails a law is not a model.
     -- `doubled` repeats every stage, so weaving twice weaves twice.
   , ("def doubled = [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise\n\
      \theory Optimizer\n    ap     : Code \8658 Code\n    sample : \8226 \8658 Code\n\
      \    law idempotent = (sample >> ap >> ap) (sample >> ap) >> sameCodeC\n\
-     \instance Dbl : Optimizer\n    ap     = doubled\n    sample = [dup >> swap] >> getCode\n1 >> print",
-     "law 'idempotent' fails for instance Dbl")
-    -- MODES (5c).  EXITS ARE THE ONLY WAY OUT, and they are out: a slot
-    -- that takes the carrier and returns base is refused BY NAME inside
-    -- the scope.  That is what makes the K-word table exact without
-    -- inference — every word written in the mode produces a carrier.
-  , (modeMod ++ "def bad = use K ; add1 ; observe\nbad ; drop",
-     "`observe` leaves K; call it outside `use K`")
-    -- a mode needs a CARRIER, so its instance needs a constructor
-    -- parameter
-  , ("theory Monoid(a) =\n    op : a a ⇒ a\n\
-     \instance IntSum : Monoid(Int) =\n    op = +\nmode M = IntSum\n1 ; print",
-     "mode M: IntSum is an instance of Monoid, which has no constructor \
-     \parameter — a mode needs a carrier `k(_, _)`")
-    -- and the two slots it is spelled with, by convention
+     \model Dbl : Optimizer\n    ap     = doubled\n    sample = [dup >> swap] >> getCode\n1 >> print",
+     "law 'idempotent' fails for model Dbl")
+    -- EXITS ARE THE ONLY WAY OUT, and they are out: a slot that takes
+    -- the carrier and returns base is refused inside the transporting
+    -- scope.  That is what makes the K-word table exact without
+    -- inference — every word written under `use M` produces a carrier.
+  , (modeMod ++ "def bad = use Funcs ; add1 ; observe\nbad ; drop",
+     "`observe` leaves Funcs; call it outside `use Funcs`")
+    -- THE LEVELS, each pinned.  Composition alone: `over M ; f g ;
+    -- <compose>` is fine (see evalTests), but there is no embedding, so
+    -- `use M` has nothing to transport a base stage WITH.
+  , (halfMod ++ "def bad = use HW ; inc ; inc\nbad ; drop",
+     "`use HW`: theory Half declares composition (`k(a, b) k(b, c) ⇒ \
+     \k(a, c)`) but no embedding (`Fn⟨a ⇒ b⟩ ⇒ k(a, b)`): `use HW` \
+     \cannot transport a base stage; `over HW` and compose by hand.")
+    -- + embedding: single-wire stages transport, and a WIDER stage is
+    -- refused naming the strength that would carry it
+  , (modeMod ++ "def bad = use Funcs ; dup ; *\nbad ; drop",
+     "`use Funcs`: dup is not one wire in and one wire out, and theory \
+     \Arrow's hom-object Arr(a, b) names ONE object on each side.")
+    -- and a stage that does not cover the stack it is handed
+  , (wideMod ++ "def bad = use Wide ; dup ; add1 ; *\nbad ; drop",
+     "`use Wide`: add1 takes 1 wire, but the scope is running 2 wires \
+     \wide.")
+    -- a stage that takes no wire has no object to be the source of
+  , (wideMod ++ "def bad = use Wide ; 5 ; dbl\nbad ; drop",
+     "`use Wide`: 5 takes no wire, and W(a, b) has an object on each side")
+    -- two composition-shaped slots: the elaborator reads the SHAPE, so
+    -- it cannot choose
   , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
-     \theory Half(k(_, _)) =\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \theory Twin(k(_, _)) =\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \    alsoP : k(a, b) k(b, c) ⇒ k(a, c)\n\
      \def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)\n\
-     \instance HW : Half(W) =\n    thenP = thenW\nmode H = HW\n1 ; print",
-     "mode H: theory Half declares no slot `arrP`")
-    -- functors, rule sets and modes share ONE namespace: each declares
-    -- a name a `use` header may carry
-  , (modeMod ++ "def w = (c -> c)\nfunctor K = w\n1 ; print",
-     "Duplicate mode declaration: K")
-  , ("mode Q = Nope\n1 ; print",
-     "mode Q: Nope is not an instance declared here")
-  , ("mode Q Funcs\n1 ; print",
-     "Malformed mode declaration (want `mode Name = Instance`)")
-    -- one mode per header: the second would `arrP` the first's carriers
-  , (modeMod ++ "mode K2 = Funcs\ndef bad = use K K2 ; add1\nbad ; drop",
-     "a header may name at most one mode")
-    -- THE FLAGSHIP QUESTION (plan item 4c): a K-word inside ANOTHER
-    -- mode's scope.  It does NOT type — `arrP` embeds a program and a
-    -- carrier is not one — and inference would say `• vs a16`, so
-    -- the elaborator says it instead.
-  , (modeMod ++ "mode K2 = Funcs\ndef other = use K2 ; add1\n\
-     \def bad = use K ; chain ; other\nbad ; drop",
-     "other is a word of mode K2, so it builds a carrier rather than \
+     \model TW : Twin(W) =\n    thenP = thenW\n    alsoP = thenW\n1 ; print",
+     "model TW: theory Twin declares two slots at the composition shape \
+     \`k(a, b) k(b, c) ⇒ k(a, c)` — `thenP` and `alsoP`")
+    -- one category per header: the second would embed the first's
+    -- carriers as if they were programs
+  , (modeMod ++ "def bad = use Funcs Funcs2 ; add1\nbad ; drop",
+     "a header may name at most one category")
+    -- THE FLAGSHIP QUESTION (plan item 4c): a word of one category
+    -- inside ANOTHER's scope.  It does NOT type — an embedding embeds a
+    -- program and a carrier is not one — and inference would say
+    -- `• vs a16`, so the elaborator says it instead.
+  , (modeMod ++ "def other = use Funcs2 ; add1\n\
+     \def bad = use Funcs ; chain ; other\nbad ; drop",
+     "other is a word of Funcs2, so it builds a carrier rather than \
      \being a program arrP could embed")
   ]
 
@@ -2329,7 +2437,7 @@ runModuleType (src, expected) =
                    ++ ", got " ++ rendered
           where rendered = showArrowA (Disp (modAliases m)
                                    [ dName d | d <- modDatas m, dResource d ]
-                                   [ (mdName md, mdCarrier md) | md <- modModes m ])
+                                   [ (tpName md, tpCarrier md) | md <- modTrans m ])
                             (normalizeArrow arr)
 
 runEval :: (String, [String], String) -> IO (Maybe String)

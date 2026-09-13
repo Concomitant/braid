@@ -62,13 +62,13 @@ data ReplState = ReplState
   , rsStackTy  :: SType      -- type of the current stack (internal names)
   , rsStack    :: [Value]    -- the current stack, front wire first
   , rsUse      :: [String]   -- ambient `use` scope: a session-wide body
-  , rsSlots    :: SlotTable  -- instance name -> its theory and slots
+  , rsSlots    :: SlotTable  -- model name -> its theory and slots
   , rsFuncs    :: [(String, String)]    -- functor name -> its word
   , rsTheories :: [Theory]   -- theories `:import` brought in
-  , rsTmpls    :: TemplateTable         -- templates awaiting an instance
-  , rsModes    :: [Mode]     -- modes `:import` brought in
+  , rsTmpls    :: TemplateTable         -- templates awaiting a model
+  , rsTrans    :: [Transport] -- carrier models `:import` brought in
   , rsKWords   :: [(String, String)]   -- def -> the mode it was declared in
-  , rsBases    :: [BaseInstance]        -- instances of `Base` it imported
+  , rsBases    :: [BaseInstance]        -- models of `Base` it imported
     -- a session cannot DECLARE a theory, a functor or a mode, but
     -- `:import` can bring them in, and then `use` must know them
   }
@@ -153,21 +153,21 @@ continueOpen line = go (lineDepth line) line
             Just next -> go (d + lineDepth next) (acc ++ "\n" ++ next)
 
 -- what a session's lines are checked on top of: everything it has
--- accumulated, including the instances and functors `:import` brought in
+-- accumulated, including the models and functors `:import` brought in
 baseOf :: ReplState -> ModuleBase
 baseOf st =
   (moduleBase (rsEnv st) (rsRun st) preludeShadowNames (rsAliases st)
               (rsDatas st))
     { mbSlots = rsSlots st, mbFuncs = rsFuncs st
     , mbTheories = rsTheories st, mbTemplates = rsTmpls st
-    , mbModes = rsModes st, mbKWords = rsKWords st
+    , mbTrans = rsTrans st, mbKWords = rsKWords st
     , mbBases = rsBases st }
 
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
 dispOf :: ReplState -> Disp
 dispOf st = Disp (rsAliases st) [ dName d | d <- rsDatas st, dResource d ]
-                 [ (mdName m, mdCarrier m) | m <- rsModes st ]
+                 [ (tpName m, tpCarrier m) | m <- rsTrans st ]
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
@@ -269,7 +269,7 @@ elabIn st src = do
   term0 <- parseProgram src
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
-                       (rsModes st) (rsKWords st) (rsBases st) Nothing)
+                       (rsTrans st) (rsKWords st) (rsBases st) Nothing)
     (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -281,7 +281,7 @@ typeOfWith render st src =
 -- `:import "path.braid"` — the file's DECLARATIONS, in this session's
 -- scope.  Its main program is not run (a library's demo is its own
 -- business), and its own imports are resolved first, exactly as in a
--- file.  This is also the only way a session gets a theory, an instance
+-- file.  This is also the only way a session gets a theory, a model
 -- or a functor, since it cannot declare one.
 importLine :: ReplState -> String -> IO ReplState
 importLine st arg =
@@ -316,7 +316,7 @@ importLine st arg =
                     , rsFuncs    = modFunctors m ++ rsFuncs st
                     , rsTheories = modTheories m
                     , rsTmpls    = modTemplates m
-                    , rsModes    = modModes m
+                    , rsTrans    = modTrans m
                     , rsKWords   = modKWords m
                     , rsBases    = modBases m
                     }
@@ -324,10 +324,9 @@ importLine st arg =
                        ++ intercalate ", " (filter (not . null)
                             [ count (length names) "def"
                             , count (length (modDatas m) + length (modAliases m)) "type"
-                            , count (length (modInstances m)) "instance"
-                            , count (length (modFunctors m)
-                                       - length (modModes m)) "functor"
-                            , count (length (modModes m)) "mode"
+                            , count (length (modInstances m)) "model"
+                            , count (length (modFunctors m)) "functor"
+                            , count (length (modTrans m)) "transporting model"
                             , count (length (modTemplates m)
                                        - length (rsTmpls st)) "template" ])
                        ++ ")"
@@ -356,9 +355,9 @@ handleLine st line
               pure st
           | Just bad <- firstUnknown names -> do
               putStrLn $ "error: `use`: " ++ bad ++ " is not a resource, \
-                         \instance, functor or mode in scope (a session \
-                         \cannot declare theories, instances, functors or \
-                         \modes — `:import` a file that does)"
+                         \model or functor in scope (a session cannot \
+                         \declare theories, models or functors — \
+                         \`:import` a file that does)"
               pure st
           | otherwise -> do
               putStrLn ("ambient: use " ++ unwords names
@@ -383,10 +382,10 @@ handleLine st line =
     Right ([], [(tyLine, _)], [], [], rest)
       | all isSpace rest -> typeLine tyLine
     Right ([], [], [], [], _) -> programLine
-    -- theory/instance/functor/rules are block declarations: they need a
-    -- whole module
+    -- theory/model/functor are block declarations: they need a whole
+    -- module
     Right (_, _, (_ : _), _, _) ->
-      report "theory, instance, functor and rules are file declarations — \
+      report "theory, model and functor are file declarations — \
              \put them in a .braid file rather than a REPL line"
     Right (_, _, _, (_ : _), _) ->
       report "import is a file declaration — `:import \"path.braid\"` brings \
@@ -454,7 +453,7 @@ handleLine st line =
             -- so it comes back in the template table instead
             [] | Just (th, _) <- lookup name (modTemplates m) -> do
                    putStrLn $ "template " ++ name ++ " over " ++ th
-                            ++ "   (`use <instance>` to call it)"
+                            ++ "   (`use <model>` to call it)"
                    pure st { rsTmpls = modTemplates m
                            , rsDocs  = modDocs m `M.union` rsDocs st }
             [(n, sc, _)] -> do

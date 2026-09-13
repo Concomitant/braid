@@ -64,7 +64,7 @@ unLog _ ; print print                  # ":" untouched, 49
 # this is the leaving half. It seeds a Log, applies the program, and
 # unrolls the wire — so the arrow LOSES `=Log>` across it, with no
 # language construct at all. (Plotkin–Pretnar: a handler is a model, and
-# Braid's instances already are models, so discharge is a wrapping
+# Braid's models already are models, so discharge is a wrapping
 # functor rather than a form.)
 
 def collectLog = (f -> [f ("" ; Log) ... ; ev ; unLog ...])
@@ -84,18 +84,18 @@ print print                            # "squared " then 49
 # THEORY, never over a resource name — a resource scope is routing, and
 # a body waiting for a resource would be waiting for an arity rather
 # than for a name. Naming the two operations a handler actually needs
-# makes it one theory plus a two-line instance per resource, and the
+# makes it one theory plus a two-line model per resource, and the
 # handler is then written once:
 
 theory Collector(e, a) =
     seed   : • ⇒ e
     unwrap : e ⇒ a
 
-instance Logs : Collector(Log, Str) =
+model Logs : Collector(Log, Str) =
     seed   = "" ; Log
     unwrap = unLog
 
-instance Counts : Collector(Counter, Int) =
+model Counts : Collector(Counter, Int) =
     seed   = 0 ; Counter
     unwrap = unCounter
 

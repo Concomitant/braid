@@ -14,7 +14,7 @@
 # track you cannot name does not exist — so `into` is a prim, while the
 # closed eliminators (`case2`, `merge`, `otherwise`) stay derived.
 #
-# NOTE `>=>` is `[q, alt2]`, a CLOSED copairing: not an instance of this.
+# NOTE `>=>` is `[q, alt2]`, a CLOSED copairing: not a model of this.
 
 # ---------------------------------------------------------------------
 # 1. PEEL, then close the ladder. Each `into` handles one alternative

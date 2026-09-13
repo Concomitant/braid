@@ -24,7 +24,7 @@
 # `theory Arrow(k(_, _))`, the arity written as underscores because a
 # bare name already means a wire and `...` already means a stack. `k`
 # is not a type and never reaches inference: it lives in the slot
-# signatures, and the instance head names a declared data type that is
+# signatures, and the model head names a declared data type that is
 # substituted for it before any slot is checked. That is the ML-functor
 # move, not higher kinds — `Ty` still has no constructor variable, and
 # nothing is inferred or dispatched. Slots also carry their OWN
@@ -96,7 +96,7 @@ def scale   = [(self n -> [(x -> (n x ; *) (n ; self ... ; ev))] ; Circuit)] ...
 # step cannot tell a stateful circuit from a stateless one
 def probe = (c -> c 3 ; stepC ; (y c2 -> c2 4 ; stepC ; (z c3 -> (y z ; +) (c3 ; drop))))
 
-instance Circuits : Arrow(Circuit) =
+model Circuits : Arrow(Circuit) =
     arrP    = arrC
     thenP   = compC
     firstP  = firstC
@@ -112,7 +112,7 @@ def firstA   = (f -> [(p -> p ; unPair ; (x d -> f ; unArr ; _ x ; ev ; (y -> y 
 def runA     = (f x -> f ; unArr ; _ x ; ev)
 def observeA = (f -> (f 3 ; runA) (f 4 ; runA) ; +)
 
-instance Funcs : Arrow(Arr) =
+model Funcs : Arrow(Arr) =
     arrP    = arrA
     thenP   = thenA
     firstP  = firstA
@@ -120,11 +120,11 @@ instance Funcs : Arrow(Arr) =
     sample  = [dup ; +] ; Arr
 
 # ---- generic code, written once --------------------------------------
-# The body is the same twice; only the scope differs. `use` is a
-# renaming, so `thenP` here IS this instance's word — resolution once
-# per scope, never a dictionary per call.
-def twiceC = use Circuits ; sample sample ; thenP ; observe
-def twiceA = use Funcs    ; sample sample ; thenP ; observe
+# The body is the same twice; only the model differs.  `over` puts the
+# model's slot words in scope and APPLIES NOTHING — resolution once per
+# scope, never a dictionary per call.
+def twiceC = over Circuits ; sample sample ; thenP ; observe
+def twiceA = over Funcs    ; sample sample ; thenP ; observe
 
 twiceC ; print              # 13  — a running sum fed into a running sum:
                             #       3 ⇒ 3 ⇒ 3, then 4 ⇒ 7 ⇒ 10
@@ -137,96 +137,122 @@ _ 4  ; stepC ; (y c -> (y ; print) c)      # 14
 _ 10 ; stepC ; (y c -> (y ; print) c)      # 34
 drop
 
-# ---- composition, OWNED: the mode ------------------------------------
-# `use Circuits` is a RENAMING: it puts this instance's `arrP` and
-# `thenP` in scope and leaves the plumbing to you.  A MODE goes one step
-# further and takes over `;`:
+# ---- composition, OWNED: `use` a model that has a carrier -------------
+# `over Circuits` is a VOCABULARY: it puts this model's `arrP`, `thenP`
+# and `firstP` in scope and leaves the plumbing to you.  `use Circuits`
+# goes one step further and takes over `;`.
 #
-#     mode Circ = Circuits
-#
-# declares the functor out of the free category that sends every stage
-# to `arrP` of that stage and every `;` to `thenP`.  It is a LABEL WITH
-# A CARRIER: `use Circ` mints the receipt `Circ` exactly as any functor
-# scope does, and the carrier is the hom-object `Circuit(a, b)`.  The
-# display folds the two together — a word built in the mode is
-# `• ⇒ Circuit(Int, Int)` carrying `Circ` at the base, and prints
-# `Int =Circ Rec> Int`.  Objects are shared with the base category;
-# composition is the mode's own.
-mode Circ = Circuits
+# Nothing declares that.  The theory above has a hom-object `k(_, _)`
+# and declares slots at three SHAPES — `k(a,b) k(b,c) ⇒ k(a,c)` is a
+# composition, `Fn⟨a ⇒ b⟩ ⇒ k(a,b)` an embedding, `k(a,b) ⇒
+# k(Pair(a,c), Pair(b,c))` a strength — and that is the whole test.  The
+# names `thenP`/`arrP`/`firstP` are this file's taste; the elaborator
+# never reads them.  `use Circuits` is then the functor out of the free
+# category that sends every stage to the embedding of that stage and
+# every `;` to the composition.  It is a LABEL WITH A CARRIER: it mints
+# the receipt `Circuits` exactly as any functor scope does, and the
+# carrier is the hom-object `Circuit(a, b)`.  The display folds the two
+# together — a transported word is `• ⇒ Circuit(Int, Int)` carrying
+# `Circuits` at the base, and prints `Int =Circuits Rec> Int`.  Objects
+# are shared with the base category; composition is the model's own.
 
 def add1 = _ 1 ; +
 def dbl  = 2 _ ; *
 
-# The same pipeline twice.  `hand` is what the mode writes out for you;
+# The same pipeline twice.  `hand` is what `use` writes out for you;
 # `easy` is what you write.
-def hand = use Circuits ; [add1] ... ; arrP ... ; _ [dbl] ; _ arrP ; thenP ; observe
-def easy = use Circ ; add1 ; dbl
-#   easy : Int =Circ Rec> Int
+def hand = over Circuits ; [add1] ... ; arrP ... ; _ [dbl] ; _ arrP ; thenP
+def easy = use Circuits ; add1 ; dbl
+#   easy : Int =Circuits Rec> Int
 
 # ENTERING is a marker, LEAVING is a model.  `observe` takes the carrier
-# and returns base, so it is an EXIT: refused by name inside `use Circ`
-# ("`observe` leaves Circ; call it outside `use Circ`") and called from
-# an ordinary instance scope outside it.  That rule is what makes the
-# K-word table exact — every word written in the mode produces a
-# carrier, so the elaborator never has to ask inference which is which.
-def easyOut = use Circuits ; easy ; observe
+# and returns base — an EXIT, read off its declared arrow — so it is
+# refused inside `use Circuits` ("`observe` leaves Circuits") and called
+# under `over Circuits`, where nothing is transported.  That rule is
+# what makes the K-word table exact: every word written under `use` or
+# `over` produces a carrier unless it deliberately exits, so the
+# elaborator never has to ask inference which is which.
+def handOut = over Circuits ; hand ; observe
+def easyOut = over Circuits ; easy ; observe
 
-hand    ; print             # 18 — (3+1)·2 + (4+1)·2
-easyOut ; print             # 18 — the same pipeline, said as a mode
+handOut ; print             # 18 — (3+1)·2 + (4+1)·2
+easyOut ; print             # 18 — the same pipeline, transported
 
-# A word written in the mode is an ordinary word, so it composes in the
-# mode with any other: inside `use Circ`, `easy` is left alone and the
+# A transported word is an ordinary word, so it composes in the category
+# with any other: inside `use Circuits`, `easy` is left alone and the
 # `;` around it is `thenP`.
-def twice2    = use Circ ; easy ; easy
-def twice2Out = use Circuits ; twice2 ; observe
+def twice2    = use Circuits ; easy ; easy
+def twice2Out = over Circuits ; twice2 ; observe
 twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 
 # OUTSIDE the scope, two of them side by side are two circuits side by
-# side: `• =Circ Rec> Circuit(Int, Int) Circuit(Int, Int)`.  That is
-# well-typed and honestly not composition in Circ — the display fold
+# side: `• =Circuits Rec> Circuit(Int, Int) Circuit(Int, Int)`.  That is
+# well-typed and honestly not composition in Circuits — the display fold
 # wants exactly ONE carrier, so it does not fire and you can see the
-# two.  Composition in Circ is written under the marker.
+# two.  Composition is written under the marker.
 def pair    = easy easy
-def pairOut = use Circuits ; pair ; thenP ; observe
+def pairOut = over Circuits ; pair ; thenP ; observe
 pairOut ; print             # 40 — the same composite, spelled by hand
 
-# ---- a carrier built BY HAND: `over Circ` -----------------------------
+# ---- wider stages: the STRENGTH is the padding ------------------------
+# A hom-object `k(a, b)` names ONE wire on each side, so a transported
+# spine is one carrier wire.  A stage that is not one-in-one-out is
+# packed with the pairing the strength names — the elaborator reads
+# `Pair` off `firstP`'s declared type, nothing is built in — and a stage
+# narrower than the running width is whiskered by `firstP` once per wire
+# riding above it.  That is resource routing's `_`-padding with `firstP`
+# in place of `_`.
+#
+# So `dup ; *` transports, and squares:
+def sq = use Circuits ; dup ; *
+#   sq : Int =Circuits Rec> Int
+def sqOut = over Circuits ; sq ; observe
+sqOut ; print               # 25 — 3² + 4²
+
+# three wires, and a stage on a wire that is not the deepest
+def poly = use Circuits ; dup ; _ dup ; _ _ add1 ; _ * ; +
+#   poly : Int =Circuits Rec> Int — x + x·(x+1)
+def polyOut = over Circuits ; poly ; observe
+polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
+
+# ---- a carrier built BY HAND: `over Circuits` -------------------------
 # `sumFrom` is the whole reason the Arrow exists — a stateful circuit
 # that is not `arrP` of anything.  Before 5c½ a def like `0 ; sumFrom`
 # was STRANDED: it produces a `Circuit(Int, Int)` at the base, but the
-# elaborator would not treat it as a word of the mode, because doing so
-# would mean reading an INFERRED type to decide what a word is.
+# elaborator would not treat it as a word of the category, because doing
+# so would mean reading an INFERRED type to decide what a word is.
 #
-# `over Circ` is the written declaration that closes it.  It applies
-# nothing — no `arrP`, no `thenP`, no transport — it says "this def is a
-# morphism of Circ", and the elaborator CHECKS the claim against the
-# def's arrow: a word of a mode builds one carrier out of nothing.  The
-# claim is written, the check is mechanical, and the def joins the
-# K-word table beside the ones `use Circ` transported.
-def sum0 = over Circ ; 0 ; sumFrom
-#   sum0 : • =Rec> Circuit(Int, Int) — UNFOLDED, and no `Circ` on it.
+# `over Circuits` is the written declaration that closes it.  It applies
+# nothing — no embedding, no composition, no transport — it says "this
+# def is a morphism of the category Circuits presents", and the
+# elaborator CHECKS the claim against the def's arrow: a word of a
+# category builds one carrier out of nothing.  The claim is written, the
+# check is mechanical, and the def joins the K-word table beside the
+# ones `use Circuits` transported.
+def sum0 = over Circuits ; 0 ; sumFrom
+#   sum0 : • =Rec> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
 #
 # That is the honest reading and it is worth the sentence.  A receipt is
-# PROVENANCE: `=Circ>` says this code went through the functor.  `sum0`
+# PROVENANCE: `=Circuits>` says the code went through the functor.  `sum0`
 # did not — it is a circuit no base program denotes, which is the whole
 # reason Arrows exist — so claiming the label would claim membership in
 # the functor's IMAGE, which is a strictly stronger thing.  `over` mints
 # nothing, because `over` applies nothing; only a `use` mints, and every
-# `use` does.  Membership in Circ is carried by the carrier in the type
-# and the entry in the K-word table.
+# `use` does.  Membership is carried by the carrier in the type and the
+# entry in the K-word table.
 #
 # Under the marker it composes like any other word of the category, and
 # THAT composite went through the functor, so it folds:
-def running    = use Circ ; sum0 ; dbl
-#   running : Int =Circ Rec> Int
-def runningOut = use Circuits ; running ; observe
+def running    = use Circuits ; sum0 ; dbl
+#   running : Int =Circuits Rec> Int
+def runningOut = over Circuits ; running ; observe
 runningOut ; print          # 20 — 3 ⇒ 3 ⇒ 6, then 4 ⇒ 7 ⇒ 14
 
-# ---- the corollary: a SEALED mode -------------------------------------
+# ---- the corollary: a SEALED category ---------------------------------
 # Exits are the only way out, so a theory that declares none is sealed:
-# every stage inside the scope becomes `arrP` and the only word that
-# touches the accumulated carrier is `thenP`, which hands back a
-# carrier.  Nothing written in the mode can leave it, and that is
+# every stage inside the scope is embedded and the only word that
+# touches the accumulated carrier is the composition, which hands back a
+# carrier.  Nothing written in the category can leave it, and that is
 # abstract-type sealing falling out of the same rule.
 data Capsule(a, b) = Fn⟨a ⇒ b⟩
 
@@ -236,21 +262,23 @@ theory Vault(k(_, _)) =
 
 def capThen = (f g -> [(x -> f ; unCapsule ; _ x ; ev ; (y -> g ; unCapsule ; _ y ; ev))] ; Capsule)
 
-instance Sealed : Vault(Capsule) =
+model Sealed : Vault(Capsule) =
     arrP  = Capsule
     thenP = capThen
 
-mode Safe = Sealed
-
-def guarded  = use Safe ; add1 ; dbl
-def guarded2 = use Safe ; guarded ; add1
-#   guarded2 : Int =Safe> Int — and the only consumer of a Safe word,
-#   inside the mode's vocabulary, is another Safe word.
+def guarded  = use Sealed ; add1 ; dbl
+def guarded2 = use Sealed ; guarded ; add1
+#   guarded2 : Int =Sealed> Int — and the only consumer of a Sealed
+#   word, inside the category's vocabulary, is another Sealed word.
+#
+# `Vault` declares composition and an embedding and NO strength, so
+# every stage of a `use Sealed` scope must be one wire in and one wire
+# out: `use Sealed ; dup ; *` is refused, naming the missing shape.
 
 # The honest caveat: the CARRIER's own unroller is an ordinary base word
 # and Braid has no export lists, so `unCapsule` still opens it from
-# outside.  A mode seals the CATEGORY — nothing written in it leaves it
-# by any route the mode offers — and sealing the TYPE is a separate,
+# outside.  A model seals the CATEGORY — nothing written in it leaves it
+# by any route the model offers — and sealing the TYPE is a separate,
 # unshipped question.
 guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 

@@ -5,7 +5,7 @@
 (1 2 3 >> pack) >> [dup >> _ single >> cons] ... >> flatMap >> print
 ((1 2 >> pack) nil (3 >> pack) >> pack) >> concat >> print
 
-# One generic reduction, two instances of the Monoid theory — the
+# One generic reduction, two models of the Monoid theory — the
 # dictionary is just wires: [op] unit.
 (1 2 3 4 >> pack) >> [+] 0 ... >> fold >> print
 ((1 2 >> pack) (3 >> pack) nil >> pack) >> [append] nil ... >> fold >> print

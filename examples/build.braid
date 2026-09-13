@@ -1,10 +1,10 @@
-# Two builds, one pipeline: configurations as instances, the pipeline as
+# Two builds, one pipeline: configurations as models, the pipeline as
 # a TEMPLATE.
 #
 # A def whose header is `over THEORY` is a template: it is a morphism of
-# the theory, and its body waits for an instance.  A def whose `use`
-# names an INSTANCE supplies one — the
-# template's body is expanded there, renamed by that instance, and
+# the theory, and its body waits for a model.  A def whose `use`
+# names a MODEL supplies one — the
+# template's body is expanded there, renamed by that model, and
 # re-inferred there.  So every instantiation gets its own principal type
 # and nothing is dispatched at run time.  ML's functor application,
 # spelled as scope.
@@ -16,14 +16,14 @@ theory Config(v) =
     version : • ⇒ v
     flags   : Str ⇒ Str
 
-instance Dev : Config(Int) =
+model Dev : Config(Int) =
     name    = "dev"
     target  = "build/dev/app"
     retries = 1
     version = 0
     flags   = _ " -g -O0" ; cat
 
-instance Prod : Config(Str) =
+model Prod : Config(Str) =
     name    = "prod"
     target  = "build/prod/app"
     retries = 3
@@ -47,7 +47,7 @@ def stamped =
     _ name
 
 # a template may call a template: `plan` meets `banner` and `stamped`
-# still waiting, and the instance that instantiates `plan` instantiates
+# still waiting, and the model that instantiates `plan` instantiates
 # them too.
 def plan =
     over Config
@@ -62,7 +62,7 @@ def prodBuild = use Prod ; plan
 
 ## the same body at two types: `• =Dev> Int Str` here …
 def devStamp  = use Dev  ; stamped
-## … and `• =Prod> Str Str` here.  Re-inferred per instance, so no
+## … and `• =Prod> Str Str` here.  Re-inferred per model, so no
 ## rank-1 wall — and the receipt says which model read the template.
 def prodStamp = use Prod ; stamped
 
@@ -71,5 +71,5 @@ prodBuild
 
 # `plan` outside any Config scope is an elaboration error, and it names
 # the theory rather than the missing word:
-#   plan needs an instance of Config in scope (`use <instance>` before
+#   plan needs a model of Config in scope (`use <model>` before
 #   calling it)

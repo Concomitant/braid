@@ -4,13 +4,13 @@
 # as the word it takes OUT.  That property — `scheme(q) ≥ scheme(p)` —
 # is rank-2, so no `Fn` type can hold it and no call site can check it.
 # It is checked ONCE, where the binding is written, by the routine that
-# checks any instance against its theory: `subsumes`.
+# checks any model against its theory: `subsumes`.
 #
 #     unification blesses a call; subsumption blesses a rule.
 #
-# So an optimizer IS AN INSTANCE.  `Base` is the ambient presentation —
+# So an optimizer IS AN MODEL.  `Base` is the ambient presentation —
 # every word in scope, each with its own scheme as the slot's declared
-# type — and `instance Opt : Base = …` is a PARTIAL model of it: the
+# type — and `model Opt : Base = …` is a PARTIAL model of it: the
 # generators it names get new images, and every generator it does not
 # name maps to itself.  It declares a word `Opt : Code ⇒ Code` for
 # runtime use, and `use Opt` renames and mints `=Opt>` on everything it
@@ -27,27 +27,27 @@ def twice    = dup >> +              # Int ⇒ Int
 def double   = 2 _ >> *              # Int ⇒ Int
 
 # ---------------------------------------------------------------------
-# 2. The instance.  Each binding is blessed at this line, not at its uses.
+# 2. The model.  Each binding is blessed at this line, not at its uses.
 # ---------------------------------------------------------------------
-instance Opt : Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
+model Opt : Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
 
 # The refusals, each with its reason.  Uncomment one to see it:
 #
-#   instance No : Base = dup = dupInt
+#   model No : Base = dup = dupInt
 #     dup is used at a0 ⇒ a0 a0 but dupInt is Int ⇒ Int Int — the
 #     image is narrower, so a Str program would stop typing.
 #
-#   instance No : Base = two = dup   (with `def two = drop 1 1`)
+#   model No : Base = two = dup   (with `def two = drop 1 1`)
 #     two is used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0 — this one
 #     would RUN on an Int, and narrows `a ⇒ Int` to `Int ⇒ Int`
 #     everywhere else.  The parametricity message refuses it.
 #
-#   instance No : Base = quiet = noisy   (quiet : a ⇒ •, noisy : a =IO> •)
+#   model No : Base = quiet = noisy   (quiet : a ⇒ •, noisy : a =IO> •)
 #     the expected type fixes the grade; this code must stay pure.
 #     The other direction PASSES: ∅ is the bottom of the grade
 #     semilattice, so a pure image fits under an io generator.
 #
-# An instance of `Base` whose images are PROVABLY EQUAL to the
+# A model of `Base` whose images are PROVABLY EQUAL to the
 # generators is an OPTIMIZER; one whose images merely satisfy the laws
 # is a REINTERPRETATION — a dialect.  Section 3 is exactly that line.
 
@@ -131,7 +131,7 @@ functor Doubled = doubled
 
 # ---------------------------------------------------------------------
 # 6. The laws, as theories.  These are audited at module start: an
-#    instance that fails one is not an instance, and the module stops.
+#    model that fails one is not a model, and the module stops.
 #
 #    `sameCodeC` is `sameCode` over Code values.  Code is what a functor
 #    RETURNS, so a law about a functor can be stated in no other way.
@@ -159,23 +159,23 @@ theory Optimizer
 
 ## An INTERACTION law: two functors that commute at a sample.  This is
 ## a naturality square with both sides fixed — the graded-distributive-
-## law question, as something an instance must pass.
+## law question, as something a model must pass.
 theory Commuting
     apF    : Code ⇒ Code
     apG    : Code ⇒ Code
     sample : • ⇒ Code
     law interchange = (sample >> apF >> apG) (sample >> apG >> apF) >> sameCodeC
 
-instance OptIsFunctor : Functor
+model OptIsFunctor : Functor
     ap      = Opt
     sample  = [dupSwap >> +] >> getCode
     sample2 = [copyDrop >> dupInt] >> getCode
 
-instance OptIsOptimizer : Optimizer
+model OptIsOptimizer : Optimizer
     ap     = Opt
     sample = [copyDrop >> dupSwap >> + >> dupInt >> *] >> getCode
 
-instance SpacedIsFunctor : Functor
+model SpacedIsFunctor : Functor
     ap      = spaced
     sample  = [dupSwap >> +] >> getCode
     sample2 = [copyDrop] >> getCode
@@ -185,13 +185,13 @@ instance SpacedIsFunctor : Functor
 ## holds by construction and the law above cannot fail.  It is still
 ## written, and still runs, because "cannot fail by construction" is a
 ## claim about the construction, and a law is how a claim gets checked.
-instance SpacedIsOptimizer : Optimizer
+model SpacedIsOptimizer : Optimizer
     ap     = spaced
     sample = [dupSwap >> +] >> getCode
 
 ## `spaced` and `Opt` commute: one renames atoms, the other adds
 ## identity stages, and neither looks at what the other did.
-instance OptSpacedCommute : Commuting
+model OptSpacedCommute : Commuting
     apF    = Opt
     apG    = spaced
     sample = [copyDrop >> dupSwap >> + >> dupInt >> *] >> getCode
@@ -200,11 +200,11 @@ instance OptSpacedCommute : Commuting
 # twice, so it has no image to detect.  Uncomment to watch the audit
 # stop the module:
 #
-#   instance DoubledIsOptimizer : Optimizer
+#   model DoubledIsOptimizer : Optimizer
 #       ap     = doubled
 #       sample = [dupSwap] >> getCode
-#   → law 'idempotent' fails for instance DoubledIsOptimizer: an
-#     instance must be an audited model of its theory
+#   → law 'idempotent' fails for model DoubledIsOptimizer: an
+#     model must be an audited model of its theory
 
 # ---------------------------------------------------------------------
 # 7. Image membership — a PROGRAM assertion, not a functor law.

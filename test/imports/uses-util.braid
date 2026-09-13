@@ -23,6 +23,6 @@ def optimised =
 
 ## the imported MODE, entered on this side of the boundary: the receipt
 ## is minted here, and `runP` is the exit, called outside the scope
-def inK  = use K >> double >> double
-def outK = use Funcs >> inK >> _ 5 >> runP
+def inK  = use Funcs >> double >> double
+def outK = over Funcs >> inK >> _ 5 >> runP
 outK >> print

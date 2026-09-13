@@ -9,7 +9,7 @@ def double = dup >> +
 theory Sink(a) =
     emit : a ⇒ a
 
-instance Loud : Sink(Int) =
+model Loud : Sink(Int) =
     emit = dup >> *
 
 def idF = (c -> c)
@@ -18,14 +18,14 @@ functor Same = idF
 ## an INSTANCE OF `Base` travels like any other declaration: the
 ## renaming and the word of the same name both cross the boundary
 def dupInt = dup >> _ _ 0 >> _ +
-instance Opt : Base = dupInt = dup
+model Opt : Base = dupInt = dup
 
 ## a TEMPLATE over Sink: no instance here, so it is not a def yet —
 ## it travels as a template and the importer instantiates it
 def emitTwice = over Sink ; emit ; emit
 
-## a MODE travels like any other declaration: the instance it names,
-## the word of the mode's own name and the functor entry all cross
+## a TRANSPORTING MODEL travels like any other declaration: the model,
+## its shape, the word of its own name and the K-word table all cross
 data Arr(a, b) = Fn⟨a ⇒ b⟩
 
 theory Arrow(k(_, _)) =
@@ -36,11 +36,9 @@ theory Arrow(k(_, _)) =
 def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)
 def runA  = (f x -> f ; unArr ; _ x ; ev)
 
-instance Funcs : Arrow(Arr) =
+model Funcs : Arrow(Arr) =
     arrP  = Arr
     thenP = thenA
     runP  = runA
-
-mode K = Funcs
 
 "util.braid's own main — NOT run when imported" >> print

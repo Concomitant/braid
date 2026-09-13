@@ -8,7 +8,7 @@
 # — and a file included twice by two different routes is included once.
 #
 # What travels is DECLARATIONS: defs, types, resources, theories,
-# instances, functors.  What does not is the imported file's main
+# models, functors.  What does not is the imported file's main
 # program; a library's demo is its own business.  Nothing here needed
 # machinery of its own, because an import is textual: the composite is
 # checked as one module.
