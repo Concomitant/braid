@@ -3831,7 +3831,9 @@ runTransport ctx tp body = do
     (e : _) -> Left $ "`" ++ e ++ "` leaves " ++ nm
                    ++ "; call it outside `use " ++ nm ++ "` (a category is "
                    ++ "entered by a marker and left by a model: inside the "
-                   ++ "scope every word builds a " ++ tpCarrier tp ++ ")"
+                   ++ "scope every word builds a carrier, `" ++ tpCarrier tp
+                   ++ "(a, b)`).  `over " ++ nm ++ "` opens the same "
+                   ++ "vocabulary and transports nothing."
     []      -> Right ()
   -- A word of ANOTHER model is a stage that builds that model's carrier
   -- out of nothing, and an embedding embeds programs, not carriers.  Say
