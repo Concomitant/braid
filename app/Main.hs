@@ -66,8 +66,10 @@ data ReplState = ReplState
   , rsFuncs    :: [(String, String)]    -- functor name -> its word
   , rsTheories :: [Theory]   -- theories `:import` brought in
   , rsTmpls    :: TemplateTable         -- templates awaiting an instance
-    -- a session cannot DECLARE a theory or a functor, but `:import` can
-    -- bring them in, and then `use` must know them
+  , rsModes    :: [Mode]     -- modes `:import` brought in
+  , rsKWords   :: [(String, String)]   -- def -> the mode it was declared in
+    -- a session cannot DECLARE a theory, a functor or a mode, but
+    -- `:import` can bring them in, and then `use` must know them
   }
 
 initialState :: ReplState
@@ -77,7 +79,7 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] [] [] [] [] []
+            [] SEnd [] [] [] [] [] [] [] []
 
 repl :: IO ()
 repl = do
@@ -156,12 +158,14 @@ baseOf st =
   (moduleBase (rsEnv st) (rsRun st) preludeShadowNames (rsAliases st)
               (rsDatas st))
     { mbSlots = rsSlots st, mbFuncs = rsFuncs st
-    , mbTheories = rsTheories st, mbTemplates = rsTmpls st }
+    , mbTheories = rsTheories st, mbTemplates = rsTmpls st
+    , mbModes = rsModes st, mbKWords = rsKWords st }
 
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
 dispOf :: ReplState -> Disp
 dispOf st = Disp (rsAliases st) [ dName d | d <- rsDatas st, dResource d ]
+                 [ (mdName m, mdCarrier m) | m <- rsModes st ]
 
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
@@ -262,7 +266,8 @@ elabIn :: ReplState -> String -> Either String Term
 elabIn st src = do
   term0 <- parseProgram src
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
-                       (rsTmpls st) (map thName (rsTheories st)))
+                       (rsTmpls st) (map thName (rsTheories st))
+                       (rsModes st) (rsKWords st))
     (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -309,13 +314,17 @@ importLine st arg =
                     , rsFuncs    = modFunctors m ++ rsFuncs st
                     , rsTheories = modTheories m
                     , rsTmpls    = modTemplates m
+                    , rsModes    = modModes m
+                    , rsKWords   = modKWords m
                     }
               putStrLn $ "imported " ++ path ++ "   ("
                        ++ intercalate ", " (filter (not . null)
                             [ count (length names) "def"
                             , count (length (modDatas m) + length (modAliases m)) "type"
                             , count (length (modInstances m)) "instance"
-                            , count (length (modFunctors m)) "functor"
+                            , count (length (modFunctors m)
+                                       - length (modModes m)) "functor"
+                            , count (length (modModes m)) "mode"
                             , count (length (modTemplates m)
                                        - length (rsTmpls st)) "template" ])
                        ++ ")"
@@ -343,9 +352,9 @@ handleLine st line
               pure st
           | Just bad <- firstUnknown names -> do
               putStrLn $ "error: `use`: " ++ bad ++ " is not a resource, \
-                         \instance or functor in scope (a session cannot \
-                         \declare theories or functors — `:import` a file \
-                         \that does)"
+                         \instance, functor or mode in scope (a session \
+                         \cannot declare theories, functors or modes — \
+                         \`:import` a file that does)"
               pure st
           | otherwise -> do
               putStrLn ("ambient: use " ++ unwords names
@@ -451,6 +460,9 @@ handleLine st line =
                 , rsDocs     = modDocs m `M.union` rsDocs st
                 , rsUserDefs =
                     rsUserDefs st ++ [n | n `notElem` rsUserDefs st]
+                  -- a session def written under `use K` is a K-word from
+                  -- here on, exactly as it would be in a file
+                , rsKWords   = modKWords m
                 }
             _ -> report "internal: expected exactly one definition"
 

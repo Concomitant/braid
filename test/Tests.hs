@@ -33,7 +33,7 @@ importTests =
     -- imported; the imported file's own main does NOT run
     -- …and a TEMPLATE: declared over a theory in one file, instantiated
     -- by a `use` in another
-  [ ("uses-util.braid", ["28", "12", "81", "50", "0"], "")
+  [ ("uses-util.braid", ["28", "12", "81", "50", "0", "20"], "")
     -- a diamond includes the shared file once
   , ("diamond.braid",   ["7", "8", "10"], "")
     -- a library file still runs as a program, main and all
@@ -804,6 +804,27 @@ moduleTypeTests =
      "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
   , (collectorMod ++ "use Counts ; collected",
      "Fn⟨ρ0 =Counter> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Int ρ1⟩")
+    -- MODES (5c).  THE DISPLAY FOLD: at the base a K-word is
+    -- `• ⇒ Arr(Int, Int)` carrying `K`, and a carrier the label
+    -- owns folds onto the glyph exactly as a threaded resource does.
+  , (modeMod ++ "chain", "Int =K> Int")
+    -- the fold wants EXACTLY ONE carrier, so two of them side by side
+    -- print unfolded: honest, well-typed, and visibly not composition
+    -- in K.  Composition in K is written under the marker.
+  , (modeMod ++ "chain chain", "• =K> Arr(Int, Int) Arr(Int, Int)")
+    -- and under the marker it composes: a K-word inside `use K` is left
+    -- alone and the `;` around it is `thenP`
+  , (modeMod ++ "def two = use K ; chain ; chain\ntwo", "Int =K> Int")
+    -- an ENTRY slot (`sample`: no carrier in, one carrier out) is
+    -- already a stage of the mode, so it is left alone too.  Its type
+    -- said so in WRITING, which is what keeps this out of inference.
+  , (modeMod ++ "def s2 = use K ; sample ; sample\ns2", "Int =K> Int")
+    -- the receipt is an ordinary label: it unions with io by the same
+    -- semilattice as everything else
+  , (modeMod ++ "def obs = use Funcs ; chain ; observe\nobs ; print",
+     "• =IO K> •")
+    -- a sealed mode: same fold, and no exit to fold back through
+  , (sealedMod ++ "guarded", "Int =Safe> Int")
   ]
 
 -- TEMPLATES (stage 5a).  A def whose `use` names a THEORY is a body
@@ -855,6 +876,47 @@ collectorMod =
 idF :: String
 idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 
+-- MODES (stage 5c).  A mode is a label with a CARRIER: `mode K = Funcs`
+-- declares the functor that sends every stage to this instance's `arrP`
+-- and every `;` to its `thenP`.  The boring model is enough to pin the
+-- whole mechanism, and unlike `Circuit` it is pure, so the expected
+-- arrows carry nothing but the receipt.
+modeMod :: String
+modeMod = unlines
+  [ "data Arr(a, b) = Fn⟨a ⇒ b⟩"
+  , "theory Arrow(k(_, _)) ="
+  , "    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
+  , "    thenP   : k(a, b) k(b, c) ⇒ k(a, c)"
+  , "    observe : k(Int, Int) ⇒ Int"
+  , "    sample  : • ⇒ k(Int, Int)"
+  , "def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)"
+  , "def runA  = (f x -> f ; unArr ; _ x ; ev)"
+  , "instance Funcs : Arrow(Arr) ="
+  , "    arrP    = Arr"
+  , "    thenP   = thenA"
+  , "    observe = (f -> f 7 ; runA)"
+  , "    sample  = [dup ; +] ; Arr"
+  , "mode K = Funcs"
+  , "def add1 = _ 1 ; +"
+  , "def dbl  = 2 _ ; *"
+  , "def chain = use K ; add1 ; dbl"
+  ]
+-- a SEALED mode: a theory with no eliminator, so nothing written in the
+-- scope can leave it by any route the mode offers
+sealedMod :: String
+sealedMod = unlines
+  [ "data Cap(a, b) = Fn⟨a ⇒ b⟩"
+  , "theory Vault(k(_, _)) ="
+  , "    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
+  , "    thenP : k(a, b) k(b, c) ⇒ k(a, c)"
+  , "def capThen = (f g -> [(x -> f ; unCap ; _ x ; ev ; (y -> g ; unCap ; _ y ; ev))] ; Cap)"
+  , "instance Sealed : Vault(Cap) ="
+  , "    arrP  = Cap"
+  , "    thenP = capThen"
+  , "mode Safe = Sealed"
+  , "def inc = _ 1 ; +"
+  , "def guarded = use Safe ; inc ; inc"
+  ]
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
@@ -1746,6 +1808,37 @@ evalTests =
   , (ruleMod ++ optimizerTheory ++ "instance OptIsOpt : Optimizer\n\
      \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
      ["audited"], "")
+    -- MODES (5c).  The scope runs: `use K ; add1 ; dbl` is
+    -- `thenP (arrP [add1]) (arrP [dbl])`, and the EXIT is called
+    -- outside, under the ordinary instance scope.
+  , (modeMod ++ "def obs = use Funcs ; chain ; observe\nobs ; print",
+     ["16"], "")
+    -- what the scope EMITS, read back off the elaborated spine
+  , (modeMod ++ "[use K ; add1 ; dbl] ; getCode ; unparse ; print",
+     ["use@K >> [add1] >> Funcs@arrP >> _ [dbl] >> _ Funcs@arrP >> Funcs@thenP"], "")
+    -- `mode K` declares a WORD of its own name as well as a functor
+    -- entry, so the same functor is a value: `[K]` is a quote and the
+    -- code it returns splices and runs.  It seeds with an identity
+    -- carrier (`leftId` is the law that says the seed is free), which
+    -- is the one way it differs from the scope.
+  , (modeMod ++ "[add1] ; getCode ; K ; unparse ; print",
+     ["[_] >> Funcs@arrP >> _ [add1] >> _ Funcs@arrP >> Funcs@thenP"], "")
+    -- and `lift2 [K]` applies it at RUNTIME with the program as its own
+    -- witness: a mode CHANGES the type, so the witness refuses the
+    -- rewrite and the original runs.  That is the fallback working, not
+    -- failing.
+  , (modeMod ++ "([K] [add1] ; lift2) 5 ; ev ; print", ["6"], "")
+    -- a SEALED mode composes inside and cannot be left: the only door
+    -- is the carrier's own unroller, an ordinary base word
+  , (sealedMod ++ "def g2 = use Safe ; guarded ; inc\n\
+     \g2 ; unCap ; _ 5 ; ev ; print", ["8"], "")
+    -- A RECEIPT IS `pass` WITH A LABEL, so the normalizer erases it as
+    -- it erases `pass`.  Without this no law could be stated about a
+    -- program written under any `use` scope: `use@F` has no closed
+    -- arity, and `sameCode` refused the whole comparison.
+  , (idF ++ "def v = (\"proved\" | \"not proved\") ; merge\n\
+     \[use Same ; dup ; _ dup] [dup ; dup _] ; sameCode ; v ; print",
+     ["proved"], "")
   ]
 
 -- a rule set over four interchangeable words, reused by the 5b tests
@@ -2093,6 +2186,43 @@ moduleFailTests =
      \    law idempotent = (sample >> ap >> ap) (sample >> ap) >> sameCodeC\n\
      \instance Dbl : Optimizer\n    ap     = doubled\n    sample = [dup >> swap] >> getCode\n1 >> print",
      "law 'idempotent' fails for instance Dbl")
+    -- MODES (5c).  EXITS ARE THE ONLY WAY OUT, and they are out: a slot
+    -- that takes the carrier and returns base is refused BY NAME inside
+    -- the scope.  That is what makes the K-word table exact without
+    -- inference — every word written in the mode produces a carrier.
+  , (modeMod ++ "def bad = use K ; add1 ; observe\nbad ; drop",
+     "`observe` leaves K; call it outside `use K`")
+    -- a mode needs a CARRIER, so its instance needs a constructor
+    -- parameter
+  , ("theory Monoid(a) =\n    op : a a ⇒ a\n\
+     \instance IntSum : Monoid(Int) =\n    op = +\nmode M = IntSum\n1 ; print",
+     "mode M: IntSum is an instance of Monoid, which has no constructor \
+     \parameter — a mode needs a carrier `k(_, _)`")
+    -- and the two slots it is spelled with, by convention
+  , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
+     \theory Half(k(_, _)) =\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)\n\
+     \instance HW : Half(W) =\n    thenP = thenW\nmode H = HW\n1 ; print",
+     "mode H: theory Half declares no slot `arrP`")
+    -- functors, rule sets and modes share ONE namespace: each declares
+    -- a name a `use` header may carry
+  , (modeMod ++ "def w = (c -> c)\nfunctor K = w\n1 ; print",
+     "Duplicate mode declaration: K")
+  , ("mode Q = Nope\n1 ; print",
+     "mode Q: Nope is not an instance declared here")
+  , ("mode Q Funcs\n1 ; print",
+     "Malformed mode declaration (want `mode Name = Instance`)")
+    -- one mode per header: the second would `arrP` the first's carriers
+  , (modeMod ++ "mode K2 = Funcs\ndef bad = use K K2 ; add1\nbad ; drop",
+     "a header may name at most one mode")
+    -- THE FLAGSHIP QUESTION (plan item 4c): a K-word inside ANOTHER
+    -- mode's scope.  It does NOT type — `arrP` embeds a program and a
+    -- carrier is not one — and inference would say `• vs a16`, so
+    -- the elaborator says it instead.
+  , (modeMod ++ "mode K2 = Funcs\ndef other = use K2 ; add1\n\
+     \def bad = use K ; chain ; other\nbad ; drop",
+     "other is a word of mode K2, so it builds a carrier rather than \
+     \being a program arrP could embed")
   ]
 
 runPass :: (String, String) -> Maybe String
@@ -2129,7 +2259,8 @@ runModuleType (src, expected) =
               Just $ show src ++ ": expected " ++ expected
                    ++ ", got " ++ rendered
           where rendered = showArrowA (Disp (modAliases m)
-                                   [ dName d | d <- modDatas m, dResource d ])
+                                   [ dName d | d <- modDatas m, dResource d ]
+                                   [ (mdName md, mdCarrier md) | md <- modModes m ])
                             (normalizeArrow arr)
 
 runEval :: (String, [String], String) -> IO (Maybe String)

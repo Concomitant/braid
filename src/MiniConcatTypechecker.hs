@@ -1887,6 +1887,29 @@ data Instance = Instance
 data InstArg = IAStack SType | IACon String
   deriving (Eq, Show)
 
+-- A MODE is a LABEL WITH A CARRIER.  `mode Circ = Circuits` names an
+-- instance of a theory with a constructor parameter — `theory
+-- Arrow(k(_, _))` — and declares the functor that sends `;` to that
+-- instance's `thenP` and every other stage to its `arrP`.  Nothing on
+-- the arrow is new: the receipt `Circ` rides the ordinary label set and
+-- the carrier `Circuit(a, b)` is an ordinary data type, folded by the
+-- display.  The slot NAMES are a convention (`arrP`, `thenP`) rather
+-- than a kind, which is what lets the model be an instance like any
+-- other and keeps `mode` a declaration instead of machinery.
+data Mode = Mode
+  { mdName    :: String    -- the mode, which is also its label
+  , mdInst    :: String    -- the instance that presents the category
+  , mdCarrier :: String    -- the hom-object's constructor
+  , mdExits   :: [String]  -- slots taking the carrier and returning base
+  , mdEnters  :: [String]  -- slots building a carrier out of base alone
+  } deriving (Eq, Show)
+
+-- The two slots a mode is spelled with.  A theory may declare any
+-- number of others; these two are what a stage and `;` become.
+modeArrSlot, modeThenSlot :: String
+modeArrSlot  = "arrP"
+modeThenSlot = "thenP"
+
 -- NOT `#`: that starts a comment, so a generated name using it would be
 -- eaten by the lexer the moment it appeared in emitted source.
 slotDefName :: String -> String -> String
@@ -2802,13 +2825,14 @@ bestAlias aliases t =
 -- What the type printer folds names back on: structural aliases, and
 -- the nominal resource names — which fold onto the arrow rather than
 -- onto a wire, so they cannot ride in the alias list.
-data Disp = Disp { dispAliases :: [Alias], dispResources :: [String] }
+data Disp = Disp { dispAliases :: [Alias], dispResources :: [String]
+                 , dispModes :: [(String, String)] }  -- mode -> its carrier
 
 noDisp :: Disp
-noDisp = Disp [] []
+noDisp = Disp [] [] []
 
 aliasDisp :: [Alias] -> Disp
-aliasDisp as = Disp as []
+aliasDisp as = Disp as [] []
 
 showTyA :: Disp -> Ty -> String
 showTyA as t =
@@ -2876,6 +2900,17 @@ arrowBetween e [] = arrowGlyph e
 arrowBetween e ns = " =" ++ unwords (S.toList (eLabels e) ++ ns) ++ "> "
 
 showArrowA :: Disp -> Arrow -> String
+-- THE MODE FOLD.  A carrier is what its label adds to the objects, so a
+-- word that builds exactly one `K(a, b)` out of nothing, carrying `K`,
+-- IS the arrow `a =K> b` — the same move that folds a threaded resource
+-- onto the glyph.  It is a FOLD, not inference: the label must be there
+-- and the carrier must be its declared constructor, or the type prints
+-- as the two wires it is.  Two carriers side by side (`f g` outside the
+-- scope) stay unfolded, which is how you see that `;` there is not
+-- composition in K.
+showArrowA as (Arrow SEnd (SCons (TData c [a, b]) SEnd) e)
+  | any (\(k, cn) -> cn == c && k `S.member` eLabels e) (dispModes as)
+  = showStackA as a ++ arrowGlyph e ++ showStackA as b
 showArrowA as (Arrow s1 s2 e)
   -- a resource PREFIX shared by both sides is what "threaded through"
   -- means, so that is exactly when the name is earned.  Works on open
@@ -3662,6 +3697,8 @@ data ElabCtx = ElabCtx
   , ecFuncs :: [(String, String)]
   , ecTmpls :: TemplateTable
   , ecThs   :: [String]          -- theory names, so `use T` is read right
+  , ecModes :: [Mode]              -- declared modes
+  , ecKWords :: [(String, String)] -- def name -> the mode it was declared in
   }
 
 -- What a `use` scope needs to know about an instance: the THEORY it
@@ -3679,7 +3716,7 @@ type SlotTable = [(String, (String, [String]))]
 type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
-elabCtx0 env slots = ElabCtx env M.empty slots [] [] []
+elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] []
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -3700,6 +3737,60 @@ runFunctor ctx (fname, word) body = do
   where
     pre  = "`use " ++ fname ++ "`: "
     inF  = either (Left . (pre ++)) Right
+
+-- Apply a MODE to a scope body: the free category's spine becomes a
+-- composite in the category the instance presents.  `;` is `thenP` and
+-- every stage is `arrP` of that stage as a quotation — a functor out of
+-- `Free(G)` determined on generators, which is why it needs no check of
+-- its own beyond the types of the code it emits.
+--
+-- The one thing it must know without inference is which atoms are
+-- ALREADY carriers: the defs declared under `use K`, held syntactically
+-- in `ecKWords`.  That table is exact because exits are refused here —
+-- so every K-scoped def produces a carrier, and nothing else can.
+runMode :: ElabCtx -> Mode -> Term -> Either String Term
+runMode ctx md body = do
+  case [ e | (dn, e) <- exits, dn `elem` primsIn body ] of
+    (e : _) -> Left $ "`" ++ e ++ "` leaves " ++ mdName md
+                   ++ "; call it outside `use " ++ mdName md ++ "` (a mode is "
+                   ++ "entered by a marker and left by a model: inside the "
+                   ++ "scope every word builds a " ++ mdCarrier md ++ ")"
+    []      -> Right ()
+  -- A word of ANOTHER mode is a stage that builds that mode's carrier
+  -- out of nothing, and `arrP` embeds programs, not carriers.  Say so
+  -- here: inference would only say `Cannot unify stacks: • vs a16`.
+  case [ (n, k) | [Prim n] <- stages, Just k <- [lookup n (ecKWords ctx)]
+                , k /= mdName md ] of
+    ((n, k) : _) ->
+      Left $ "`use " ++ mdName md ++ "`: " ++ n ++ " is a word of mode " ++ k
+          ++ ", so it builds a carrier rather than being a program "
+          ++ modeArrSlot ++ " could embed.  A mode is entered from the BASE: "
+          ++ "compose " ++ n ++ " under `use " ++ k ++ "`, or write the "
+          ++ "crossing as a word that leaves " ++ k ++ " first."
+    [] -> Right ()
+  case stages of
+    []       -> Left $ "`use " ++ mdName md ++ "`: the scope is empty, and a "
+                    ++ "mode scope must build a " ++ mdCarrier md
+    (s : ss) -> Right (chainTerm (enter s ++ concatMap follow ss))
+  where
+    stages = filter (not . null) (spineOf body)
+    arrW   = slotDefName (mdInst md) modeArrSlot
+    thenW  = slotDefName (mdInst md) modeThenSlot
+    exits  = [ (slotDefName (mdInst md) e, e) | e <- mdExits md ]
+    -- a stage that is one atom and is ALREADY a carrier is left alone:
+    -- a def written under `use K`, or one of the theory's own entry
+    -- slots (`sample`), whose type said so in writing
+    enters = map (slotDefName (mdInst md)) (mdEnters md)
+    kword [Prim n] = lookup n (ecKWords ctx) == Just (mdName md)
+                       || n `elem` enters
+    kword _        = False
+    enter s
+      | kword s   = [s]
+      | otherwise = [[Quote (chainTerm [s])], [Prim arrW]]
+    follow s
+      | kword s   = [Prim "_" : s, [Prim thenW]]
+      | otherwise = [ [Prim "_", Quote (chainTerm [s])]
+                    , [Prim "_", Prim arrW], [Prim thenW] ]
 
 -- The RECEIPT of a functor: a stage that does nothing and says so.
 --
@@ -3765,16 +3856,35 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
                        ++ "def's own header may: that is what makes the "
                        ++ "def a template, waiting for an instance"
         []      -> Right ()
-      let fs   = [ (n, w) | n <- ns, Just w <- [lookup n (ecFuncs ctx)] ]
-          rest = [ n | n <- ns, isNothing (lookup n (ecFuncs ctx)) ]
+      -- a MODE is named here too, and is taken OUT of the functor list:
+      -- its rule is not a `Code ⇒ Code` word run over the spine but the
+      -- carrier construction below, which needs the K-word table.
+      let ms  = [ md | md <- ecModes ctx, mdName md `elem` ns ]
+          mns = map mdName ms
+      case ms of
+        (_ : _ : _) -> Left $ "`use " ++ unwords mns ++ "`: a header may "
+                           ++ "name at most one mode — the second would "
+                           ++ "arrP the first's carriers.  Nest the scopes, "
+                           ++ "or declare the composite category."
+        _           -> Right ()
+      let fs   = [ (n, w) | n <- ns, n `notElem` mns
+                          , Just w <- [lookup n (ecFuncs ctx)] ]
+          rest = [ n | n <- ns, n `notElem` mns
+                     , isNothing (lookup n (ecFuncs ctx)) ]
           (is, rs) = partitionEithers
                        [ maybe (Right n) (\(_, sl) -> Left (n, sl))
                                (lookup n (ecSlots ctx))
                        | n <- rest ]
-          b'' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' is
-      routed <- case rs of
-                  [] -> pure b''
-                  _  -> elabScope (ecEnv ctx) rs b''
+          -- a mode brings its instance's slot words into scope exactly
+          -- as `use Inst` does: inside `use Circ`, `thenP` IS this
+          -- instance's word, which is how the mode is spelled at all.
+          mis = [ (mdInst md, sl) | md <- ms
+                , Just (_, sl) <- [lookup (mdInst md) (ecSlots ctx)] ]
+          b'' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' (is ++ mis)
+      routed0 <- case rs of
+                   [] -> pure b''
+                   _  -> elabScope (ecEnv ctx) rs b''
+      routed <- foldM (flip (runMode ctx)) routed0 ms
       -- left to right: functor composition of Code ⇒ Code words IS `;`,
       -- so `use F G` is sugar for one composed functor
       -- Code cannot encode a `use`, so a functor's output never contains
@@ -3794,8 +3904,9 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
       let wordLabels w = case M.lookup w (ecEnv ctx) of
             Just (Forall _ _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
             Nothing                                        -> []
-          marks = nub (concat [ receiptName f : map receiptName (wordLabels w)
-                              | (f, w) <- fs ])
+          marks = nub (map receiptName mns
+                       ++ concat [ receiptName f : map receiptName (wordLabels w)
+                                 | (f, w) <- fs ])
       pure (foldr (Seq . Prim) expanded marks)
     go (Seq a b)       = Seq <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
@@ -3808,14 +3919,20 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
     -- evidence and a slot reachable only through its scope.  One rule
     -- for both: a receipt gets the sharper message it has always had.
     go (Prim n)
-      | Just f <- receiptLabel n =
+      | not (isLitAtom n), Just f <- receiptLabel n =
           Left $ n ++ " is the receipt of `use " ++ f
               ++ "`, not a word: a label is minted by a scope, never "
               ++ "written by hand"
-      | '@' `elem` n =
+      | not (isLitAtom n), '@' `elem` n =
           Left $ "`" ++ n ++ "` is the compiler's spelling of a slot: "
               ++ "reach it with `use " ++ takeWhile (/= '@') n ++ "`"
     go t               = Right t
+
+    -- a Str literal rides as a Prim whose name begins with a quote, and
+    -- its TEXT is not a name: `"a@b"` is a string, and a generated mode
+    -- word carries slot names inside literals it parses at runtime
+    isLitAtom ('"' : _) = True
+    isLitAtom _         = False
 
 -- Templates, phase one of elaboration.
 --
@@ -4209,6 +4326,8 @@ data Module = Module
   , modInstances :: [Instance]
   , modFunctors  :: [(String, String)]  -- `functor Name = word`
   , modTemplates :: TemplateTable       -- defs over a theory, awaiting one
+  , modModes     :: [Mode]              -- `mode Name = Instance`
+  , modKWords    :: [(String, String)]  -- def -> the mode it was declared in
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -4246,7 +4365,9 @@ splitDefs src = do
       -- `theory` / `instance`: a header plus its indented block, raw
       -- `functor F = word`: a declaration line with no block, so it
       -- rides the block bucket with an empty body
-      | ("functor" : _) <- words l = do
+      -- `mode K = Inst` rides the same bucket: a declaration line with
+      -- no block, naming an instance rather than a word
+      | (kw : _) <- words l, kw `elem` ["functor", "mode"] = do
           (ds, ts, bs, is, ps) <- go Nothing rest
           pure (ds, ts, (l, [], doc) : bs, is, ps)
       -- `rules Name = p => q, r => s`, or the same rules one per line
@@ -4470,6 +4591,104 @@ parseFunctorLine l =
     _ -> Left $ "Malformed functor declaration (want `functor Name = word`): "
              ++ dropWhile isSpace l
 
+-- `mode Name = Instance` — a declaration line, no block.
+parseModeLine :: String -> Either String (String, String)
+parseModeLine l =
+  case break (== '=') (takeWhile (/= '#') l) of
+    (lhs, '=' : rhs)
+      | ["mode", nm] <- words lhs
+      , [i] <- words rhs -> Right (nm, i)
+    _ -> Left $ "Malformed mode declaration (want `mode Name = Instance`): "
+             ++ dropWhile isSpace l
+
+-- What a mode needs from its instance, checked once, here: a CARRIER (a
+-- theory parameter that is a two-argument type constructor, and the
+-- data name the instance supplied for it), the two slots the scope is
+-- spelled with, and the EXITS — the slots that take the carrier and
+-- return base, which are refused inside the scope so that the K-word
+-- table stays exact.
+buildMode :: [Theory] -> [Instance] -> (String, String)
+          -> Either String Mode
+buildMode theories insts (nm, instNm) = do
+  inst <- case [ i | i <- insts, inName i == instNm ] of
+            (i : _) -> Right i
+            []      -> Left $ here ++ instNm ++ " is not an instance declared "
+                           ++ "here: a mode is a category, and an instance is "
+                           ++ "what presents one"
+  th <- either (const (Left (here ++ "unknown theory " ++ inTheory inst)))
+               Right (theoryOf theories (inTheory inst))
+  let cons = [ (p, ar, arg) | (p@(PCon _ ar), arg) <- zip (thParams th) (inArgs inst) ]
+  (kNm, carrier) <- case cons of
+    ((PCon k 2, _, IACon c) : _) -> Right (k, c)
+    ((PCon k ar, _, _) : _) ->
+      Left $ here ++ instNm ++ " is an instance of " ++ thName th
+          ++ ", whose constructor parameter `" ++ k ++ "` has arity "
+          ++ show ar ++ " — a mode needs a hom-object `k(_, _)`, one "
+          ++ "wire in and one out"
+    _ -> Left $ here ++ instNm ++ " is an instance of " ++ thName th
+             ++ ", which has no constructor parameter — a mode needs a "
+             ++ "carrier `k(_, _)`"
+  let slotOf n = lookup n (thSlots th)
+      isCar (TData n _) = n == kNm
+      isCar _           = False
+      carriers st = length [ () | t <- fromMaybe [] (closedWires st), isCar t ]
+  arrA <- maybe (Left (missing modeArrSlot th)) Right (slotOf modeArrSlot)
+  thA  <- maybe (Left (missing modeThenSlot th)) Right (slotOf modeThenSlot)
+  case arrA of
+    Arrow (SCons (TFn _) SEnd) o _ | carriers o == 1 -> Right ()
+    _ -> Left $ here ++ "theory " ++ thName th ++ " declares " ++ modeArrSlot
+             ++ " : " ++ show arrA ++ ", but a mode enters through `"
+             ++ modeArrSlot ++ " : Fn\10216a \8658 b\10217 \8658 " ++ kNm
+             ++ "(a, b)`"
+  case thA of
+    Arrow i o _ | carriers i == 2, carriers o == 1 -> Right ()
+    _ -> Left $ here ++ "theory " ++ thName th ++ " declares " ++ modeThenSlot
+             ++ " : " ++ show thA ++ ", but a mode composes with `"
+             ++ modeThenSlot ++ " : " ++ kNm ++ "(a, b) " ++ kNm
+             ++ "(b, c) \8658 " ++ kNm ++ "(a, c)`"
+  -- an EXIT consumes a carrier and hands back base.  `sample` (no
+  -- carrier in) and `firstP` (a carrier out) are not exits; `observe`
+  -- is.  Read off the DECLARED arrow, so a model cannot hide one.
+  let exits = [ n | (n, Arrow i o _) <- thSlots th
+                  , n /= modeArrSlot, n /= modeThenSlot
+                  , carriers i >= 1, carriers o == 0 ]
+      -- and an ENTRY is the mirror: a slot that builds a carrier out of
+      -- base alone, so it is already a stage of the mode.  Read off the
+      -- DECLARED arrow, which is a written type — this is not inference
+      -- steering elaboration, it is the signature doing it (invariant
+      -- five).  `sample` is one; `arrP` is the general case and is
+      -- named separately.
+      enters = [ n | (n, Arrow i o _) <- thSlots th
+                   , n /= modeArrSlot, n /= modeThenSlot
+                   , carriers i == 0, carriers o == 1 ]
+  pure (Mode nm instNm carrier exits enters)
+  where
+    here = "mode " ++ nm ++ ": "
+    missing sl th = here ++ "theory " ++ thName th ++ " declares no slot `"
+                 ++ sl ++ "`.  A mode is spelled with two slots by "
+                 ++ "convention: `" ++ modeArrSlot ++ "` embeds a program "
+                 ++ "and `" ++ modeThenSlot ++ "` composes two carriers "
+                 ++ "(MANUAL \167\&8)"
+
+-- The mode's WORD, of the mode's own name: the same functor as a value,
+-- so `[Circ]` is a quote and `lift2 [Circ]` applies it at runtime.  It
+-- differs from the scope in exactly two ways, both deliberate: it has
+-- no K-word table (every stage is embedded) and it seeds with an
+-- identity carrier so that `stagewise` can be uniform.  `leftId` is the
+-- law that says the seed is free.
+modeDefSrc :: Mode -> String
+modeDefSrc md =
+  "(c -> (" ++ lit ("[_] >> " ++ arrW) ++ " >> parse >> " ++ orNil ++ ") "
+        ++ "(c >> [(s -> " ++ lit "_ [" ++ " (s >> pack >> unparse) >> cat >> _ "
+        ++ lit ("] >> _ " ++ arrW ++ " >> " ++ thenW)
+        ++ " >> cat >> parse >> " ++ orNil ++ ")] ... >> stagewise)"
+        ++ " >> append)"
+  where
+    arrW  = slotDefName (mdInst md) modeArrSlot
+    thenW = slotDefName (mdInst md) modeThenSlot
+    lit t = "\"" ++ t ++ "\""
+    orNil = "((q -> q) | drop >> nil) >> merge"
+
 --------------------------------------------------------------------------------
 -- 10.4 Imports: one file's declarations, in another file's scope
 --
@@ -4686,11 +4905,13 @@ data ModuleBase = ModuleBase
   , mbFuncs   :: [(String, String)]   -- functor -> its word
   , mbTheories  :: [Theory]           -- theories a session `:import`ed
   , mbTemplates :: TemplateTable      -- templates it brought with them
+  , mbModes     :: [Mode]             -- modes it brought with them
+  , mbKWords    :: [(String, String)] -- and their K-words
   }
 
 moduleBase :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl] -> ModuleBase
 moduleBase env run shadow aliases datas =
-  ModuleBase env run shadow aliases datas [] [] [] []
+  ModuleBase env run shadow aliases datas [] [] [] [] [] []
 
 checkModuleWith :: ModuleBase -> String -> Either String Module
 checkModuleWith base src = do
@@ -4732,9 +4953,22 @@ checkModuleWith base src = do
   -- does, receipt included, and `[Opt]` is an ordinary quote.
   ownRules <- sequence [ parseRulesLine h b
                        | (h, b, _) <- declLines, take 5 h == "rules" ]
-  let funcs = ownFuncs ++ [ (n, n) | (n, _) <- ownRules ] ++ mbFuncs base
+  -- A MODE declares a word of its own name and a functor entry of that
+  -- name, exactly as a rule set does — so the namespace is shared, the
+  -- receipt is minted by the ordinary path, and `:import` carries it.
+  ownModeLines <- sequence [ parseModeLine h
+                           | (h, _, _) <- declLines, take 1 (words h) == ["mode"] ]
+  ownModes <- mapM (buildMode theories insts) ownModeLines
+  let modes = ownModes ++ mbModes base
+      funcs = ownFuncs ++ [ (n, n) | (n, _) <- ownRules ]
+                      ++ [ (mdName m, mdName m) | m <- ownModes ]
+                      ++ mbFuncs base
   case [ n | (n, i) <- zip (map fst funcs) [0 :: Int ..]
            , n `elem` take i (map fst funcs) ] of
+    (n : _) | n `elem` map mdName ownModes ->
+      Left $ "Duplicate mode declaration: " ++ n ++ " (a functor, a rule set "
+          ++ "and a mode share one namespace — each declares a name a `use` "
+          ++ "header may carry)"
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories) insts
@@ -4750,18 +4984,27 @@ checkModuleWith base src = do
   -- The rule-set words are hoisted ABOVE the module's own defs: their
   -- bodies mention nothing but the prelude, and `use Opt` inside a def
   -- needs the word to be runnable by then (the ordering rule).
-  let ruleDefs = [ ( nm, ruleSetDefSrc rs
+  let modeDefs = [ ( mdName m, modeDefSrc m
+                   , Just ("mode " ++ mdName m ++ " = " ++ mdInst m
+                            ++ ": `;` is " ++ modeThenSlot ++ ", a stage is "
+                            ++ modeArrSlot ++ ", the carrier is "
+                            ++ mdCarrier m) )
+                 | m <- ownModes ]
+      ruleDefs = [ ( nm, ruleSetDefSrc rs
                    , Just ("rule set " ++ nm ++ ": "
                             ++ intercalate ", " [ p ++ " => " ++ q
                                                 | (p, q) <- rs ]) )
                  | (nm, rs) <- ownRules ]
   -- instance bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  (env', runFinal, _, defsRev, docs, tmpls) <-
-    foldM (addDef slotTable funcs thNames)
+  (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
+    foldM (addDef slotTable funcs thNames modes)
           (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0,
-           mbTemplates base)
-          (ruleDefs ++ defSrcs ++ instDefs)
+           mbTemplates base, mbKWords base)
+          (ruleDefs ++ modeDefs ++ defSrcs ++ instDefs)
+  -- the generated mode word is checked like any other functor's word:
+  -- if a mode's slots ever stop composing, the message says so here
+  mapM_ (\m -> checkFunctorWord env' (mdName m) (mdName m)) ownModes
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this instance's arguments
   mapM_ (checkInstance env' theories) insts
@@ -4777,13 +5020,14 @@ checkModuleWith base src = do
       then pure Nothing
       else do
         term0 <- parseProgram mainSrc
-        term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls thNames)
+        term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
+                                      thNames modes kwords)
                              term0
         arr <- inferTermIn env' term1
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
-                theories insts funcs tmpls)
+                theories insts funcs tmpls modes kwords)
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
@@ -4828,8 +5072,8 @@ checkModuleWith base src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
-    addDef slotTable funcs thNames
-           (env, run, shadow, acc, docs, tmpls) (name, bodySrc, doc) = do
+    addDef slotTable funcs thNames modes
+           (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) = do
       if name `elem` elimEmits && M.member name env
         then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
                  ++ "elimination EMITS it, so a def of that name would "
@@ -4850,14 +5094,24 @@ checkModuleWith base src = do
         Just (th, tbody) ->
           pure ( env, run, shadow, acc
                , maybe docs (\d -> M.insert name d docs) doc
-               , (name, (th, tbody)) : tmpls )
+               , (name, (th, tbody)) : tmpls, kws )
         Nothing -> do
           let env1 = M.delete name env   -- a shadowed def must not leak in
           -- `use` scopes are written out here, between parse and infer: a
           -- syntactic Term rewrite with the Env available for arities and
           -- resource signatures.
+          -- a def whose own header names a mode is a K-WORD: it produces
+          -- a carrier, and a later `use K` leaves it alone instead of
+          -- embedding it.  Syntactic knowledge, recorded before the body
+          -- is elaborated, in the same prefix scope every def lives in.
+          let kws' = case term0 of
+                Use ns _ | (k : _) <- [ mdName m | m <- modes
+                                                 , mdName m `elem` ns ] ->
+                  (name, k) : kws
+                _ -> kws
           term <- either (Left . inDef) Right
-                    (elabUseWith (ElabCtx env1 run slotTable funcs tmpls thNames)
+                    (elabUseWith (ElabCtx env1 run slotTable funcs tmpls
+                                          thNames modes kws)
                                  term0)
           -- self-reference is refused AFTER expansion, so a functor that
           -- splices the name in is caught too
@@ -4875,7 +5129,7 @@ checkModuleWith base src = do
                , filter (/= name) shadow
                , (name, sc, term) : acc
                , maybe docs (\d -> M.insert name d docs) doc
-               , tmpls )
+               , tmpls, kws' )
       where inDef e = "in def " ++ name ++ ": " ++ e
 
 --------------------------------------------------------------------------------
@@ -5485,8 +5739,12 @@ normTerm ctx defs seen term s0 = case term of
       | n == "swap"           = Right (wire 2 reverse              s)
       -- `pass` is the open remainder: everything as the final atom, and
       -- closed to nothing by the typechecker anywhere else
-      | n == "pass" =
+      | n == "pass" || isJust (receiptLabel n) =
           Right (if isFinal then (nsStack s, s { nsStack = [] }) else ([], s))
+      -- (a RECEIPT is `pass` with a label — it moves no wire, so the
+      -- normalizer erases it exactly as it erases `pass`.  Without this
+      -- no law could be stated about a program written under any `use`
+      -- scope, mode scopes included: `use@F` has no closed arity.)
       -- the injections are open-arity in the same way: the whole
       -- remaining segment is the bundle when they end the stage
       | Just k <- injIndex n =

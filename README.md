@@ -298,9 +298,22 @@ bare `use` leaves.
     atomwise through quotations, rows and `fix` bodies, and `use Opt`
     mints `=Opt>` on everything it rewrote — an optimizer you can audit
     rather than one you have to trust (`examples/optimizer.braid`).
+
+    A **mode** is the same mechanism pointed at composition itself:
+    `mode Circ = Circuits` names an instance of a theory with a carrier
+    (`theory Arrow(k(_, _))`) and `use Circ ; add1 ; dbl` elaborates
+    every stage to that instance's `arrP` and every `;` to its `thenP`,
+    so a block reads as the ordinary program it is and comes out a
+    circuit. The receipt is an ordinary label with a *carrier* — at the
+    base the word is `• ⇒ Circuit(Int, Int)` carrying `Circ`, and the
+    display folds the two into `Int =Circ Rec> Int`. Entering is a
+    marker, leaving is a model: the theory's eliminators are refused by
+    name inside the scope, which makes a theory with no eliminator a
+    **sealed** mode — abstract types for free (`examples/circuits.braid`).
 15. **A file is a presentation, an import is the inclusion.**
     `import "geometry.braid"` puts one file's declarations — defs,
-    types, resources, theories, instances, functors — in another file's
+    types, resources, theories, instances, functors, rule sets and
+    modes — in another file's
     scope. Objects are added, never merged: a clash is an error naming
     both files, a diamond includes the shared file once, a cycle is
     reported. What does not travel is the imported file's main program,
@@ -346,7 +359,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 932-case test suite, a full
+(typechecker, interpreter, REPL), a 951-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

@@ -137,6 +137,105 @@ _ 4  ; stepC ; (y c -> (y ; print) c)      # 14
 _ 10 ; stepC ; (y c -> (y ; print) c)      # 34
 drop
 
+# ---- composition, OWNED: the mode ------------------------------------
+# `use Circuits` is a RENAMING: it puts this instance's `arrP` and
+# `thenP` in scope and leaves the plumbing to you.  A MODE goes one step
+# further and takes over `;`:
+#
+#     mode Circ = Circuits
+#
+# declares the functor out of the free category that sends every stage
+# to `arrP` of that stage and every `;` to `thenP`.  It is a LABEL WITH
+# A CARRIER: `use Circ` mints the receipt `Circ` exactly as any functor
+# scope does, and the carrier is the hom-object `Circuit(a, b)`.  The
+# display folds the two together — a word built in the mode is
+# `• ⇒ Circuit(Int, Int)` carrying `Circ` at the base, and prints
+# `Int =Circ Rec> Int`.  Objects are shared with the base category;
+# composition is the mode's own.
+mode Circ = Circuits
+
+def add1 = _ 1 ; +
+def dbl  = 2 _ ; *
+
+# The same pipeline twice.  `hand` is what the mode writes out for you;
+# `easy` is what you write.
+def hand = use Circuits ; [add1] ... ; arrP ... ; _ [dbl] ; _ arrP ; thenP ; observe
+def easy = use Circ ; add1 ; dbl
+#   easy : Int =Circ Rec> Int
+
+# ENTERING is a marker, LEAVING is a model.  `observe` takes the carrier
+# and returns base, so it is an EXIT: refused by name inside `use Circ`
+# ("`observe` leaves Circ; call it outside `use Circ`") and called from
+# an ordinary instance scope outside it.  That rule is what makes the
+# K-word table exact — every word written in the mode produces a
+# carrier, so the elaborator never has to ask inference which is which.
+def easyOut = use Circuits ; easy ; observe
+
+hand    ; print             # 18 — (3+1)·2 + (4+1)·2
+easyOut ; print             # 18 — the same pipeline, said as a mode
+
+# A word written in the mode is an ordinary word, so it composes in the
+# mode with any other: inside `use Circ`, `easy` is left alone and the
+# `;` around it is `thenP`.
+def twice2    = use Circ ; easy ; easy
+def twice2Out = use Circuits ; twice2 ; observe
+twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
+
+# OUTSIDE the scope, two of them side by side are two circuits side by
+# side: `• =Circ Rec> Circuit(Int, Int) Circuit(Int, Int)`.  That is
+# well-typed and honestly not composition in Circ — the display fold
+# wants exactly ONE carrier, so it does not fire and you can see the
+# two.  Composition in Circ is written under the marker.
+def pair    = easy easy
+def pairOut = use Circuits ; pair ; thenP ; observe
+pairOut ; print             # 40 — the same composite, spelled by hand
+
+# ---- the corollary: a SEALED mode -------------------------------------
+# Exits are the only way out, so a theory that declares none is sealed:
+# every stage inside the scope becomes `arrP` and the only word that
+# touches the accumulated carrier is `thenP`, which hands back a
+# carrier.  Nothing written in the mode can leave it, and that is
+# abstract-type sealing falling out of the same rule.
+data Capsule(a, b) = Fn⟨a ⇒ b⟩
+
+theory Vault(k(_, _)) =
+    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    thenP : k(a, b) k(b, c) ⇒ k(a, c)
+
+def capThen = (f g -> [(x -> f ; unCapsule ; _ x ; ev ; (y -> g ; unCapsule ; _ y ; ev))] ; Capsule)
+
+instance Sealed : Vault(Capsule) =
+    arrP  = Capsule
+    thenP = capThen
+
+mode Safe = Sealed
+
+def guarded  = use Safe ; add1 ; dbl
+def guarded2 = use Safe ; guarded ; add1
+#   guarded2 : Int =Safe> Int — and the only consumer of a Safe word,
+#   inside the mode's vocabulary, is another Safe word.
+
+# The honest caveat: the CARRIER's own unroller is an ordinary base word
+# and Braid has no export lists, so `unCapsule` still opens it from
+# outside.  A mode seals the CATEGORY — nothing written in it leaves it
+# by any route the mode offers — and sealing the TYPE is a separate,
+# unshipped question.
+guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
+
+# ---- what the laws can and cannot decide ------------------------------
+# The five category axioms above run through `observe` at sample points,
+# and that is not for want of trying: `sameCode` refuses every one of
+# them for both models, with `ev` of a value that is not a literal
+# quotation.  The reason is structural rather than incidental.  An
+# Arrow's composition must APPLY a program that arrived as a wire —
+# `compC` does it through `fix` and `Funcs` does it through `unArr ; ev`
+# — and an `Fn` whose input stack is an open variable has no arity for
+# the normalizer to give it.  Equality modulo a model's defining
+# equations is structural induction over an initial algebra, a different
+# procedure from normalizing in a free category (design-macros.md,
+# "honest gaps").  So the laws stay finite tests of an infinite object,
+# which is what `observe` was asked for in the first place.
+
 # The laws ran before any of this printed. `firstFst` is the one worth
 # a second look: `first f ; arr fst = arr fst ; f` is a naturality
 # square, and stating it needed `k` at THREE different pairs of wires —

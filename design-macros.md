@@ -2124,6 +2124,121 @@ abstraction elimination before normalizing, which is the path `reflect`
 already took, so the two words agree on every program. The line in the
 products/coproducts table above is updated accordingly.
 
+## Amendment (2026-09-13): modes, shipped
+
+*Stage 5c. `mode K = Inst`, the K-word table, the exit rule, the
+display fold, sealed modes. What follows is the record of where the
+implementation departed from items 4b and 4c, and of the one question
+those items left open.*
+
+**What shipped, in one paragraph.** `mode Circ = Circuits` is a
+declaration line beside `functor` and `rules`. It requires `Circuits`
+to model a theory with a two-argument constructor parameter, reads the
+carrier off the instance head, and reads two slots off the theory by
+NAME: `arrP : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` and `thenP : k(a, b) k(b, c) ⇒
+k(a, c)`. Every other slot is classified off its DECLARED arrow — a
+carrier in and none out is an EXIT, none in and one out is an ENTRY.
+`use Circ` renames the instance's slots into scope (so the mode is
+spelled with them), then rewrites the spine: a stage that is a K-word
+or an entry slot is left alone, every other stage `s` becomes `[s] ;
+arrP`, and the pieces are joined with `thenP`. A receipt `Circ` is
+minted by the ordinary path. The display folds `• ⇒ K(a, b)` carrying
+`K` to `a =K> b`, wanting exactly one carrier. `mode K` also declares
+a word `K : Code ⇒ Code` and a functor entry of that name, so the
+namespace is shared with `functor`/`rules` and `[K]`/`lift2 [K]` work.
+No field on `Arrow`; no change to inference.
+
+**Deviations from 4b.**
+
+1. **`use K` does not go through `runFunctor`.** 4b said the mode's
+   functor is applied "exactly as any functor scope does". It cannot
+   be, and the reason is worth recording: the rule needs the K-word
+   table, which is elaborator state, and a `Code ⇒ Code` word is a
+   Braid value that cannot see it. So the scope's rewrite is a Haskell
+   pass (`runMode`) beside `elabScope`'s routing — the same kind of
+   thing routing already was — and the WORD `K` is generated
+   separately for value use. The two agree on a K-word-free body up to
+   one identity carrier: the word seeds with `[_] ; arrP` so that its
+   per-stage action can be uniform (`stagewise`), where the scope
+   emits the tight form. `leftId` is the law that says the seed is
+   free, and a test pins both spellings' emitted code.
+2. **Entry slots join the K-word table.** 4b's table was "defs
+   declared under `use K`". That is not enough to write anything: the
+   theory's own generators (`sample : • ⇒ k(Int, Int)`) are carriers
+   too, and `arrP` cannot embed them. They are admitted on the
+   strength of their DECLARED arrow, which is a written type, so
+   invariant five is intact — this is a signature steering
+   elaboration, which is the Lean move the amendment of 2026-08-31
+   already blessed, not inference steering it.
+3. **A module def that merely produces a carrier is NOT a K-word**,
+   and this is the sharpest ergonomic edge in the stage. `def sum0 = 0
+   ; sumFrom` has type `• ⇒ Circuit(Int, Int)` and is still `arrP`'d
+   inside `use Circ`, because admitting it would mean reading an
+   INFERRED type to decide a rewrite. The fix available to the user is
+   to declare it as a theory slot (written type) or to write it under
+   `use K`. Recorded here rather than softened.
+4. **One mode per header.** `use K1 K2` is refused; the second would
+   `arrP` the first's carriers. Nesting or a declared composite is the
+   spelling.
+5. **The receipt is now transparent to the normalizer.** `use@F` is
+   `pass` with a label, and `sameCode` refused any program carrying
+   one — *`use@F` has no closed arity* — so no law could be stated
+   about code written under ANY `use` scope. The normalizer now erases
+   a receipt exactly as it erases `pass`. This was found while trying
+   to state the mode's category axioms and is a fix for functors and
+   rule sets too.
+6. **A string literal is not a slot name.** The elaborator's `@` guard
+   was testing every `Prim`, and a Str literal rides as a `Prim` whose
+   name starts with a quote — so `"a@b"` was refused as "the
+   compiler's spelling of a slot". Fixed; the generated mode word
+   needs it, and it was a latent bug for everyone else.
+
+**Deviations from 4c.** None on the rule itself: exits are read off
+declared arrows and refused by name inside the scope, and the K-word
+table is exact because of it. Two clarifications the implementation
+forced:
+
+- The refusal is by SLOT name, and a slot is only a name inside a
+  `use`. The instance's underlying def (`probe`, for `observe`) is an
+  ordinary word and stays callable anywhere. A mode seals its own
+  vocabulary, not the module's — which is the same honesty the sealed
+  corollary needs.
+- **Sealed modes work and are one example** (`examples/circuits.braid`,
+  `theory Vault`): with no exit declared, every stage becomes `arrP`
+  and the only word touching the accumulated carrier is `thenP`, which
+  returns one, so nothing written in the mode leaves it. The limit to
+  state plainly: the CARRIER's generated unroller is an ordinary base
+  word and Braid has no export lists, so a mode seals the category and
+  not the type.
+
+**The flagship question, answered: a K-word inside ANOTHER mode's
+scope does NOT type, and should not.** 4c asked for this first. A word
+of mode `K2` is `• ⇒ K2(a, b)`; inside `use K` it is a stage, and
+`arrP` embeds `Fn⟨a ⇒ b⟩` — a program with one wire in and one out,
+not a carrier-out-of-nothing. Inference says `Cannot unify stacks: •
+vs a16`, so the elaborator says it instead, naming both modes. And the
+refusal is right: the two modes present two different categories, and
+a functor between them is a piece of data neither declaration carries.
+The way to cross is to leave `K2` first — its exit — and re-enter,
+which is exactly "entering is a marker, leaving is a model" applied
+twice. A transport `K2 → K` would be the `morphism` declaration, still
+unbuilt for the reason recorded above.
+
+**The category axioms are NOT decided, and the reason is structural.**
+Both of `circuits.braid`'s models were tried against `sameCode` (left
+identity, right identity, associativity, `arr` functoriality, and the
+`first`/`fst` square). All five are refused for both, with *outside
+the structural fragment: `ev` of a value that is not a literal
+quotation*. An Arrow's composition must APPLY a program that arrived
+as a wire — `compC` through `fix`, `Funcs` through `unArr ; ev` — and
+an `Fn` whose input stack is an open variable has no arity to give it.
+This is not a gap peculiar to modes: it is the `morphism` verdict
+again, equality modulo a model's defining equations, which is
+structural induction over an initial algebra and not normalization in
+a free category. The five laws stay finite tests of an infinite
+object, run through `observe` at sample points, which is what a
+theory asking for an `observe` slot was always admitting.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and
@@ -2155,3 +2270,13 @@ products/coproducts table above is updated accordingly.
   amendments.
 - The **image-tagging question above is open**, and the coeffect
   decision with it.
+- **A mode's category axioms cannot be decided** by this normalizer,
+  for the `ev`-of-a-wire reason above, and no Arrow model avoids it.
+  They run through `observe`.
+- **A written `Fn⟨a =K> b⟩` is not the folded form.** The display fold
+  does not run backwards — for modes or for resources — so the carrier
+  is written out. For a mode it could not run backwards anyway: type
+  lines are parsed before theories and instances, so a slot cannot
+  mention a mode declared from an instance of its own theory.
+- **Nothing carries a mode ACROSS modes.** See the flagship answer
+  above; the missing declaration is `morphism`.

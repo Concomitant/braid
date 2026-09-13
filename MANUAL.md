@@ -50,6 +50,7 @@ the current stack is rejected with a message naming the stack.
 | `=Rec>` , `=IO Rec>` | any written label set, in any order — displayed sorted (§3) |
 | `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, manifest included (§3, §8) |
 | `=Traced>` | a functor's receipt: minted by `use Traced`, never written (§3, §12) |
+| `=Circ>` | a mode's receipt: the same, with a CARRIER the display folds (§3, §8) |
 | `import "f.braid"` | include another file's declarations (§8) |
 
 Identifiers are any run of characters not in the punctuation set —
@@ -212,16 +213,42 @@ in the other phase, where a step budget rather than `Rec` is the bound
 no other unbounded construct, which is believed and has not been
 audited end to end.
 
+**And a MODE is a label with a CARRIER** *(2026-09-13)*. `mode Circ =
+Circuits` (§8) declares the functor that sends every stage of a scope
+to that instance's `arrP` and every `;` to its `thenP`. `use Circ`
+mints `Circ` exactly as any functor scope does — nothing on the arrow
+is new — and what the label *adds to the objects* is the hom-object
+`Circuit(a, b)`. At the base a word written in the mode is
+`• ⇒ Circuit(Int, Int)` carrying `Circ`, and the display folds the
+carrier onto the glyph, which is the same move that folds a threaded
+resource:
+
+```text
+easy     : Int =Circ Rec> Int       -- one carrier, out of `•`, carrying `Circ`
+pair     : • =Circ Rec> Circuit(Int, Int) Circuit(Int, Int)
+```
+
+**The fold wants exactly one carrier.** `pair` above is two words of
+the mode side by side outside the scope: well-typed, and visibly *not*
+composition in `Circ` — so it prints unfolded, and you can see the two
+circuits. Composition in the mode is written under the marker (`use
+Circ ; f ; g`). Like the resource fold this is display, not inference,
+and like the resource fold it does not run backwards: a *written*
+`Fn⟨Int =Circ> Int⟩` means the labelled arrow it looks like, and the
+carrier form is written out (`Fn⟨• =Circ> Circuit(Int, Int)⟩`).
+
 The built-in labels, then:
 
-| label | minted by | says |
-|---|---|---|
-| `IO` | the four io prims (`print`, `readLine`, `readFile`, `writeFile`) | touched the world |
-| `Rec` | `fix` and `loop` | may recurse without bound |
-| `F` (any functor) | `use F` on a `functor` (§12) | was rewritten by `F` |
-| `R` (any resource) | `use R` on a `resource` (§8) | threads the `R` wire |
+| label | minted by | carrier | says |
+|---|---|---|---|
+| `IO` | the four io prims (`print`, `readLine`, `readFile`, `writeFile`) | the world, untouchable | touched the world |
+| `Rec` | `fix` and `loop` | none | may recurse without bound |
+| `F` (any functor) | `use F` on a `functor` (§12) | none | was rewritten by `F` |
+| `R` (any resource) | `use R` on a `resource` (§8) | a wire of type `R` | threads the `R` wire |
+| `K` (any mode) | `use K` on a `mode` (§8) | the hom-object `K(a, b)` | was built in the category `K` presents |
 
-One mechanism, four readings; union along composition for all of them.
+One mechanism, five readings; union along composition for all of them,
+and every difference is in the carrier column.
 
 ## 4. The remainder discipline
 
@@ -505,8 +532,8 @@ A resource contributes a wire the elaborator threads; an instance
 contributes no wire at all and disappears at elaboration, leaving its
 slots renamed.
 
-`use` names resources, instances, functors and — in a def's own
-header — theories (§8), and opens a scope over them,
+`use` names **resources, instances, functors and modes**, and — in a
+def's own header — **theories** (§8), and opens a scope over them,
 taking the **rest of the enclosing scope as its body** — the same scope-taking
 shape as the binders `x y ->` and `-> x y`, and the same rule about
 needing a rest to reach. An elaborator running between parse and
@@ -568,23 +595,36 @@ for the rest of the scope. Unlike a resource, an instance claims no
 wire and asserts nothing about the incoming stack: the selection is a
 renaming at elaboration (§8), so it disappears before inference.
 
-**The fourth kind of name is a theory** (§8) — and it may appear only
+**The third kind of name is a functor** (§8, §12): `use Fuel Metered`
+threads the resource and then hands the routed, renamed body — as
+`Code` — to the word `Metered` names, splicing back what it returns.
+
+**The fourth kind is a MODE** *(2026-09-13)*: `mode Circ = Circuits`
+(§8) names an instance of a theory with a *carrier*, and `use Circ`
+takes over `;` itself — every stage becomes `arrP` of that stage and
+every `;` becomes `thenP`, so a block reads as the ordinary program it
+is and comes out as a value of the category the instance presents. A
+mode brings its instance's slot words into scope too, so `use Circ` is
+`use Circuits` plus owned composition. Its **exits** — the slots that
+take the carrier and hand back base, `observe` and kin — are refused
+by name inside the scope and called outside it: *entering is a marker,
+leaving is a model*. One mode per header.
+
+**And the theory case is a template.** A theory name may appear only
 in a *def's own header*, where it makes the def a **template**: a body
 that waits for an instance. `use Monoid` inside a body, or in a REPL
 session, is refused, because there is no def for it to be the header
 of.
 
-**The third kind of name is a functor** (§8, §12): `use Fuel Metered`
-threads the resource and then hands the routed, renamed body — as
-`Code` — to the word `Metered` names, splicing back what it returns.
-One header, four kinds, applied in a fixed order: templates expand,
-instances rename, resources route, functors rewrite (left to right),
-so a functor always sees finished wiring — and an expanded template
-body is routed by every scope it landed in, exactly as if it had been
-written there. `functor Both = metered ; traced` then `use Both`
-is the recommended spelling whenever the order carries meaning:
-functor composition IS `;`.  A functor scope also leaves its RECEIPT —
-the label `Metered` on the manifest of everything it rewrote (§3, §12).
+One header, five kinds, applied in a fixed order: templates expand,
+instances rename, resources route, modes compose, functors rewrite
+(left to right), so a functor always sees finished wiring — and an
+expanded template body is routed by every scope it landed in, exactly
+as if it had been written there. `functor Both = metered ; traced`
+then `use Both` is the recommended spelling whenever the order carries
+meaning: functor composition IS `;`.  Every functor and mode scope
+also leaves its RECEIPT — the label on the manifest of everything it
+rewrote (§3, §12).
 
 **What `use` does to a pure stage is `lift`** (§10), an ordinary
 prelude word: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a program
@@ -1298,6 +1338,71 @@ words, a rule set, the two rules `sameCode` can prove and the two it
 honestly cannot, the receipt on the arrow, the laws as theories, and
 image membership.
 
+**`mode Name = Instance`** *(2026-09-13)* declares a **mode**: a label
+whose functor is *composition itself*. `Instance` must model a theory
+with a **constructor parameter** — a carrier, `k(_, _)` — and the
+declaration records the functor that sends every stage of a `use Name`
+scope to that instance's `arrP` and every `;` to its `thenP`:
+
+```braid
+theory Arrow(k(_, _)) =
+    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)          # the CONVENTION: these two
+    thenP   : k(a, b) k(b, c) ⇒ k(a, c)    #   names are what `mode` reads
+    observe : k(Int, Int) ⇒ Int            # an EXIT: carrier in, base out
+    sample  : • ⇒ k(Int, Int)              # an ENTRY: base in, carrier out
+
+instance Circuits : Arrow(Circuit) = …
+mode Circ = Circuits
+
+def easy    = use Circ ; add1 ; dbl        # Int =Circ Rec> Int
+def easyOut = use Circuits ; easy ; observe
+```
+
+`easy` elaborates to `[add1] ; arrP ; _ [dbl] ; _ arrP ; thenP` —
+which you may write by hand under `use Circuits`, and the two print
+the same thing.
+
+**The slot convention.** A mode is spelled with two slot names,
+`arrP` and `thenP`, read off the theory by name and checked for shape:
+`arrP` takes one `Fn` and returns one carrier, `thenP` takes two
+carriers and returns one. Everything else the theory declares is
+classified off its **declared** arrow — which is a *written* type, so
+this is a signature steering elaboration and not inference doing it:
+
+- an **exit** has a carrier in and none out (`observe`, a step/run
+  word, `reify`). It is refused *by name* inside the scope —
+  ``observe`` *leaves Circ; call it outside* `use Circ` — and called
+  from an ordinary instance scope outside. That rule is what makes the
+  mode's word table exact without asking inference: every word written
+  in the mode produces a carrier, so nothing else can.
+- an **entry** has no carrier in and one out (`sample`). It is already
+  a stage of the mode, so the scope leaves it alone.
+- anything else (`firstP`, which takes a carrier *and* returns one) is
+  used outside the scope, or through a word of your own.
+
+**A mode shares the functor namespace** with `functor` and `rules` —
+each declares a name a `use` header may carry — and, like a rule set,
+`mode K` declares a **word** `K : Code ⇒ Code` as well, so `[K]` is an
+ordinary quote and `lift2 [K]` applies the functor at run time. (It
+will always fall back: a mode changes the program's type, and `lift2`'s
+witness is the program itself.) The word seeds with an identity carrier
+where the scope does not, which `leftId` is the law for.
+
+**Sealed modes, for free.** A theory that declares no exit cannot be
+left: every stage becomes `arrP` and the only word that touches the
+accumulated carrier is `thenP`, which returns one. Code written in such
+a mode can be consumed only by more code in that mode — abstract-type
+sealing falling out of the exit rule rather than being a feature. The
+honest limit: the carrier's own generated unroller is an ordinary base
+word and Braid has no export lists, so a mode seals the *category*, not
+the *type*. `examples/circuits.braid` has both halves.
+
+Declaration errors, all at the `mode` line: *`Inst` is an instance of
+`T`, which has no constructor parameter — a mode needs a carrier
+`k(_, _)`*; *theory `T` declares no slot `arrP`*; *`Inst` is not an
+instance declared here*; *Duplicate mode declaration*; and, at a `use`,
+*a header may name at most one mode*.
+
 **`morphism Len : ListMonoid -> IntSum = len` — still PROPOSED**
 *(2026-09-13)*. A natural transformation between two models of one
 theory is a homomorphism, and because the base is the **free** category
@@ -1794,6 +1899,19 @@ The code runs in the *witness's* scope — the words it may call are the
 ones the witness could — so a prelude word that splices on your behalf
 (`box`, `lift2`) still runs your code among your defs.
 
+**Modes are the "models" row applied to composition itself**
+*(2026-09-13)*. `use Inst` replaces a theory's *generators* by a
+model's words and is known to type because `checkInstance` compared
+each slot to its declared signature. `mode K = Inst` (§8) replaces the
+*composition* as well — `;` becomes `thenP` and each stage becomes
+`arrP` of that stage — and it is known to type for exactly the same
+reason, plus two shape checks on those two slots at the `mode` line. A
+functor out of a free category is determined on generators; a mode is
+what you get when you let it move the composition too, and the price
+is that the result lives in the model's hom-objects rather than in the
+base. The receipt records which category you are in, and the carrier
+is what the label adds to the objects (§3).
+
 See `examples/cuts.braid` for splices in context.
 
 ### Functors, and the ones known to type
@@ -1817,6 +1935,7 @@ per use:
 | `interpose [η]` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `interpose` itself, by subsumption |
 | `use Inst` for an instance | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
 | a rule set `rules Opt = p => q, …` | a typed generator image, applied atomwise | `subsumes`, once per rule at the declaration (§8) |
+| a **mode** `mode Circ = Circuits` | a model applied to COMPOSITION: stage ↦ `arrP`, `;` ↦ `thenP` | `checkInstance` on the slots, once, plus the carrier/slot shapes at the `mode` line (§8) |
 | `lift2 [m]` on any `Code ⇒ Code` `m` | the runtime lift | per program, at run time; never fails — it falls back |
 
 Everything not in the table — delete a stage, reorder, reverse,
@@ -2077,6 +2196,25 @@ holds for them too: final atom of their stage (§9).
     ordered, because a `Fn` type is invariant in its arrow. `Fn⟨Int
     =IO> Int⟩` and `Fn⟨Int ⇒ Int⟩` are different types, and neither
     stands for the other.
+- **An exit is refused inside its mode's scope.** `use Circ ; f ;
+  observe` is *`observe` leaves Circ; call it outside `use Circ`* — not
+  a type error, a scope error, and deliberate: it is what makes the
+  mode's word table exact without consulting inference (§8). Call it
+  one line out, under the ordinary instance scope: `use Circuits ; f ;
+  observe`. The rule is by *slot name*, so the instance's own
+  underlying def (`probe`, say) is an ordinary word and stays callable
+  anywhere — the mode seals its vocabulary, not the module's.
+- **Two carriers side by side outside the scope are not an error.**
+  `f g` for two words of mode `K` is `• =K> K(a, b) K(b, c)`: two
+  values, well-typed, and honestly not composition in `K`. The display
+  fold wants exactly one carrier, so it does not fire and you see the
+  two. If you meant composition, say so under the marker — `use K ; f ;
+  g`. (`f ; g` is a different thing again and usually a stack error:
+  the second word takes `•` and there is already a carrier there.)
+  Related: a module def that merely *happens* to produce a carrier is
+  not a word of the mode — only a def written under `use K`, or one of
+  the theory's declared entry slots, is left alone inside the scope.
+  Everything else is a stage, and `arrP` will refuse it.
 - The same goes for a functor's receipt, and it surprises people once:
   a *written* type with no labels refuses labelled code. An `evalAs`
   witness `Fn⟨Int ⇒ Int⟩`, or a theory slot declared `a ⇒ a`, will not

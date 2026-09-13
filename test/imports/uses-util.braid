@@ -20,3 +20,9 @@ def optimised =
 6 >> optimised >> print
 3 >> loudTwice >> print
 (0 >> Tally) 5 >> scored >> _ print >> unTally >> print
+
+## the imported MODE, entered on this side of the boundary: the receipt
+## is minted here, and `runP` is the exit, called outside the scope
+def inK  = use K >> double >> double
+def outK = use Funcs >> inK >> _ 5 >> runP
+outK >> print

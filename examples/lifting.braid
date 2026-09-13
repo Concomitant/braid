@@ -45,3 +45,56 @@ unLog >> print                                     # 100 — the log
 # The same shape one level up: a `Code ⇒ Code` functor applied by `use`
 # is this action on a whole region's spine instead of one quotation —
 # "the logged version of this block". See design-macros.md.
+
+# ---- the same block, said as a MODE -----------------------------------
+# The sentence at the top of this file is a theory slot:
+#
+#     arrP : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+#
+# Take an ordinary function, get back the better one. A `mode` names an
+# instance of such a theory and takes over `;` as well, so the lift
+# applies to a whole block by its HEADER instead of one quotation at a
+# time — `use Noted` below is the only mark, and the arrow carries the
+# receipt.
+#
+# The carrier is written UNFOLDED (`Fn⟨Log a =Log> Log b⟩`): a resource
+# folds onto the glyph for DISPLAY, and a written type says what the
+# stack actually holds. The same is true of `=Noted>` itself.
+data Logged(a, b) = Fn⟨Log a =Log> Log b⟩
+
+theory Lifting(k(_, _)) =
+    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    thenP : k(a, b) k(b, c) ⇒ k(a, c)
+    runP  : k(a, b) Log a =Log> Log b
+
+# `arrP` IS `logged`, one `Logged` wrapper later. The other two are the
+# plumbing the mode does for you: written once, here, per model.
+def logArr  = logged >> Logged
+def logThen = (f g -> [(l x -> f >> unLogged >> _ l >> _ _ x >> ev >> (m y -> g >> unLogged >> _ m >> _ _ y >> ev))] >> Logged)
+def logRun  = (f l x -> f >> unLogged >> _ l >> _ _ x >> ev)
+#   logArr : Fn⟨a ⇒ b⟩ ⇒ Logged(a, b)
+
+instance Notes : Lifting(Logged) =
+    arrP  = logArr
+    thenP = logThen
+    runP  = logRun
+
+mode Noted = Notes
+
+def triple = 3 _ >> *
+
+# This is the payoff: the block reads like the ordinary program it is,
+# and the arrow says what happened to it.
+def piped = use Noted >> celsius >> triple
+#   piped : Int =Noted> Int
+#   — at the base `• ⇒ Logged(Int, Int)`, carrying the label `Noted`;
+#   the display folds the carrier onto the arrow, exactly as it folds a
+#   threaded resource.
+
+# `runP` takes the carrier and returns base, so it is an EXIT: refused
+# by name inside `use Noted`, and called outside it under the ordinary
+# instance scope.
+def report = use Notes >> piped >> _ ("" >> Log) >> _ _ 100 >> runP
+
+report >> _ print                                  # 636 — 212 tripled
+unLog >> print                                     # 100 212 — the log

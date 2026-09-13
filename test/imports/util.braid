@@ -24,4 +24,23 @@ rules Opt = dupInt => dup
 ## it travels as a template and the importer instantiates it
 def emitTwice = use Sink ; emit ; emit
 
+## a MODE travels like any other declaration: the instance it names,
+## the word of the mode's own name and the functor entry all cross
+data Arr(a, b) = Fn⟨a ⇒ b⟩
+
+theory Arrow(k(_, _)) =
+    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    thenP : k(a, b) k(b, c) ⇒ k(a, c)
+    runP  : k(a, b) a ⇒ b
+
+def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)
+def runA  = (f x -> f ; unArr ; _ x ; ev)
+
+instance Funcs : Arrow(Arr) =
+    arrP  = Arr
+    thenP = thenA
+    runP  = runA
+
+mode K = Funcs
+
 "util.braid's own main — NOT run when imported" >> print
