@@ -368,8 +368,11 @@ the logged version of a function, game rules as lifted moves),
 `sniff` (typed CSV-cell refinement), `sac` (split-apply-combine),
 `laws`, `theories` (theories, models, laws that run),
 `build` (one pipeline as a template, instantiated by two configurations),
-`arrows` (Control.Arrow's interface, as plain syntax) and `circuits`
-(the arrows that aren't: stream transducers as ordinary data),
+`arrows` (Control.Arrow's interface, as plain syntax), `circuits`
+(the arrows that aren't: stream transducers as ordinary data, and the
+shape rule that transports base programs into them) and `reified`
+(the same shape rule over a carrier that is the program AND its Code —
+`getCode` and `evalAs` as one model's embedding and exit),
 `payroll` (a whole small program: a resource, a theory and a grade
 meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
@@ -394,7 +397,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 979-case test suite, a full
+(typechecker, interpreter, REPL), a 980-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
