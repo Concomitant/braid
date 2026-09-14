@@ -98,6 +98,31 @@ passTests =
   , ("1 >> 2 _",      "• ⇒ Int Int")
   , ("1 >> 2 ...",    "• ⇒ Int Int")
   , ("1 >> 2 \8230",  "• ⇒ Int Int")   -- U+2026 … aliases ...
+    -- FLOAT (2026-09-14): a base type beside Int, sharing no word with
+    -- it.  A literal is digits `.` digits, terminal-source exactly as
+    -- an Int literal is.
+  , ("2.0",           "• ⇒ Float")
+  , ("0.5",           "• ⇒ Float")
+  , ("-2.5",          "• ⇒ Float")
+  , ("2.0 ...",       "ρ0 ⇒ Float ρ0")
+  , ("2.0 3.5 >> fadd", "• ⇒ Float")
+  , ("fsub",          "Float Float ⇒ Float")
+  , ("fmul",          "Float Float ⇒ Float")
+  , ("fdiv",          "Float Float ⇒ Float")
+  , ("fexp",          "Float ⇒ Float")
+  , ("fsin",          "Float ⇒ Float")
+  , ("fcos",          "Float ⇒ Float")
+  , ("fsqrt",         "Float ⇒ Float")
+    -- the comparison is a ROUTER, exactly as `lt?` is
+  , ("flt?",          "Float Float ⇒ (Float Float | Float Float)")
+    -- `eq?` is the polymorphic one and reaches a Float; there is no
+    -- second spelling of equality
+  , ("2.0 2.0 >> eq?", "• ⇒ (Float Float | Float Float)")
+    -- the two crossings, written where they are meant
+  , ("toFloat",       "Int ⇒ Float")
+  , ("floor",         "Float ⇒ Int")
+  , ("2 >> toFloat",  "• ⇒ Float")
+  , ("2.5 >> floor",  "• ⇒ Int")
   , ("+",             "Int Int ⇒ Int")
   , ("pass",          "ρ0 ⇒ ρ0")
 
@@ -278,6 +303,17 @@ failTests =
     -- Γ inside Fn⟨…⟩: binding Γ := Fn⟨Γ⇒Δ⟩ ρ must fail the occurs
     -- check now that it traverses element types.
   , ("dup >> ev",  "Occurs check")
+    -- FLOAT: no numeric tower and no overloading, so a mixed stage is
+    -- a clash, and the refusal names the two vocabularies and the two
+    -- crossings rather than a coercion that does not exist
+  , ("1 2.0 >> +",     "no numeric tower")
+  , ("1.0 2 >> fadd",  "no numeric tower")
+  , ("2 2 >> fmul",    "no numeric tower")
+  , ("2.0 >> floor >> fsqrt", "no numeric tower")
+    -- one Float literal notation, so the other one is refused where it
+    -- is written
+  , ("1e-3",           "Exponent notation is not a Float literal")
+  , ("2.5e3 >> print", "Exponent notation is not a Float literal")
   , ("[dup",          "Unclosed quotation")
   , ("]",             "Expected a tensor stage")
   , ("(1",            "Unclosed group")
@@ -1081,7 +1117,28 @@ evalTests =
     -- is any pure `Code ⇒ Code` word; the scope's body is reified, the
     -- word RUNS at elaboration, and the result is spliced back and
     -- re-inferred.  Here `Traced` weaves a trace after every stage.
-  [ ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\ndef weave   = (f h -> [(s -> (s >> pack) h >> append)] f >> flatMap)\ndef tracer  = (f -> f ([trace] >> getCode) >> weave)\nfunctor Traced = tracer\ndef process =\n    use Traced\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
+    -- FLOAT (2026-09-14).  THE DISPLAY CONVENTION, pinned: the shortest
+    -- decimal that reads back as the same Double, never in exponent
+    -- notation, always with a point.  So every finite Float prints as a
+    -- Float LITERAL — `0.1 fadd 0.2` prints the seventeen digits that
+    -- are true rather than the three that are convenient.
+  [ ("0.5 ; print\n2.0 ; print\n-0.0 ; print\n(1.0 3.0 ; fdiv) ; print\n(2.0 ; fsqrt) ; print\n(0.1 0.2 ; fadd) ; print\n(7 ; toFloat) ; print\n(-2.7 ; floor) ; print\n(2.0 ; fexp) ; print",
+     ["0.5", "2.0", "-0.0", "0.3333333333333333", "1.4142135623730951",
+      "0.30000000000000004", "7.0", "-3", "7.38905609893065"], "")
+    -- every Float word once, against hand arithmetic
+  , ("(2.0 3.5 ; fadd) ; print\n(2.0 3.5 ; fsub) ; print\n(2.0 3.5 ; fmul) ; print\n(3.0 2.0 ; fdiv) ; print\n(2.5 ; fneg) ; print\n(-2.5 ; fabs) ; print\n(0.0 ; fsin) ; print\n(0.0 ; fcos) ; print\n(1.0 2.0 ; flt? ; verdict) ; print\n(2.0 1.0 ; flt? ; verdict) ; print",
+     ["5.5", "-1.5", "7.0", "1.5", "-2.5", "2.5", "0.0", "1.0",
+      "alt1()", "alt2()"], "")
+    -- `eq?` on Floats is STRUCTURAL — the two doubles, not an epsilon
+  , ("((0.1 0.2 ; fadd) 0.3 ; eq? ; verdict) ; print\n(0.3 0.3 ; eq? ; verdict) ; print",
+     ["alt2()", "alt1()"], "")
+    -- a Float literal travels the reflective pipeline as an ordinary
+    -- ATOM: `Atom`'s literal alternatives stay three, so `foldAtom`
+    -- keeps its arity and every reflective program keeps its shape,
+    -- and the literal round-trips through unparse/parse by its name
+  , ("[2.5 ... ; fmul] ; reflect ; ((c -> c ; unparse ; print) | print) ; forget\n[2.5 ... ; fmul] ; reflect ; ((c -> [2.5 ... ; fmul] c 3.0 ; evalAs ; print) | print) ; forget",
+     ["2.5 pass >> fmul", "alt1(7.5)"], "")
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\ndef weave   = (f h -> [(s -> (s >> pack) h >> append)] f >> flatMap)\ndef tracer  = (f -> f ([trace] >> getCode) >> weave)\nfunctor Traced = tracer\ndef process =\n    use Traced\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
      ["7", "49", "2", "98", "98"], "")
     -- an identity functor changes nothing
   , ("def idF = (c -> c)\nfunctor Same = idF\ndef p = use Same ; 1 ... >> +\n3 >> p >> print",
@@ -2107,7 +2164,11 @@ moduleFailTests =
     -- reflected code, so a module def of either name would capture code
     -- that never mentioned it.  They are the two prelude names a module
     -- may not shadow (stage 5a¾).
-  [ ("def capture = dup\n1 >> print",
+    -- `fdiv` keeps `div`'s one refusal: dividing by zero has no answer
+    -- worth inventing.  Everything else that leaves the finite doubles
+    -- is IEEE and prints as itself.
+  [ ("1.0 0.0 ; fdiv ; print", "division by zero")
+  , ("def capture = dup\n1 >> print",
      "`capture` cannot be shadowed: abstraction elimination EMITS it")
   , ("def dist2 = dup\n1 >> print",
      "`dist2` cannot be shadowed: abstraction elimination EMITS it")

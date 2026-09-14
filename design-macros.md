@@ -2839,6 +2839,92 @@ Not shipped. Recorded so the next attempt starts further along:
   says no) or a per-def re-tie that recomputes the tuple. That is the
   open question, and it is why this is recorded rather than built.
 
+## Amendment (2026-09-14): Float, and the first flagship
+
+*Stage 6a. One base type, and the first example written to find out
+what the declaration layer costs a person who is trying to compute
+something rather than demonstrate something.*
+
+### What `Float` is, and what it is not
+
+`Float` is an IEEE double and a base type **beside** `Int`. It is not a
+numeric tower, not a class, not a coercion, and not a second reading of
+any word that already exists. `+` is Int addition and will stay Int
+addition. The two types meet only where a program says they meet, at
+`toFloat : Int ⇒ Float` and `floor : Float ⇒ Int`, and a stage that
+mixes them is a type error whose message names both vocabularies and
+both crossings — because in a language with no tower, "add a coercion
+here" is never the fix; *write the other word, or write the crossing*
+is.
+
+Seven decisions worth the record.
+
+1. **The spelling scheme is alphabetic, and the lexer forced it.**
+   `f+ f- f* f/ f<` was the first choice and it does not lex: `-` is
+   not an identifier character — it heads `->`, `---` and every
+   negative literal — so `f-` is two atoms, `f` and `-`. A scheme that
+   breaks on subtraction is not a scheme, so the family is `fadd fsub
+   fmul fdiv flt?`, with `fexp fsin fcos fsqrt` and `fneg`/`fabs`
+   beside them. One scheme, every word, no exceptions.
+
+2. **There is no `feq?`.** `eq?` is already polymorphic and already
+   reaches a `Float`, and one spelling per thing forbids a second. What
+   it means at `Float` is IEEE `==`: bit equality up to the one
+   identification IEEE makes (`0.0` and `-0.0`) and the one it refuses
+   (`NaN` equals nothing, itself included). `(0.1 0.2 ; fadd) 0.3 ;
+   eq?` is **false**, and a language that quietly made it true would be
+   lying about the two doubles. A tolerance test is four words and
+   belongs where the tolerance is known; `examples/autodiff.braid`
+   writes one.
+
+3. **The literal is digits, a point, digits.** `1e-3` is refused where
+   it is written, with the fix in the message. The reason is the same
+   `-` as in (1): an exponent form needs a lexer case of its own for a
+   notation nothing ever prints back. A leading digit is required, so
+   `.5` is still the symbol it always was.
+
+4. **The display convention is pinned: shortest round-trip decimal, no
+   exponent, always a point.** `showFFloat Nothing` over Haskell's own
+   shortest-identifying digits. What that buys is a property, not a
+   preference: **every finite Float prints as a Float literal that
+   re-reads as itself**, so a printed result is a Braid term, and a
+   worked example's output can be pasted back into the file that
+   produced it. The three non-finite doubles print `NaN`, `Infinity`,
+   `-Infinity`; they are values and not literals, and `valueToCode`
+   refuses to splice one, which is the honest edge of the property.
+
+5. **Eleven implementation prims, 47 → 58, and the criterion did not
+   move.** A word keeps its place in the kernel if it is a structure map
+   of the doctrine *or if it touches the implementation*; a double is a
+   machine number and nothing in the language can build one, so the
+   Float arithmetic is in the kernel for precisely the reason the Int
+   arithmetic and the four io edges are. The count is a large jump and
+   it is the honest one: these span no structure, they *are* the
+   machine. What did **not** enter: `fneg` is `0.0` minus and `fabs` is
+   one `flt?` and a two-track row, so both are prelude defs with their
+   derivations visible, and the Float mirrors of `gt?`/`gte?`/`lte?`
+   are not written at all until something wants one.
+
+6. **`fdiv` keeps `div`'s refusal.** Dividing by zero has no answer
+   worth inventing, at either type, and one spelling per thing extends
+   to one behaviour per question. Everything else that can leave the
+   finite doubles — `fexp` overflowing, `fsqrt` of a negative — yields
+   the IEEE value, because those are answers.
+
+7. **`Atom` did not gain an alternative.** A Float literal reflects as
+   a WORD atom rather than as a fourth literal track. `Atom`'s
+   alternative list *is* `foldAtom`'s arity, and every reflective
+   program in the tree — `examples/transpose.braid`,
+   `examples/reified.braid`, the tracer and the meter — is written
+   against seven cases; an eighth would rewrite all of them for a
+   literal that already round-trips by name (`unparse` prints `2.5`,
+   `parse` reads it back as a literal, and the normalizer treats it as
+   the same nullary constant either way, which is what makes `[2.5 ...]`
+   and `[2.6 ...]` decidably different). The asymmetry is recorded here
+   rather than hidden: it is the one place where a Float literal is not
+   quite an Int literal.
+
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and

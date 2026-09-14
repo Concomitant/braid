@@ -6,11 +6,14 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (**47 morphisms**, counted
+The design bet: keep the primitive set tiny (**58 morphisms**, counted
 2026-09-14) and prove it spans everything else **in the language
 itself**. A word keeps its place in the kernel only if it is a
 structure map of the doctrine — cartesian, coproduct, exponential — or
-if it touches the implementation (arithmetic, io, reflection). The entire
+if it touches the implementation (arithmetic, io, reflection) — which
+is why the eleven `Float` words of 2026-09-14 are prims and
+`fneg`/`fabs` are not: a double is a machine number, negation is `0.0`
+minus. The entire
 standard library is derived user code: `id`, booleans, three of the four
 comparisons, iteration (`loop` and `fix` are both derived under the
 `use Recursive` marker), `while` and `until`, the list type and
@@ -421,7 +424,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1006-case test suite, a full
+(typechecker, interpreter, REPL), a 1035-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -433,7 +436,7 @@ the eliminator is a fold and not an unroll), and `design-macros.md`
 (elaboration as a library: functors over `Code`, the five invariants,
 and the transport of `⇒` into other categories). `READING.md` is the
 annotated bibliography behind all of them. Deliberately absent so
-far: floats, labeled record fields, totality checking (`Recursive` marks
+far: labeled record fields, totality checking (`Recursive` marks
 what *may* recurse without bound — provenance, not a proof), and the
 last stage of the effects staging —
 `resource` wires, `use` scopes, and theories/models with runnable

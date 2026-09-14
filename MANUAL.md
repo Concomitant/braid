@@ -298,7 +298,41 @@ them visible:
 
 Type formers:
 
-- **Base**: `Int`, `Str`, `Sym`.
+- **Base**: `Int`, `Float`, `Str`, `Sym`.
+
+  **`Float`** *(2026-09-14)* is an IEEE double, and it is a base type
+  **beside** `Int` rather than above it. There is no numeric tower and
+  no overloading: `+ - * div mod lt?` are Int words, `fadd fsub fmul
+  fdiv flt?` are Float words, and **no word is shared**. A mixed stage
+  is a type error that names both vocabularies and the two crossings,
+  `toFloat : Int ⇒ Float` and `floor : Float ⇒ Int`, which are written
+  where you mean them. The whole word list is §9; `fneg` and `fabs` are
+  prelude defs (§10).
+
+  A **literal** is digits, a point, digits — `2.0`, `0.5`, `-2.5`. The
+  point is the whole notation: `1e-3` is refused where it is written
+  (*write the decimal point form*), because `-` cannot be an identifier
+  character — it heads `->`, `---` and every negative literal — so an
+  exponent form would need a lexer case of its own for a notation the
+  display never prints back. A literal needs a leading digit: `.5` is a
+  symbol, as it always was.
+
+  **The display convention, pinned**: the **shortest decimal that reads
+  back as the same double**, never in exponent notation, always with a
+  point. So every finite Float prints as a Float literal and re-reads as
+  itself, and `(0.1 0.2 ; fadd) ; print` prints
+  `0.30000000000000004` — the seventeen digits that are true rather than
+  the three that are convenient. The three non-finite doubles print
+  `NaN`, `Infinity`, `-Infinity`; they are values, not literals, and
+  splicing one into `Code` is refused.
+
+  **`eq?` on Floats is structural**, which at `Float` means IEEE `==`:
+  bit equality up to the one identification IEEE makes (`0.0` and
+  `-0.0`) and the one it refuses (`NaN` equals nothing, itself
+  included). It is not an epsilon comparison and will not become one —
+  `(0.1 0.2 ; fadd) 0.3 ; eq?` is **false**, and that is the truth about
+  the two doubles. Write your own tolerance test with `fabs` and `flt?`
+  when you want one (`examples/autodiff.braid` does).
 - **`•`** — the empty stack; the terminal object. Constants are points
   `• ⇒ A`; `forget : ρ ⇒ •` is the unique map to it.
 - **Products** are juxtaposition: `Int Str` is two wires. There is no
@@ -1799,7 +1833,7 @@ one term with two spellings. Derived-but-primitive-looking words
 `lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
-**There are 47 primitives** *(2026-09-14)*. A word keeps its place here
+**There are 58 primitives** *(2026-09-14)*. A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), the open
@@ -1807,7 +1841,16 @@ coproduct (`into`), the exponent eliminators over `Aⁿ` — or if it
 **touches the implementation**: arithmetic and strings, `eq?`, the four
 io edges, reflection (`parse`/`unparse`/`reflect`/`evalAs`/`sameCode`/
 `sameCodeC`/`interpose`/`rewrite`), and the type-level `weaken`/`finInt`. Everything else is
-a prelude def with its derivation visible. **Recursion left this list
+a prelude def with its derivation visible.
+
+**The eleven Float words are implementation prims** *(2026-09-14, 47 →
+58)*, in the kernel for exactly the reason the Int arithmetic and the
+four io edges are: a double is a machine number and nothing in the
+language can build one. They span no structure — they are the machine,
+written down. `fneg` and `fabs` are *not* among them: negation is
+`0.0` minus, absolute value is one comparison, so both are prelude defs
+(§10), and equality is the polymorphic `eq?`, which already reaches a
+Float. There is no second spelling of equality and no `feq?`. **Recursion left this list
 on 2026-09-14** (48 → 47): the knot is spelled `#fix`, which source
 cannot write, and `use Recursive` is the only thing that emits it —
 so `fix` is a prelude def (§10) like `loop`.
@@ -1828,6 +1871,10 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | word | type |
 |---|---|
 | `+` `-` `*` `div` `mod` | `Int Int ⇒ Int` |
+| `fadd` `fsub` `fmul` `fdiv` | `Float Float ⇒ Float` — Float arithmetic (2026-09-14). One scheme, `f` + the operation spelled out: a symbolic family (`f+ f- f*`) cannot be had, because `-` is not an identifier character, so `f-` is two atoms — and a scheme that breaks on subtraction is not a scheme |
+| `fexp` `fsin` `fcos` `fsqrt` | `Float ⇒ Float` |
+| `toFloat` | `Int ⇒ Float` — the only way up |
+| `floor` | `Float ⇒ Int` — the only way down; the mathematical floor (`-2.7 ; floor` is `-3`) |
 | `cat` | `Str Str ⇒ Str` |
 | `toStr` | `a0 ⇒ Str` |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
@@ -1842,7 +1889,8 @@ now, via `mod`/`equals`/`less` and the `(n | n)` re-routing pattern):
 | word | type |
 |---|---|
 | `eq?` | `a0 a0 ⇒ (a0 a0 \| a0 a0)` — structural equality, any value |
-| `lt?` | `Int Int ⇒ (Int Int \| Int Int)` — the only primitive order. `gt?` `gte?` `lte?` are **prelude defs** derived from it (§10), with identical schemes |
+| `lt?` | `Int Int ⇒ (Int Int \| Int Int)` — the only primitive order on `Int`. `gt?` `gte?` `lte?` are **prelude defs** derived from it (§10), with identical schemes |
+| `flt?` | `Float Float ⇒ (Float Float \| Float Float)` — the same, on `Float` (2026-09-14). The Float comparators that mirror `gt?`/`gte?`/`lte?` are not in the prelude: `swap`, `not` and a two-track row derive each in one stage where it is wanted |
 
 Sums & control:
 
@@ -1953,6 +2001,10 @@ the parent row, any inner arity); the ladder steps `settle :
 (ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)` (guard ladder — fold an agreeing answer
 into the pile) and `settleR : ((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)` (its
 validation mirror). See `examples/settle.braid`.
+
+**Float** *(2026-09-14)*: `fneg : Float ⇒ Float` (`0.0` minus) and
+`fabs : Float ⇒ Float` (one `flt?` and a two-track row). Everything
+else about a double is a machine fact and therefore a prim (§9).
 
 **Verdict tier** (forget the data, keep the decision): `verdict :
 (ρ0|ρ1) ⇒ Bool`, and long forms `equals` `less` `odd` `even` `zero`

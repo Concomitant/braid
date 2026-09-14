@@ -17,6 +17,7 @@ import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
 import Data.Char (isAlphaNum, isDigit, isLower, isSpace, isUpper, toUpper)
 import Data.Bifunctor (first)
+import Numeric (showFFloat)
 import System.Directory (doesFileExist, canonicalizePath)
 import System.FilePath (takeDirectory, takeFileName, isAbsolute, (</>))
 
@@ -151,6 +152,10 @@ instance Show Exp where
 data Ty
   = TVarTy TVar
   | TInt
+  | TFloat             -- IEEE double (2026-09-14).  Its own base type
+                       -- beside Int, sharing NO word with it: there is no
+                       -- numeric tower and no overloading, so `+` is Int
+                       -- arithmetic and `fadd` is Float arithmetic.
   | TStr               -- text
   | TSym               -- interned symbol: .name literals
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
@@ -183,6 +188,7 @@ instance Show SumRow where
 instance Show Ty where
   show (TVarTy a)  = show a
   show TInt        = "Int"
+  show TFloat      = "Float"
   show TStr        = "Str"
   show TSym        = "Sym"
   show (TFn arr) = "Fn⟨" ++ show arr ++ "⟩"
@@ -338,6 +344,7 @@ instance Substitutable Ty where
       Nothing -> t
       Just t' -> apply s t'   -- chase chains, like the SType instance
   apply _ TInt        = TInt
+  apply _ TFloat      = TFloat
   apply _ TStr        = TStr
   apply _ TSym        = TSym
   apply s (TFn arr) = TFn (apply s arr)
@@ -431,6 +438,7 @@ varsOfEff _                = noVars
 varsOfTy :: Ty -> Vars
 varsOfTy (TVarTy v)  = ([v], [], [], [], [])
 varsOfTy TInt        = noVars
+varsOfTy TFloat      = noVars
 varsOfTy TStr        = noVars
 varsOfTy TSym        = noVars
 varsOfTy (TFn arr)   = varsOfArrow arr
@@ -475,6 +483,14 @@ occursStack v st = let (_, ss, _, _, _) = varsOfStack st in v `elem` ss
 occursRow :: RVar -> SumRow -> Bool
 occursRow v row = let (_, _, rs, _, _) = varsOfRow row in v `elem` rs
 
+mixedNumbers :: String
+mixedNumbers =
+  "Cannot unify types: Int vs Float.  Braid has no numeric tower and no \
+  \overloading: `+ - * div mod lt?` are Int words and `fadd fsub fmul \
+  \fdiv flt?` are Float words, and no word is shared.  Cross with \
+  \`toFloat : Int \8658 Float` or `floor : Float \8658 Int`, written where \
+  \you mean it."
+
 -- Unify simple element types
 unifyTy :: Subst -> Ty -> Ty -> Either String Subst
 unifyTy s t1 t2 =
@@ -484,6 +500,12 @@ unifyTy s t1 t2 =
     (TVarTy a, t) -> bindTyVar s a t
     (t, TVarTy a) -> bindTyVar s a t
     (TInt, TInt)  -> Right s
+    (TFloat, TFloat) -> Right s
+    -- The one clash worth its own sentence: there is no numeric tower
+    -- and no overloading, so the fix is never "add a coercion here" —
+    -- it is a different word, or a written crossing.
+    (TInt, TFloat) -> Left mixedNumbers
+    (TFloat, TInt) -> Left mixedNumbers
     (TStr, TStr)  -> Right s
     (TSym, TSym)  -> Right s
     (TFn (Arrow i1 o1 g1), TFn (Arrow i2 o2 g2)) -> do
@@ -1289,7 +1311,10 @@ tokenize = go
     go ('-':'>':cs)     = (TokArrow :) <$> go cs
     go ('-':cs)
       | (ds@(_:_), rest) <- span isDigit cs =
-          (TokIdent ('-' : ds) :) <$> go rest          -- negative literal
+          case floatTail rest of
+            Just (frac, rest') ->                      -- negative Float
+              expNote rest' ((TokIdent ('-' : ds ++ "." ++ frac) :) <$> go rest')
+            Nothing -> expNote rest ((TokIdent ('-' : ds) :) <$> go rest)
       | otherwise = (TokIdent "-" :) <$> go cs         -- subtraction
     go ('|':cs)         = (TokBar :) <$> go cs
     go ('^':cs)         = (TokCaret :) <$> go cs
@@ -1308,10 +1333,34 @@ tokenize = go
           in ((TokCaret :) . (supTok plain :)) <$> go rest
       | isDigit c =
           let (digits, rest) = span isDigit (c:cs)
-          in (TokInt (read digits) :) <$> go rest
+          in case floatTail rest of
+               Just (frac, rest') ->
+                 expNote rest' ((TokIdent (digits ++ "." ++ frac) :) <$> go rest')
+               Nothing -> expNote rest ((TokInt (read digits) :) <$> go rest)
       | otherwise =
           let (ident, rest) = span isIdentChar (c:cs)
           in (TokIdent ident :) <$> go rest
+
+    -- A FLOAT LITERAL is digits `.` digits (2026-09-14), lexed as one
+    -- identifier so that it travels the whole pipeline — scheme, spine,
+    -- reflection, runtime — exactly as an Int literal does.  It is taken
+    -- only after a digit, so `2...` is still `2` then `...` and `.foo`
+    -- is still a symbol.
+    floatTail ('.' : cs@(d : _))
+      | isDigit d = let (frac, rest) = span isDigit cs in Just (frac, rest)
+    floatTail _   = Nothing
+
+    -- …and there is no exponent form.  `-` cannot be an identifier
+    -- character (it heads `->`, `---` and every negative literal), so
+    -- `1e-3` would need a lexer case of its own for a notation the
+    -- display convention never prints back.  One spelling per thing.
+    expNote (e : cs) _
+      | e `elem` ("eE" :: String)
+      , (d : _) <- dropWhile (`elem` ("+-" :: String)) cs
+      , isDigit d =
+          Left "Exponent notation is not a Float literal: write the decimal \
+               \point form (1e-3 is 0.001)"
+    expNote _ k = k
 
     supTok plain
       | all isDigit plain = TokInt (read plain)
@@ -2546,6 +2595,7 @@ parseTyElem aliases dataSigs params toks = case toks of
     (alts, end, rest') <- goAlts rest
     pure (TSum (foldr RCons end alts), rest')
   (TokIdent "Int" : rest) -> pure (TInt, rest)
+  (TokIdent "Float" : rest) -> pure (TFloat, rest)
   (TokIdent "Str" : rest) -> pure (TStr, rest)
   (TokIdent "Sym" : rest) -> pure (TSym, rest)
   -- A theory's CONSTRUCTOR parameter, applied: `k(a, b)`.  It shadows
@@ -2793,6 +2843,7 @@ substParams tmap m rmap nmap = goT
   where
     goT t@(TVarTy v) = M.findWithDefault t v tmap
     goT TInt         = TInt
+    goT TFloat       = TFloat
     goT TStr         = TStr
     goT TSym         = TSym
     -- substitute inside Fn, KEEPING its grade: a nested written arrow
@@ -2838,6 +2889,7 @@ matchAlias al t = do
       | TV (show v) `elem` [ tv | PWire tv <- aParams al ] =
           bindS (SV (show v)) (SCons x SEnd) m
     goT TInt TInt m = Just m
+    goT TFloat TFloat m = Just m
     goT TStr TStr m = Just m
     goT TSym TSym m = Just m
     goT (TSum rb) (TSum rx) m = goR rb rx m
@@ -2912,6 +2964,7 @@ showTyA as t =
     Nothing -> case t of
       TVarTy a  -> show a
       TInt      -> "Int"
+      TFloat    -> "Float"
       TStr      -> "Str"
       TSym      -> "Sym"
       TFn arr   -> "Fn⟨" ++ showArrowA as arr ++ "⟩"
@@ -3133,6 +3186,7 @@ infer env (Seq t u) = do
 inferOperand :: Env -> Bool -> Term -> Infer (Arrow, [Constraint])
 inferOperand env final (Prim name)
   | isIntLiteral name = pick intLitScheme
+  | isFloatLiteral name = pick floatLitScheme
   | isStrLiteral name =
       pick (Forall [] [] [] [] [] [] (arrPure SEnd (SCons TStr SEnd)))
   | isSymLiteral name =
@@ -3261,6 +3315,27 @@ isIntLiteral :: String -> Bool
 isIntLiteral ('-' : ds) = not (null ds) && all isDigit ds
 isIntLiteral name       = not (null name) && all isDigit name
 
+-- A Float literal: optional `-`, digits, `.`, digits.  Nothing else
+-- lexes to this shape, so the test is exact rather than a heuristic.
+isFloatLiteral :: String -> Bool
+isFloatLiteral s0 =
+  let s = case s0 of { '-' : r -> r ; _ -> s0 }
+  in case break (== '.') s of
+       (ds@(_:_), '.' : fs@(_:_)) -> all isDigit ds && all isDigit fs
+       _                          -> False
+
+-- THE DISPLAY CONVENTION, pinned 2026-09-14: the shortest decimal that
+-- reads back as the same Double, never in exponent notation, always
+-- with a point.  So every finite Float prints as a Float LITERAL and
+-- re-reads as itself; `showFFloat Nothing` is Haskell's own
+-- shortest-round-trip digits laid out in fixed notation.  The three
+-- non-finite values have no literal form and print as themselves.
+showFloatLit :: Double -> String
+showFloatLit d
+  | isNaN d      = "NaN"
+  | isInfinite d = if d < 0 then "-Infinity" else "Infinity"
+  | otherwise    = showFFloat Nothing d ""
+
 isStrLiteral :: String -> Bool
 isStrLiteral ('"' : _) = True
 isStrLiteral _         = False
@@ -3333,6 +3408,12 @@ distScheme k =
 -- `...` (e.g. `1 ...` : ρ ⇒ Int ρ).  See spec-update-exponentials.md.
 intLitScheme :: Scheme
 intLitScheme = Forall [] [] [] [] [] [] (arrPure SEnd (SCons TInt SEnd))
+
+-- …and a Float literal is the same terminal source at the other base
+-- type.  There is no coercion between them: `toFloat` and `floor` are
+-- words, written where they are meant.
+floatLitScheme :: Scheme
+floatLitScheme = Forall [] [] [] [] [] [] (arrPure SEnd (SCons TFloat SEnd))
 
 --------------------------------------------------------------------------------
 -- 7. The primitive environment
@@ -3448,6 +3529,17 @@ primEnv =
          in arrPure aa (one (TSum (RCons aa (RCons aa RNil)))))
       binIntTy = Forall [] [] [] [] [] []
         (arrPure (SCons TInt (one TInt)) (one TInt))
+      -- Float (2026-09-14).  Every one of these is an IMPLEMENTATION
+      -- prim, in the kernel for the same reason the Int arithmetic and
+      -- the four io words are: a double is a machine number and nothing
+      -- in the language can build one.  NO word is shared with Int.
+      binFloatTy = Forall [] [] [] [] [] []
+        (arrPure (SCons TFloat (one TFloat)) (one TFloat))
+      unFloatTy = Forall [] [] [] [] [] []
+        (arrPure (one TFloat) (one TFloat))
+      float2Router = Forall [] [] [] [] [] []
+        (let ff = SCons TFloat (one TFloat)
+         in arrPure ff (one (TSum (RCons ff (RCons ff RNil)))))
       -- Bool ≡ (• | •): two payload-free tracks; true = alt1, false = alt2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
       boolLit  = Forall [] [] [] [] [] [] (arrPure SEnd (one tBool))
@@ -3540,6 +3632,25 @@ primEnv =
        , ("-",         binIntTy)
        , ("div",       binIntTy)
        , ("mod",       binIntTy)
+         -- the Float words: `f` + the operation, spelled out.  A
+         -- symbolic scheme (`f+ f- f*`) cannot be had — `-` is not an
+         -- identifier character, so `f-` is two atoms — and a scheme
+         -- that breaks on subtraction is not a scheme.  `fneg` and
+         -- `fabs` are prelude defs; equality is the polymorphic `eq?`,
+         -- which already reaches a Float.
+       , ("fadd",      binFloatTy)
+       , ("fsub",      binFloatTy)
+       , ("fmul",      binFloatTy)
+       , ("fdiv",      binFloatTy)
+       , ("flt?",      float2Router)
+       , ("fexp",      unFloatTy)
+       , ("fsin",      unFloatTy)
+       , ("fcos",      unFloatTy)
+       , ("fsqrt",     unFloatTy)
+         -- the two crossings, both written where they are meant: there
+         -- is no coercion and no numeric tower
+       , ("toFloat",   Forall [] [] [] [] [] [] (arrPure (one TInt) (one TFloat)))
+       , ("floor",     Forall [] [] [] [] [] [] (arrPure (one TFloat) (one TInt)))
        , ("cat",       Forall [] [] [] [] [] []
            (arrPure (SCons TStr (one TStr)) (one TStr)))
        , ("toStr",     Forall [a] [] [] [] [] [] (arrPure (one ta) (one TStr)))
@@ -3657,6 +3768,7 @@ inferTermSub :: Env -> Term -> Either String (Arrow, [EffSub])
 inferTermSub env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
+               , not (isFloatLiteral n)
                , not (isStrLiteral n)
                , not (isSymLiteral n)
                , not (M.member n env)
@@ -5181,7 +5293,8 @@ splitDefs src = do
         (lhs, '=' : body) ->
           case words lhs of
             ["def", name]
-              | not (isIntLiteral name) -> Right (name, body)
+              | not (isIntLiteral name), not (isFloatLiteral name) ->
+                  Right (name, body)
             _ -> Left $ "Malformed definition: " ++ l
         _ -> Left $ "Malformed definition (missing '='): " ++ l
 
@@ -6221,6 +6334,10 @@ preludeSrc = unlines
   , "def gt? = swap >> lt? >> (swap | swap)"
   , "def gte? = lt? >> not >> (pass | pass)"
   , "def lte? = gt? >> not >> (pass | pass)"
+  , "## the two Float words that are NOT implementation.  Negation is `0.0 minus`; absolute value is one comparison.  Everything else about a double is a machine fact, so it is a prim (MANUAL 9)."
+  , "##   fneg fabs : Float => Float"
+  , "def fneg = (x -> 0.0 x >> fsub)"
+  , "def fabs = (x -> x 0.0 >> flt? >> ((v w -> v >> fneg) | (v w -> v)) >> merge)"
   , "## long-form comparisons forget their input and answer Bool"
   , "def equals = eq? >> verdict"
   , "def less = lt? >> verdict"
@@ -6959,7 +7076,7 @@ normTerm ctx defs seen term s0 = case term of
       -- literals are nullary constants, and distinct literals are
       -- distinct constants (that is what makes `[1 ...]` and `[2 ...]`
       -- decidably different rather than merely untested)
-      | isIntLiteral n || isStrLiteral n || isSymLiteral n =
+      | isIntLiteral n || isFloatLiteral n || isStrLiteral n || isSymLiteral n =
           Right ([SApp n [] 0], s)
       -- any other word is uninterpreted: it needs a closed arity so we
       -- know how many wires it eats and how many it returns
@@ -7288,6 +7405,7 @@ etaEq depth ctx caps body u si so
 
 data Value
   = VInt Int
+  | VFloat Double
   | VStr String
   | VSym String
   | VFn RunDefs VarEnv Term   -- a quote closes over BOTH its binder values
@@ -7302,6 +7420,13 @@ data Value
 -- meaningless for `eq?` and would loop on the recursive self-knot.)
 instance Eq Value where
   VInt a     == VInt b     = a == b
+  -- STRUCTURAL, which at Float means IEEE `==`: `eq?` on two Floats is
+  -- bit equality of the two doubles up to the one identification IEEE
+  -- makes (0.0 and -0.0) and the one it refuses (NaN is equal to
+  -- nothing, itself included).  It is not an epsilon comparison and
+  -- never will be: `(0.1 0.2 ; fadd) 0.3 ; eq?` is false, and that is
+  -- the truth about the two doubles.
+  VFloat a   == VFloat b   = a == b
   VStr a     == VStr b     = a == b
   VSym a     == VSym b     = a == b
   VFn _ va a == VFn _ vb b = va == vb && a == b
@@ -7323,6 +7448,7 @@ instance Show Value where
     | Just vs <- listView v =
         "list(" ++ intercalate ", " (map show vs) ++ ")"
   show (VInt n)      = show n
+  show (VFloat d)    = showFloatLit d
   show (VStr t)      = t
   show (VSym t)      = t
   show (VFn _ _ _)   = "[fn]"
@@ -7770,6 +7896,7 @@ evalTerm env defs vars term st =
     applyAtom isFinal (Prim name) stk
       | Just v <- M.lookup name vars = pure ([v], stk, [])
       | isIntLiteral name = pure ([VInt (read name)], stk, [])
+      | isFloatLiteral name = pure ([VFloat (read name)], stk, [])
       | isStrLiteral name = pure ([VStr (drop 1 name)], stk, [])
       | isSymLiteral name = pure ([VSym name], stk, [])
       | Just entry <- M.lookup name defs =
@@ -7994,6 +8121,23 @@ runBuiltin _ _ "div"  [VInt _, VInt 0]  = Left "division by zero"
 runBuiltin _ _ "div"  [VInt x, VInt y]  = Right ([VInt (x `div` y)], [])
 runBuiltin _ _ "mod"  [VInt _, VInt 0]  = Left "modulo by zero"
 runBuiltin _ _ "mod"  [VInt x, VInt y]  = Right ([VInt (x `mod` y)], [])
+-- Float arithmetic is IEEE, with one refusal kept for company with
+-- `div`: dividing by zero has no answer worth inventing.  Everything
+-- else that can leave the finite doubles (`fexp` overflowing, `fsqrt`
+-- of a negative) yields the IEEE value, which prints as itself.
+runBuiltin _ _ "fadd"  [VFloat x, VFloat y] = Right ([VFloat (x + y)], [])
+runBuiltin _ _ "fsub"  [VFloat x, VFloat y] = Right ([VFloat (x - y)], [])
+runBuiltin _ _ "fmul"  [VFloat x, VFloat y] = Right ([VFloat (x * y)], [])
+runBuiltin _ _ "fdiv"  [VFloat _, VFloat 0] = Left "division by zero"
+runBuiltin _ _ "fdiv"  [VFloat x, VFloat y] = Right ([VFloat (x / y)], [])
+runBuiltin _ _ "flt?"  [VFloat x, VFloat y] =
+  Right ([VSum (if x < y then 0 else 1) [VFloat x, VFloat y]], [])
+runBuiltin _ _ "fexp"  [VFloat x]           = Right ([VFloat (exp x)], [])
+runBuiltin _ _ "fsin"  [VFloat x]           = Right ([VFloat (sin x)], [])
+runBuiltin _ _ "fcos"  [VFloat x]           = Right ([VFloat (cos x)], [])
+runBuiltin _ _ "fsqrt" [VFloat x]           = Right ([VFloat (sqrt x)], [])
+runBuiltin _ _ "toFloat" [VInt n]           = Right ([VFloat (fromIntegral n)], [])
+runBuiltin _ _ "floor" [VFloat x]           = Right ([VInt (floor x)], [])
 runBuiltin _ _ "cat"  [VStr x, VStr y]  = Right ([VStr (x ++ y)], [])
 runBuiltin _ _ "toStr" [v]              = Right ([VStr (show v)], [])
 runBuiltin _ _ "symStr" [VSym t]        = Right ([VStr (drop 1 t)], [])
@@ -8219,6 +8363,11 @@ codeToTermV stagesV = do
 -- embed a runtime value as code that pushes it
 valueToCode :: Env -> Value -> Either String Term
 valueToCode _   (VInt n)  = Right (Prim (show n))
+valueToCode _   (VFloat d)
+  | isNaN d || isInfinite d =
+      Left "a non-finite Float has no literal form, so it cannot be spliced \
+           \into code: NaN, Infinity and -Infinity are values, not literals"
+  | otherwise = Right (Prim (showFloatLit d))
 valueToCode _   (VStr t)  = Right (Prim ('"' : t))
 valueToCode _   (VSym t)  = Right (Prim t)
 valueToCode env (VFn _ cv t) = do
@@ -8365,8 +8514,8 @@ compileAbs env outer ps body = do
     classify t@(Prim nm)
       | Just i <- elemIndex nm ps = Right (AtomInfo 1 [(0, i)] (Prim "_"))
       | nm == "pass" = Left "reflect: '...' before the end of a stage in an abstraction body"
-      | isIntLiteral nm || isStrLiteral nm || isSymLiteral nm =
-          Right (AtomInfo 0 [] t)
+      | isIntLiteral nm || isFloatLiteral nm || isStrLiteral nm
+          || isSymLiteral nm = Right (AtomInfo 0 [] t)
       | Just _ <- finIndex nm = Right (AtomInfo 0 [] t)
       -- an injection is open-arity, hence final in its stage: nothing
       -- to its right needs its width
