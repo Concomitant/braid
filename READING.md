@@ -226,6 +226,21 @@ copies where they exist.
 - [*Semantics of multimodal adjoint type
   theory*](https://arxiv.org/pdf/2303.02572) — the model theory.
 
+## Automatic differentiation (the autodiff flagship, 2026-09-14)
+
+- Elliott, [*The simple essence of automatic
+  differentiation*](http://conal.net/papers/essence-of-ad/) —
+  differentiation is a functor into (value, linear map) pairs, so it
+  is a model of the Doctrine; forward and reverse mode are two
+  representations of the linear map (a tangent, or its transpose as a
+  continuation). The flagship's two models.
+- Wang, Zheng, Decker, Wu, Essertel & Rompf, [*Demystifying
+  differentiable programming: shift/reset the penultimate
+  backpropagator*](https://arxiv.org/abs/1803.10228) — reverse mode as
+  delimited continuations plus an accumulator; the efficient version
+  of the closure-built backward pass, and in Braid's terms the tape
+  is a resource (stage 7).
+
 ## Verified rewriting (where the audited optimizer sits)
 
 - GHC rewrite `RULES` — user rules, trusted; the pole `sameCode`
