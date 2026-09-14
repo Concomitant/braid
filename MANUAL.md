@@ -1606,30 +1606,64 @@ scope, *`observe` leaves `Circuits`*, *`f` is a word of `Other`, so it
 builds a carrier rather than being a program `embed` could embed*, and
 the width refusals above.
 
-**`morphism Len : ListMonoid -> IntSum = len` — still PROPOSED**
-*(2026-09-13)*. A natural transformation between two models of one
-theory is a homomorphism, and because the base is the **free** category
-on the theory's generators, naturality is finite and complete: the
-squares for composites paste from the squares for generators, so
-checking one square per slot checks every program. The declaration
-would generate them — `ListMonoid@append ; len = len len ; IntSum@+`,
-`ListMonoid@nil ; len = IntSum@zero` — and audit them at module start
-like model laws. What blocks it is not the generator, it is the
-**verdict**: a generated square compares two programs, and an
-model's slots are ordinary (often recursive) defs.
-*Re-checked 2026-09-13, with the normalizer now through closures and
-rows, and the answer did not change.* `nil ; len` against `0` is
-decided — **`differ`** — because `len` is a structural recursor, opaque
-by necessity, and the free category cannot compute a fold; `append ;
-len` against `len len ; +` is refused outright, *outside the structural
-fragment: `ev` of a value that is not a literal quotation*, because a
-fold applies its handlers to a wire. The missing verdict has a name:
-**equality modulo the model's defining equations**, which for an
-initial algebra means proof by structural induction. That is a
-different procedure from normalizing in a free category, not a bigger
-version of it. Sampling them instead needs a `sample` slot the
-generator cannot conjure. The sentence to keep either way is:
-*naturality over a free category is finite — the generators suffice*.
+**`morphism Len : ListMonoid ⇒ IntSum = len`** *(2026-09-13, shipped)*.
+Two models of **one** theory, and a base word between their carriers.
+The claim is that the word is a **homomorphism**: for every slot
+`s : Σ ⇒ Θ`, the square
+
+```text
+A@s ; K(Θ)   =   K(Σ) ; B@s
+```
+
+commutes, where `K` at a stack is the component **on each wire that is
+the theory's parameter** and the identity on the rest — monoidal, so at
+`a a` it is `len len`. Because the base is the **free** category on the
+theory's generators, one square per generator is complete: the squares
+for composites paste from the squares for generators. The arrow is `⇒`
+because that is the arrow of every written type in Braid; `->` is only
+its ASCII synonym there.
+
+The declaration generates the squares and **decides** them, one of two
+ways:
+
+- **Proved** by `sameCode`, for every input and every interpretation of
+  the words — which reaches as far as the normalizer does. A category
+  whose carrier is a hom-object pins its own `Fn⟨a ⇒ b⟩` to one wire
+  per side, so an internal functor's squares (`compose`, `embed`,
+  `first`, and the exits) are proved outright: see `Forget` in
+  `examples/morphisms.braid`.
+- **Sampled**, at the theory's own evidence, when it is not: `sample`
+  supplies the inputs, an exit observes a result that is a carrier (a
+  carrier cannot be compared), `eq?` decides, and the check runs at
+  module start beside the model laws. `Len` above is this case — `len`
+  is a fold, and a fold applies its handler.
+
+A square that neither proves nor samples is **refused**, naming the
+slot and the reason: *the square for slot 'op' does not decide —
+`sameCode` cannot prove it, and it cannot be sampled: the theory
+declares no `sample : • ⇒ a` to supply its inputs with. Add a `sample`
+slot to theory Mag, or state the square as a law of the theory.* A
+square that runs and comes out false names the slot too: *the square
+for slot 'unit' does not commute at the theory's samples*.
+
+The component is an ordinary **word** under the morphism's own name —
+`Len : List(Int) ⇒ Int` — forward-declared at the type the two model
+heads wrote, so a def may use it wherever it sits. `use Len` (reading a
+template through one model and landing in another) is **not** shipped:
+it wants a second elaboration of the template, and nothing has asked
+for it yet.
+
+**Evidence is a generator.** `sample` is a slot like any other, so a
+morphism must preserve it: `len` of `ListMonoid`'s sample must *be*
+`IntSum`'s sample. That is why the example's list has seven elements.
+If that reads as strict, it is the same strictness that makes a model
+an audited model — what the theory declares is what the models owe.
+
+**When both models are models of a theory extending `Doctrine`** they
+are internal categories, and a morphism between them is an **internal
+functor**: the squares for `compose`, `embed` and `first` are exactly
+functoriality. `examples/morphisms.braid` has one — a function that
+carries its name, and the functor that forgets the name.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse

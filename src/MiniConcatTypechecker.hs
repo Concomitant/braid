@@ -7,7 +7,7 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
-import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes)
+import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes, listToMaybe)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, stripPrefix, partition, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
@@ -3769,6 +3769,12 @@ data ElabCtx = ElabCtx
                                    -- of, if any: its own `use` resolves
                                    -- slot names and mints nothing, because
                                    -- a model does not apply itself
+  , ecGen   :: Bool                -- a def the COMPILER wrote (a
+                                   -- morphism's squares), which may name
+                                   -- a slot in the compiler's own
+                                   -- spelling.  Source may not, and that
+                                   -- refusal is what makes a slot
+                                   -- reachable only through its scope.
   }
 
 -- `model Opt : Base = dupInt = dup` — a PARTIAL model of the
@@ -3795,7 +3801,7 @@ type SlotTable = [(String, (String, [String]))]
 type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
-elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] [] [] Nothing
+elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] [] [] Nothing False
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -4130,7 +4136,7 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
           Left $ n ++ " is the receipt of `use " ++ f
               ++ "`, not a word: a label is minted by a scope, never "
               ++ "written by hand"
-      | not (isLitAtom n), '@' `elem` n =
+      | not (isLitAtom n), '@' `elem` n, not (ecGen ctx) =
           Left $ "`" ++ n ++ "` is the compiler's spelling of a slot: "
               ++ "reach it with `use " ++ takeWhile (/= '@') n ++ "`"
     go t               = Right t
@@ -4409,6 +4415,287 @@ instanceDefs theories trans inst = do
                          ++ " — runs at module start") )
                | (nm, body) <- thLaws th ++ inherited ]
   pure (cons ++ slots ++ laws)
+
+-- A MORPHISM OF MODELS: `morphism Len : ListMonoid \8658 IntSum = len`.
+--
+-- Two models of ONE theory, and a base word between their carriers.
+-- The claim is naturality: for every slot `s : s \8658 j` of the theory,
+-- the square
+--
+--   A@s ; K(j)  =  K(s) ; B@s
+--
+-- commutes, where K at a stack is the component ON EACH WIRE that is
+-- the theory's parameter and the identity on the rest — monoidal, so
+-- at `a a` the component is `len len`.  Because the base is the FREE
+-- category on the theory's generators, one square per generator is
+-- complete: a morphism of presentations is determined on generators.
+--
+-- The arrow is written `\8658` because that is the arrow of every written
+-- type in Braid (`->` is only its ASCII synonym there); a morphism of
+-- models is an arrow between two named things, so it is written with
+-- the arrow.
+data Morphism = Morphism
+  { moName :: String
+  , moFrom :: String
+  , moTo   :: String
+  , moWord :: String
+  } deriving (Eq, Show)
+
+-- one slot's square: the two sides as generated defs, and the sampled
+-- law that decides it when the normalizer will not
+data MorphSquare = MorphSquare
+  { msSlot :: String
+  , msLhs  :: String
+  , msRhs  :: String
+  , msLaw  :: Maybe String
+  , msWhy  :: String          -- why there is no sampled law, if there is none
+  }
+
+morphDefName :: String -> String -> String -> String
+morphDefName nm side slot = nm ++ "@" ++ side ++ "@" ++ slot
+
+-- a generated side or square of a morphism's naturality square, and the
+-- (morphism, slot) it came from
+morphNameParts :: String -> Maybe (String, String)
+morphNameParts n = case break (== '@') n of
+  (mo, '@' : rest) -> case break (== '@') rest of
+    (side, '@' : sl) | side `elem` ["lhs", "rhs", "square"] -> Just (mo, sl)
+    _ -> Nothing
+  _ -> Nothing
+
+-- a generated square def, and the (morphism, slot) it came from
+squareParts :: String -> Maybe (String, String)
+squareParts n = case breakOnStr "@square@" n of
+  Just (i, l) -> Just (i, l)
+  Nothing     -> Nothing
+
+breakOnStr :: String -> String -> Maybe (String, String)
+breakOnStr pat = go ""
+  where
+    go _   []          = Nothing
+    go acc r@(c : cs)
+      | take (length pat) r == pat = Just (reverse acc, drop (length pat) r)
+      | otherwise = go (c : acc) cs
+
+-- `morphism Name : A \8658 B = word` \8212 a declaration line, no block.
+parseMorphismLine :: String -> Either String Morphism
+parseMorphismLine l =
+  case break (== '=') (takeWhile (/= '#') l) of
+    (lhs, '=' : rhs)
+      | [w] <- words rhs ->
+          case break (== ':') lhs of
+            (hd, ':' : nms) | ["morphism", nm] <- words hd ->
+              case words nms of
+                [a, arr, b] | arr `elem` ["\8658", "->", "\8594"] ->
+                  Right (Morphism nm a b w)
+                _ -> Left (malformed l)
+            _ -> Left (malformed l)
+    _ -> Left (malformed l)
+  where
+    malformed t = "Malformed morphism declaration (want `morphism Name : "
+               ++ "ModelA \8658 ModelB = word`): " ++ dropWhile isSpace t
+
+-- Is this wire the theory's parameter \8212 the thing the component acts
+-- on?  A wire parameter is the wire itself; a constructor parameter is
+-- the hom-object applied to anything.
+paramWire :: TyParam -> Ty -> Bool
+paramWire (PWire (TV n)) (TVarTy (TV m)) = n == m
+paramWire (PCon n _)     (TData m _)     = n == m
+paramWire _              _               = False
+
+-- The defs a morphism declaration contributes: the component under its
+-- own name, the two sides of every square, and \8212 where the theory's
+-- evidence allows it \8212 a sampled law per square.
+morphismDefs :: [Theory] -> [Instance] -> Morphism
+             -> Either String ( [(String, String, Maybe String)]
+                              , [MorphSquare] )
+morphismDefs theories insts mo = do
+  a  <- modelOf (moFrom mo)
+  b  <- modelOf (moTo mo)
+  if inTheory a == inTheory b then Right () else
+    Left $ here ++ moFrom mo ++ " models " ++ inTheory a ++ " and "
+        ++ moTo mo ++ " models " ++ inTheory b ++ ": a morphism is a "
+        ++ "component between two models of ONE theory."
+  th <- theoryOf theories (inTheory a)
+  param <- case thParams th of
+    [p] -> Right p
+    ps  -> Left $ here ++ "theory " ++ thName th ++ " has "
+               ++ show (length ps) ++ " parameters, and a morphism is a "
+               ++ "component at ONE of them.  Split the theory, or write "
+               ++ "the homomorphism by hand and state its squares as laws."
+  built <- mapM (square th param a b) (thSlots th)
+  let word  = ( moName mo, moWord mo
+              , Just ("morphism " ++ moName mo ++ " : " ++ moFrom mo
+                       ++ " \8658 " ++ moTo mo ++ " \8212 the component, as "
+                       ++ "an ordinary word") )
+      defs  = concat [ [ (msLhs sq, l, note sq "the model's side")
+                       , (msRhs sq, r, note sq "the component's side") ]
+                       ++ [ (nm, src, note sq "the square, at the samples")
+                          | (Just nm, Just src) <- [(msLaw sq, mlaw)] ]
+                     | (sq, l, r, mlaw) <- built ]
+  pure (word : defs, [ sq | (sq, _, _, _) <- built ])
+  where
+    here = "morphism " ++ moName mo ++ ": "
+    nm   = moName mo
+    note sq what = Just ("morphism " ++ nm ++ ", slot '" ++ msSlot sq
+                          ++ "' \8212 " ++ what)
+    modelOf n = case [ i | i <- insts, inName i == n ] of
+      (i : _) -> Right i
+      []      -> Left $ here ++ n ++ " is not a model declared at this point"
+    joinSrc = intercalate " >> " . filter (not . null)
+
+    -- the component at a stack: on each wire that is the theory's
+    -- parameter, the word; on the rest, nothing.  `""` is the identity.
+    stageFor param sName st = case closedWires st of
+      Nothing -> Left $ here ++ "slot '" ++ sName ++ "' has an open stack, "
+                     ++ "and a component is applied wire by wire.  A theory "
+                     ++ "with a `...` slot needs its homomorphism written by "
+                     ++ "hand."
+      Just ws
+        | not (any (paramWire param) ws) -> Right ""
+        | otherwise -> Right (unwords [ if paramWire param w
+                                          then moWord mo else "_" | w <- ws ])
+
+    square th param a b (sName, Arrow sIn sOut _) = do
+      kIn  <- stageFor param sName sIn
+      kOut <- stageFor param sName sOut
+      let lhsS = joinSrc [slotDefName (inName a) sName, kOut]
+          rhsS = joinSrc [kIn, slotDefName (inName b) sName]
+          lhsN = morphDefName nm "lhs" sName
+          rhsN = morphDefName nm "rhs" sName
+      (mlaw, why) <- pure (sampledLaw th param a b sName sIn sOut)
+      pure ( MorphSquare sName lhsN rhsN (fmap fst mlaw) why
+           , lhsS, rhsS, fmap snd mlaw )
+
+    -- The square RUN at the theory's evidence: the standing pattern —
+    -- `sample : \8226 \8658 a` supplies values, an exit observes a carrier
+    -- (it cannot be compared), and `eq?` decides.  `Nothing` carries
+    -- the reason, which is what the refusal prints.
+    sampledLaw th param a b sName sIn sOut =
+      case (closedWires sIn, closedWires sOut) of
+        (Just ins, Just [out])
+          | Just atoms <- mapM sampleAtom ins
+          , Just obs <- observer out ->
+              let lhsRun = joinSrc [unwords atoms, slotDefName (inName a) sName
+                                   , compAt sOut, obs]
+                  rhsRun = joinSrc [unwords atoms, compAt sIn
+                                   , slotDefName (inName b) sName, obs]
+              in ( Just ( morphDefName nm "square" sName
+                        , "(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
+                            ++ "(forget >> true | forget >> false) >> merge" )
+                 , "" )
+          | isNothing (mapM sampleAtom ins) ->
+              (Nothing, "the theory declares no `sample : \8226 \8658 "
+                          ++ pName param ++ "` to supply its inputs with")
+          | otherwise ->
+              (Nothing, "its result is a carrier and the theory declares no "
+                          ++ "exit to observe one with (a slot taking one "
+                          ++ pName param ++ " and returning base)")
+        (_, Just outs) | length outs /= 1 ->
+          (Nothing, "it leaves " ++ show (length outs) ++ " wires, and a "
+                      ++ "sampled square is compared with `eq?` at one")
+        _ -> (Nothing, "its stacks are not closed")
+      where
+        compAt st = either (const "") id (stageFor param sName st)
+        sampleAtom w
+          | paramWire param w = slotDefName (inName a) <$> sampleSlot
+          | TFn _ <- w        = Just "[pass]"
+          | otherwise         = Nothing
+        -- an ENTRY of the source model supplies a value of the carrier
+        sampleSlot = listToMaybe
+          [ n | (n, Arrow i o _) <- thSlots th, i == SEnd
+              , Just [w] <- [closedWires o], paramWire param w ]
+        -- an EXIT of the TARGET model observes one; a wire parameter
+        -- (an ordinary type) needs none, since `eq?` reaches it
+        observer out
+          | not (paramWire param out) = Just ""
+          | PCon _ _ <- param = slotDefName (inName b) <$> exitSlot out
+          | otherwise         = Just ""
+        -- ...and it must FIT: `observe : k(Int, Int) \8658 Int` observes
+        -- the result of `compose`, whose output is `k(a, c)`, and not
+        -- the result of `first`, whose output is the hom-object at a
+        -- PAIRING.  Unification is the test, at fresh variables.
+        exitSlot out = listToMaybe
+          [ n | (n, Arrow i o _) <- thSlots th
+              , Just [w] <- [closedWires i], paramWire param w
+              , Just ws <- [closedWires o], length ws == 1
+              , not (any (paramWire param) ws)
+              , fits out w ]
+        fits out w =
+          let Arrow i' _ _ = runInfer0 (instantiate
+                               (generalize M.empty (arrPure (SCons w SEnd) SEnd)))
+          in case solve [CEqStack i' (SCons out SEnd)] of
+               Right _ -> True
+               Left _  -> False
+
+-- What a component must be: the source model's carrier to the target's.
+-- `k(a, b) \8658 k\8242(a, b)` for a hom-object, `A \8658 B` for a wire
+-- parameter.  It is DECLARED in the sense that matters — the two model
+-- heads wrote it — so a morphism's word can be forward-declared at it,
+-- exactly as a theory slot is.
+componentArrow :: [Theory] -> [Instance] -> Morphism -> Either String Arrow
+componentArrow theories insts mo = do
+  a  <- modelOf (moFrom mo)
+  b  <- modelOf (moTo mo)
+  th <- theoryOf theories (inTheory a)
+  case (thParams th, listToMaybe (inArgs a), listToMaybe (inArgs b)) of
+    ([PCon _ _], Just (IACon ca), Just (IACon cb)) ->
+      let x = SCons (TVarTy (TV "\945")) SEnd
+          y = SCons (TVarTy (TV "\946")) SEnd
+      in Right (arrPure (SCons (TData ca [x, y]) SEnd)
+                        (SCons (TData cb [x, y]) SEnd))
+    ([PWire _], Just (IAStack sa), Just (IAStack sb)) -> Right (arrPure sa sb)
+    _ -> Left $ "morphism " ++ moName mo ++ ": theory " ++ thName th
+             ++ "'s parameter and the models' arguments are not at one kind"
+  where
+    modelOf n = case [ i | i <- insts, inName i == n ] of
+      (i : _) -> Right i
+      []      -> Left $ "morphism " ++ moName mo ++ ": " ++ n
+                     ++ " is not a model declared at this point"
+
+-- The component's own type, and the verdict on every square.  Run after
+-- the module's defs are in: the squares are ordinary defs by then, so
+-- the normalizer can be asked whether the two sides are the same
+-- morphism, and where it cannot say, the sampled law does.
+checkMorphism :: Env -> RunDefs -> [Theory] -> [Instance] -> Morphism
+              -> [MorphSquare] -> Either String ()
+checkMorphism env defs theories insts mo squares = do
+  a  <- modelOf (moFrom mo)
+  b  <- modelOf (moTo mo)
+  th <- theoryOf theories (inTheory a)
+  case thParams th of
+    [_] -> do
+      wanted <- componentArrow theories insts mo
+      sc <- maybe (Left (here ++ "no word " ++ moWord mo)) Right
+                  (M.lookup (moWord mo) env)
+      case subsumes sc wanted of
+        Right () -> Right ()
+        Left e   -> Left $ here ++ "the component " ++ moWord mo ++ " is "
+                        ++ show (normalizeArrow (runInfer0 (instantiate sc)))
+                        ++ " but a component from " ++ moFrom mo ++ " to "
+                        ++ moTo mo ++ " is " ++ show (normalizeArrow wanted)
+                        ++ " (" ++ e ++ ")"
+    _ -> Right ()   -- refused earlier, at `morphismDefs`
+  mapM_ verdict squares
+  where
+    here = "morphism " ++ moName mo ++ ": "
+    modelOf n = case [ i | i <- insts, inName i == n ] of
+      (i : _) -> Right i
+      []      -> Left $ here ++ n ++ " is not a model declared at this point"
+    verdict sq = case (termOf (msLhs sq), termOf (msRhs sq)) of
+      (Just tl, Just tr) ->
+        case sameProgram env defs defs tl tr of
+          Right True -> Right ()      -- proved, for every input
+          _ | isJust (msLaw sq) -> Right ()   -- decided at the samples
+          _ -> Left $ here ++ "the square for slot '" ++ msSlot sq
+                   ++ "' does not decide \8212 `sameCode` cannot prove it, and "
+                   ++ "it cannot be sampled: " ++ msWhy sq ++ ".  Add a "
+                   ++ "`sample` slot to theory " ++ inTheory (head
+                        [ i | i <- insts, inName i == moFrom mo ])
+                   ++ ", or state the square as a law of the theory."
+      _ -> Left (here ++ "internal: missing square def for " ++ msSlot sq)
+    termOf n = listToMaybe [ t | (dn, de) <- M.toList defs, dn == n
+                               , let t = deBody de ]
 
 -- The words a law's source mentions.  Tokenized, never scraped: `op)`
 -- is not the word `op`, and a slot name inside a string literal is a
@@ -4691,7 +4978,7 @@ splitDefs src = do
       -- `theory` / `model`: a header plus its indented block, raw
       -- `functor F = word`: a declaration line with no block, so it
       -- rides the block bucket with an empty body
-      | (kw : _) <- words l, kw `elem` ["functor"] = do
+      | (kw : _) <- words l, kw `elem` ["functor", "morphism"] = do
           (ds, ts, bs, is, ps) <- go Nothing rest
           pure (ds, ts, (l, [], doc) : bs, is, ps)
       -- `rules` was a keyword until 2026-09-13; it is a model now.
@@ -5480,6 +5767,8 @@ checkModuleWith base src = do
                        , isNothing (baseInstanceName h) ]
   ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]
+  ownMorphs <- sequence [ parseMorphismLine h
+                        | (h, _, _) <- declLines, take 8 h == "morphism" ]
   -- A model of `Base` declares a WORD of its own name (so `[Opt]`
   -- is an ordinary quote and `lift2 [Opt]` lifts it at runtime); the
   -- scope itself is the renaming every `use Inst` performs, receipt
@@ -5496,7 +5785,7 @@ checkModuleWith base src = do
       funcs = ownFuncs ++ mbFuncs base
       -- one namespace for every name a `use` header may carry
       useNames = map fst funcs ++ map fst ownBases
-                 ++ [ inName i | i <- insts ]
+                 ++ [ inName i | i <- insts ] ++ map moName ownMorphs
   case [ n | (n, i) <- zip useNames [0 :: Int ..]
            , n `elem` take i useNames ] of
     (n : _) | n `elem` map fst ownBases || n `elem` map inName insts ->
@@ -5506,15 +5795,27 @@ checkModuleWith base src = do
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories trans) insts
+  -- A MORPHISM contributes its component as a word, the two sides of
+  -- every square, and the sampled law for each square the theory's
+  -- evidence can decide.  They are ordinary defs, named with the
+  -- compiler's `@` so no source can reach them.
+  morphParts <- mapM (morphismDefs theories insts) ownMorphs
+  let morphDefs' = concatMap fst morphParts
   slotTable <- (++ mbSlots base)
                  <$> sequence [ (\th -> (inName i, (thName th, slotWords trans th i)))
                                   <$> theoryOf theories (inTheory i)
                               | i <- insts ]
   slotSigs <- concat <$> mapM (declaredSlots theories) insts
+  -- a morphism's component is forward-declared at the type the two
+  -- model heads wrote, so a def may name it however the declarations
+  -- are ordered — the same courtesy a theory slot gets
+  morphSigs <- sequence [ (,) (moName mo) . generalize M.empty
+                            <$> componentArrow theories insts mo
+                        | mo <- ownMorphs ]
   -- a functor's receipt is a word in the environment from here on: defs,
   -- model bodies and main are all inferred with it in scope
   let envSig = foldr (\(n, sc) e -> M.insert n sc e) (receiptEnv funcs env1)
-                     slotSigs
+                     (slotSigs ++ morphSigs)
   -- The Base-model words are hoisted ABOVE the module's own defs:
   -- their bodies mention nothing but the prelude, and `use Opt` inside a
   -- def needs the word to be runnable by then (the ordering rule).
@@ -5539,9 +5840,10 @@ checkModuleWith base src = do
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
     foldM (addDef slotTable funcs thNames trans ownBases resNames
                   (map inName insts))
-          (envSig, runTy, shadow0 ++ map fst slotSigs, [], docs0,
+          (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst morphSigs,
+           [], docs0,
            mbTemplates base, mbKWords base)
-          (baseDefs ++ transDefs ++ defSrcs ++ instDefs)
+          (baseDefs ++ transDefs ++ defSrcs ++ instDefs ++ morphDefs')
   -- the generated transport word is checked like any other functor's
   -- word: if a model's slots ever stop composing, the message says so
   -- here
@@ -5556,13 +5858,19 @@ checkModuleWith base src = do
            [ (thName th, map fst (thSlots th)) | th <- theories ])
         ownBases0
   mapM_ (checkLawType env') [ n | (n, _, _) <- instDefs, isJust (lawParts n) ]
+  mapM_ (checkLawType env')
+        [ n | (n, _, _) <- morphDefs', isJust (squareParts n) ]
+  -- every square decided, by the normalizer or at the samples
+  sequence_ [ checkMorphism env' runFinal theories insts mo sqs
+            | (mo, (_, sqs)) <- zip ownMorphs morphParts ]
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
       else do
         term0 <- parseProgram mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
-                                      thNames trans kwords ownBases Nothing)
+                                      thNames trans kwords ownBases Nothing
+                                      False)
                              term0
         arr <- inferTermIn env' term1
         pure (Just (term1, arr))
@@ -5688,7 +5996,8 @@ checkModuleWith base src = do
           -- only a `use` mints, and every `use` does.
           term0' <- either (Left . inDef) Right
                       (elabUseWith (ElabCtx env1 run slotTable funcs tmpls
-                                            thNames trans kws bases self)
+                                            thNames trans kws bases self
+                                            ('@' `elem` name))
                                    termH)
           -- `over M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.
@@ -5734,7 +6043,14 @@ checkModuleWith base src = do
                , (name, sc, term) : acc
                , maybe docs (\d -> M.insert name d docs) doc
                , tmpls, kws2 )
-      where inDef e = "in def " ++ name ++ ": " ++ e
+      where
+        inDef e = case morphNameParts name of
+          Just (mo, sl) ->
+            "morphism " ++ mo ++ ": the square for slot '" ++ sl
+              ++ "' does not typecheck (" ++ e ++ ") \8212 the component "
+              ++ "must be a word from the source model's carrier to the "
+              ++ "target's, and every slot's square must be writable at it"
+          Nothing -> "in def " ++ name ++ ": " ++ e
 
 --------------------------------------------------------------------------------
 -- 10.5 Prelude: derived definitions available in every module and REPL
@@ -6567,14 +6883,14 @@ seedSeg env c1 c2 base b1 b2 = (ws, base + k, tys)
     own c i = drop (length c) (stackWires i)
     k   = max (maybe 0 (length . own c1) i1) (maybe 0 (length . own c2) i2)
     ws  = [ SVar (base + j) | j <- [0 .. k - 1] ]
-    tys = mergeTypes (capTys c1 i1) (capTys c2 i2)
+    tys = mergeTypes env (capTys c1 i1) (capTys c2 i2)
     capTys c (Just i) = M.fromList (zip c (stackWires i))
                           `M.union` M.fromList (zip ws (own c i))
     capTys _ Nothing  = M.empty
 
 seedPair :: Env -> [SymV] -> Int -> Term -> Term -> ([SymV], Int, Map SymV Ty)
 seedPair env caps base b1 b2 =
-  ( caps ++ ws, base + k, mergeTypes (tysFor i1) (tysFor i2) )
+  ( caps ++ ws, base + k, mergeTypes env (tysFor i1) (tysFor i2) )
   where
     c   = length caps
     inp t = case inferTermIn env t of
@@ -6601,9 +6917,9 @@ seedPair env caps base b1 b2 =
 -- the SHAPE is ever read off these types — a row's track widths, an
 -- `Fn`'s stack widths — and a type variable is one wire whatever it is
 -- called.
-mergeTypes :: Map SymV Ty -> Map SymV Ty -> Map SymV Ty
-mergeTypes = M.unionWith (\x y -> fromMaybe (TVarTy (TV "#clash"))
-                                            (mergeTy x y))
+mergeTypes :: Env -> Map SymV Ty -> Map SymV Ty -> Map SymV Ty
+mergeTypes env = M.unionWith (\x y -> fromMaybe (TVarTy (TV "#clash"))
+                                                (mergeTy env x y))
 
 -- Structural merge of what the two sides say one wire is.  A type
 -- VARIABLE is "not said": the other side's answer stands, which is
@@ -6612,34 +6928,45 @@ mergeTypes = M.unionWith (\x y -> fromMaybe (TVarTy (TV "#clash"))
 -- `Str`, two different constructors, rows of different length — is
 -- `Nothing`, and the caller marks the wire so no row can be read off
 -- it and no split is taken on one side's say-so.
-mergeTy :: Ty -> Ty -> Maybe Ty
-mergeTy a b = case (a, b) of
+mergeTy :: Env -> Ty -> Ty -> Maybe Ty
+mergeTy env a b = case (a, b) of
   (TVarTy _, t)                -> Just t
   (t, TVarTy _)                -> Just t
   (TFn (Arrow i1 o1 e), TFn (Arrow i2 o2 _)) ->
-    TFn <$> (Arrow <$> mergeS i1 i2 <*> mergeS o1 o2 <*> pure e)
-  (TSum r1, TSum r2)           -> TSum <$> mergeR r1 r2
+    TFn <$> (Arrow <$> mergeS env i1 i2 <*> mergeS env o1 o2 <*> pure e)
+  (TSum r1, TSum r2)           -> TSum <$> mergeR env r1 r2
   (TData n1 as1, TData n2 as2)
     | n1 == n2, length as1 == length as2 ->
-        TData n1 <$> sequence (zipWith mergeS as1 as2)
+        TData n1 <$> sequence (zipWith (mergeS env) as1 as2)
+  -- A single-wire nominal wrapper is its body here, because the
+  -- normalizer has already erased the roll: one side saying
+  -- `Plain(a, b)` and the other `Fn⟨a ⇒ b⟩` are saying one thing.
+  (TData _ _, _) | Just a' <- unwrapTy env a -> mergeTy env a' b
+  (_, TData _ _) | Just b' <- unwrapTy env b -> mergeTy env a b'
   _ | a == b   -> Just a
     | otherwise -> Nothing
 
-mergeS :: SType -> SType -> Maybe SType
-mergeS a b = case (a, b) of
+unwrapTy :: Env -> Ty -> Maybe Ty
+unwrapTy env (TData n _)
+  | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup ("un" ++ n) env
+  , Just [u] <- closedWires o = Just u
+unwrapTy _ _ = Nothing
+
+mergeS :: Env -> SType -> SType -> Maybe SType
+mergeS env a b = case (a, b) of
   (SEnd, SEnd)               -> Just SEnd
   (STail _, t)               -> Just t
   (t, STail _)               -> Just t
-  (SCons t1 r1, SCons t2 r2) -> SCons <$> mergeTy t1 t2 <*> mergeS r1 r2
+  (SCons t1 r1, SCons t2 r2) -> SCons <$> mergeTy env t1 t2 <*> mergeS env r1 r2
   _ | a == b   -> Just a
     | otherwise -> Nothing
 
-mergeR :: SumRow -> SumRow -> Maybe SumRow
-mergeR a b = case (a, b) of
+mergeR :: Env -> SumRow -> SumRow -> Maybe SumRow
+mergeR env a b = case (a, b) of
   (RNil, RNil)               -> Just RNil
   (RTail _, t)               -> Just t
   (t, RTail _)               -> Just t
-  (RCons s1 r1, RCons s2 r2) -> RCons <$> mergeS s1 s2 <*> mergeR r1 r2
+  (RCons s1 r1, RCons s2 r2) -> RCons <$> mergeS env s1 s2 <*> mergeR env r1 r2
   _ | a == b   -> Just a
     | otherwise -> Nothing
 
@@ -8009,6 +8336,9 @@ runModule src = runExceptT $ do
   -- saying so at module start is the whole difference between a law
   -- that documents and a law that holds.
   mapM_ (runLaw m) [ (n, t) | (n, _, t) <- modDefs m, isJust (lawParts n) ]
+  -- ...and every square a morphism could only decide at the samples.
+  mapM_ (runSquare m) [ (n, t) | (n, _, t) <- modDefs m
+                               , isJust (squareParts n) ]
   case modMain m of
     Nothing -> pure ([], [])
     Just (term, arr@(Arrow i o _))
@@ -8032,6 +8362,20 @@ runLaw m (n, t) = do
       in throwError $ "law '" ++ lw ++ "' fails for model " ++ inst
                    ++ ": a model must be an audited model of its theory"
 
+-- One generated square, run at the theory's samples.  A morphism whose
+-- square the normalizer could not prove is checked here instead, and a
+-- failure names the slot whose square does not commute.
+runSquare :: Module -> (String, Term) -> ExceptT String IO ()
+runSquare m (n, t) = do
+  (out, _) <- evalTerm (modEnv m) (moduleRunDefs m) M.empty t []
+  case out of
+    [VSum 0 []] -> pure ()
+    _ ->
+      let (mo, sl) = fromMaybe ("?", n) (squareParts n)
+      in throwError $ "morphism " ++ mo ++ ": the square for slot '" ++ sl
+                   ++ "' does not commute at the theory's samples \8212 a "
+                   ++ "morphism of models is a homomorphism, slot by slot"
+
 -- A scheme's runtime shape: how many wires it consumes, and whether it
 -- wants the whole remaining segment.  Shared by the runtime scope
 -- builder and the elaboration-time one.
@@ -8051,4 +8395,3 @@ openTailed SEnd           = False
 chunk2 :: [a] -> [(a, a)]
 chunk2 (x : y : rest) = (x, y) : chunk2 rest
 chunk2 _              = []
-

@@ -2636,6 +2636,75 @@ they were stated by `observe` at sample points, and they still are. The
 flips are pinned in `test/Tests.hs` and described where they are true,
 in `examples/circuits.braid`'s closing comment.
 
+## Amendment (2026-09-13): `morphism`, shipped
+
+*Stage 5d, part three. Designed on 2026-09-13 and shipped the same
+day, once `ev` gave the verdict something to stand on.*
+
+**The declaration.** `morphism Len : ListMonoid ⇒ IntSum = len` — two
+models of ONE theory and a base word between their carriers. The
+elaborator generates one square per slot,
+
+```text
+A@s ; K(Θ)  =  K(Σ) ; B@s
+```
+
+with `K` the component on each wire that is the theory's parameter and
+the identity on the rest, and that is complete because the base is the
+FREE category on the theory's generators: the squares for composites
+paste from the squares for generators. The old record said the
+generator was straightforward and the VERDICT was missing. The verdict
+is what this amendment is.
+
+**The verdict, in two ways and a refusal.**
+
+1. **Proved** by the normalizer (`sameProgram` at check time, which is
+   `sameCode`'s engine). This is now worth doing, which it was not two
+   commits ago: a hom-object pins its own `Fn⟨a ⇒ b⟩` to one wire per
+   side, so `ev` of it has an arity and a whole internal functor's
+   squares go through. All five of `Forget`'s do, in
+   `examples/morphisms.braid`.
+2. **Sampled**, at the theory's own evidence, when the normalizer will
+   not: `sample : • ⇒ a` supplies the inputs, an exit observes a result
+   that is a carrier (a carrier cannot be compared), `eq?` decides, and
+   the check runs at module start beside the model laws. All three of
+   `Len`'s are this case: `len` is a fold and a fold applies its
+   handler, whose arrow is open.
+3. **Refused**, naming the slot and the missing evidence, when neither
+   reaches. That is the honest third answer, and it is what the design
+   record asked for a stage ago.
+
+**Decisions worth the record.**
+
+- *Evidence is a generator.* `sample` is a slot, so a morphism must
+  preserve it. The example's list has seven elements because `IntSum`'s
+  sample is 7. The alternative — exempting evidence slots — would have
+  been a second class of slot, and there is no such thing in a theory.
+- *`⇒`, not `->`.* The arrow of every written type in Braid; `->` is
+  only its ASCII synonym there, and it is already the binder's arrow.
+- *The component is a word.* `Len` is forward-declared at the type the
+  two model heads wrote, exactly as a theory slot is, so a def may name
+  it wherever the declaration sits.
+- *The compiler may write the compiler's spelling.* The squares are
+  ordinary generated defs that name `A@op` and `B@op` directly, and
+  `ecGen` lets them — a def the compiler wrote may reach a slot the way
+  the compiler spells it, while source still may not. That is cheaper
+  and more honest than wrapping each side in a scope that would
+  transport what it touched.
+- *One parameter.* A morphism is a component AT the theory's parameter,
+  so a theory with two is refused, naming the count. `Doctrine` itself
+  has two (the hom-object and the pairing); the theories that extend it
+  have one, which is the case that matters.
+- *`use Len` is not shipped.* Transporting a template's result from one
+  model to another wants a second elaboration of the template, and
+  nothing has asked for it. The word is enough for everything the
+  examples do.
+
+**What the two examples pin, side by side.** `Len` proves nothing and
+samples everything; `Forget` proves everything and samples nothing.
+Same declaration, two verdicts, and the difference is the carrier — a
+declared hom-object is what makes a category's own laws decidable.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and
@@ -2656,16 +2725,14 @@ in `examples/circuits.braid`'s closing comment.
   slot — each applies an `Fn` whose input stack is an open variable, so
   there is no arity to give it. Those laws are still stated with `eq?`
   and labelled syntactic.
-- **`morphism` is designed and not built** (2026-09-13, re-checked the
-  same day against the new normalizer): the law *generator* is
-  straightforward and the freeness argument makes it complete, but a
-  generated square still has no verdict. `nil ; len = zero` normalizes
-  and comes out **differ** — `len` is a structural recursor, opaque by
-  necessity — and `append ; len = len len ; +` is refused for `ev` of a
-  wire. The missing verdict is *equality modulo the model's defining
-  equations*: structural induction over an initial algebra, a different
-  procedure from normalizing in a free category. See the 2026-09-13
-  amendments.
+- **`morphism` is shipped** (2026-09-13), and what is still missing is
+  narrower: a square over a model whose slots are folds is decided at
+  SAMPLES, not proved, because equality modulo a model's defining
+  equations is structural induction over an initial algebra — a
+  different procedure from normalizing in a free category. A theory
+  with no `sample` slot and a square the normalizer cannot prove is
+  refused rather than assumed. `use Len` — reading a template through
+  one model and landing in another — is not shipped.
 - The **image-tagging question above is open**, and the coeffect
   decision with it.
 - **A category's axioms are decided when its composition applies a
@@ -2679,5 +2746,8 @@ in `examples/circuits.braid`'s closing comment.
   is written out. For a mode it could not run backwards anyway: type
   lines are parsed before theories and models, so a slot cannot
   mention a mode declared from a model of its own theory.
-- **Nothing carries a mode ACROSS modes.** See the flagship answer
-  above; the missing declaration is `morphism`.
+- **Carrying a word across categories** is `morphism` now: a component
+  between two models of one theory, with its squares decided. What it
+  does not do is carry a TEMPLATE across — `use Len` would read a
+  template through one model and land it in another, and that is a
+  second elaboration nobody has asked for yet.

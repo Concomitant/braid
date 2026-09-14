@@ -954,6 +954,27 @@ modeMod = unlines
   , "    sample  = [dup ; +] ; Arr"
   ]
 
+-- MORPHISMS (5d): two models of one theory, and a word between their
+-- carriers.  `len` is opaque to the normalizer (it applies its handler,
+-- and that `ev` has an open arrow), so every square here is decided at
+-- the theory's samples \8212 which is why the samples correspond.
+monoidMod :: String
+monoidMod = unlines
+  [ "theory Monoid(a) ="
+  , "    unit   : \8226 \8658 a"
+  , "    op     : a a \8658 a"
+  , "    sample : \8226 \8658 a"
+  , "model IntSum : Monoid(Int) ="
+  , "    unit   = 0"
+  , "    op     = +"
+  , "    sample = 7"
+  , "model ListMonoid : Monoid(List(Int)) ="
+  , "    unit   = nil"
+  , "    op     = append"
+  , "    sample = 1 2 3 4 5 6 7 >> pack"
+  , "def len = [(acc x -> acc >> _ 1 >> +)] 0 ... >> fold"
+  ]
+
 -- SHAPE NO LONGER DETECTS (2026-09-13).  The same two arrows, declared
 -- at the same signatures, WITHOUT `over Doctrine`: not a category, so
 -- `use Plain` is the renaming it has always been and the spine comes
@@ -1932,6 +1953,12 @@ evalTests =
   , (ruleMod ++ optimizerTheory ++ "model OptIsOpt : Optimizer\n\
      \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
      ["audited"], "")
+    -- A MORPHISM accepted: the squares are checked at declaration time
+    -- and the component is an ordinary word under its own name, usable
+    -- in a def that was written before the declaration.
+  , (monoidMod ++ "morphism Len : ListMonoid ⇒ IntSum = len\n\
+     \def three = 1 2 3 >> pack >> Len\nthree >> print",
+     ["3"], "")
     -- the same theory with no `over Doctrine` is not a category: the
     -- spine is left alone, and only the receipt is minted
   , (plainMod ++ "[use Plain ; add1 ; dbl] ; getCode ; unparse ; print",
@@ -2440,6 +2467,35 @@ moduleFailTests =
      \    only : k(a, b) ⇒ k(a, b)\n\
      \model TW : Bare(W) =\n    only = _\n1 ; print",
      "`over Doctrine` declares nothing")
+    -- MORPHISMS (5d).  A square that does not commute is named, and the
+    -- verdict comes from the samples because `len` is opaque to the
+    -- normalizer: `lenUp` adds one, so the unit square breaks first.
+  , (monoidMod ++ "def lenUp = (l -> l >> len >> _ 1 >> +)\n\
+     \morphism Bad : ListMonoid ⇒ IntSum = lenUp\n1 >> print",
+     "morphism Bad: the square for slot 'unit' does not commute at the \
+     \theory's samples")
+    -- ...and with NO evidence to sample with, the refusal names the slot
+    -- and asks for the slot that would decide it
+  , ("theory Mag(a) =\n    op : a a ⇒ a\n\
+     \model Sum : Mag(Int) =\n    op = +\n\
+     \model Prod : Mag(Int) =\n    op = *\n\
+     \morphism Id : Sum ⇒ Prod = id\n1 >> print",
+     "morphism Id: the square for slot 'op' does not decide")
+  , ("theory Mag(a) =\n    op : a a ⇒ a\n\
+     \model Sum : Mag(Int) =\n    op = +\n\
+     \model Prod : Mag(Int) =\n    op = *\n\
+     \morphism Id : Sum ⇒ Prod = id\n1 >> print",
+     "Add a `sample` slot to theory Mag")
+    -- two models of ONE theory, or it is not a component
+  , (monoidMod ++ "theory Other(a) =\n    z : • ⇒ a\n\
+     \model Zed : Other(Int) =\n    z = 0\n\
+     \morphism Nope : ListMonoid ⇒ Zed = len\n1 >> print",
+     "ListMonoid models Monoid and Zed models Other: a morphism is a \
+     \component between two models of ONE theory")
+    -- and the component's own type is the two carriers, read off the
+    -- model heads
+  , (monoidMod ++ "morphism Nope : ListMonoid ⇒ IntSum = toStr\n1 >> print",
+     "morphism Nope: the square for slot 'unit' does not typecheck")
     -- THE DOCTRINE'S LAWS RUN, for a model in another file.  This
     -- carrier is a function AND a counter, and its composition charges
     -- one per `;` — parametric enough to typecheck, and wrong, so the

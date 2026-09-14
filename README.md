@@ -211,6 +211,16 @@ bare `use` leaves.
     stateful circuit and a program paired with its own `Code` — are
     audited against the same seven.
 
+    Two models of one theory have **morphisms**:
+    `morphism Len : ListMonoid ⇒ IntSum = len` says `len` is a
+    homomorphism, and the elaborator generates one naturality square
+    per slot and *decides* it — proved by `sameCode` where the
+    normalizer reaches, sampled at the theory's own `sample` slot where
+    it does not, and refused, naming the slot, where it can do neither.
+    When the two models are models of a theory that extends `Doctrine`,
+    that is an **internal functor**, and the squares are functoriality
+    (`examples/morphisms.braid`).
+
     A body can be written **once over the theory**. Two header words
     say which side you are on: **`over X` declares** that this def is a
     morphism of X, and **`use X` applies** X to the block that follows
@@ -408,7 +418,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 985-case test suite, a full
+(typechecker, interpreter, REPL), a 992-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
