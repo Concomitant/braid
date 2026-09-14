@@ -194,11 +194,22 @@ bare `use` leaves.
     part of what it *means* to be a model
     (`examples/theories.braid`). A theory parameter may also be a type
     **constructor** — `theory Arrow(k(_, _))`, with slots like
-    `thenP : k(a, b) k(b, c) ⇒ k(a, c)` — which is enough to state the
+    `compose : k(a, b) k(b, c) ⇒ k(a, c)` — which is enough to state the
     Arrow interface once and audit circuits and functions against it
     (`examples/circuits.braid`). That is still not higher kinds: `k`
     lives in the signature, the model head names a declared data
     type, and the substitution happens before inference ever runs.
+    The **prelude** declares that interface once and for all as
+    `theory Doctrine(k(_, _), p(_, _))` — `compose`, `embed`, `first`,
+    and the seven arrow laws — and a theory joins it by writing
+    `over Doctrine` and declaring its operations. That declaration is
+    what makes `use M` *transport* a whole block into the category,
+    and how much it declares is the level: composition alone composes
+    by hand, `+ embed` carries one-wire stages, `+ first` carries any
+    stage. The laws are inherited and run at model check, so
+    `examples/circuits.braid` and `examples/reified.braid` — a
+    stateful circuit and a program paired with its own `Code` — are
+    audited against the same seven.
 
     A body can be written **once over the theory**. Two header words
     say which side you are on: **`over X` declares** that this def is a
@@ -397,7 +408,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 980-case test suite, a full
+(typechecker, interpreter, REPL), a 984-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

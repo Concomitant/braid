@@ -28,17 +28,17 @@ def emitTwice = over Sink ; emit ; emit
 ## its shape, the word of its own name and the K-word table all cross
 data Arr(a, b) = Fn⟨a ⇒ b⟩
 
-theory Arrow(k(_, _)) =
-    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-    thenP : k(a, b) k(b, c) ⇒ k(a, c)
-    runP  : k(a, b) a ⇒ b
+theory Arrow(k(_, _)) over Doctrine =
+    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    runP    : k(a, b) a ⇒ b
 
 def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)
 def runA  = (f x -> f ; unArr ; _ x ; ev)
 
 model Funcs : Arrow(Arr) =
-    arrP  = Arr
-    thenP = thenA
-    runP  = runA
+    embed   = Arr
+    compose = thenA
+    runP    = runA
 
 "util.braid's own main — NOT run when imported" >> print

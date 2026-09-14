@@ -2459,6 +2459,102 @@ to `over`. That is the migration in `circuits.braid`, `lifting.braid`
 and the imports fixture, and it reads better: `over` is where hand
 work lives, `use` is where transport does.
 
+## Amendment (2026-09-13): the Doctrine, declared
+
+*Stage 5d, part one. The shape rule of the previous amendment lasted
+half a day. It was right about the structure and wrong about who says
+so.*
+
+**What was wrong with detection.** "Models transport by shape" read
+three arrow shapes off every slot of every theory and concluded, from
+their presence, that the theory presented a category. That answers
+*does this theory happen to look like a category*. The question is
+*does it claim to be one* — and the language already has the word for
+a claim, which is the word this project spent a whole stage
+sharpening. Detection also had two smells that would not go away: the
+"two slots at one shape" refusal (an ambiguity that only exists
+because nothing was named), and the arrow LAWS, which had to be
+rewritten in every theory that wanted them, because there was nothing
+to inherit them from.
+
+**The doctrine is a theory, in the prelude.**
+
+```braid
+theory Doctrine(k(_, _), p(_, _)) =
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    first   : k(a, b) ⇒ k(p(a, c), p(b, c))
+    observe : k(Int, Int) ⇒ Int
+    sample  : • ⇒ k(Int, Int)
+    law leftId, rightId, assoc, embedFunctor,
+        firstFst, firstEmbed, firstCompose
+```
+
+and a theory joins it by declaring its operations at its signatures:
+`theory Arrow(k(_, _)) over Doctrine = …`. The prelude had never
+declared a theory before; it does now, because a claim needs something
+to point at in every module, and `Doctrine` is ambient the way `Base`
+is — with the difference that `Base` cannot be written down and this
+one is written down in full.
+
+**`over` in a theory head is `over` doing its one job.** Declares
+membership, applies nothing, mints nothing, and the elaborator checks
+the claim against the written signatures — the same sentence as `over
+T` for a template and `over M` for a hand-built morphism. One word,
+three positions, one meaning. `extends` was the alternative and it
+would have been a fourth keyword for a thing the language already
+says.
+
+**Four decisions worth the record.**
+
+1. *Conformance, not copying.* A theory declares the doctrine's
+   operations rather than inheriting them silently. That is what keeps
+   the LEVELS expressible — `Vault` takes `compose` and `embed` and
+   not `first`, and is refused for a wide stage, naming the slot that
+   would have carried it — and it keeps the slot list readable at the
+   theory. Inheriting the slots would have forced every model to fill
+   all five and made the sealed example unwritable.
+2. *The grade is the extending theory's.* Only the stacks are matched.
+   `Doctrine`'s slots are pure and `Arrow`'s are `=Rec>` (circuits are
+   built with `fix`); a grade says what a model may DO, and the
+   doctrine does not bound it. Had the grade been inherited, every
+   transporting model in the language would have become `Rec`, and
+   `Reified`'s arrows would have changed for no reason.
+3. *The laws ARE inherited*, and a model is audited against every one
+   it can STATE — every slot the law names is one its theory declared.
+   `Arrow` takes all five, so all seven run, for `Circuits` and for
+   `Funcs`; `Reflective` takes them too, so the same seven now run
+   over a carrier that is a program paired with its `Code`; `Vault`
+   declares no observation and runs none, which is the honest reading
+   of *sealed* — nothing leaves it, the audit included.
+4. *A constructor parameter names two things.* `p(_, _)` is a type in
+   a signature and, capitalized, the words `P` and `unP` in a law; a
+   model's argument substitutes both (generated defs `M@P = Pair`,
+   renamed by the same walk `use M` already performs). Without it the
+   doctrine could not state a law about `first` — every such law has
+   to pack and unpack a pair to be observed at `k(Int, Int)` — and the
+   laws about `first` would have stayed copied into every theory,
+   which is the thing this amendment is against. A word that is
+   already its own image generates nothing, so a pairing actually
+   named `P` is left alone.
+
+**What the elaborator reads now.** `thOver th == Just "Doctrine"`, then
+which of `compose`/`embed`/`first` the theory declared. The hom-object
+is the doctrine's `k` as the theory instantiated it, and it must be one
+of the theory's own parameters, because choosing the carrier is the
+MODEL's job. Exits and entries are classified off the remaining slots'
+declared arrows exactly as 5c read them. `isCompositionShape`,
+`isEmbeddingShape` and `strengthShape` are deleted; what replaces them
+is one general one-way matcher against the doctrine's own declared
+arrows, so the refusal can print both signatures.
+
+**Migration.** `arrP`/`thenP`/`firstP` are gone from the codebase:
+the doctrine's names are `compose`/`embed`/`first`, which
+`examples/reified.braid` already used, and one spelling per thing
+decided the rest. `examples/circuits.braid` lost five hand-written
+laws and gained two it never had; `examples/reified.braid` gained
+`observe`/`sample` and with them the whole audit.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and

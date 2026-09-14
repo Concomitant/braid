@@ -219,8 +219,8 @@ no other unbounded construct, which is believed and has not been
 audited end to end.
 
 **And a MODEL WITH A CARRIER is a label with a carrier**
-*(2026-09-13)*. When a model's theory has a hom-object `k(_, _)` and
-declares slots at the composition and embedding SHAPES (§8), `use` of
+*(2026-09-13)*. When a model's theory is declared `over Doctrine` and
+takes the doctrine's composition and embedding (§8), `use` of
 that model is the functor that sends every stage of a scope to the
 model's embedding and every `;` to its composition. `use Circuits`
 mints `Circuits` exactly as any functor scope does — nothing on the
@@ -640,9 +640,9 @@ renaming at elaboration (§8), so it disappears before inference.
 threads the resource and then hands the routed, renamed body — as
 `Code` — to the word `Metered` names, splicing back what it returns.
 
-**A model whose theory has a CARRIER transports** *(2026-09-13)*.
-There is no fourth keyword: if the theory has a hom-object `k(_, _)`
-and declares slots at the composition and embedding SHAPES (§8), `use`
+**A model whose theory joins the DOCTRINE transports** *(2026-09-13)*.
+There is no fourth keyword: if the theory is declared `over Doctrine`
+and takes the doctrine's composition and embedding (§8), `use`
 of one of its models takes over `;` itself — every stage becomes the
 embedding of that stage and every `;` becomes the composition, so a
 block reads as the ordinary program it is and comes out as a value of
@@ -1421,20 +1421,30 @@ words, a model of `Base`, the two bindings `sameCode` can prove and
 the two it honestly cannot, the receipt on the arrow, the laws as
 theories, and image membership.
 
-**A model whose theory has a CARRIER transports** *(2026-09-13; the
-`mode` keyword it replaces is gone)*. Nothing is declared: if the
-theory has a **constructor parameter** — a hom-object, `k(_, _)` — and
-declares slots at the shapes below, then `use M` is the functor that
-sends every stage of the scope to M's **embedding** and every `;` to
-M's **composition**:
+**A model whose theory joins the DOCTRINE transports** *(2026-09-13;
+it was a shape rule for half a day, and the `mode` keyword before
+that)*. The prelude declares one theory every module sees:
 
 ```braid
-theory Arrow(k(_, _)) =
-    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)          # an EMBEDDING, by its SHAPE
-    thenP   : k(a, b) k(b, c) ⇒ k(a, c)    # a COMPOSITION, by its SHAPE
-    firstP  : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))   # a STRENGTH
-    observe : k(Int, Int) ⇒ Int            # an EXIT: carrier in, base out
-    sample  : • ⇒ k(Int, Int)              # an ENTRY: base in, carrier out
+theory Doctrine(k(_, _), p(_, _)) =
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    first   : k(a, b) ⇒ k(p(a, c), p(b, c))
+    observe : k(Int, Int) ⇒ Int
+    sample  : • ⇒ k(Int, Int)
+    law leftId … rightId … assoc … embedFunctor …
+        firstFst … firstEmbed … firstCompose
+```
+
+A theory **joins** it by declaring its operations, at its signatures:
+
+```braid
+theory Arrow(k(_, _)) over Doctrine =
+    embed   : Fn⟨a ⇒ b⟩ =Rec> k(a, b)
+    compose : k(a, b) k(b, c) =Rec> k(a, c)
+    first   : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
+    observe : k(Int, Int) =Rec> Int
+    sample  : • =Rec> k(Int, Int)
 
 model Circuits : Arrow(Circuit) = …
 
@@ -1442,73 +1452,89 @@ def easy    = use Circuits ; add1 ; dbl     # Int =Circuits Rec> Int
 def easyOut = over Circuits ; easy ; observe
 ```
 
-`easy` elaborates to `[add1] ; arrP ; _ [dbl] ; _ arrP ; thenP` —
+`easy` elaborates to `[add1] ; embed ; _ [dbl] ; _ embed ; compose` —
 which you may write by hand under `over Circuits`, and the two print
 the same thing.
 
-**Shape, not name.** `arrP`/`thenP`/`firstP` are what
-`examples/circuits.braid` happens to call its slots; the elaborator
-never reads a slot's name. It reads each slot's **declared arrow**,
-which is a *written* type, so this is a signature steering elaboration
-and not inference doing it (invariant five). With `k` the theory's
-constructor parameter:
+**`over D` in a theory head is `over` doing its one job**: declaring
+membership, applying nothing, minting nothing. The elaborator *checks
+the claim* — each slot whose name is one of `D`'s must be `D`'s arrow,
+with `D`'s constructor parameters instantiated consistently across the
+whole theory — and then it knows, without reading a shape, that `use
+Circuits` transports. Deviations that are refused, each naming the
+fix: a slot of a doctrine name at another signature; two slots reading
+one parameter two ways; a hom-object that is not the theory's own
+parameter (a model must be able to choose the carrier); an `over` that
+takes none of the named theory's operations (it declared nothing);
+extension of a theory that itself extends one (extension is one level
+deep).
 
-| shape | what it is | what it licenses |
-|---|---|---|
-| `k(a, b) k(b, c) ⇒ k(a, c)` | the **composition** | `over M ; f g ; <compose>` — carriers built by hand compose |
-| `Fn⟨a ⇒ b⟩ ⇒ k(a, b)` | the **embedding** | `use M` on stages that are one wire in, one wire out |
-| `k(a, b) ⇒ k(P(a, c), P(b, c))` | the **strength**, and `P` is the pairing | `use M` on any stage, of any width |
-| carrier in, none out | an **exit** | refused inside `use M`; called under `over M` |
-| `•` in, one carrier out | an **entry** | already a stage of the category: left alone |
+**The grade is the extending theory's.** `Doctrine`'s slots are
+written pure; `Arrow`'s are `=Rec>` because circuits are built with
+`fix`. Only the *stacks* are checked against the doctrine — a grade
+says what a model may do, and the doctrine does not bound it.
 
-Two slots at one shape are refused naming both: the elaborator reads
-the structure off the types, so it cannot choose. Identity is
-`embed [pass]`; no slot is needed for it (and if a theory declares one
-at the identity shape, it is an ordinary slot).
+**The pairing is a parameter, and a parameter names two things.** In a
+signature `p(_, _)` is a type; in a law, capitalized, `P` and `unP` are
+its constructor and unroller, and a model's argument substitutes both.
+That is what lets the doctrine state a law about `first` without
+knowing which pairing you chose.
+
+**The three levels are what the theory declared.**
+
+| declared | it licenses |
+|---|---|
+| `compose` | `over M ; f g ; compose` — carriers built by hand compose. `use M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` … `over Half` and compose by hand.* |
+| `+ embed` | `use M` transports stages that are one wire in, one wire out. A wider stage is refused naming `first`. |
+| `+ first` | any stage transports; see the routing below. |
+
+Slots that are not the doctrine's are classified exactly as 5c read
+them: a slot taking the carrier and returning base is an **exit**
+(refused inside `use M`, called under `over M`), one taking `•` to a
+single carrier is an **entry** (already a stage of the category, left
+alone). Identity is `embed [pass]` and needs no slot.
+
+**The laws are the doctrine's, and they run.** A model is audited
+against every inherited law it can *state* — every slot the law names
+is one its theory declared. `Arrow` above takes all five slots, so all
+seven laws run, for `Circuits` and for `Funcs`, and again for
+`Reified` in `examples/reified.braid`. A theory that takes `compose`
+and `embed` and no evidence — `Vault`, the sealed category — runs
+none, which is the honest reading of *sealed*: nothing can be observed
+leaving it, the audit included. They are sampled laws (`observe` at
+`sample` points); what `sameCode` can and cannot decide about them is
+in §12 and in `examples/circuits.braid`'s closing comment.
 
 This is not Braid inventing a doctrine. It is the **base's own**
 structure — a Freyd category, Hughes' `arr`/`>>>`/`first` (Atkey,
-*What is a categorical model of arrows?*; READING) — made *declarable*,
-so that "a target must have the structure the source has" is checked
-rather than assumed. That is what a functor is.
-
-**The three levels, and what each is refused for.**
-
-- **Composition alone.** `over M ; f g ; thenP` composes carriers you
-  built by hand. `use M` is refused: *theory `Half` declares
-  composition (`k(a, b) k(b, c) ⇒ k(a, c)`) but no embedding
-  (`Fn⟨a ⇒ b⟩ ⇒ k(a, b)`): `use Half` cannot transport a base stage;
-  `over Half` and compose by hand.*
-- **+ embedding.** `use M` transports, one wire in and one wire out per
-  stage. A wider stage is refused naming the strength that would carry
-  it: *`dup` is not one wire in and one wire out, and theory `Arrow`'s
-  hom-object `Arr(a, b)` names ONE object on each side… a wider stage
-  transports through the STRENGTH… and this theory declares none.*
-- **+ strength.** Any pure stage transports; see the routing below.
+*What is a categorical model of arrows?*; READING) — written down as
+an ordinary theory, so that "a target must have the structure the
+source has" is *declared and checked* rather than assumed. That is
+what a functor is.
 
 **The routing discipline.** A hom-object `k(a, b)` names **one** wire
 on each side, so a transported spine is one carrier wire whose object
-is the base stack *packed* with the pairing `P` that the strength
-names — read off `firstP`'s declared type; nothing is built in. A stage
+is the base stack *packed* with the pairing `P` that `first` names —
+read off `first`'s declared type; nothing is built in. A stage
 of `k` wires in and `j` out is embedded as
 
 ```text
-arrP [unP … ; stage ; P …]       -- k−1 unpackings, j−1 packings
+embed [unP … ; stage ; P …]      -- k−1 unpackings, j−1 packings
 ```
 
-and then whiskered by the strength once per wire riding **above** it:
-that is resource routing's `_`-padding with `firstP` in place of `_`.
+and then whiskered by `first` once per wire riding **above** it:
+that is resource routing's `_`-padding with `first` in place of `_`.
 `...` is exactly what the strength becomes — `add1 ...` acts on the
 deepest wire and the rest rides along, which is `first`. The widths
 come from each stage's own arrow in the prefix scope: an *arity*, the
 same mechanical read of a written signature the `over` check makes. A
-one-wire stage emits `arrP [stage]` and nothing else, so a scope that
+one-wire stage emits `embed [stage]` and nothing else, so a scope that
 worked before is compiled identically. So:
 
 ```braid
 def sq = use Circuits ; dup ; *             # Int =Circuits Rec> Int
-#   use@Circuits >> [dup >> Pair] >> Circuits@arrP
-#              >> _ [unPair >> *] >> _ Circuits@arrP >> Circuits@thenP
+#   use@Circuits >> [dup >> Pair] >> Circuits@embed
+#              >> _ [unPair >> *] >> _ Circuits@embed >> Circuits@compose
 ```
 
 **Not admitted: a stack-shaped embedding.** `Fn⟨... ⇒ ...⟩ ⇒ k(..., ...)`
@@ -1571,13 +1597,14 @@ feature. The honest limit: the carrier's own generated unroller is an
 ordinary base word and Braid has no export lists, so a model seals the
 *category*, not the *type*. `examples/circuits.braid` has both halves.
 
-Errors, at the `model` line or at the `use`: *theory `T` declares two
-slots at the composition shape … it cannot choose between them*;
-*theory `T`'s constructor parameter `k` has arity 3 — a category's
-hom-object is `k(_, _)`*; *Duplicate model declaration*; *a header may
-name at most one category*; and, inside a scope, *`observe` leaves
-`Circuits`*, *`f` is a word of `Other`, so it builds a carrier rather
-than being a program `arrP` could embed*, and the width refusals above.
+Errors, at the `theory` line, the `model` line or the `use`: *slot
+`compose` is … but Doctrine declares it …*; *`over Doctrine` declares
+nothing*; *theory `T`'s constructor parameter `k` has arity 3, and
+Doctrine declares the hom-object `k(_, _)`*; *Duplicate model
+declaration*; *a header may name at most one category*; and, inside a
+scope, *`observe` leaves `Circuits`*, *`f` is a word of `Other`, so it
+builds a carrier rather than being a program `embed` could embed*, and
+the width refusals above.
 
 **`morphism Len : ListMonoid -> IntSum = len` — still PROPOSED**
 *(2026-09-13)*. A natural transformation between two models of one

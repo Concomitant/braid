@@ -722,10 +722,10 @@ moduleTypeTests =
     -- arity visible (`k(_, _)`), applied in the slots, and substituted
     -- away at the model — so what comes out is an ordinary type and
     -- inference never meets a constructor variable.
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = over P ; thenP\nt",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) over Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = over P ; compose\nt",
      "K(a0, a1) K(a1, a2) ⇒ K(a0, a2)")
     -- the substitution reaches inside an Fn type in a slot too
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = over P ; arrP\nar",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) over Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = over P ; embed\nar",
      "Fn⟨a0 ⇒ a1⟩ ⇒ K(a0, a1)")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ =StrCat> Str")
@@ -846,11 +846,11 @@ moduleTypeTests =
     -- LEVEL THREE: with a strength declared, a wider stage transports
     -- by being packed with the pairing the strength names
   , (wideMod ++ "def sq = use Wide ; dup ; *\nsq", "Int =Wide> Int")
-    -- and a narrow stage is whiskered: `...` is what `firstP` becomes
+    -- and a narrow stage is whiskered: `...` is what `first` becomes
   , (wideMod ++ "def w = use Wide ; dup ; add1 ... ; *\nw", "Int =Wide> Int")
     -- LEVEL ONE: composition alone.  `over` composes carriers built by
     -- hand, and the def is a word of the category like any other.
-  , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; f f ; thenP\ng",
+  , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; f f ; compose\ng",
      "• ⇒ H(Int, Int)")
     -- `over T` is the template header; the def's own type is the
     -- instantiation's, and `over` leaves no receipt of its own here
@@ -922,7 +922,7 @@ idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 -- hom-object `k(_, _)` and slots at the composition and embedding
 -- SHAPES is a label with a CARRIER: `use Funcs` sends every stage to
 -- this model's embedding and every `;` to its composition.  No `mode`
--- line, and no slot NAME is read — `arrP`/`thenP` are this fixture's
+-- line, and no slot NAME is read — `embed`/`compose` are this fixture's
 -- taste.  `Arrow` here declares NO strength, which is what pins the
 -- one-wire level.  The boring model is enough for the whole mechanism,
 -- and unlike `Circuit` it is pure, so the expected arrows carry nothing
@@ -930,16 +930,16 @@ idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 modeMod :: String
 modeMod = unlines
   [ "data Arr(a, b) = Fn⟨a ⇒ b⟩"
-  , "theory Arrow(k(_, _)) ="
-  , "    arrP    : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
-  , "    thenP   : k(a, b) k(b, c) ⇒ k(a, c)"
+  , "theory Arrow(k(_, _)) over Doctrine ="
+  , "    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
+  , "    compose   : k(a, b) k(b, c) ⇒ k(a, c)"
   , "    observe : k(Int, Int) ⇒ Int"
   , "    sample  : • ⇒ k(Int, Int)"
   , "def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)"
   , "def runA  = (f x -> f ; unArr ; _ x ; ev)"
   , "model Funcs : Arrow(Arr) ="
-  , "    arrP    = Arr"
-  , "    thenP   = thenA"
+  , "    embed    = Arr"
+  , "    compose   = thenA"
   , "    observe = (f -> f 7 ; runA)"
   , "    sample  = [dup ; +] ; Arr"
   , "def add1 = _ 1 ; +"
@@ -948,10 +948,28 @@ modeMod = unlines
     -- a SECOND category over the same carrier, for the two-in-a-header
     -- and word-of-another-category refusals
   , "model Funcs2 : Arrow(Arr) ="
-  , "    arrP    = Arr"
-  , "    thenP   = thenA"
+  , "    embed    = Arr"
+  , "    compose   = thenA"
   , "    observe = (f -> f 7 ; runA)"
   , "    sample  = [dup ; +] ; Arr"
+  ]
+
+-- SHAPE NO LONGER DETECTS (2026-09-13).  The same two arrows, declared
+-- at the same signatures, WITHOUT `over Doctrine`: not a category, so
+-- `use Plain` is the renaming it has always been and the spine comes
+-- out untouched.  Membership is declared or it is not there.
+plainMod :: String
+plainMod = unlines
+  [ "data Arr(a, b) = Fn\10216a \8658 b\10217"
+  , "theory Shaped(k(_, _)) ="
+  , "    embed   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
+  , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+  , "def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)"
+  , "model Plain : Shaped(Arr) ="
+  , "    embed   = Arr"
+  , "    compose = thenA"
+  , "def add1 = _ 1 ; +"
+  , "def dbl  = 2 _ ; *"
   ]
 
 -- LEVEL ONE: composition and nothing else.  `over HW` composes carriers
@@ -959,34 +977,34 @@ modeMod = unlines
 halfMod :: String
 halfMod = unlines
   [ "data H(a, b) = Fn\10216a \8658 b\10217"
-  , "theory Half(k(_, _)) ="
-  , "    thenP : k(a, b) k(b, c) \8658 k(a, c)"
+  , "theory Half(k(_, _)) over Doctrine ="
+  , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
   , "def thenH = (f g -> [(x -> f ; unH ; _ x ; ev ; (y -> g ; unH ; _ y ; ev))] ; H)"
   , "model HW : Half(H) ="
-  , "    thenP = thenH"
+  , "    compose = thenH"
   , "def inc = _ 1 ; +"
   , "def dbl = 2 _ ; *"
   ]
 
 -- LEVEL THREE: composition, embedding AND a strength, so the elaborator
 -- can pack a wide stage with the pairing the strength names (`P`) and
--- whisker a narrow one with `firstP`.
+-- whisker a narrow one with `first`.
 wideMod :: String
 wideMod = unlines
   [ "data W(a, b) = Fn\10216a \8658 b\10217"
   , "data P(a, b) = a b"
-  , "theory Wider(k(_, _)) ="
-  , "    arrP   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
-  , "    thenP  : k(a, b) k(b, c) \8658 k(a, c)"
-  , "    firstP : k(a, b) \8658 k(P(a, c), P(b, c))"
+  , "theory Wider(k(_, _)) over Doctrine ="
+  , "    embed   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
+  , "    compose  : k(a, b) k(b, c) \8658 k(a, c)"
+  , "    first : k(a, b) \8658 k(P(a, c), P(b, c))"
   , "    runW   : k(a, b) a \8658 b"
   , "def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)"
   , "def firstW = (f -> [(q -> q ; unP ; (x d -> f ; unW ; _ x ; ev ; (y -> y d ; P)))] ; W)"
   , "def runWi = (f x -> f ; unW ; _ x ; ev)"
   , "model Wide : Wider(W) ="
-  , "    arrP   = W"
-  , "    thenP  = thenW"
-  , "    firstP = firstW"
+  , "    embed   = W"
+  , "    compose  = thenW"
+  , "    first = firstW"
   , "    runW   = runWi"
   , "def add1 = _ 1 ; +"
   , "def dbl  = 2 _ ; *"
@@ -996,13 +1014,13 @@ wideMod = unlines
 sealedMod :: String
 sealedMod = unlines
   [ "data Cap(a, b) = Fn⟨a ⇒ b⟩"
-  , "theory Vault(k(_, _)) ="
-  , "    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
-  , "    thenP : k(a, b) k(b, c) ⇒ k(a, c)"
+  , "theory Vault(k(_, _)) over Doctrine ="
+  , "    embed  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
+  , "    compose : k(a, b) k(b, c) ⇒ k(a, c)"
   , "def capThen = (f g -> [(x -> f ; unCap ; _ x ; ev ; (y -> g ; unCap ; _ y ; ev))] ; Cap)"
   , "model Sealed : Vault(Cap) ="
-  , "    arrP  = Cap"
-  , "    thenP = capThen"
+  , "    embed  = Cap"
+  , "    compose = capThen"
   , "def inc = _ 1 ; +"
   , "def guarded = use Sealed ; inc ; inc"
   ]
@@ -1224,7 +1242,7 @@ evalTests =
   , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel W : Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w = use W ; box\n5 >> w >> print",
      ["5"], "")
     -- STAGE 5a: a theory over a type CONSTRUCTOR, composed and run
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) =\n    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    arrP  = K\n    thenP = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 = over P ; [_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; unK ; _ 5 ; ev\nrun2 >> print",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) over Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 = over P ; [_ 1 ; +] ... ; embed ... ; _ [_ 2 ; *] ; _ embed ; compose ; unK ; _ 5 ; ev\nrun2 >> print",
      ["12"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
@@ -1897,21 +1915,25 @@ evalTests =
   , (ruleMod ++ optimizerTheory ++ "model OptIsOpt : Optimizer\n\
      \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
      ["audited"], "")
+    -- the same theory with no `over Doctrine` is not a category: the
+    -- spine is left alone, and only the receipt is minted
+  , (plainMod ++ "[use Plain ; add1 ; dbl] ; getCode ; unparse ; print",
+     ["use@Plain >> add1 >> dbl"], "")
     -- TRANSPORT (5c, reshaped 5c½).  The scope runs: `use Funcs ; add1
-    -- ; dbl` is `thenP (arrP [add1]) (arrP [dbl])`, and the EXIT is
+    -- ; dbl` is `compose (embed [add1]) (embed [dbl])`, and the EXIT is
     -- called under `over`, which transports nothing.
   , (modeMod ++ "def obs = over Funcs ; chain ; observe\nobs ; print",
      ["16"], "")
     -- what the scope EMITS, read back off the elaborated spine
   , (modeMod ++ "[use Funcs ; add1 ; dbl] ; getCode ; unparse ; print",
-     ["use@Funcs >> [add1] >> Funcs@arrP >> _ [dbl] >> _ Funcs@arrP >> Funcs@thenP"], "")
+     ["use@Funcs >> [add1] >> Funcs@embed >> _ [dbl] >> _ Funcs@embed >> Funcs@compose"], "")
     -- a transporting model declares a WORD of its own name as well, so
     -- the same functor is a value: `[Funcs]` is a quote and the code it
     -- returns splices and runs.  It seeds with an identity carrier
     -- (`leftId` is the law that says the seed is free), which is the one
     -- way it differs from the scope.
   , (modeMod ++ "[add1] ; getCode ; Funcs ; unparse ; print",
-     ["[_] >> Funcs@arrP >> _ [add1] >> _ Funcs@arrP >> Funcs@thenP"], "")
+     ["[_] >> Funcs@embed >> _ [add1] >> _ Funcs@embed >> Funcs@compose"], "")
     -- and `lift2 [Funcs]` applies it at RUNTIME with the program as its
     -- own witness: transport CHANGES the type, so the witness refuses
     -- the rewrite and the original runs.  That is the fallback working,
@@ -1919,32 +1941,32 @@ evalTests =
   , (modeMod ++ "([Funcs] [add1] ; lift2) 5 ; ev ; print", ["6"], "")
     -- STAGE 5c½, THE ROUTING.  A hom-object names ONE wire on each
     -- side, so a wide stage is PACKED with the pairing the strength
-    -- names — read off `firstP`'s declared type, nothing built in — and
-    -- a narrow one is whiskered with `firstP` once per wire above it.
+    -- names — read off `first`'s declared type, nothing built in — and
+    -- a narrow one is whiskered with `first` once per wire above it.
   , (wideMod ++ "def sq = use Wide ; dup ; *\n\
      \def run = over Wide ; sq ; _ 5 ; runW\nrun ; print", ["25"], "")
   , (wideMod ++ "[use Wide ; dup ; *] ; getCode ; unparse ; print",
-     ["use@Wide >> [dup >> P] >> Wide@arrP >> _ [unP >> *] >> _ Wide@arrP \
-      \>> Wide@thenP"], "")
+     ["use@Wide >> [dup >> P] >> Wide@embed >> _ [unP >> *] >> _ Wide@embed \
+      \>> Wide@compose"], "")
     -- a three-wire stage, and a stage that acts on a wire that is not
     -- the deepest
   , (wideMod ++ "def poly = use Wide ; dup ; _ dup ; _ _ add1 ; _ * ; +\n\
      \def run = over Wide ; poly ; _ 5 ; runW\nrun ; print", ["35"], "")
     -- `...` is what the strength becomes: `add1 ...` acts on the deepest
-    -- wire and the one above it rides along, which is `firstP`
+    -- wire and the one above it rides along, which is `first`
   , (wideMod ++ "[use Wide ; dup ; add1 ... ; *] ; getCode ; unparse ; print",
-     ["use@Wide >> [dup >> P] >> Wide@arrP >> _ [add1 pass] >> _ Wide@arrP \
-      \>> _ Wide@firstP >> Wide@thenP >> _ [unP >> *] >> _ Wide@arrP \
-      \>> Wide@thenP"], "")
+     ["use@Wide >> [dup >> P] >> Wide@embed >> _ [add1 pass] >> _ Wide@embed \
+      \>> _ Wide@first >> Wide@compose >> _ [unP >> *] >> _ Wide@embed \
+      \>> Wide@compose"], "")
   , (wideMod ++ "def w = use Wide ; dup ; add1 ... ; *\n\
      \def run = over Wide ; w ; _ 5 ; runW\nrun ; print", ["30"], "")
     -- LEVEL ONE, composition alone: carriers built by hand compose, and
     -- the composite is a word of the category with no label on it
   , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; [dbl] ; H\n\
-     \def fg = over HW ; f g ; thenP\nfg ; unH ; _ 5 ; ev ; print", ["12"], "")
+     \def fg = over HW ; f g ; compose\nfg ; unH ; _ 5 ; ev ; print", ["12"], "")
     -- OVER/USE COHERENCE: the transport writes out what `over` writes
     -- by hand, so the two denote the same morphism
-  , (wideMod ++ "def byHand = over Wide ; [add1] ; arrP ; _ [dbl] ; _ arrP ; thenP\n\
+  , (wideMod ++ "def byHand = over Wide ; [add1] ; embed ; _ [dbl] ; _ embed ; compose\n\
      \def byUse = use Wide ; add1 ; dbl\n\
      \def h5 = over Wide ; byHand ; _ 5 ; runW\n\
      \def u5 = over Wide ; byUse ; _ 5 ; runW\n\
@@ -2128,24 +2150,24 @@ moduleFailTests =
   , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
      "must stay parametric in it")
     -- STAGE 5a, item 1: the four ways a constructor parameter goes wrong
-  , ("theory Arrow(k(_, _)) =\n    thenP : k ⇒ k\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k ⇒ k\n1",
      "Type parameter k is a type constructor of arity 2: it is not a wire, write it applied — k(_, _)")
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a) ⇒ k(a)\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a) ⇒ k(a)\n1",
      "Type constructor parameter 'k' takes 2 argument(s), but was given 1")
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(Nope) =\n    thenP = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(Nope) =\n    compose = _\n1",
      "declares 'k' as a type constructor of arity 2, so its argument names a declared data type; 'Nope' is not one")
-  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(One) =\n    thenP = _\n1",
+  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(One) =\n    compose = _\n1",
      "declares 'k' with arity 2, but One takes 1 argument(s)")
     -- `Fn` is built in and takes an arrow, not wires: the refusal says
     -- so, and names the one-line wrapper that works
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel F : Arrow(Fn) =\n    thenP = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel F : Arrow(Fn) =\n    compose = _\n1",
      "`Fn` is built in and takes an arrow, not wires")
     -- a constructor argument is a NAME, not a type expression
-  , ("theory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(List(Int)) =\n    thenP = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(List(Int)) =\n    compose = _\n1",
      "must be a bare constructor name")
     -- and every parameter of the named constructor must be a wire, or
     -- the substitution would not be sound
-  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    thenP : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(T) =\n    thenP = _\n1",
+  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(T) =\n    compose = _\n1",
      "every parameter of a constructor argument must be a wire")
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Partial : Monoid(Int) =\n    unit = 0\n1",
      "no binding for 'op'")
@@ -2173,8 +2195,8 @@ moduleFailTests =
     -- a NESTED written Fn keeps its grade through the `k := <data>`
     -- substitution: substituting theory parameters used to rebuild every
     -- nested Fn pure, which silently dropped the declared manifest
-  , ("theory Emb(k(_, _)) =\n    arrP : Fn⟨a =Rec> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A : Emb(Arr) =\n    arrP = Arr\n\ndef go = use A ; arrP\n[dup >> *] >> go >> drop",
-     "slot 'arrP' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Rec> a1⟩ ⇒ Arr(a0, a1)")
+  , ("theory Emb(k(_, _)) =\n    embed : Fn⟨a =Rec> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A : Emb(Arr) =\n    embed = Arr\n\ndef go = use A ; embed\n[dup >> *] >> go >> drop",
+     "slot 'embed' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Rec> a1⟩ ⇒ Arr(a0, a1)")
     -- a theory slot declared pure refuses a `fix`-built body — the same
     -- rule that already refused an io body under a pure slot
   , ("theory Stepper =\n    step : Int ⇒ Int\n\nmodel Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go = use Fixed ; step\n5 >> go >> drop",
@@ -2364,17 +2386,17 @@ moduleFailTests =
     -- <compose>` is fine (see evalTests), but there is no embedding, so
     -- `use M` has nothing to transport a base stage WITH.
   , (halfMod ++ "def bad = use HW ; inc ; inc\nbad ; drop",
-     "`use HW`: theory Half declares composition (`k(a, b) k(b, c) ⇒ \
-     \k(a, c)`) but no embedding (`Fn⟨a ⇒ b⟩ ⇒ k(a, b)`): `use HW` \
-     \cannot transport a base stage; `over HW` and compose by hand.")
+     "`use HW`: theory Half takes Doctrine's `compose` and not its \
+     \`embed` (`Fn⟨a ⇒ b⟩ ⇒ k(a, b)`): `use HW` cannot transport a base \
+     \stage; `over HW` and compose by hand.")
     -- + embedding: single-wire stages transport, and a WIDER stage is
     -- refused naming the strength that would carry it
   , (modeMod ++ "def bad = use Funcs ; dup ; *\nbad ; drop",
      "`use Funcs`: dup is not one wire in and one wire out, and theory \
      \Arrow's hom-object Arr(a, b) names ONE object on each side.  A wider \
-     \stage transports through the STRENGTH — a slot declared `k(a, b) \8658 \
-     \k(P(a, c), P(b, c))`, whose P is the pairing the elaborator packs \
-     \with — and this theory declares none.")
+     \stage transports through `first` — Doctrine's strength, `k(a, b) \8658 \
+     \k(p(a, c), p(b, c))`, whose pairing the elaborator packs with — and \
+     \theory Arrow does not declare it.")
     -- and a stage that does not cover the stack it is handed
   , (wideMod ++ "def bad = use Wide ; dup ; add1 ; *\nbad ; drop",
      "`use Wide`: add1 takes 1 wire, but the scope is running 2 wires \
@@ -2382,15 +2404,52 @@ moduleFailTests =
     -- a stage that takes no wire has no object to be the source of
   , (wideMod ++ "def bad = use Wide ; 5 ; dbl\nbad ; drop",
      "`use Wide`: 5 takes no wire, and W(a, b) has an object on each side")
-    -- two composition-shaped slots: the elaborator reads the SHAPE, so
-    -- it cannot choose
+    -- THE CLAIM IS CHECKED.  `over Doctrine` says a slot of that name
+    -- IS the doctrine's, so a slot of that name at another signature is
+    -- refused, naming both arrows.  (This replaces the "two slots at
+    -- one shape" refusal: names are read now, so two slots cannot
+    -- collide at one meaning.)
   , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
-     \theory Twin(k(_, _)) =\n    thenP : k(a, b) k(b, c) ⇒ k(a, c)\n\
-     \    alsoP : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \theory Bent(k(_, _)) over Doctrine =\n\
+     \    compose : k(a, b) k(b, c) ⇒ k(a, b)\n\
      \def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)\n\
-     \model TW : Twin(W) =\n    thenP = thenW\n    alsoP = thenW\n1 ; print",
-     "model TW: theory Twin declares two slots at the composition shape \
-     \`k(a, b) k(b, c) ⇒ k(a, c)` — `thenP` and `alsoP`")
+     \model TW : Bent(W) =\n    compose = (f g -> f g ; drop)\n1 ; print",
+     "theory Bent: slot 'compose' is k(a0, a1) k(a1, a2) ⇒ k(a0, a1), but \
+     \Doctrine declares it k(a0, a1) k(a1, a2) ⇒ k(a0, a2)")
+    -- and `over Doctrine` that takes none of its operations did nothing
+  , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
+     \theory Bare(k(_, _)) over Doctrine =\n\
+     \    only : k(a, b) ⇒ k(a, b)\n\
+     \model TW : Bare(W) =\n    only = _\n1 ; print",
+     "`over Doctrine` declares nothing")
+    -- THE DOCTRINE'S LAWS RUN, for a model in another file.  This
+    -- carrier is a function AND a counter, and its composition charges
+    -- one per `;` — parametric enough to typecheck, and wrong, so the
+    -- prelude's `leftId` catches it.  (Most wrong models of an arrow
+    -- theory never get this far: the hom-object's parameters are
+    -- universally quantified, so a composition in the wrong order or a
+    -- `first` that swaps the pair is refused by the SIGNATURE.)
+  , ("data Ctr(a, b) = Fn⟨a ⇒ b⟩ Int\n\
+     \theory Counting(k(_, _)) over Doctrine =\n\
+     \    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n\
+     \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \    observe : k(Int, Int) ⇒ Int\n\
+     \    sample  : • ⇒ k(Int, Int)\n\
+     \model Counted : Counting(Ctr) =\n\
+     \    embed   = (f -> f 0 ; Ctr)\n\
+     \    compose = (c d -> c ; unCtr ; (f m -> d ; unCtr ; (g n -> [(x -> f ; _ x ; ev ; (y -> g ; _ y ; ev))] (m n ; + ; _ 1 ; +) ; Ctr)))\n\
+     \    observe = (c -> c ; unCtr ; drop _)\n\
+     \    sample  = [dup ; +] 0 ; Ctr\n1 ; print",
+     "law 'leftId' fails for model Counted")
+    -- extension is one level deep: a doctrine of a doctrine wants a
+    -- pushout nobody has asked for
+  , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
+     \theory Mid(k(_, _)) over Doctrine =\n\
+     \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \theory Top(k(_, _)) over Mid =\n\
+     \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n1 ; print",
+     "extends a theory that itself extends Doctrine, and extension is \
+     \one level deep")
     -- one category per header: the second would embed the first's
     -- carriers as if they were programs
   , (modeMod ++ "def bad = use Funcs Funcs2 ; add1\nbad ; drop",
@@ -2402,7 +2461,7 @@ moduleFailTests =
   , (modeMod ++ "def other = use Funcs2 ; add1\n\
      \def bad = use Funcs ; chain ; other\nbad ; drop",
      "other is a word of Funcs2, so it builds a carrier rather than \
-     \being a program arrP could embed")
+     \being a program embed could embed")
   ]
 
 runPass :: (String, String) -> Maybe String

@@ -34,14 +34,18 @@ copies where they exist.
   the transformer stacking the graded arrow dissolves.
 - Atkey, [*What is a Categorical Model of
   Arrows?*](https://bentnib.org/arrows.pdf) — Arrows vs Freyd
-  categories, with the two-input caveat.  **This is the shape rule of
-  MANUAL §8** *(2026-09-13)*: the elaborator recognizes a transporting
-  model by the three declared slot shapes — composition, embedding
-  (`arr`), strength (`first`) — which is Hughes' interface, i.e. the
-  base's own Freyd structure made *declarable*.  A model of a theory
-  that declares them is a target with the structure the source has,
-  which is what a functor is; `examples/circuits.braid` declares it
-  and `theory Arrow(k(_, _))` is the statement.
+  categories, with the two-input caveat.  **This is the prelude's
+  `Doctrine`** *(2026-09-13, amended the same day)*: `compose`, `embed`
+  (`arr`) and `first` are Hughes' interface, i.e. the base's own Freyd
+  structure, declared as an ordinary theory that other theories join
+  with `over Doctrine`.  It was a SHAPE RULE for half a day — three
+  arrow shapes matched against every slot, names never read — and the
+  declaration replaced it: a model of a theory that takes the
+  doctrine's operations is a target with the structure the source has,
+  which is what a functor is, and now it says so.  The arrow laws are
+  the doctrine's laws, written once, run for every model;
+  `examples/circuits.braid` and `examples/reified.braid` are two
+  models with nothing in common but that.
 - Staton, [*Freyd categories are Enriched Lawvere
   Theories*](https://www.cs.ox.ac.uk/people/samuel.staton/papers/freyd-lawvere-2014.pdf)
   — arrows, theories, and effects are one object; why `theory` and the

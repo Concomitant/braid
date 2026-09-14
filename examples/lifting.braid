@@ -49,26 +49,26 @@ unLog >> print                                     # 100 — the log
 # ---- the same block, said by TRANSPORT --------------------------------
 # The sentence at the top of this file is a theory slot:
 #
-#     arrP : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+#     embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
 #
-# Take an ordinary function, get back the better one. A theory with a
-# hom-object `k(_, _)` and a slot at THAT SHAPE presents a category, and
-# `use` of one of its models takes over `;` as well — so the lift
-# applies to a whole block by its HEADER instead of one quotation at a
-# time. `use Notes` below is the only mark, and the arrow carries the
-# receipt. Nothing declares the transport: the shape is the declaration.
+# Take an ordinary function, get back the better one. That slot is the
+# prelude doctrine's embedding, and a theory declared `over Doctrine`
+# that takes it — with the doctrine's `compose` — presents a category,
+# so `use` of one of its models takes over `;` as well: the lift applies
+# to a whole block by its HEADER instead of one quotation at a time.
+# `use Notes` below is the only mark, and the arrow carries the receipt.
 #
 # The carrier is written UNFOLDED (`Fn⟨Log a =Log> Log b⟩`): a resource
 # folds onto the glyph for DISPLAY, and a written type says what the
 # stack actually holds. The same is true of `=Notes>` itself.
 data Logged(a, b) = Fn⟨Log a =Log> Log b⟩
 
-theory Lifting(k(_, _)) =
-    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-    thenP : k(a, b) k(b, c) ⇒ k(a, c)
-    runP  : k(a, b) Log a =Log> Log b
+theory Lifting(k(_, _)) over Doctrine =
+    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    runP    : k(a, b) Log a =Log> Log b
 
-# `arrP` IS `logged`, one `Logged` wrapper later. The other two are the
+# `embed` IS `logged`, one `Logged` wrapper later. The other two are the
 # plumbing the transport does for you: written once, here, per model.
 def logArr  = logged >> Logged
 def logThen = (f g -> [(l x -> f >> unLogged >> _ l >> _ _ x >> ev >> (m y -> g >> unLogged >> _ m >> _ _ y >> ev))] >> Logged)
@@ -76,9 +76,9 @@ def logRun  = (f l x -> f >> unLogged >> _ l >> _ _ x >> ev)
 #   logArr : Fn⟨a ⇒ b⟩ ⇒ Logged(a, b)
 
 model Notes : Lifting(Logged) =
-    arrP  = logArr
-    thenP = logThen
-    runP  = logRun
+    embed   = logArr
+    compose = logThen
+    runP    = logRun
 
 def triple = 3 _ >> *
 
@@ -94,9 +94,9 @@ def piped = use Notes >> celsius >> triple
 # inside `use Notes`, and called under `over Notes`, which puts the
 # model's words in scope and transports nothing.
 #
-# `Lifting` declares no STRENGTH, so every stage of a `use Notes` block
-# must be one wire in and one wire out — the refusal says so and names
-# the shape a strength would have.
+# `Lifting` does not take the doctrine's `first`, so every stage of a
+# `use Notes` block must be one wire in and one wire out — the refusal
+# says so and names the slot that would have carried it.
 def report = over Notes >> piped >> _ ("" >> Log) >> _ _ 100 >> runP
 
 report >> _ print                                  # 636 — 212 tripled

@@ -39,7 +39,7 @@ data Pair(a, b) = a b
 # below passes under a `=Rec>` slot by absorption.
 #
 # What the slots DO NOT say, since 2026-09-12: nothing about the
-# PROGRAM handed to `arrP`. Composition joins grades now, so `arrC`
+# PROGRAM handed to `embed`. Composition joins grades now, so `arrC`
 # (which is built with `fix`) no longer demands that its argument
 # recurse; `Fn⟨a ⇒ b⟩` is what the embedding takes, and `Arr` wraps the
 # same pure arrow. Both spellings were `=Rec>` while composition
@@ -52,29 +52,34 @@ data Pair(a, b) = a b
 data Arr(a, b) = Fn⟨a ⇒ b⟩
 
 # ---- the theory ------------------------------------------------------
-# A category with hom-objects, plus strength. `thenP` is composition,
-# `arrP` is the embedding of ordinary Braid programs, `firstP` is
-# `first` — and it is the slot that made constructor parameters
-# necessary: its type mentions `k` at three different pairs of wires.
+# `over Doctrine` is the whole of it (2026-09-13). `Doctrine` is the
+# prelude's theory of arrows — `compose`, `embed`, `first`, and the
+# seven arrow laws — and a theory that says `over Doctrine` DECLARES
+# that its slots of those names are the doctrine's. The elaborator
+# checks the claim against the written signatures and then knows,
+# without reading a shape or guessing, that `use Circuits` transports.
 #
-# `observe` and `sample` are the audit's evidence. A circuit is codata,
-# so it cannot be compared, only OBSERVED; the theory asks for the
-# observation, which is what keeps the laws honest about being finite
-# tests of an infinite object.
-theory Arrow(k(_, _)) =
-    arrP    : Fn⟨a ⇒ b⟩ =Rec> k(a, b)
-    thenP   : k(a, b) k(b, c) =Rec> k(a, c)
-    firstP  : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
+# Before this the three slots were DETECTED by matching arrow shapes,
+# and the names were this file's taste. Detection answered "does this
+# theory happen to look like a category"; the declaration answers "does
+# it claim to be one", which is the question `over` was invented for.
+#
+# `first` is still the slot that made constructor parameters necessary:
+# its type mentions `k` at three different pairs of wires, and it names
+# the pairing — `Pair` here, the doctrine's `p` — that packs a wide
+# stage into one object.
+#
+# `observe` and `sample` are the audit's evidence, and they are the
+# doctrine's slots too. A circuit is codata, so it cannot be compared,
+# only OBSERVED; the doctrine asks for the observation, which is what
+# keeps its laws honest about being finite tests of an infinite object.
+# A theory that declares neither gets no laws — see `Vault` below.
+theory Arrow(k(_, _)) over Doctrine =
+    embed   : Fn⟨a ⇒ b⟩ =Rec> k(a, b)
+    compose : k(a, b) k(b, c) =Rec> k(a, c)
+    first   : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
     observe : k(Int, Int) =Rec> Int
     sample  : • =Rec> k(Int, Int)
-    # The five laws. A leftmost atom in a stage is the DEEPEST wire, so
-    # `X ...` slides X UNDER the stack and `_ X` puts it ON TOP; that is
-    # how each law picks which side of `thenP` the other circuit goes on.
-    law leftId  = ([_] ... ; arrP ... ; _ sample ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
-    law rightId = (sample ; _ [_] ; _ arrP ; thenP ; observe) (sample ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
-    law assoc   = (sample sample sample ; thenP _ ; thenP ; observe) (sample sample sample ; _ thenP ; thenP ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
-    law arrFunctor = ([_ 1 ; + ; _ 2 ; *] ... ; arrP ... ; observe) ([_ 1 ; +] ... ; arrP ... ; _ [_ 2 ; *] ; _ arrP ; thenP ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
-    law firstFst = ([dup ; Pair] ... ; arrP ... ; _ sample ; _ firstP ; thenP ; _ [unPair ; _ drop] ; _ arrP ; thenP ; observe) ([dup ; Pair] ... ; arrP ... ; _ [unPair ; _ drop] ; _ arrP ; thenP ; _ sample ; thenP ; observe) ; eq? ; (forget ; true | forget ; false) ; merge
 
 # ---- model one: circuits ---------------------------------------------
 # A circuit consumes an input and returns an output AND ITS SUCCESSOR.
@@ -97,15 +102,15 @@ def scale   = [(self n -> [(x -> (n x ; *) (n ; self ... ; ev))] ; Circuit)] ...
 def probe = (c -> c 3 ; stepC ; (y c2 -> c2 4 ; stepC ; (z c3 -> (y z ; +) (c3 ; drop))))
 
 model Circuits : Arrow(Circuit) =
-    arrP    = arrC
-    thenP   = compC
-    firstP  = firstC
+    embed   = arrC
+    compose = compC
+    first   = firstC
     observe = probe
     sample  = 0 ; sumFrom
 
 # ---- model two: plain functions --------------------------------------
-# The boring model, and the point of having one: the same five laws run
-# again over a carrier with no state at all.
+# The boring model, and the point of having one: the same seven laws
+# run again over a carrier with no state at all.
 def arrA     = Arr
 def thenA    = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)
 def firstA   = (f -> [(p -> p ; unPair ; (x d -> f ; unArr ; _ x ; ev ; (y -> y d ; Pair)))] ; Arr)
@@ -113,9 +118,9 @@ def runA     = (f x -> f ; unArr ; _ x ; ev)
 def observeA = (f -> (f 3 ; runA) (f 4 ; runA) ; +)
 
 model Funcs : Arrow(Arr) =
-    arrP    = arrA
-    thenP   = thenA
-    firstP  = firstA
+    embed   = arrA
+    compose = thenA
+    first   = firstA
     observe = observeA
     sample  = [dup ; +] ; Arr
 
@@ -123,8 +128,8 @@ model Funcs : Arrow(Arr) =
 # The body is the same twice; only the model differs.  `over` puts the
 # model's slot words in scope and APPLIES NOTHING — resolution once per
 # scope, never a dictionary per call.
-def twiceC = over Circuits ; sample sample ; thenP ; observe
-def twiceA = over Funcs    ; sample sample ; thenP ; observe
+def twiceC = over Circuits ; sample sample ; compose ; observe
+def twiceA = over Funcs    ; sample sample ; compose ; observe
 
 twiceC ; print              # 13  — a running sum fed into a running sum:
                             #       3 ⇒ 3 ⇒ 3, then 4 ⇒ 7 ⇒ 10
@@ -138,16 +143,16 @@ _ 10 ; stepC ; (y c -> (y ; print) c)      # 34
 drop
 
 # ---- composition, OWNED: `use` a model that has a carrier -------------
-# `over Circuits` is a VOCABULARY: it puts this model's `arrP`, `thenP`
-# and `firstP` in scope and leaves the plumbing to you.  `use Circuits`
+# `over Circuits` is a VOCABULARY: it puts this model's `embed`, `compose`
+# and `first` in scope and leaves the plumbing to you.  `use Circuits`
 # goes one step further and takes over `;`.
 #
-# Nothing declares that.  The theory above has a hom-object `k(_, _)`
-# and declares slots at three SHAPES — `k(a,b) k(b,c) ⇒ k(a,c)` is a
-# composition, `Fn⟨a ⇒ b⟩ ⇒ k(a,b)` an embedding, `k(a,b) ⇒
-# k(Pair(a,c), Pair(b,c))` a strength — and that is the whole test.  The
-# names `thenP`/`arrP`/`firstP` are this file's taste; the elaborator
-# never reads them.  `use Circuits` is then the functor out of the free
+# The theory above DECLARES that: `over Doctrine`, plus the three slots
+# at the doctrine's signatures — `compose` is `k(a,b) k(b,c) ⇒ k(a,c)`,
+# `embed` is `Fn⟨a ⇒ b⟩ ⇒ k(a,b)`, `first` is `k(a,b) ⇒ k(Pair(a,c),
+# Pair(b,c))` — and that is the whole test.  The names are the
+# doctrine's, which is why they are these names and not others: one
+# spelling per thing.  `use Circuits` is then the functor out of the free
 # category that sends every stage to the embedding of that stage and
 # every `;` to the composition.  It is a LABEL WITH A CARRIER: it mints
 # the receipt `Circuits` exactly as any functor scope does, and the
@@ -161,7 +166,7 @@ def dbl  = 2 _ ; *
 
 # The same pipeline twice.  `hand` is what `use` writes out for you;
 # `easy` is what you write.
-def hand = over Circuits ; [add1] ... ; arrP ... ; _ [dbl] ; _ arrP ; thenP
+def hand = over Circuits ; [add1] ... ; embed ... ; _ [dbl] ; _ embed ; compose
 def easy = use Circuits ; add1 ; dbl
 #   easy : Int =Circuits Rec> Int
 
@@ -180,7 +185,7 @@ easyOut ; print             # 18 — the same pipeline, transported
 
 # A transported word is an ordinary word, so it composes in the category
 # with any other: inside `use Circuits`, `easy` is left alone and the
-# `;` around it is `thenP`.
+# `;` around it is `compose`.
 def twice2    = use Circuits ; easy ; easy
 def twice2Out = over Circuits ; twice2 ; observe
 twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
@@ -191,16 +196,16 @@ twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 # wants exactly ONE carrier, so it does not fire and you can see the
 # two.  Composition is written under the marker.
 def pair    = easy easy
-def pairOut = over Circuits ; pair ; thenP ; observe
+def pairOut = over Circuits ; pair ; compose ; observe
 pairOut ; print             # 40 — the same composite, spelled by hand
 
 # ---- wider stages: the STRENGTH is the padding ------------------------
 # A hom-object `k(a, b)` names ONE wire on each side, so a transported
 # spine is one carrier wire.  A stage that is not one-in-one-out is
 # packed with the pairing the strength names — the elaborator reads
-# `Pair` off `firstP`'s declared type, nothing is built in — and a stage
-# narrower than the running width is whiskered by `firstP` once per wire
-# riding above it.  That is resource routing's `_`-padding with `firstP`
+# `Pair` off `first`'s declared type, nothing is built in — and a stage
+# narrower than the running width is whiskered by `first` once per wire
+# riding above it.  That is resource routing's `_`-padding with `first`
 # in place of `_`.
 #
 # So `dup ; *` transports, and squares:
@@ -217,7 +222,7 @@ polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 
 # ---- a carrier built BY HAND: `over Circuits` -------------------------
 # `sumFrom` is the whole reason the Arrow exists — a stateful circuit
-# that is not `arrP` of anything.  Before 5c½ a def like `0 ; sumFrom`
+# that is not `embed` of anything.  Before 5c½ a def like `0 ; sumFrom`
 # was STRANDED: it produces a `Circuit(Int, Int)` at the base, but the
 # elaborator would not treat it as a word of the category, because doing
 # so would mean reading an INFERRED type to decide what a word is.
@@ -254,7 +259,7 @@ runningOut ; print          # 20 — 3 ⇒ 3 ⇒ 6, then 4 ⇒ 7 ⇒ 14
 # the claim has teeth: `sum0` and `scale3` are both built by hand.
 def scale3 = over Circuits ; 3 ; scale
 
-def byHand = over Circuits ; sum0 scale3 ; thenP
+def byHand = over Circuits ; sum0 scale3 ; compose
 def byUse  = use Circuits ; sum0 ; scale3
 #   byHand : • =Rec> Circuit(Int, Int)   — no label: nothing was applied
 #   byUse  : Int =Circuits Rec> Int      — transported, so it folds
@@ -279,24 +284,32 @@ useObs  ; print             # 30 — the same circuit, said two ways
 # abstract-type sealing falling out of the same rule.
 data Capsule(a, b) = Fn⟨a ⇒ b⟩
 
-theory Vault(k(_, _)) =
-    arrP  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-    thenP : k(a, b) k(b, c) ⇒ k(a, c)
+theory Vault(k(_, _)) over Doctrine =
+    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
 
 def capThen = (f g -> [(x -> f ; unCapsule ; _ x ; ev ; (y -> g ; unCapsule ; _ y ; ev))] ; Capsule)
 
 model Sealed : Vault(Capsule) =
-    arrP  = Capsule
-    thenP = capThen
+    embed   = Capsule
+    compose = capThen
 
 def guarded  = use Sealed ; add1 ; dbl
 def guarded2 = use Sealed ; guarded ; add1
 #   guarded2 : Int =Sealed> Int — and the only consumer of a Sealed
 #   word, inside the category's vocabulary, is another Sealed word.
 #
-# `Vault` declares composition and an embedding and NO strength, so
-# every stage of a `use Sealed` scope must be one wire in and one wire
-# out: `use Sealed ; dup ; *` is refused, naming the missing shape.
+# `Vault` takes the doctrine's `compose` and `embed` and NOT its
+# `first`, so every stage of a `use Sealed` scope must be one wire in
+# and one wire out: `use Sealed ; dup ; *` is refused, naming the slot
+# that would have carried it.  That is the level table, read straight
+# off what the theory declared.
+#
+# It declares no `observe` and no `sample` either, so NO doctrine law
+# runs for `Sealed`: an inherited law runs when the model can state it,
+# and a sealed category admits no observation.  That is the honest
+# reading of sealed, and it is worth seeing beside `Circuits`, where all
+# seven run.
 
 # The honest caveat: the CARRIER's own unroller is an ordinary base word
 # and Braid has no export lists, so `unCapsule` still opens it from
@@ -306,7 +319,12 @@ def guarded2 = use Sealed ; guarded ; add1
 guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 
 # ---- what the laws can and cannot decide ------------------------------
-# The five category axioms above run through `observe` at sample points,
+# The seven category axioms — leftId, rightId, assoc, embedFunctor,
+# firstFst, firstEmbed, firstCompose — are the PRELUDE's, inherited by
+# `over Doctrine` and run for `Circuits` and for `Funcs`.  This file
+# used to write five of them out; the doctrine writes them once.
+#
+# They run through `observe` at sample points,
 # and that is not for want of trying: `sameCode` refuses every one of
 # them for both models, with `ev` of a value that is not a literal
 # quotation.  The reason is structural rather than incidental.  An
@@ -319,7 +337,9 @@ guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 # "honest gaps").  So the laws stay finite tests of an infinite object,
 # which is what `observe` was asked for in the first place.
 
-# The laws ran before any of this printed. `firstFst` is the one worth
+# The laws ran before any of this printed — seven of them, twice, for
+# two models with nothing in common but the doctrine.  `firstFst` is
+# the one worth
 # a second look: `first f ; arr fst = arr fst ; f` is a naturality
 # square, and stating it needed `k` at THREE different pairs of wires —
 # `k(Int, Pair(Int, Int))`, `k(Pair(Int, Int), Pair(Int, Int))`,

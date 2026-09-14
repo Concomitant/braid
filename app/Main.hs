@@ -80,7 +80,7 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] [] [] [] [] [] [] [] []
+            [] SEnd [] [] [] [] (modTheories preludeModule) [] [] [] []
 
 repl :: IO ()
 repl = do

@@ -1,12 +1,14 @@
 # A category whose carrier is the program AND its Code.
 #
-# `examples/circuits.braid` says the shape rule once: a model whose
-# theory has a hom-object `k(_, _)` and declares slots at the
-# composition, embedding and strength SHAPES presents a category, and
-# `use` of it transports base programs into that category.  This file
-# is a second model of that rule with nothing in common with circuits
-# except the shape — its carrier is a PAIR of the program and the Code
-# the elaborator handed it, so a transported word can be RUN and READ.
+# `examples/circuits.braid` says the rule once: a theory declared
+# `over Doctrine` that takes the doctrine's `compose`, `embed` and
+# `first` presents a category, and `use` of one of its models
+# transports base programs into it.  This file is a second model of
+# that rule with nothing in common with circuits except the doctrine —
+# its carrier is a PAIR of the program and the Code the elaborator
+# handed it, so a transported word can be RUN and READ.  The doctrine's
+# seven laws run for this model too, which is the point of having the
+# doctrine at all: one audit, two carriers that share nothing.
 #
 # The point to take away, and the reason the file is short: `getCode`
 # and `evalAs` are THIS MODEL's embedding and exit.  `Code` is not a
@@ -17,16 +19,23 @@ data Coded(a, b) = Fn⟨a ⇒ b⟩ Code
 data Pair(a, b)  = a b
 
 # ---- the theory ------------------------------------------------------
-# Four slots, and the elaborator reads three of them by SHAPE:
-# `compose` is `k(a,b) k(b,c) ⇒ k(a,c)`, `embed` is `Fn⟨a ⇒ b⟩ ⇒
-# k(a,b)`, `first` is `k(a,b) ⇒ k(P(a,c), P(b,c))`.  `run` has a
-# carrier in and none out, so it is an EXIT: legal under `over`, never
-# inside `use`.  The names are this file's taste; nothing reads them.
-theory Reflective(k(_, _)) =
+# `over Doctrine` is the declaration: `compose`, `embed` and `first` are
+# the prelude doctrine's, at its signatures, and the elaborator checks
+# that rather than matching shapes.  `run` has a carrier in and none
+# out, so it is an EXIT: legal under `over`, never inside `use`.
+#
+# `observe` and `sample` are the doctrine's evidence slots, and taking
+# them is what puts this model under the SAME seven arrow laws that
+# `examples/circuits.braid` runs — over a carrier that is a program and
+# its Code.  `observe` runs the witness at 3 and at 4 through the exit,
+# so the laws are finite tests here too.
+theory Reflective(k(_, _)) over Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     first   : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
     run     : k(a, b) a ⇒ (b | Str a)
+    observe : k(Int, Int) ⇒ Int
+    sample  : • ⇒ k(Int, Int)
 
 # ---- what the prelude lacks ------------------------------------------
 # Composition of two WITNESSES, at one wire.  The prelude has `lift`
@@ -62,11 +71,17 @@ def firstC = (c -> c ; unCoded ; (f s -> [(q -> q ; unPair ; (x d -> f ; _ x ; e
 # check.  A model's exit, not a language escape hatch.
 def runC = (c x -> c ; unCoded ; _ _ x ; evalAs)
 
+def orZero    = (... | drop _ ; drop ; 0) ; merge
+def observeC  = (c -> (c 3 ; runC ; orZero) (c 4 ; runC ; orZero) ; +)
+def sampleC   = [dup ; +] ; embedC
+
 model Reified : Reflective(Coded) =
     embed   = embedC
     compose = composeC
     first   = firstC
     run     = runC
+    observe = observeC
+    sample  = sampleC
 
 # ---- transport -------------------------------------------------------
 # `dup` leaves two wires and `*` takes two, so neither is one-wire:
@@ -80,7 +95,7 @@ sq ; unCoded ; drop _ ; unparse ; print
 
 # ...and runnable, through the exit.
 def sq5 = over Reified ; sq ; _ 5 ; run
-sq5 ; (... | drop _ ; drop ; 0) ; merge ; print    # 25
+sq5 ; orZero ; print    # 25
 
 # And the STRENGTH is real, not decoration.  `add1 ...` acts on the
 # deepest wire and the one above it rides along, so the elaborator
@@ -90,4 +105,4 @@ def add1 = _ 1 ; +
 def w    = use Reified ; dup ; add1 ... ; *
 w ; unCoded ; drop _ ; unparse ; print
 def w5 = over Reified ; w ; _ 5 ; run
-w5 ; (... | drop _ ; drop ; 0) ; merge ; print    # 30 — (5+1)·5
+w5 ; orZero ; print    # 30 — (5+1)·5
