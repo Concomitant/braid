@@ -245,14 +245,16 @@ def fastFix = [[drop ... >> dup    >> +] ... >> fix ...]
 (slowFix >> getCode >> Opt) (fastFix >> getCode) >> sameMorphism >> print
 (slowFix >> getCode)        (fastFix >> getCode) >> sameMorphism >> print
 
-# The SELF-CALLING body is the honest boundary, and it is one word wide.
-# `self` is a binder parameter, so abstraction elimination turns it into
-# a wire, and `self ... ; ev` is `ev` of a WIRE — an Fn whose type is
-# `Fn⟨Σf =Rec> Θf⟩`, an open stack variable, so there is no segment
-# width to hand it.  `sameCodeC` says so by name rather than guessing:
+# The SELF-CALLING body is the honest boundary, and since 2026-09-13 it
+# is one word narrower than it was.  `ev` of a WIRE is decided when the
+# wire's arrow is CLOSED — the normalizer gives it the arity the type
+# wrote down.  `self` is a binder parameter, so abstraction elimination
+# turns it into a wire whose type is `Fn⟨Σf =Rec> Θf⟩`, and Σf is an
+# open stack variable: no arity, and nothing to decide with.
+# `sameCodeC` says so by name rather than guessing:
 #
-#   sameCodeC: outside the structural fragment: `ev` of a value that is
-#   not a literal quotation
+#   sameCodeC: outside the structural fragment: `ev` of a value whose
+#   arrow is not closed (there is no arity to give it)
 #
 # So this pair is still compared SPINE to SPINE, which is sound for "the
 # same spine" and says nothing about two spines denoting one morphism.

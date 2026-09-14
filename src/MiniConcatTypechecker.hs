@@ -7,7 +7,7 @@ import qualified Data.Map as M
 import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
-import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes, listToMaybe)
+import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, stripPrefix, partition, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
@@ -6275,6 +6275,33 @@ resolveSym r = go (64 :: Int)
                    _           -> v
         in if v' == v then v else go (d - 1) v'
 
+-- The type of a symbolic value, where the program said one: an input
+-- wire carries the type the seed gave it, and the j-th output of an
+-- uninterpreted word carries the one its scheme declares.
+symTy :: NCtx -> SymV -> Maybe Ty
+symTy ctx v = unwrap (8 :: Int) =<< own
+  where
+    own = case v of
+      -- a neutral `ev` is typed by the FUNCTION it applied, not by
+      -- `ev`'s own scheme (whose output is an open stack)
+      SApp "ev" (f : _) j
+        | Just (TFn (Arrow _ o _)) <- symTy ctx f -> stackWireAt j o
+      SApp n _ j
+        | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup n (ncEnv ctx)
+        , Just t <- stackWireAt j o -> Just t
+      _ -> M.lookup v (ncTypes ctx)
+    -- A single-wire nominal type is its body to the normalizer: the
+    -- unroller is the identity and has already been inlined away, so
+    -- the wire that is TYPED `Arr(a, b)` IS the `Fn⟨a ⇒ b⟩` inside it.
+    -- The scheme of `unName` is where the body still is.
+    unwrap 0 t = Just t
+    unwrap d t@(TData n _)
+      | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup ("un" ++ n)
+                                                            (ncEnv ctx)
+      , Just [u] <- closedWires o = unwrap (d - 1) u
+      | otherwise = Just t
+    unwrap _ t = Just t
+
 -- The track stacks of a sum-typed value, when the type says so and
 -- every track is closed.  `Nothing` is a refusal, never a guess: an
 -- open row tail (`---`, a row variable σ) has tracks with no names and
@@ -6298,7 +6325,13 @@ sumTracks ctx v = case v of
       t <- stackWireAt 0 o
       case t of
         TSum row -> fromTy (TSum row)
-        _        -> Nothing
+        -- a SINGLE-ALTERNATIVE declaration (`data Pair(a, b) = a b`):
+        -- the unroller hands back the payload stack, so there is one
+        -- track and it is that stack.  The "split" is then a partition
+        -- into one branch, which is how `unPair` of a wire gets its
+        -- two wires.
+        _ | Just _ <- closedWidth o, Just _ <- closedWidth o -> Just [o]
+        _ -> Nothing
     fromTy _ = Nothing
     closedRow RNil        = Just []
     closedRow (RTail _)   = Nothing
@@ -6418,7 +6451,21 @@ normTerm ctx defs seen term s0 = case term of
               s2 <- normTerm ctx defs seen body s1 { nsStack = caps ++ seg }
               Right ( nsStack s2
                     , s2 { nsStack = if isFinal then [] else nsStack s1 } )
-            _ -> outside "`ev` of a value that is not a literal quotation"
+            -- `ev` of a WIRE.  There is no β to do — the function is
+            -- not a quotation we hold — but if its type is a CLOSED
+            -- arrow the typechecker has already said how many wires it
+            -- eats and leaves, so it is a neutral application like any
+            -- other uninterpreted word: standard NbE's neutral case,
+            -- and the widths come from a written type.  Only an OPEN
+            -- stack (a `fix` body's self wire, a handler slot) is left
+            -- outside, and now that is the whole of what is left.
+            u | Just (TFn (Arrow i o _)) <- symTy ctx u
+              , Just k <- closedWidth i
+              , Just m <- closedWidth o ->
+                  let (args, s2) = takeSym k s1
+                  in Right ([SApp "ev" (u : args) j | j <- [0 .. m - 1]], s2)
+            _ -> outside "`ev` of a value whose arrow is not closed \
+                         \(there is no arity to give it)"
       -- the 1-ary re-tag: on an injection we know, shift the tag; on one
       -- we do not, `there` stays an uninterpreted word (its row is a
       -- bare tail, so there is nothing to split on)
@@ -6435,7 +6482,12 @@ normTerm ctx defs seen term s0 = case term of
       | n == "capture" =
           let (x, f, s1) = two s in case scrut f of
             SQuo caps body -> Right ([SQuo (caps ++ [x]) body], s1)
-            _ -> outside "`capture` of a value that is not a literal quotation"
+            -- capture of a function that arrived as a WIRE is partial
+            -- application, and partial application is the quotation
+            -- that applies it: `capture x into f` = `[f x … ; ev]`.
+            -- Whether THAT can be run is the `ev`-of-a-wire question,
+            -- asked where it belongs rather than here.
+            u -> Right ([SQuo [u, x] (Prim "ev")], s1)
       | n == "dist2" || isJust (distPrimArity n) =
           let k = fromMaybe 2 (distPrimArity n)
               (x, sm, s1) = two s
@@ -6500,6 +6552,26 @@ normTerm ctx defs seen term s0 = case term of
 -- therefore seeded with the SAME number of wires, the larger of what
 -- they ask for.  Seeding both with extra wires is whiskering by an
 -- identity, which preserves equality in both directions.
+-- `seedPair`, with the two sides' capture lists kept apart: the shared
+-- fresh segment is what a quotation is APPLIED to, and the captures are
+-- already-supplied arguments that each side holds its own of.
+seedSeg :: Env -> [SymV] -> [SymV] -> Int -> Term -> Term
+        -> ([SymV], Int, Map SymV Ty)
+seedSeg env c1 c2 base b1 b2 = (ws, base + k, tys)
+  where
+    inp t = case inferTermIn env t of
+      Right (Arrow i _ _) | isJust (closedWidth i) -> Just i
+      _                                            -> Nothing
+    i1  = inp b1
+    i2  = inp b2
+    own c i = drop (length c) (stackWires i)
+    k   = max (maybe 0 (length . own c1) i1) (maybe 0 (length . own c2) i2)
+    ws  = [ SVar (base + j) | j <- [0 .. k - 1] ]
+    tys = mergeTypes (capTys c1 i1) (capTys c2 i2)
+    capTys c (Just i) = M.fromList (zip c (stackWires i))
+                          `M.union` M.fromList (zip ws (own c i))
+    capTys _ Nothing  = M.empty
+
 seedPair :: Env -> [SymV] -> Int -> Term -> Term -> ([SymV], Int, Map SymV Ty)
 seedPair env caps base b1 b2 =
   ( caps ++ ws, base + k, mergeTypes (tysFor i1) (tysFor i2) )
@@ -6520,8 +6592,56 @@ seedPair env caps base b1 b2 =
 -- Two type maps merged; a wire the two sides disagree about is marked
 -- with a type nothing can read a row off, so a split is refused there
 -- rather than taken on one side's say-so.
+--
+-- "Disagree" is up to the NAMES of type variables, which is the whole
+-- point: the two sides are inferred independently, so the same wire
+-- comes back as `Arr(a0, a1)` on one side and `Arr(a5, a6)` on the
+-- other, and marking that a clash threw away every type in every
+-- comparison of two programs that were not spelled identically.  Only
+-- the SHAPE is ever read off these types — a row's track widths, an
+-- `Fn`'s stack widths — and a type variable is one wire whatever it is
+-- called.
 mergeTypes :: Map SymV Ty -> Map SymV Ty -> Map SymV Ty
-mergeTypes = M.unionWith (\x y -> if x == y then x else TVarTy (TV "#clash"))
+mergeTypes = M.unionWith (\x y -> fromMaybe (TVarTy (TV "#clash"))
+                                            (mergeTy x y))
+
+-- Structural merge of what the two sides say one wire is.  A type
+-- VARIABLE is "not said": the other side's answer stands, which is
+-- what makes a generic quotation comparable with the specialized one
+-- it is being weighed against.  A real disagreement — `Int` against
+-- `Str`, two different constructors, rows of different length — is
+-- `Nothing`, and the caller marks the wire so no row can be read off
+-- it and no split is taken on one side's say-so.
+mergeTy :: Ty -> Ty -> Maybe Ty
+mergeTy a b = case (a, b) of
+  (TVarTy _, t)                -> Just t
+  (t, TVarTy _)                -> Just t
+  (TFn (Arrow i1 o1 e), TFn (Arrow i2 o2 _)) ->
+    TFn <$> (Arrow <$> mergeS i1 i2 <*> mergeS o1 o2 <*> pure e)
+  (TSum r1, TSum r2)           -> TSum <$> mergeR r1 r2
+  (TData n1 as1, TData n2 as2)
+    | n1 == n2, length as1 == length as2 ->
+        TData n1 <$> sequence (zipWith mergeS as1 as2)
+  _ | a == b   -> Just a
+    | otherwise -> Nothing
+
+mergeS :: SType -> SType -> Maybe SType
+mergeS a b = case (a, b) of
+  (SEnd, SEnd)               -> Just SEnd
+  (STail _, t)               -> Just t
+  (t, STail _)               -> Just t
+  (SCons t1 r1, SCons t2 r2) -> SCons <$> mergeTy t1 t2 <*> mergeS r1 r2
+  _ | a == b   -> Just a
+    | otherwise -> Nothing
+
+mergeR :: SumRow -> SumRow -> Maybe SumRow
+mergeR a b = case (a, b) of
+  (RNil, RNil)               -> Just RNil
+  (RTail _, t)               -> Just t
+  (t, RTail _)               -> Just t
+  (RCons s1 r1, RCons s2 r2) -> RCons <$> mergeS s1 s2 <*> mergeR r1 r2
+  _ | a == b   -> Just a
+    | otherwise -> Nothing
 
 allOk :: (a -> Either String Bool) -> [a] -> Either String Bool
 allOk _ []       = Right True
@@ -6609,20 +6729,30 @@ eqLeaf depth ctx (k1, o1) (k2, o2)
 -- a body is a proper subterm of the term that carried it.
 eqSym :: Int -> NCtx -> (SymV, SymV) -> Either String Bool
 eqSym depth ctx (a, b) = case (a, b) of
-  (SQuo c1 b1, SQuo c2 b2)
-    | length c1 == length c2 -> do
-        ok <- allOk (eqSym depth ctx) (zip c1 c2)
-        if not ok then Right False
-          else if depth >= normDepthCap
-            then Left ("outside the structural fragment: quotations nested \
-                       \past " ++ show normDepthCap ++ " levels")
-            else
-              let base = 1 + maxVarIn (c1 ++ c2)
-                  defs = ncDefs ctx
-                  (seed, fr, tys) = seedPair (ncEnv ctx) c1 base b1 b2
-                  ctx' = ctx { ncRef = M.empty, ncTypes = tys }
-              in decideProgs (depth + 1) ctx'
-                   (NProg b1 defs seed fr) (NProg b2 defs seed fr)
+  (SQuo c1 b1, SQuo c2 b2) -> do
+    ok <- if length c1 == length c2
+            then allOk (eqSym depth ctx) (zip c1 c2)
+            else Right False
+    if ok then sameQuo depth ctx c1 c2 b1 b2
+      -- Captures that are not pairwise equal are not a verdict: two
+      -- closures can hold different things and still be the same
+      -- morphism (`[capture 1 … ; +]` against `[capture 0 … ; + ; _ 1
+      -- ; +]`).  So run each body on ITS OWN captures plus a shared
+      -- fresh segment, which is what equality of functions means.  A
+      -- refusal there falls back to the syntactic answer this had
+      -- before, so no verdict that stood is withdrawn.
+      else fallbackFalse (sameQuo depth ctx c1 c2 b1 b2)
+  -- ETA for the exponential.  A quotation against a FUNCTION THAT
+  -- ARRIVED AS A WIRE: `f = [f ... ; ev]` holds in any closed
+  -- category, so apply the quote to fresh wires and compare with the
+  -- neutral application.  Without this, every identity law of a
+  -- category whose carrier wraps an `Fn` comes out `false` — the law
+  -- says `embed [pass] ; f = f`, and the left side is a quotation
+  -- while the right side is the wire itself.
+  (SQuo c1 b1, u) | Just (si, so) <- evArity ctx u ->
+    fallbackFalse (etaEq depth ctx c1 b1 u si so)
+  (u, SQuo c2 b2) | Just (si, so) <- evArity ctx u ->
+    fallbackFalse (etaEq depth ctx c2 b2 u si so)
   (SApp n1 as1 j1, SApp n2 as2 j2)
     | n1 == n2, j1 == j2, length as1 == length as2 ->
         allOk (eqSym depth ctx) (zip as1 as2)
@@ -6630,6 +6760,68 @@ eqSym depth ctx (a, b) = case (a, b) of
     | t1 == t2, length x1 == length x2 ->
         allOk (eqSym depth ctx) (zip x1 x2)
   _ -> Right (a == b)
+
+-- Two quotations, each run on its own captures and a SHARED fresh
+-- segment: the segment is seeded once, at the wider of the two sides'
+-- own arities, because seeding both with extra wires is whiskering by
+-- an identity.
+sameQuo :: Int -> NCtx -> [SymV] -> [SymV] -> Term -> Term
+        -> Either String Bool
+sameQuo depth ctx c1 c2 b1 b2
+  | depth >= normDepthCap =
+      Left ("outside the structural fragment: quotations nested past "
+            ++ show normDepthCap ++ " levels")
+  | otherwise =
+      let base = 1 + maxVarIn (c1 ++ c2)
+          defs = ncDefs ctx
+          (ws, fr, tys) = seedSeg (ncEnv ctx) c1 c2 base b1 b2
+          -- the OUTER wire types are still true inside a quotation: a
+          -- captured wire is the same wire, and dropping its type is
+          -- what kept `ev` of a captured function undecided
+          ctx' = ctx { ncRef = M.empty, ncTypes = M.union tys (ncTypes ctx) }
+      in decideProgs (depth + 1) ctx'
+           (NProg b1 defs (c1 ++ ws) fr) (NProg b2 defs (c2 ++ ws) fr)
+
+-- a refusal is not a verdict, but where this already answered `false`
+-- on syntax alone, keep answering it
+fallbackFalse :: Either String Bool -> Either String Bool
+fallbackFalse (Left _) = Right False
+fallbackFalse r        = r
+
+-- the widths `ev` of this value may be given: a closed arrow, read off
+-- the type the program wrote (through a single-wire nominal wrapper,
+-- whose roll and unroll the normalizer has already erased)
+evArity :: NCtx -> SymV -> Maybe (SType, SType)
+evArity ctx u = case symTy ctx u of
+  Just (TFn (Arrow i o _)) | isJust (closedWidth i), isJust (closedWidth o) ->
+    Just (i, o)
+  _ -> Nothing
+
+-- One side of an eta comparison: run the quotation on fresh wires and
+-- ask whether it lands exactly on `ev` of the neutral at those wires.
+etaEq :: Int -> NCtx -> [SymV] -> Term -> SymV -> SType -> SType
+      -> Either String Bool
+etaEq depth ctx caps body u si so
+  | depth >= normDepthCap =
+      Left ("outside the structural fragment: quotations nested past "
+            ++ show normDepthCap ++ " levels")
+  | otherwise =
+      let k    = length (stackWires si)
+          m    = length (stackWires so)
+          base = 1 + maxVarIn (u : caps)
+          ws   = [ SVar (base + j) | j <- [0 .. k - 1] ]
+          app  = [ SApp "ev" (u : ws) j | j <- [0 .. m - 1] ]
+          -- the arguments are typed by the function's own input stack
+          ctx1 = ctx { ncTypes = M.union (M.fromList (zip ws (stackWires si)))
+                                         (ncTypes ctx) }
+      in case runProg ctx1 (NProg body (ncDefs ctx) (caps ++ ws) (base + k)) of
+           Left (NOut msg)   -> Left msg
+           Left (NSplit _ _) -> Left "outside the structural fragment: a \
+                                     \case split under an eta comparison"
+           Right (fresh, out)
+             | fresh /= base + k        -> Right False   -- other arity
+             | length out /= m          -> Right False
+             | otherwise -> allOk (eqSym (depth + 1) ctx1) (zip out app)
 
 data Value
   = VInt Int
@@ -7859,3 +8051,4 @@ openTailed SEnd           = False
 chunk2 :: [a] -> [(a, a)]
 chunk2 (x : y : rest) = (x, y) : chunk2 rest
 chunk2 _              = []
+

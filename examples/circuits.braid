@@ -324,18 +324,29 @@ guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 # `over Doctrine` and run for `Circuits` and for `Funcs`.  This file
 # used to write five of them out; the doctrine writes them once.
 #
-# They run through `observe` at sample points,
-# and that is not for want of trying: `sameCode` refuses every one of
-# them for both models, with `ev` of a value that is not a literal
-# quotation.  The reason is structural rather than incidental.  An
-# Arrow's composition must APPLY a program that arrived as a wire —
-# `compC` does it through `fix` and `Funcs` does it through `unArr ; ev`
-# — and an `Fn` whose input stack is an open variable has no arity for
-# the normalizer to give it.  Equality modulo a model's defining
-# equations is structural induction over an initial algebra, a different
-# procedure from normalizing in a free category (design-macros.md,
-# "honest gaps").  So the laws stay finite tests of an infinite object,
-# which is what `observe` was asked for in the first place.
+# They run through `observe` at sample points — and since 2026-09-13
+# the two models answer differently when asked to PROVE them instead.
+#
+# `Funcs` proves six of the seven.  Its composition applies a program
+# that arrived as a wire, and `Arr(a, b)` unrolls to `Fn⟨a ⇒ b⟩` — one
+# wire in, one wire out — so the normalizer can give that `ev` an
+# arity, and `[lhs] [rhs] ; sameCode` answers `true` for leftId,
+# rightId, assoc, embedFunctor, firstEmbed and firstCompose.  Only
+# `firstFst` is left: it is stated at THREE pairings, and the pairing's
+# instantiation is lost when a generic quotation body (`compose`'s) is
+# weighed on its own, so the wire the law would `unPair` comes back as
+# a bare variable.
+#
+# `Circuits` proves none of them, and the reason is structural rather
+# than incidental: `compC` applies the self wire of a `fix`, whose
+# arrow is `Fn⟨Σ =Rec> Θ⟩` with Σ an open stack variable — there is no
+# arity to give THAT.  Equality modulo a model's defining equations is
+# structural induction over an initial algebra, a different procedure
+# from normalizing in a free category (design-macros.md, "honest
+# gaps").  So for codata the laws stay finite tests of an infinite
+# object, which is what `observe` was asked for in the first place —
+# and `Sealed` below, whose composition is `unCapsule ; ev`, proves its
+# axioms the way `Funcs` does.
 
 # The laws ran before any of this printed — seven of them, twice, for
 # two models with nothing in common but the doctrine.  `firstFst` is

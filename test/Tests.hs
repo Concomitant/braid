@@ -1118,6 +1118,23 @@ evalTests =
      \[[+] ... >> ev] [-] >> sameCode >> v >> print\n\
      \[(x -> x [(y z -> y z >> +)] >> capture >> _ x >> ev)] [(x -> x x >> +)] >> sameCode >> v >> print",
      ["same", "same", "differ", "same"], "")
+    -- `ev` OF A WIRE, when the wire's arrow is CLOSED (2026-09-13).  A
+    -- hom-object pins it: `Arr(a, b)` unrolls to `Fn⟨a ⇒ b⟩`, one wire
+    -- in and one out, so applying it is a neutral application and the
+    -- category axioms of every Arrow model built that way decide.
+    -- ETA comes with it — `embed [pass] ; f = f` weighs a quotation
+    -- against the wire itself — and `capture` of such a wire is the
+    -- partial application it denotes.
+  , ("data Arr(a, b) = Fn⟨a ⇒ b⟩\n\
+     \def v = (\"same\" | \"differ\") >> merge\n\
+     \def comp = (f g -> [(x -> f >> unArr >> _ x >> ev >> (y -> g >> unArr >> _ y >> ev))] >> Arr)\n\
+     \[(f g h -> f g >> comp >> _ h >> comp)] [(f g h -> f (g h >> comp) >> comp)] >> sameCode >> v >> print\n\
+     \[(f -> ([_] >> Arr) f >> comp)] [(f -> f)] >> sameCode >> v >> print\n\
+     \[(f -> f ([_] >> Arr) >> comp)] [(f -> f)] >> sameCode >> v >> print\n\
+     \[[_ 1 >> + >> _ 2 >> *] >> Arr] [([_ 1 >> +] >> Arr) ([_ 2 >> *] >> Arr) >> comp] >> sameCode >> v >> print\n\
+     \[(f x -> f >> unArr >> _ x >> ev)] [(f x -> x (f >> unArr) >> capture >> ev)] >> sameCode >> v >> print\n\
+     \[(f g -> f g >> comp)] [(f g -> g f >> comp)] >> sameCode >> v >> print",
+     ["same", "same", "same", "same", "same", "differ"], "")
     -- β for the COPRODUCT at an injection the normalizer knows: follow
     -- the tag, run that track, re-tag.  No branching needed.
   , ("def v = (\"same\" | \"differ\") >> merge\n\
@@ -2083,12 +2100,13 @@ moduleFailTests =
     -- outside the fragment `sameCode` REPORTS, rather than guessing:
     -- "I cannot tell" is not "they differ".  Since 2026-09-13 the
     -- boundary is narrower and each refusal names what stopped it.
-    -- `ev` of a WIRE: the Fn's input is an open stack variable, so
-    -- there is no segment width to hand it.  This is the one thing that
-    -- keeps transport of recursion syntactic.
+    -- `ev` of a WIRE whose arrow is OPEN: `ev`'s own scheme takes the
+    -- whole remaining segment, so there is no arity to give it.  Since
+    -- 2026-09-13 that is the only `ev` left outside — one whose arrow
+    -- is closed is a neutral application, decided like any other word.
   , ("[ev] [ev] ; sameCode ; drop ; 1",
-     "outside the structural fragment: `ev` of a value that is not a \
-     \literal quotation")
+     "outside the structural fragment: `ev` of a value whose arrow is \
+     \not closed")
     -- `loop` is `fix`, and a fixpoint equation is an axiom of an
     -- iteration theory, not an equation of the free category
   , ("[loop] [loop] ; sameCode ; drop ; 1",
@@ -2367,8 +2385,8 @@ moduleFailTests =
      \def slow = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) \
      \>> (dupSwap >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]\n\
      \(slow >> getCode >> Opt) (slow >> getCode) >> sameCodeC >> drop >> 1 >> print",
-     "sameCodeC: outside the structural fragment: `ev` of a value that \
-     \is not a literal quotation")
+     "sameCodeC: outside the structural fragment: `ev` of a value whose \
+     \arrow is not closed")
     -- the audit: a model that fails a law is not a model.
     -- `doubled` repeats every stage, so weaving twice weaves twice.
   , ("def doubled = [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise\n\

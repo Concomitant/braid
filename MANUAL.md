@@ -2299,7 +2299,8 @@ the two words agree on every program.
 The fragment they decide is the free **bicartesian closed** category
 over the words a program mentions: wiring (`id`/`_`/`dup`/`drop`/`swap`/
 `pass`), composition and juxtaposition; literals as nullary constants;
-quotations with `capture` and `ev`; the coproduct's structure maps
+quotations with `capture` and `ev` — β *and* η, and `ev` of a function
+that arrived as a **wire** whenever its arrow is closed; the coproduct's structure maps
 (`alt1`…`altN`, a code row, `merge`, `into`, `dist2`); and every word
 with a closed arity, treated as **uninterpreted**. Defs inside the
 fragment are inlined (so `sameCode` sees through your own words); a def
@@ -2352,7 +2353,8 @@ stopped it.
 | the coproduct's β and η, the track swap, `dist2`/`undist2`, `into`'s two equations, `case2`…`case4`, `cond`, `otherwise` | **yes** — `examples/distributive.braid` has seven of them as audited laws |
 | a row over an **arbitrary** sum, residual or closed, when the row's tracks are closed stacks | **yes** — by case split; the residual is compared *semantically*, so `(f \| ---)` and `(f \| pass)` at a closed two-track sum are the same morphism |
 | `[b] ; fix` — two `fix` bodies compared in normal form | **yes**, provided the body does not apply the self wire |
-| `ev` of a wire (`self ... ; ev` in a `fix` body; a handler slot) | **no**: its segment is an open stack variable, so there is no arity to give it |
+| `ev` of a wire whose **arrow is closed** — a hom-object's `Fn⟨a ⇒ b⟩`, anything the type pins to a width | **yes** *(2026-09-13)* — a neutral application, like any uninterpreted word; `capture` of such a wire is the partial application it denotes, and η holds (a quotation against the wire itself) |
+| `ev` of a wire whose **arrow is open** (`self ... ; ev` in a `fix` body, a handler slot, a bare `Fn` inference left unpinned) | **no**: its segment is an open stack variable, so there is no arity to give it |
 | `loop`, and the Elgot identity `loop f = f ; [loop f] into` | **no**: a fixpoint equation is an axiom of an iteration theory, not an equation of the free category — `examples/into.braid` runs it at sample points |
 | a sum whose injection is unknown and whose row has **no closed tracks** (an open row variable σ) | **no**: unnamed tracks have no widths, so there is no partition |
 | anything needing `+` to be commutative, or `Int` arithmetic | **no** — sampled laws; the free category cannot see it |

@@ -2555,6 +2555,87 @@ decided the rest. `examples/circuits.braid` lost five hand-written
 laws and gained two it never had; `examples/reified.braid` gained
 `observe`/`sample` and with them the whole audit.
 
+## Amendment (2026-09-13): `ev` in the normalizer
+
+*Stage 5d, part two. The normal form stopped at `ev` of a wire. It
+stops one step later now, and the step is the whole of what an Arrow's
+composition does.*
+
+**The rule.** `ev` of a value that is not a literal quotation is a
+NEUTRAL APPLICATION when the value's arrow is CLOSED: the typechecker
+wrote how many wires the function eats and leaves, so the normalizer
+takes that many and emits `ev(f, x…)` as an uninterpreted term — which
+is standard NbE's neutral case, arrived at from the other direction.
+Only an OPEN arrow (a `fix` body's self wire, a handler slot, a bare
+`Fn` inference never pinned) is left outside, and the refusal now says
+which: *`ev` of a value whose arrow is not closed (there is no arity to
+give it)*.
+
+**Four things had to come with it**, and each was a separate bug the
+new rule exposed:
+
+1. **η for the exponential.** `embed [pass] ; f = f` weighs a
+   QUOTATION against a wire. Without η every identity law of every
+   category whose carrier wraps an `Fn` came out `false`. A quotation
+   against a neutral of closed arrow type is now compared by applying
+   both to fresh wires.
+2. **Two quotations with different captures.** The old comparison
+   required captures pairwise equal and otherwise answered `false` —
+   which is a syntactic answer to a semantic question, and it is
+   exactly the shape associativity takes (`compose (compose f g) h`
+   captures a composite where `compose f (compose g h)` captures `f`).
+   Each body is now run on ITS OWN captures plus a shared fresh
+   segment, which is what equality of functions means. A refusal there
+   falls back to the old syntactic `false`, so no verdict that stood is
+   withdrawn.
+3. **The wire types the two sides disagree about.** They are inferred
+   independently, so the same wire came back `Arr(a0, a1)` on one side
+   and `Arr(a5, a6)` on the other, and the clash marker threw the type
+   away — which meant no arity, no split, no verdict, in every
+   comparison of two programs not spelled identically. Types are now
+   MERGED structurally: a type variable is "not said" and the other
+   side's answer stands; a real disagreement is still a clash.
+4. **Types survive into a quotation, and a single-alternative nominal
+   type has one track.** A captured wire is the same wire, so its type
+   is still true inside; and `data Pair(a, b) = a b` unrolls to a
+   payload stack, which is one track, so `unPair` of a wire is a
+   partition into one branch rather than a refusal.
+
+**What flipped, measured.** For `Funcs` — the pure-function Arrow of
+`examples/circuits.braid` — six of the doctrine's seven laws now
+DECIDE by `sameCode`: `leftId`, `rightId`, `assoc`, `embedFunctor`,
+`firstEmbed`, `firstCompose`. So do the sealed category `Sealed`'s
+axioms. `capture ; ev` on a wire-borne closed `Fn` decides.
+
+**What did not, and why — sharply.**
+
+- `firstFst`, the naturality square, for `Funcs`: it is stated at three
+  pairings, and the pairing's instantiation is LOST when a generic
+  quotation body (`compose`'s) is weighed on its own, so the wire the
+  law would `unPair` comes back a bare variable. Fixing it means
+  propagating the expected type into the comparison — inference for the
+  whole equation rather than per body.
+- Every axiom of `Circuits`, and the `over`/`use` coherence at a
+  stateful pair (still pinned by observation, 30 = 30): `compC`
+  applies the self wire of a `fix`, whose arrow is `Fn⟨Σ =Rec> Θ⟩`
+  with Σ open. Codata is where this stops, and that is the honest
+  place for it to stop.
+- The self-calling transport law in `examples/optimizer.braid`: the
+  same open self wire. Still compared spine to spine, and it says so.
+- A composition over a BARE `Fn` wire (no hom-object) — the arrow
+  inference leaves open, so it has no arity. Worth the note because it
+  is the mirror of the good news: a DECLARED hom-object is what pins
+  the width, so the doctrine's carrier is exactly what makes its own
+  laws decidable.
+- `loop`, and the Elgot identity: untouched, and out of scope
+  permanently — a fixpoint equation is an axiom of an iteration
+  theory, not an equation of the free category.
+
+No example's output changed: the laws that flipped were never printed,
+they were stated by `observe` at sample points, and they still are. The
+flips are pinned in `test/Tests.hs` and described where they are true,
+in `examples/circuits.braid`'s closing comment.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and
@@ -2568,12 +2649,13 @@ laws and gained two it never had; `examples/reified.braid` gained
   friends assume rows); scope them down or sequence them after.
 - **`eq?` on Code is syntactic** — that has not changed, but
   `sameCodeC` is the semantic alternative wherever the fragment
-  reaches, and since 2026-09-13 that includes quotations and rows. What
-  is left outside is narrower and sharper: `ev` of a WIRE. A fix body
-  that calls itself, a fold that applies its handler, a handler slot —
-  each applies an `Fn` whose input stack is an open variable, so there
-  is no arity to give it. Those laws are still stated with `eq?` and
-  labelled syntactic.
+  reaches, and since 2026-09-13 that includes quotations, rows, and
+  `ev` of a wire whose ARROW IS CLOSED. What is left outside is
+  narrower and sharper again: `ev` of a wire whose arrow is OPEN. A fix
+  body that calls itself, a fold that applies its handler, a handler
+  slot — each applies an `Fn` whose input stack is an open variable, so
+  there is no arity to give it. Those laws are still stated with `eq?`
+  and labelled syntactic.
 - **`morphism` is designed and not built** (2026-09-13, re-checked the
   same day against the new normalizer): the law *generator* is
   straightforward and the freeness argument makes it complete, but a
@@ -2586,9 +2668,12 @@ laws and gained two it never had; `examples/reified.braid` gained
   amendments.
 - The **image-tagging question above is open**, and the coeffect
   decision with it.
-- **A mode's category axioms cannot be decided** by this normalizer,
-  for the `ev`-of-a-wire reason above, and no Arrow model avoids it.
-  They run through `observe`.
+- **A category's axioms are decided when its composition applies a
+  wire whose arrow is closed** (2026-09-13) — `Funcs` and `Sealed`
+  prove theirs — and are not when it applies the self wire of a `fix`,
+  which is every codata model, `Circuits` included. Those run through
+  `observe`. `firstFst` is undecided even for `Funcs`; see the
+  amendment above for why.
 - **A written `Fn⟨a =K> b⟩` is not the folded form.** The display fold
   does not run backwards — for modes or for resources — so the carrier
   is written out. For a mode it could not run backwards anyway: type
