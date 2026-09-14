@@ -69,6 +69,7 @@ data ReplState = ReplState
   , rsTrans    :: [Transport] -- carrier models `:import` brought in
   , rsKWords   :: [(String, String)]   -- def -> the category it is a word of
   , rsBases    :: [BaseInstance]        -- models of `Base` it imported
+  , rsMorphs   :: [MorphInfo]  -- morphisms it imported, with their verdicts
     -- a session cannot DECLARE a theory, a model or a functor, but
     -- `:import` can bring them in, and then `use` must know them
   }
@@ -80,13 +81,13 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] [] [] [] (modTheories preludeModule) [] [] [] []
+            [] SEnd [] [] [] [] (modTheories preludeModule) [] [] [] [] []
 
 repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :import \"f.braid\", :s stack, :defs, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :import \"f.braid\", :s stack, :defs, :morphisms, :clear, :q quit"
   runInputT defaultSettings (loop initialState)
 
 -- haskeline supplies line editing, history (up-arrow), and ctrl-d;
@@ -122,6 +123,12 @@ loop st = do
             mapM_ (\(n, (th, _)) ->
                      putStrLn ("def " ++ n ++ " : template over " ++ th))
                   (reverse (rsTmpls st))
+          loop st
+        ":morphisms" -> do
+          liftIO $ case rsMorphs st of
+            [] -> putStrLn "no morphisms in scope   (:import a file that \
+                           \declares one)"
+            ms -> mapM_ (putStrLn . renderMorph) ms
           loop st
         l | ":t! " `isPrefixOf` l -> do
               liftIO (typeOfWith show st (drop 4 l))
@@ -224,10 +231,15 @@ docOf :: ReplState -> String -> IO ()
 docOf st name
   | M.member name (rsEnv st) || isAlias =
       case M.lookup name (rsDocs st) of
-        Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine
-        Nothing -> putStrLn "(no doc)" >> putStrLn renderTypeLine
+        Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine >> verdicts
+        Nothing -> putStrLn "(no doc)" >> putStrLn renderTypeLine >> verdicts
   | otherwise = putStrLn $ "unknown name: " ++ name
   where
+    -- a morphism's word is a def like any other, and its squares are
+    -- one line of its documentation (`:morphisms` for the slots)
+    verdicts =
+      mapM_ (putStrLn . morphDocLine)
+            [ mi | mi <- rsMorphs st, miName mi == name ]
     isAlias = any ((== name) . aName) (rsAliases st)
               || any ((== name) . dName) (rsDatas st)
     renderTypeLine =
@@ -320,6 +332,10 @@ importLine st arg =
                     , rsTrans    = modTrans m
                     , rsKWords   = modKWords m
                     , rsBases    = modBases m
+                    , rsMorphs   = modMorphs m
+                                     ++ [ mi | mi <- rsMorphs st
+                                             , miName mi `notElem`
+                                                 map miName (modMorphs m) ]
                     }
               putStrLn $ "imported " ++ path ++ "   ("
                        ++ intercalate ", " (filter (not . null)
@@ -329,7 +345,8 @@ importLine st arg =
                                      (length (modTrans m))
                             , count (length (modFunctors m)) "functor"
                             , count (length (modTemplates m)
-                                       - length (rsTmpls st)) "template" ])
+                                       - length (rsTmpls st)) "template"
+                            , count (length (modMorphs m)) "morphism" ])
                        ++ ")"
               pure st'
   where

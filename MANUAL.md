@@ -20,8 +20,9 @@ each feature is the way it is), `examples/` (everything running).
 ```
 
 REPL commands: `:t <prog>` type · `:t! <prog>` raw (no alias folding) ·
-`:doc <name>` doc comment · `:defs` whole prelude with types · `:s`
-show stack · `:clear` reset stack · `:q` quit. Every REPL line runs
+`:doc <name>` doc comment · `:defs` whole prelude with types ·
+`:morphisms` every declared morphism, with the verdict on each of its
+squares · `:s` show stack · `:clear` reset stack · `:q` quit. Every REPL line runs
 against a **persistent typed stack**; a line whose input doesn't match
 the current stack is rejected with a message naming the stack.
 
@@ -1704,6 +1705,53 @@ slot to theory Mag, or state the square as a law of the theory.* A
 square that runs and comes out false names the slot too: *the square
 for slot 'unit' does not commute at the theory's samples*.
 
+**The exit is applied whatever the parameter's kind** *(2026-09-14)*.
+A sampled square compares two results, and when the result is the
+carrier it compares them **through the theory's exit** — the slot
+taking one carrier and handing back base. Until this date that was done
+only for a hom-object parameter; a **wire** parameter was compared
+directly, on the reasoning that `eq?` reaches an ordinary type. It
+does — but an ordinary type may HOLD a quotation
+(`data Rev = Float Fn⟨Float ⇒ Grad⟩`), and `eq?` on a quotation is
+syntactic, so two extensionally equal continuations built by different
+code answer `false` and a square that commutes is reported as not
+commuting. `examples/autodiff.braid`'s `morphism Transpose : Fwd ⇒ Rev`
+is the declaration that was refused that way and is declared now. Two
+consequences, both worth knowing before declaring one:
+
+- **A theory with no exit still compares carriers directly** — there is
+  nothing else to compare them with — and a failure says so: *the two
+  carriers were compared with `eq?` directly, since the theory declares
+  no exit: if the carrier holds a function, `eq?` is syntactic —
+  declare an exit `observe` in the theory*.
+- **A sampled square establishes its claim AT THE EXIT.** `Transpose`'s
+  exit is the value, so what its five sampled squares check is that
+  forward and reverse agree on the value; the gradient is read by a
+  word outside the theory (the exit problem, below).
+
+**A square the normalizer PROVED is not sampled again** *(2026-09-14)*.
+The sampled law is generated before the verdict is in, so a proved
+square used to run one too — harmlessly, until the exit change gave
+`first` (whose output is the hom-object at a *pairing*, which no exit
+fits) a law that weighed two carriers. Proof outranks evidence.
+
+**`:morphisms`** lists every morphism in scope — own and imported —
+with the verdict on each square, read off the module rather than
+decided again:
+
+```text
+braid> :morphisms
+Transpose : Fwd ⇒ Rev
+  add      sampled (2 points)
+  …
+  lit      proved
+```
+
+`proved` is `sameCode`, for every input; `sampled (n points)` is the
+theory's evidence at the n inputs `sample` supplied (a square with no
+inputs reads just `sampled`). `:doc <name>` puts the same verdicts on
+one line under the component's type.
+
 The component is an ordinary **word** under the morphism's own name,
 forward-declared at the type the two model heads wrote
 (`List(Int) ⇒ Int`), so a def may use it wherever it sits — and then
@@ -2222,7 +2270,10 @@ and read by all three. Each slot says what the derivative of **one**
 operation is; nothing composes derivatives by hand, because `;` does.
 `morphism Value : Fwd ⇒ Floats = value` is the sentence *AD computes
 the right value*, and all eight of its squares are **proved** by the
-normalizer rather than sampled.
+normalizer rather than sampled; `morphism Transpose : Fwd ⇒ Rev` is
+the sentence *forward and reverse are one linear map*, and its
+verdicts are mixed — three proved, five sampled through the exit
+*(2026-09-14)*.
 
 ### `Code`: reflection and splicing
 
@@ -2746,6 +2797,27 @@ holds for them too: final atom of their stage (§9).
   §7 shows the comparison failing next to the same square passing
   through the exits, and states the one-line fix (apply the exit for a
   wire parameter too) that is deliberately not made yet.
+  *(Resolved 2026-09-14: the exit is applied whatever the parameter's
+  kind, `morphism Transpose : Fwd ⇒ Rev` is declared, and `:morphisms`
+  prints what each square was decided by — §8. A theory that declares
+  no exit still compares carriers directly, and says so when one
+  fails.)* Two riders came out of the same investigation and are worth
+  keeping:
+  - **`sameCode` says `false`, not a refusal, for "spelled
+    differently"** — two quotations that build the same function out of
+    different code, closing over different captures. Everywhere else a
+    verdict the normalizer cannot reach is a refusal, and `false` means
+    *different morphism*; here it means *different spelling*. It is why
+    a square over a closure-holding carrier goes to the samples rather
+    than proving.
+  - **A slot whose input is not the parameter can never be sampled.**
+    `lit : Float ⇒ a` takes a `Float`, and `sample : • ⇒ a` supplies
+    only the carrier, so no evidence reaches that square: it must
+    PROVE or the module is refused. That is a real constraint on how a
+    model is written — `examples/autodiff.braid`'s `rlit` builds the
+    zero linear map as `(0.0 ; scaleK)` rather than `[(d -> gzero)]`
+    precisely so the `lit` square is the same CODE and not merely the
+    same map.
 - **`| ...` no longer means the residual** *(2026-09-12)*. It is
   refused, for one release, with the message *"`| ...` used to mean the
   residual; write `| ---` for more alternatives, or `| pass` for a
@@ -2859,14 +2931,16 @@ that ties every row of the table together, and the one to read after
 `theories.braid`. `examples/autodiff.braid` declares `theory
 Smooth(a)`, three `data` carriers, three models (evaluation, forward
 mode, reverse mode), three programs written `over Smooth` and read by
-all three, a `morphism` whose squares are proved, Newton's method
+all three, two `morphism`s — one with every square proved, one decided
+three ways proved and five at the samples — Newton's method
 under `use Recursive`, and a fourth model in which the adjoint is
 threaded through a `resource` instead of summed. It contains no
 `Code`, no `functor` and no chain rule: the chain rule is what a model
-*is*. It also records, in the file, the two places the declaration
-layer did not reach — a model parameterized by a model (second
-derivatives), and a sampled square over a carrier that holds a closure
-(§14).
+*is*. It also records, in the file, the place the declaration
+layer does not reach — a model parameterized by a model (second
+derivatives) — and, since the sampled square over a closure-holding
+carrier was fixed *(2026-09-14, §14)*, what a sampled square costs:
+it establishes its claim at the theory's exit.
 
 **An effectful arrow is a resource + a macro + a theory**: the resource
 carries the state, the macro installs and discharges it, and the theory

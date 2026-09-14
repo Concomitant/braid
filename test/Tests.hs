@@ -20,6 +20,71 @@ runExample name = do
         Right _  -> Nothing
         Left err -> Just ("examples/" ++ name ++ ": " ++ err)
 
+-- MORPHISM VERDICTS (2026-09-14).  What the checker decided about each
+-- square is STORED on the module, so `:morphisms` reads it rather than
+-- deciding it again; these pin the stored verdicts for the two example
+-- files that declare morphisms.  `proved` is `sameCode`, for every
+-- input; `sampled (n points)` is the theory's own evidence.
+-- (example file, morphism, the rendering `:morphisms` prints)
+morphVerdictTests :: [(String, String, String)]
+morphVerdictTests =
+    -- a hom-object carrier pins its own `Fn` to one wire per side, so
+    -- an internal functor's squares normalize outright
+  [ ( "morphisms.braid", "Forget"
+    , unlines' [ "Forget : Names \8658 Funcs"
+               , "  embed    proved"
+               , "  compose  proved"
+               , "  first    proved"
+               , "  observe  proved"
+               , "  sample   proved" ] )
+    -- ...and `len` is a fold, which applies its handler: all three
+    -- squares go to the samples
+  , ( "morphisms.braid", "Len"
+    , unlines' [ "Len : ListMonoid \8658 IntSum"
+               , "  unit    sampled"
+               , "  op      sampled (2 points)"
+               , "  sample  sampled" ] )
+    -- forgetting the tangent: every square proved, which is the
+    -- strongest verdict the machinery has
+  , ( "autodiff.braid", "Value"
+    , unlines' [ "Value : Fwd \8658 Floats"
+               , "  add      proved"
+               , "  mul      proved"
+               , "  neg      proved"
+               , "  lit      proved"
+               , "  exp      proved"
+               , "  sin      proved"
+               , "  sample   proved"
+               , "  observe  proved" ] )
+    -- and the transpose: `lit` must prove (its input is a `Float`, so
+    -- no `sample` reaches it), the five operations are decided at the
+    -- samples THROUGH THE EXIT, since a `Rev` holds a closure
+  , ( "autodiff.braid", "Transpose"
+    , unlines' [ "Transpose : Fwd \8658 Rev"
+               , "  add      sampled (2 points)"
+               , "  mul      sampled (2 points)"
+               , "  neg      sampled (1 point)"
+               , "  lit      proved"
+               , "  exp      sampled (1 point)"
+               , "  sin      sampled (1 point)"
+               , "  sample   proved"
+               , "  observe  proved" ] )
+  ]
+  where unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
+
+runMorphVerdicts :: (String, String, String) -> IO (Maybe String)
+runMorphVerdicts (file, name, expected) = do
+  loaded <- loadSource ("examples/" ++ file)
+  pure $ case loaded >>= checkModule of
+    Left err -> Just (file ++ " (" ++ name ++ "): " ++ err)
+    Right m  ->
+      case [ mi | mi <- modMorphs m, miName mi == name ] of
+        []       -> Just (file ++ ": no morphism " ++ name)
+        (mi : _)
+          | renderMorph mi == expected -> Nothing
+          | otherwise -> Just (file ++ ": expected\n" ++ expected
+                                    ++ "\ngot\n" ++ renderMorph mi)
+
 -- IMPORTS (stage 4¾).  A file's declarations in another file's scope:
 -- textual inclusion, so a type, a resource, a theory, a model and a
 -- functor all cross the boundary with no machinery of their own —
@@ -1039,6 +1104,37 @@ monoidMod = unlines
   , "    sample = 1 2 3 4 5 6 7 >> pack"
   , "def len = [(acc x -> acc >> _ 1 >> +)] 0 ... >> fold"
   ]
+
+-- A CARRIER THAT HOLDS A FUNCTION (2026-09-14).  `K` is a value and a
+-- linear map, exactly as `examples/autodiff.braid`'s `Rev` is, and the
+-- two models build the SAME map out of different code (`d 3 >> *` and
+-- `3 d >> *`).  The `sample` square is therefore not provable and goes
+-- to the theory's evidence \8212 where it must be compared THROUGH the
+-- exit, because `eq?` on a carrier holding a quotation is syntactic.
+closureMod :: String
+closureMod = unlines
+  [ "data Two = Int Int"
+  , "data K = Int Fn\10216Int \8658 Int\10217"
+  , "theory Scale(a) ="
+  , "    bump    : a \8658 a"
+  , "    sample  : \8226 \8658 a"
+  , "    observe : a \8658 Int"
+  , "model Src : Scale(Two) ="
+  , "    bump    = unTwo >> (v f -> (v 1 >> +) f >> Two)"
+  , "    sample  = 2 3 >> Two"
+  , "    observe = unTwo >> (v f -> v)"
+  , "model Dst : Scale(K) ="
+  , "    bump    = unK >> (v k -> (v 1 >> +) k >> K)"
+  , "    sample  = 2 [(d -> 3 d >> *)] >> K"
+  , "    observe = unK >> (v k -> v)"
+  , "def toK = unTwo >> (v f -> v [(d -> d f >> *)] >> K)"
+  ]
+
+-- the same theory with NO exit: then there is nothing to observe the
+-- carriers with, `eq?` weighs them directly, and the refusal says so
+closureModNoExit :: String
+closureModNoExit =
+  unlines [ l | l <- lines closureMod, not ("observe" `isInfixOf` l) ]
 
 -- SHAPE NO LONGER DETECTS (2026-09-13).  The same two arrows, declared
 -- at the same signatures, WITHOUT `over Doctrine`: not a category, so
@@ -2077,6 +2173,16 @@ evalTests =
   , (monoidMod ++ "morphism Len : ListMonoid ⇒ IntSum = len\n\
      \def three = 1 2 3 >> pack >> Len\nthree >> print",
      ["3"], "")
+    -- A MORPHISM OVER A CARRIER THAT HOLDS A FUNCTION (2026-09-14).
+    -- The `sample` square is not provable (the two models spell the
+    -- same linear map differently) and is decided at the theory's
+    -- evidence THROUGH THE EXIT.  Compared as carriers it would be
+    -- `eq?` on a quotation, which is syntactic, and this declaration
+    -- would be refused for a square that commutes.
+  , (closureMod ++ "morphism Scaled : Src ⇒ Dst = toK\n\
+     \def run = Scaled >> unK >> (v k -> k 5 >> ev)\n\
+     \2 3 >> Two >> run >> print",
+     ["15"], "")
     -- the same theory with no `over Doctrine` is not a category: the
     -- spine is left alone, and only the receipt is minted
   , (plainMod ++ "[use Plain ; add1 ; dbl] ; getCode ; unparse ; print",
@@ -2609,6 +2715,18 @@ moduleFailTests =
      \morphism Bad : ListMonoid ⇒ IntSum = lenUp\n1 >> print",
      "morphism Bad: the square for slot 'unit' does not commute at the \
      \theory's samples")
+    -- ...and a component that is wrong in the VALUE is caught through
+    -- the exit, on a carrier `eq?` could only have weighed by spelling
+  , (closureMod ++ "def toKBad = unTwo >> (v f -> (v 1 >> +) \
+     \[(d -> d f >> *)] >> K)\n\
+     \morphism Scaled : Src ⇒ Dst = toKBad\n1 >> print",
+     "morphism Scaled: the square for slot 'sample' does not commute at \
+     \the theory's samples")
+    -- ...and with no exit to observe a carrier with, the comparison IS
+    -- `eq?` on the carrier, and the refusal names the slot that would
+    -- have decided it honestly
+  , (closureModNoExit ++ "morphism Scaled : Src ⇒ Dst = toK\n1 >> print",
+     "declare an exit `observe` in the theory")
     -- ...and with NO evidence to sample with, the refusal names the slot
     -- and asks for the slot that would decide it
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\
@@ -2835,6 +2953,7 @@ main = do
   exFs <- mapM runExample exNames
   impFs  <- mapM runImport importTests
   impFFs <- mapM runImportFail importFailTests
+  mvFs   <- mapM runMorphVerdicts morphVerdictTests
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
         ++ map runFail failTests
@@ -2846,11 +2965,13 @@ main = do
         ++ exFs
         ++ impFs
         ++ impFFs
+        ++ mvFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
             + length unifTests + length pureEvalTests + length exNames
             + length importTests + length importFailTests
+            + length morphVerdictTests
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

@@ -15,14 +15,14 @@
 # tangent (forward mode), `Rev` carries the TRANSPOSE of the same
 # linear map as a continuation (reverse mode).  Forward and reverse are
 # not two algorithms here; they are two REPRESENTATIONS of one linear
-# map, and `morphism Transpose : Fwd ⇒ Rev` is the sentence that would
-# say so — §7 records, precisely, why the machinery cannot yet accept
-# that declaration, and states the squares by hand instead.  A fourth
-# model in §8 threads the adjoint through a resource.
+# map, and `morphism Transpose : Fwd ⇒ Rev` is the sentence that says
+# so — §7 declares it, and records which of its squares the normalizer
+# proves and which the theory's samples decide.  A fourth model in §8
+# threads the adjoint through a resource.
 #
 # There is no `Code`, no `functor`, no `getCode` anywhere below.  This
-# is not metaprogramming: it is one theory, four models, one declared
-# morphism and a resource.  Binders throughout, so every slot body
+# is not metaprogramming: it is one theory, four models, two declared
+# morphisms and a resource.  Binders throughout, so every slot body
 # reads as the arithmetic it is.
 
 # ---------------------------------------------------------------------
@@ -39,7 +39,8 @@
 # algebraic theory over ONE carrier: a ring.  Elliott's functor is
 # between categories; a model of an algebraic theory is the same
 # statement one level down, on the free category its generators
-# present.  (§7 records what that choice cost.)
+# present.  (§7 records what that choice costs: a wire parameter is
+# compared through this exit, and the exit is the value.)
 
 theory Smooth(a) =
     add     : a a ⇒ a
@@ -155,8 +156,10 @@ def scaleK = (dx -> [(d -> (d dx ; fmul) ; gx)])
 def radd = unRev _ ; _ _ unRev ; (a ka b kb -> (a b ; fadd) [(d -> ka d kb d ; k2)] ; Rev)
 def rmul = unRev _ ; _ _ unRev ; (a ka b kb -> (a b ; fmul) [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev)
 def rneg = unRev ; (a ka -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev)
-# a literal depends on no input: its continuation is the zero map
-def rlit = (c -> c [(d -> gzero)] ; Rev)
+# a literal depends on no input: its continuation is the ZERO linear
+# map, which is `scaleK` at 0.0 — the same map `[(d -> gzero)]` is, and
+# the same CODE the `lit` square's other side normalizes to (§7)
+def rlit = (c -> c (0.0 ; scaleK) ; Rev)
 def rexp = unRev ; (a ka -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Rev))
 def rsin = unRev ; (a ka -> (a ; fsin) [(d -> ka (d (a ; fcos) ; fmul) ; ev)] ; Rev)
 def rvalue = unRev ; (v k -> v)
@@ -276,7 +279,7 @@ def newton =
                                #   exactly what it says it is.
 
 # ---------------------------------------------------------------------
-# 7. The morphisms — what the squares establish, and what they cannot
+# 7. The morphisms — two declarations, and what their squares establish
 # ---------------------------------------------------------------------
 # FORGETTING THE TANGENT IS A HOMOMORPHISM.  That single declaration is
 # the statement "AD computes the right value": for every generator, the
@@ -294,75 +297,25 @@ morphism Value : Fwd ⇒ Floats = value
 
 # A TANGENT BECOMES THE LINEAR MAP THAT SCALES BY IT.  That is the
 # sentence "forward and reverse are two representations of the same
-# linear map", and `transpose` is the component that says it.
+# linear map", and it is a declaration too, since 2026-09-14.
 def transpose = unDual ; (x dx -> x (dx ; scaleK) ; Rev)
 #   transpose : Dual ⇒ Rev
 
-# `morphism Transpose : Fwd ⇒ Rev = transpose` IS NOT DECLARED, and the
-# reason is a gap in the machinery rather than a fact about the maths.
-# Run as it stands, it is refused:
-#
-#   morphism Transpose: the square for slot 'add' does not commute at
-#   the theory's samples — a morphism of models is a homomorphism, slot
-#   by slot
-#
-# Why.  When a theory's parameter is a WIRE (rather than a hom-object),
-# the generated square is sampled by comparing two CARRIERS with `eq?`
-# directly — the exit is not applied, on the reasoning that "`eq?`
-# reaches an ordinary type".  It does; but a `Rev` holds a CLOSURE, and
-# `eq?` on two closures is syntactic.  The two sides of these squares
-# build extensionally equal continuations out of different code, so the
-# comparison answers `false` — and `false` here means "spelled
-# differently", not "different function".  `sameCode` answers `false`
-# too, for the same reason one step earlier.
-#
-# What DOES decide, measured rather than guessed:
-#   proved by the normalizer : sample, observe  (and `lit`, if `rlit`
-#                              is written `(c -> c (0.0 ; scaleK) ; Rev)`
-#                              — the zero linear map — instead of
-#                              `[(d -> gzero)]`)
-#   sampled, and FAILS       : add (and mul, neg, exp and sin, which
-#                              are the same comparison — the check stops
-#                              at the first)
-#   cannot be stated at all  : `lit`, whose input is a `Float` and not
-#                              the parameter, so no `sample` supplies it
-# The fix is one line in `sampledLaw` — apply the theory's exit for a
-# wire parameter too — and it is deliberately NOT made in this stage.
-#
-# So the squares are stated here by hand, through the exits: `rvalue`
-# for the value and `backward` for the gradient.  That is exactly what
-# the generated square would compare if the exit were applied.
+morphism Transpose : Fwd ⇒ Rev = transpose
 
-def revEq = (p q -> ((p ; rvalue) (q ; rvalue) ; eq? ; verdict) ((p ; backward) (q ; backward) ; eq? ; verdict) ; and)
-
-# two sample Duals, and the component applied to each
-def dA = 1.5 1.0 ; Dual
-def dB = 2.5 0.5 ; Dual
-def tA = dA ; transpose
-def tB = dB ; transpose
-
-def sqAdd = (dA dB ; dadd ; transpose) (tA tB ; radd) ; revEq
-def sqMul = (dA dB ; dmul ; transpose) (tA tB ; rmul) ; revEq
-def sqNeg = (dA ; dneg ; transpose) (tA ; rneg) ; revEq
-def sqExp = (dA ; dexp ; transpose) (tA ; rexp) ; revEq
-def sqSin = (dA ; dsin ; transpose) (tA ; rsin) ; revEq
-def sqLit = (2.0 ; dlit ; transpose) (2.0 ; rlit) ; revEq
-
-"-- Transpose's squares, through the exits (alt1 = commutes) --" ; print
-sqAdd ; print       # alt1()
-sqMul ; print       # alt1() — the square the chain rule would have been for
-sqNeg ; print       # alt1()
-sqExp ; print       # alt1()
-sqSin ; print       # alt1()
-sqLit ; print       # alt1() — the square the generator could not even state
-
-# …and here is the comparison the generated square makes instead: two
-# `Rev` carriers, weighed with `eq?`.  Same two values as `sqMul`.
-(dA dB ; dmul ; transpose) (tA tB ; rmul) ; eq? ; verdict ; print
-                    # alt2() — FALSE.  Not because the square fails but
-                    # because a `Rev` holds a closure and `eq?` on two
-                    # closures is syntactic.  That is the gap, shown
-                    # rather than described.
+# What its eight squares establish (`:morphisms` in the REPL prints the
+# verdicts): `lit`, `sample` and `observe` are PROVED by the
+# normalizer, for every input — which is why `rlit` builds the ZERO
+# LINEAR MAP `(0.0 ; scaleK)` rather than `[(d -> gzero)]`: the two are
+# the same map and only the first is the same CODE, and `lit`'s input
+# is a `Float` rather than the carrier, so no `sample` reaches it and a
+# proof is the only verdict available.  The other five — `add`, `mul`,
+# `neg`, `exp`, `sin` — are SAMPLED at the theory's evidence and
+# compared through the theory's exit, which is the VALUE; the gradient
+# half of the transpose is what §5 prints, against the analytic
+# derivative.  (Before the exit was applied here, a sampled square
+# compared two `Rev` carriers with `eq?` — syntactic on a closure — and
+# refused this declaration for squares that commute.)
 
 # ---------------------------------------------------------------------
 # 8. The same functor with the adjoint THREADED
@@ -448,8 +401,12 @@ def gradPoly =
 # the machinery (`Fin(n)`, `at`, bundles) and joining it to this is a
 # different piece of work.
 #
-# THE TRANSPOSE SQUARE IS NOT MACHINE-CHECKED — see §7.  It is checked
-# here at points, by hand, through the exits.
+# THE GRADIENT HALF OF THE TRANSPOSE IS NOT MACHINE-CHECKED — see §7.
+# `morphism Transpose` is declared and its eight squares are decided,
+# but the five sampled ones are compared through the theory's exit, and
+# the exit is the VALUE: a theory whose exit could also hand back the
+# gradient is the per-model exit that a slot is not.  §5's printed
+# gradients are the evidence for the other half.
 #
 # `examples/transpose.braid` is the linear-algebra view of the same
 # operation: reversing a diagram and dualizing each generator

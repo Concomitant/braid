@@ -78,7 +78,9 @@ braid> :doc decide
 ```
 
 `:t` shows a type (`:t!` raw, un-folded); `:doc` and `:defs` browse
-the prelude; every REPL line runs against a persistent typed stack. A
+the prelude; `:morphisms` lists every declared morphism with the
+verdict on each of its squares; every REPL line runs against a
+persistent typed stack. A
 bare `use Log` line opens an ambient scope over the rest of the
 session — the resource threads itself through every later line, and a
 bare `use` leaves.
@@ -456,7 +458,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1036-case test suite, a full
+(typechecker, interpreter, REPL), a 1043-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

@@ -4669,12 +4669,74 @@ data Morphism = Morphism
 -- one slot's square: the two sides as generated defs, and the sampled
 -- law that decides it when the normalizer will not
 data MorphSquare = MorphSquare
-  { msSlot :: String
-  , msLhs  :: String
-  , msRhs  :: String
-  , msLaw  :: Maybe String
-  , msWhy  :: String          -- why there is no sampled law, if there is none
+  { msSlot   :: String
+  , msLhs    :: String
+  , msRhs    :: String
+  , msLaw    :: Maybe String
+  , msWhy    :: String        -- why there is no sampled law, if there is none
+  , msPoints :: Int           -- sample points the law runs at, if it has one
+  , msExit   :: Bool          -- ...and whether it compares through the exit
   }
+
+-- A square's sampled law: the def it becomes, its source, how many of
+-- the theory's sample points supply its inputs, and whether the
+-- comparison goes through the theory's exit (it does not when the
+-- theory declares none, and then `eq?` weighs the carriers themselves).
+data SampledLaw = SampledLaw
+  { slName   :: String
+  , slSrc    :: String
+  , slPoints :: Int
+  , slExit   :: Bool
+  }
+
+-- What the checker decided about one square, kept so that `:morphisms`
+-- READS the verdict rather than deciding it again.  `MVProved` is
+-- `sameCode` — for every input; `MVSampled n` is the theory's own
+-- evidence, at n sample points (a square with no inputs runs at none).
+data MorphVerdict = MVProved | MVSampled Int
+  deriving (Eq, Show)
+
+-- A declared morphism and its verdicts, slot by slot, in the theory's
+-- order.  A morphism whose square neither proved nor sampled never gets
+-- one of these: the module was refused.
+data MorphInfo = MorphInfo
+  { miName    :: String
+  , miFrom    :: String
+  , miTo      :: String
+  , miSquares :: [(String, MorphVerdict)]
+  , miNoExit  :: [String]   -- slots whose carriers `eq?` weighed directly
+  } deriving (Eq, Show)
+
+-- one verdict, as `:morphisms` and `:doc` print it.  A square with no
+-- inputs is run at no sample points and simply reads `sampled`.
+showVerdict :: MorphVerdict -> String
+showVerdict MVProved      = "proved"
+showVerdict (MVSampled 0) = "sampled"
+showVerdict (MVSampled n) = "sampled (" ++ show n ++ " point"
+                              ++ (if n == 1 then "" else "s") ++ ")"
+
+-- A declared morphism and what the checker decided about each of its
+-- squares, as `:morphisms` prints it.  The verdicts are READ off the
+-- module the declaration was checked in, never decided again here.
+renderMorph :: MorphInfo -> String
+renderMorph mi =
+  intercalate "\n"
+    ( (miName mi ++ " : " ++ miFrom mi ++ " \8658 " ++ miTo mi)
+      : [ "  " ++ pad sl ++ showVerdict v | (sl, v) <- miSquares mi ] )
+  where
+    width  = maximum (1 : map (length . fst) (miSquares mi))
+    pad sl = sl ++ replicate (width - length sl + 2) ' '
+
+-- the same verdicts on ONE line, for `:doc`
+morphDocLine :: MorphInfo -> String
+morphDocLine mi =
+  "  squares: " ++ intercalate ", " (filter (not . null) [proved, sampled])
+  where
+    vs      = map snd (miSquares mi)
+    proved  = count (length [ () | MVProved <- vs ]) "proved"
+    sampled = count (length [ () | MVSampled _ <- vs ]) "sampled"
+    count 0 _    = ""
+    count n what = show n ++ " " ++ what
 
 morphDefName :: String -> String -> String -> String
 morphDefName nm side slot = nm ++ "@" ++ side ++ "@" ++ slot
@@ -4789,33 +4851,34 @@ morphismDefs theories insts mo = do
           lhsN = morphDefName nm "lhs" sName
           rhsN = morphDefName nm "rhs" sName
       (mlaw, why) <- pure (sampledLaw th param a b sName sIn sOut)
-      pure ( MorphSquare sName lhsN rhsN (fmap fst mlaw) why
-           , lhsS, rhsS, fmap snd mlaw )
+      pure ( MorphSquare sName lhsN rhsN (fmap slName mlaw) why
+                         (maybe 0 slPoints mlaw) (maybe False slExit mlaw)
+           , lhsS, rhsS, fmap slSrc mlaw )
 
     -- The square RUN at the theory's evidence: the standing pattern —
-    -- `sample : \8226 \8658 a` supplies values, an exit observes a carrier
-    -- (it cannot be compared), and `eq?` decides.  `Nothing` carries
-    -- the reason, which is what the refusal prints.
+    -- `sample : \8226 \8658 a` supplies values, the theory's exit observes
+    -- a carrier (comparing one directly is `eq?` on whatever it holds),
+    -- and `eq?` decides.  `Nothing` carries the reason, which is what
+    -- the refusal prints.
     sampledLaw th param a b sName sIn sOut =
       case (closedWires sIn, closedWires sOut) of
         (Just ins, Just [out])
-          | Just atoms <- mapM sampleAtom ins
-          , Just obs <- observer out ->
-              let lhsRun = joinSrc [unwords atoms, slotDefName (inName a) sName
+          | Just atoms <- mapM sampleAtom ins ->
+              let obs    = observer out
+                  lhsRun = joinSrc [unwords atoms, slotDefName (inName a) sName
                                    , compAt sOut, obs]
                   rhsRun = joinSrc [unwords atoms, compAt sIn
                                    , slotDefName (inName b) sName, obs]
-              in ( Just ( morphDefName nm "square" sName
-                        , "(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
-                            ++ "(forget >> true | forget >> false) >> merge" )
+              in ( Just (SampledLaw
+                          (morphDefName nm "square" sName)
+                          ("(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
+                            ++ "(forget >> true | forget >> false) >> merge")
+                          (length [ () | w <- ins, paramWire param w ])
+                          (not (null obs)))
                  , "" )
-          | isNothing (mapM sampleAtom ins) ->
+          | otherwise ->
               (Nothing, "the theory declares no `sample : \8226 \8658 "
                           ++ pName param ++ "` to supply its inputs with")
-          | otherwise ->
-              (Nothing, "its result is a carrier and the theory declares no "
-                          ++ "exit to observe one with (a slot taking one "
-                          ++ pName param ++ " and returning base)")
         (_, Just outs) | length outs /= 1 ->
           (Nothing, "it leaves " ++ show (length outs) ++ " wires, and a "
                       ++ "sampled square is compared with `eq?` at one")
@@ -4830,12 +4893,19 @@ morphismDefs theories insts mo = do
         sampleSlot = listToMaybe
           [ n | (n, Arrow i o _) <- thSlots th, i == SEnd
               , Just [w] <- [closedWires o], paramWire param w ]
-        -- an EXIT of the TARGET model observes one; a wire parameter
-        -- (an ordinary type) needs none, since `eq?` reaches it
+        -- an EXIT of the TARGET model observes one \8212 whatever the
+        -- parameter's kind.  A result that is not the carrier needs
+        -- none; a carrier needs one whenever the theory declares one,
+        -- because `eq?` on a carrier is `eq?` on whatever it holds, and
+        -- on a quotation that is SYNTACTIC (2026-09-14: before this the
+        -- exit was applied only for a constructor parameter, on the
+        -- reasoning that `eq?` reaches an ordinary type \8212 it does,
+        -- but `data Rev = (Float Fn\10216Float \8658 Grad\10217)` is an
+        -- ordinary type holding a closure).  With no exit declared the
+        -- carriers are compared directly, and a failure says so.
         observer out
-          | not (paramWire param out) = Just ""
-          | PCon _ _ <- param = slotDefName (inName b) <$> exitSlot out
-          | otherwise         = Just ""
+          | not (paramWire param out) = ""
+          | otherwise = maybe "" (slotDefName (inName b)) (exitSlot out)
         -- ...and it must FIT: `observe : k(Int, Int) \8658 Int` observes
         -- the result of `compose`, whose output is `k(a, c)`, and not
         -- the result of `first`, whose output is the hom-object at a
@@ -4883,7 +4953,7 @@ componentArrow theories insts mo = do
 -- the normalizer can be asked whether the two sides are the same
 -- morphism, and where it cannot say, the sampled law does.
 checkMorphism :: Env -> RunDefs -> [Theory] -> [Instance] -> Morphism
-              -> [MorphSquare] -> Either String ()
+              -> [MorphSquare] -> Either String MorphInfo
 checkMorphism env defs theories insts mo squares = do
   a  <- modelOf (moFrom mo)
   b  <- modelOf (moTo mo)
@@ -4901,7 +4971,10 @@ checkMorphism env defs theories insts mo squares = do
                         ++ moTo mo ++ " is " ++ show (normalizeArrow wanted)
                         ++ " (" ++ e ++ ")"
     _ -> Right ()   -- refused earlier, at `morphismDefs`
-  mapM_ verdict squares
+  vs <- mapM verdict squares
+  pure (MorphInfo (moName mo) (moFrom mo) (moTo mo) vs
+                  [ msSlot sq | sq <- squares
+                              , isJust (msLaw sq), not (msExit sq) ])
   where
     here = "morphism " ++ moName mo ++ ": "
     modelOf n = case [ i | i <- insts, inName i == n ] of
@@ -4910,8 +4983,10 @@ checkMorphism env defs theories insts mo squares = do
     verdict sq = case (termOf (msLhs sq), termOf (msRhs sq)) of
       (Just tl, Just tr) ->
         case sameProgram env defs defs tl tr of
-          Right True -> Right ()      -- proved, for every input
-          _ | isJust (msLaw sq) -> Right ()   -- decided at the samples
+          -- proved, for every input
+          Right True -> Right (msSlot sq, MVProved)
+          -- decided at the samples
+          _ | isJust (msLaw sq) -> Right (msSlot sq, MVSampled (msPoints sq))
           _ -> Left $ here ++ "the square for slot '" ++ msSlot sq
                    ++ "' does not decide \8212 `sameCode` cannot prove it, and "
                    ++ "it cannot be sampled: " ++ msWhy sq ++ ".  Add a "
@@ -5166,6 +5241,7 @@ data Module = Module
   , modTrans     :: [Transport]         -- models with a carrier
   , modKWords    :: [(String, String)]  -- def -> the category it is a word of
   , modBases     :: [BaseInstance]      -- `model Name : Base`
+  , modMorphs    :: [MorphInfo]         -- `morphism Name`, with its verdicts
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -6086,9 +6162,10 @@ checkModuleWith base src = do
   mapM_ (checkLawType env') [ n | (n, _, _) <- instDefs, isJust (lawParts n) ]
   mapM_ (checkLawType env')
         [ n | (n, _, _) <- morphDefs', isJust (squareParts n) ]
-  -- every square decided, by the normalizer or at the samples
-  sequence_ [ checkMorphism env' runFinal theories insts mo sqs
-            | (mo, (_, sqs)) <- zip ownMorphs morphParts ]
+  -- every square decided, by the normalizer or at the samples; the
+  -- verdicts are kept on the module, so nothing decides them twice
+  morphInfos <- sequence [ checkMorphism env' runFinal theories insts mo sqs
+                         | (mo, (_, sqs)) <- zip ownMorphs morphParts ]
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
@@ -6102,7 +6179,8 @@ checkModuleWith base src = do
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
-                theories insts funcs tmpls ownTrans kwords ownBases)
+                theories insts funcs tmpls ownTrans kwords ownBases
+                morphInfos)
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
@@ -8623,8 +8701,12 @@ runModule src = runExceptT $ do
   -- that documents and a law that holds.
   mapM_ (runLaw m) [ (n, t) | (n, _, t) <- modDefs m, isJust (lawParts n) ]
   -- ...and every square a morphism could only decide at the samples.
+  -- A square the normalizer PROVED is not sampled again: its law was
+  -- generated before the verdict was in, and sampling a proved square
+  -- could only weigh two carriers `eq?` has nothing true to say about.
   mapM_ (runSquare m) [ (n, t) | (n, _, t) <- modDefs m
-                               , isJust (squareParts n) ]
+                               , Just (mo, sl) <- [squareParts n]
+                               , sampledSquare m mo sl ]
   case modMain m of
     Nothing -> pure ([], [])
     Just (term, arr@(Arrow i o _))
@@ -8648,6 +8730,15 @@ runLaw m (n, t) = do
       in throwError $ "law '" ++ lw ++ "' fails for model " ++ inst
                    ++ ": a model must be an audited model of its theory"
 
+-- Was this square left to the samples?  A morphism the module does not
+-- know about (there is none) is sampled, which is what the check did
+-- before the verdicts were recorded.
+sampledSquare :: Module -> String -> String -> Bool
+sampledSquare m mo sl =
+  or [ True | mi <- modMorphs m, miName mi == mo
+            , (s, MVSampled _) <- miSquares mi, s == sl ]
+    || null [ () | mi <- modMorphs m, miName mi == mo ]
+
 -- One generated square, run at the theory's samples.  A morphism whose
 -- square the normalizer could not prove is checked here instead, and a
 -- failure names the slot whose square does not commute.
@@ -8658,9 +8749,23 @@ runSquare m (n, t) = do
     [VSum 0 []] -> pure ()
     _ ->
       let (mo, sl) = fromMaybe ("?", n) (squareParts n)
+          -- the comparison went through the theory's exit unless the
+          -- theory declares none, and then it weighed the two carriers
+          -- themselves: say so, because `eq?` on a carrier holding a
+          -- quotation is syntactic and answers `false` for two
+          -- extensionally equal continuations
+          bare = or [ sl `elem` miNoExit mi | mi <- modMorphs m
+                                            , miName mi == mo ]
       in throwError $ "morphism " ++ mo ++ ": the square for slot '" ++ sl
                    ++ "' does not commute at the theory's samples \8212 a "
                    ++ "morphism of models is a homomorphism, slot by slot"
+                   ++ (if bare
+                         then ".  The two carriers were compared with `eq?` "
+                               ++ "directly, since the theory declares no "
+                               ++ "exit: if the carrier holds a function, "
+                               ++ "`eq?` is syntactic \8212 declare an exit "
+                               ++ "`observe` in the theory"
+                         else "")
 
 -- A scheme's runtime shape: how many wires it consumes, and whether it
 -- wants the whole remaining segment.  Shared by the runtime scope

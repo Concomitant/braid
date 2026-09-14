@@ -3024,6 +3024,25 @@ states the six squares by hand instead, through `rvalue` and
 `backward`, and prints the failing `eq?` beside them so the gap is
 shown rather than described.
 
+*(Made in stage 6a½, 2026-09-14. The `PCon` case is deleted, the exit
+is applied whatever the parameter's kind, and `morphism Transpose :
+Fwd ⇒ Rev = transpose` is a declaration in the file: `lit`, `sample`
+and `observe` **proved**, `add`, `mul`, `neg`, `exp` and `sin`
+**sampled** through the exit. `lit` proves only because `rlit` now
+builds the zero linear map as `(0.0 ; scaleK)` — the table above
+predicted exactly that, and it is a real constraint: `lit`'s input is
+a `Float`, no `sample` reaches it, so a square like that must prove or
+the module is refused. The hand-stated squares and the printed `eq?`
+came out of §7 with the gap they demonstrated; what replaced them is
+three sentences and a declaration. Two things the fix did NOT buy: a
+theory with no exit still compares carriers directly — there is
+nothing else — though a failure now names the fix, and the sampled
+squares establish their claim at the exit, which here is the value.
+The verdicts are stored on the module and printed by `:morphisms`,
+because the gap was found by instrumenting the compiler with
+`Debug.Trace`, and a verdict that takes a recompile to read is a
+verdict nobody checks.)*
+
 A second, smaller finding rides along: `sameCode` here answers **false**
 rather than refusing. Everywhere else in the tree a verdict the
 normalizer cannot reach is a refusal, and `false` means *different
@@ -3087,6 +3106,17 @@ is a different piece of work.
   place, `sameCode` answers **false** rather than refusing when two
   quotations differ only in their captures — `false` should mean
   *different morphism*, and here it means *spelled differently*.
+  **CLOSED 2026-09-14 (stage 6a½)**: the `PCon` case is gone, so the
+  exit is applied whatever the parameter's kind, and
+  `morphism Transpose : Fwd ⇒ Rev` is declared in the flagship. What a
+  theory with no exit does is unchanged — it compares the carriers —
+  but a failure now names the fix (*declare an exit `observe` in the
+  theory*), and a square the normalizer PROVED is no longer sampled
+  besides. The `sameCode` half is **not** closed: it is still a
+  `false` where a refusal belongs, and it is what sends these squares
+  to the samples in the first place. What the machine checks about
+  `Transpose` is therefore what the exit can see — the value — and the
+  gradient half stays a printed check in §5 of the file.
 - **A model parameterized by a model** is not writable (2026-09-14): a
   `model` head names a declared data type, so nesting forward mode
   inside itself for second derivatives — `model Fwd(M) :
