@@ -2925,6 +2925,139 @@ Seven decisions worth the record.
    quite an Int literal.
 
 
+### The first flagship: `examples/autodiff.braid`
+
+**The thesis.** Differentiation is a functor into pairs of a value and
+a linear map — `D(f)(x) = (f x, f'(x)·—)` — and it is a functor
+*because* the chain rule says composition goes to composition
+(Elliott, *The simple essence of automatic differentiation*; READING).
+A model of a theory in Braid IS a functor out of the free category on
+that theory's generators. Put those two sentences together and the
+chain rule has nothing left to do: write the arithmetic as a `theory`,
+write differentiation as a `model` of it, and each slot says what the
+derivative of **one** operation is. Composition is the language's.
+
+The file contains **no `Code`, no `functor`, no `getCode` and no chain
+rule**, and that absence is the result. It is the argument for the top
+of §12's ladder over the bottom of it, made by a program that anyone
+would have expected to need syntax.
+
+**Forward and reverse are one linear map, twice.** `Fwd` carries the
+tangent — the map applied to a seeded direction. `Rev` carries the
+map's **transpose** as a continuation `Float ⇒ Grad`: given the adjoint
+of this node, return the gradient of the inputs. `morphism Transpose :
+Fwd ⇒ Rev` is the sentence that says they are the same map, and it is
+a declaration rather than a comment. Two consequences fall out that are
+usually engineering:
+
+- **Fan-out needs no special case.** Continuations are linear, so a
+  value used twice contributes twice: call its continuation twice and
+  add. There is no tape, no node id, no visit count. `k2` is four
+  words and is the whole of it.
+- **One reverse sweep gives every partial**, where forward mode needs
+  one run per input. The file prints both, at the same function, to
+  make the difference visible rather than asserted.
+
+**What the morphisms establish, measured.** `morphism Value : Fwd ⇒
+Floats = value` — forgetting the tangent — is the claim *AD computes
+the right value*, and **all eight squares are PROVED** by the
+normalizer (add, mul, neg, lit, exp, sin, sample, observe), not
+sampled. A `Dual` is two Float wires under a roll, `unDual` partitions
+into one track, and the whole square normalizes. That is the strongest
+verdict the machinery has and it is the one that matters here: the
+correctness claim about a differentiator is that it does not change the
+value.
+
+**THE EXIT PROBLEM, and how it was resolved.** A theory's exit is a
+SLOT, so it has one type for every model: `observe : a ⇒ Float`. `Rev`
+has two things to hand back — the value and the gradient — and the
+theory cannot ask for the second, because `Floats` and `Fwd` have
+none. A per-model exit would be a slot whose type varies with the
+model, which is not what a slot is; the alternatives (a second theory
+parameter, a sum-typed exit that three models fill differently) both
+buy the gradient by making the theory about reverse mode. So the exit
+is the VALUE, matching `Fwd`, and the gradient is read by an ordinary
+base word outside the theory: `backward : Rev ⇒ Grad`, which runs the
+accumulated continuation at adjoint `1.0`. *Entering is a marker,
+leaving is a model* already said the shape of this; what the flagship
+adds is that a carrier may have more to say on the way out than one
+slot can carry, and the answer is a word and not a bigger slot.
+
+**The gap `morphism` has, stated exactly.** `morphism Transpose : Fwd
+⇒ Rev = transpose` **cannot be declared as the machinery stands**, and
+the reason is the machinery and not the maths. When a theory's
+parameter is a WIRE rather than a hom-object, `sampledLaw`'s `observer`
+returns the empty stage — the theory's exit is NOT applied — on the
+reasoning that "a wire parameter is an ordinary type, since `eq?`
+reaches it". `eq?` does reach it; but a `Rev` holds a CLOSURE, and
+`eq?` on a quotation is syntactic. So the sampled square weighs two
+extensionally equal continuations that were built by different code,
+answers `false`, and the module is refused with *the square for slot
+'add' does not commute at the theory's samples*. `sameCode` answers
+`false` one step earlier for the same reason.
+
+Measured, not guessed, by instrumenting `checkMorphism`:
+
+| slot | verdict |
+|---|---|
+| `sample`, `observe` | proved by the normalizer |
+| `lit` | proved — *if* `rlit` is written `(c -> c (0.0 ; scaleK) ; Rev)`, the zero linear map, rather than `[(d -> gzero)]`; otherwise not provable, and **not statable** either, because `lit`'s input is a `Float` and no `sample` supplies one |
+| `add`, `mul`, `neg`, `exp`, `sin` | sampled, and FALSE |
+
+Note where the gap lives: it is exactly the **wire-parameter** case. A
+theory declared `over Doctrine`, whose parameter is a hom-object, takes
+the other branch of `observer` and goes through the exit already. So
+the machinery was right for the case it was written against
+(`examples/morphisms.braid`'s `Forget`) and wrong for the first theory
+that put a function inside an ordinary carrier. `Smooth(a)` is an
+algebraic theory over one carrier — a ring — and not a category with a
+hom-object, which is why it is not declared `over Doctrine`: Elliott's
+functor is between categories, and the model of an algebraic theory is
+the same statement one level down, on the free category the theory's
+generators present.
+
+The fix is one line — apply the theory's exit for a wire parameter too,
+i.e. delete the `PCon` special case in `observer` — and it is
+deliberately NOT made in this stage, because a stage that finds a gap
+and patches it in the same breath has not tested anything. The file
+states the six squares by hand instead, through `rvalue` and
+`backward`, and prints the failing `eq?` beside them so the gap is
+shown rather than described.
+
+A second, smaller finding rides along: `sameCode` here answers **false**
+rather than refusing. Everywhere else in the tree a verdict the
+normalizer cannot reach is a refusal, and `false` means *different
+morphism*. For two quotations that close over different captures it
+means *spelled differently* — the 2026-09-13 amendment's fallback
+("a refusal there falls back to the old syntactic `false`") reached
+further than expected once carriers began holding closures.
+
+**The `Gradient` resource.** `Rev` SUMS: every node returns a gradient
+and `gadd` merges them coming back. The last section threads ONE
+accumulator through the whole reverse sweep instead and lets the leaves
+add into it — the same functor with the adjoint threaded rather than
+summed, a fourth model `RevThread : Smooth(RevG)`, and a program typed
+`Float ρ0 =RevThread Gradient> ρ0`: two receipts on one arrow, which
+model read the template and which resource the scope threaded. It is
+installed by rolling a `gzero` and discharged by unrolling, exactly as
+`metered.braid` installs and discharges `Fuel`; there is no handler
+keyword and none was wanted. What it cost to write is one sentence
+worth recording: **`Fn⟨Gradient Float ⇒ Gradient⟩` has to be written
+out in the `data` declaration**, because the `=Gradient>` fold is
+display and does not run backwards.
+
+**What is not built, and why it is not a small step.** Second
+derivatives need `Fwd` to be a model of `Smooth(Dual(a))` for ANY model
+of `Smooth(a)` — a model **parameterized by a model**. A `model` head
+names a declared data type, so `model Fwd(M) : Smooth(Dual(M))` is not
+writable; templates are parameterized by a model and models are not.
+That is the honest shape of the missing feature and it is a real one.
+Wang–Rompf's per-node accumulator (shift/reset; READING) wants a
+reified graph — a map from node ids to partial sums — which is a data
+structure nobody has built here. And `Grad` is two slots because a
+gradient indexed by its inputs is `Fin(n)` work joined to this, which
+is a different piece of work.
+
 ## Honest gaps
 
 - **Error provenance** remains the biggest gap in the language, and
@@ -2945,6 +3078,20 @@ Seven decisions worth the record.
   slot — each applies an `Fn` whose input stack is an open variable, so
   there is no arity to give it. Those laws are still stated with `eq?`
   and labelled syntactic.
+- **A sampled `morphism` square over a wire parameter compares
+  CARRIERS with `eq?`** (2026-09-14), and a carrier may hold a closure,
+  where `eq?` is syntactic. The theory's exit is applied only when the
+  parameter is a constructor. Found by `examples/autodiff.braid`'s
+  `Fwd ⇒ Rev`, whose squares commute and are reported as not
+  commuting; the fix is one line and is not made yet. In the same
+  place, `sameCode` answers **false** rather than refusing when two
+  quotations differ only in their captures — `false` should mean
+  *different morphism*, and here it means *spelled differently*.
+- **A model parameterized by a model** is not writable (2026-09-14): a
+  `model` head names a declared data type, so nesting forward mode
+  inside itself for second derivatives — `model Fwd(M) :
+  Smooth(Dual(M))` — cannot be said. Templates are parameterized by a
+  model; models are not.
 - **`morphism` is shipped** (2026-09-13), and what is still missing is
   narrower: a square over a model whose slots are folds is decided at
   SAMPLES, not proved, because equality modulo a model's defining

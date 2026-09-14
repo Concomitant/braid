@@ -2207,6 +2207,23 @@ below for where the guarantees stop. The word `functor` names the
 non-tabular case deliberately: it is the escape hatch, not the front
 door.
 
+**The worked example of rungs 1–3 is `examples/autodiff.braid`**
+*(2026-09-14)*, and it is worth reading precisely for what it does
+*not* contain: no `Code`, no `functor`, no `getCode`, and no chain
+rule. Differentiation is a functor into pairs of a value and a linear
+map (Elliott; §16), a model of a theory *is* a functor out of the free
+category on the theory's generators, so the chain rule is the
+statement that composition goes to composition — which is what a model
+already promises. The file writes `theory Smooth(a)` (a ring with
+`exp` and `sin`), three models of it — `Floats` evaluates, `Fwd`
+carries a tangent, `Rev` carries the transpose of the same linear map
+as a continuation — and one body per program, written `over Smooth`
+and read by all three. Each slot says what the derivative of **one**
+operation is; nothing composes derivatives by hand, because `;` does.
+`morphism Value : Fwd ⇒ Floats = value` is the sentence *AD computes
+the right value*, and all eight of its squares are **proved** by the
+normalizer rather than sampled.
+
 ### `Code`: reflection and splicing
 
 `reflect` turns a quotation into its **spine**: `Code = List(Stage)`,
@@ -2715,6 +2732,20 @@ holds for them too: final atom of their stage (§9).
   sum whose row is a bare tail — and each refusal names itself (§12.9).
   If a law you want is refused, read the message: it says which of
   those it is.
+- **A sampled square compares carriers with `eq?`, and a carrier may
+  hold a closure** *(2026-09-14)*. When a theory's parameter is a
+  **wire** (rather than a hom-object), the square a `morphism`
+  generates is sampled by comparing the two carrier values directly —
+  the theory's exit is not applied, on the reasoning that `eq?` reaches
+  an ordinary type. It does; but `eq?` on a quotation is **syntactic**,
+  so a carrier whose payload is an `Fn` — reverse-mode AD's
+  `data Rev = Float Fn⟨Float ⇒ Grad⟩` is the case that found this — is
+  weighed by spelling. Two extensionally equal continuations built by
+  different code answer `false`, and the square is reported as not
+  commuting at the samples when it does commute. `examples/autodiff.braid`
+  §7 shows the comparison failing next to the same square passing
+  through the exits, and states the one-line fix (apply the exit for a
+  wire parameter too) that is deliberately not made yet.
 - **`| ...` no longer means the residual** *(2026-09-12)*. It is
   refused, for one release, with the message *"`| ...` used to mean the
   residual; write `| ---` for more alternatives, or `| pass` for a
@@ -2820,7 +2851,22 @@ flow that is all ordinary defs), `theories.braid` (theories and
 models), `circuits.braid` (a stream transducer — a genuinely
 different category — as data plus a composition word plus
 `theory Arrow(k(_, _))`, the Arrow interface stated once over a
-constructor parameter and audited against two models).
+constructor parameter and audited against two models), and
+`autodiff.braid` (below).
+
+**Differentiation is a model** *(2026-09-14)* — the worked example
+that ties every row of the table together, and the one to read after
+`theories.braid`. `examples/autodiff.braid` declares `theory
+Smooth(a)`, three `data` carriers, three models (evaluation, forward
+mode, reverse mode), three programs written `over Smooth` and read by
+all three, a `morphism` whose squares are proved, Newton's method
+under `use Recursive`, and a fourth model in which the adjoint is
+threaded through a `resource` instead of summed. It contains no
+`Code`, no `functor` and no chain rule: the chain rule is what a model
+*is*. It also records, in the file, the two places the declaration
+layer did not reach — a model parameterized by a model (second
+derivatives), and a sampled square over a carrier that holds a closure
+(§14).
 
 **An effectful arrow is a resource + a macro + a theory**: the resource
 carries the state, the macro installs and discharges it, and the theory

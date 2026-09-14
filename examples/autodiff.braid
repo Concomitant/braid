@@ -1,0 +1,457 @@
+# AUTOMATIC DIFFERENTIATION, as a model of a theory.
+#
+# The thesis (Elliott, *The simple essence of automatic
+# differentiation*; READING): differentiation is a FUNCTOR into pairs
+# of a value and a LINEAR MAP — D(f)(x) = (f x, f'(x)·—) — and it is a
+# functor because the chain rule says exactly that composition goes to
+# composition.  A model of a theory in Braid IS a functor out of the
+# free category on the theory's generators.  So: write the arithmetic
+# as a THEORY, write differentiation as a MODEL of it, and the chain
+# rule is not a rule any more.  It appears NOWHERE in this file.  What
+# appears instead is one slot per generator, each saying what the
+# derivative of that ONE operation is; composition is the language's.
+#
+# Three models of one theory: `Floats` evaluates, `Fwd` carries a
+# tangent (forward mode), `Rev` carries the TRANSPOSE of the same
+# linear map as a continuation (reverse mode).  Forward and reverse are
+# not two algorithms here; they are two REPRESENTATIONS of one linear
+# map, and `morphism Transpose : Fwd ⇒ Rev` is the sentence that would
+# say so — §7 records, precisely, why the machinery cannot yet accept
+# that declaration, and states the squares by hand instead.  A fourth
+# model in §8 threads the adjoint through a resource.
+#
+# There is no `Code`, no `functor`, no `getCode` anywhere below.  This
+# is not metaprogramming: it is one theory, four models, one declared
+# morphism and a resource.  Binders throughout, so every slot body
+# reads as the arithmetic it is.
+
+# ---------------------------------------------------------------------
+# 1. The theory: a commutative ring with exp and sin, over one carrier
+# ---------------------------------------------------------------------
+# `sample` is the evidence a parametric law runs on (a law cannot
+# invent a value of `a`).  `observe` is the EXIT: the one slot that
+# takes the carrier and hands back base, so a law can compare results.
+# Everything below is stated at `observe`, because two carriers cannot
+# be compared — `Rev`'s carrier holds a closure.
+#
+# `Smooth` is NOT declared `over Doctrine`.  The doctrine's carrier is
+# a hom-object `k(a, b)` — a category of arrows — and this is an
+# algebraic theory over ONE carrier: a ring.  Elliott's functor is
+# between categories; a model of an algebraic theory is the same
+# statement one level down, on the free category its generators
+# present.  (§7 records what that choice cost.)
+
+theory Smooth(a) =
+    add     : a a ⇒ a
+    mul     : a a ⇒ a
+    neg     : a ⇒ a
+    lit     : Float ⇒ a
+    exp     : a ⇒ a
+    sin     : a ⇒ a
+    sample  : • ⇒ a
+    observe : a ⇒ Float
+    # The ring laws, at the theory's own evidence.  They are exact at
+    # these points — 1.5, 2.0 and 3.0 are dyadic rationals with small
+    # mantissas, so every sum and product below is a double with no
+    # rounding.  At other points they would NOT be exact: `Float`
+    # arithmetic is a ring only up to rounding, and stating the laws at
+    # samples is the only honest way to state them at all.
+    law addComm  = (sample (2.0 ; lit) ; add ; observe) ((2.0 ; lit) sample ; add ; observe) ; eq? ; verdict
+    law addAssoc = ((sample (2.0 ; lit) ; add) (3.0 ; lit) ; add ; observe) (sample ((2.0 ; lit) (3.0 ; lit) ; add) ; add ; observe) ; eq? ; verdict
+    law mulComm  = (sample (2.0 ; lit) ; mul ; observe) ((2.0 ; lit) sample ; mul ; observe) ; eq? ; verdict
+    law mulAssoc = ((sample (2.0 ; lit) ; mul) (3.0 ; lit) ; mul ; observe) (sample ((2.0 ; lit) (3.0 ; lit) ; mul) ; mul ; observe) ; eq? ; verdict
+    law distrib  = ((sample (2.0 ; lit) ; add) (3.0 ; lit) ; mul ; observe) ((sample (3.0 ; lit) ; mul) ((2.0 ; lit) (3.0 ; lit) ; mul) ; add ; observe) ; eq? ; verdict
+    law addUnit  = (sample (0.0 ; lit) ; add ; observe) (sample ; observe) ; eq? ; verdict
+    law mulUnit  = (sample (1.0 ; lit) ; mul ; observe) (sample ; observe) ; eq? ; verdict
+    law negAdd   = (sample (sample ; neg) ; add ; observe) (0.0 ; lit ; observe) ; eq? ; verdict
+
+# ---------------------------------------------------------------------
+# 2. Evaluation — the model everything else is compared against
+# ---------------------------------------------------------------------
+# The carrier is `Float` itself, so `lit` and `observe` are both the
+# identity.  This is the model that says what the programs MEAN.
+
+model Floats : Smooth(Float) =
+    add     = fadd
+    mul     = fmul
+    neg     = fneg
+    lit     = id
+    exp     = fexp
+    sin     = fsin
+    sample  = 1.5
+    observe = id
+
+# ---------------------------------------------------------------------
+# 3. Forward mode — the value, paired with a tangent
+# ---------------------------------------------------------------------
+# `Dual` is (value, tangent): the value of the expression and its
+# derivative along ONE seeded direction.  Each slot says what the
+# derivative of that one operation is, LOCALLY — `d(a·b) = a·db + da·b`
+# is written once, in `dmul`, and nothing anywhere composes derivatives
+# by hand.
+#
+# Seed the input with tangent 1.0 and the tangent that comes out IS the
+# derivative: `(x 1.0 ; Dual)` is `x` with `dx/dx = 1`.
+
+data Dual = Float Float
+
+def dadd = unDual _ ; _ _ unDual ; (a da b db -> (a b ; fadd) (da db ; fadd) ; Dual)
+def dmul = unDual _ ; _ _ unDual ; (a da b db -> (a b ; fmul) ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual)
+def dneg = unDual ; (a da -> (a ; fneg) (da ; fneg) ; Dual)
+# a literal is constant, so its tangent is 0
+def dlit = (c -> c 0.0 ; Dual)
+# d(exp x) = exp x · dx, and the value is shared with the tangent
+def dexp = unDual ; (a da -> (a ; fexp) ; (e -> e (e da ; fmul) ; Dual))
+# d(sin x) = cos x · dx — the one place `fcos` is needed at all
+def dsin = unDual ; (a da -> (a ; fsin) ((a ; fcos) da ; fmul) ; Dual)
+def value   = unDual ; (v t -> v)
+def tangent = unDual ; (v t -> t)
+
+model Fwd : Smooth(Dual) =
+    add     = dadd
+    mul     = dmul
+    neg     = dneg
+    lit     = dlit
+    exp     = dexp
+    sin     = dsin
+    sample  = 1.5 1.0 ; Dual
+    observe = value
+
+# ---------------------------------------------------------------------
+# 4. Reverse mode — the value, paired with the TRANSPOSE of that map
+# ---------------------------------------------------------------------
+# `Grad` is a FIXED TWO-SLOT gradient record.  A gradient wants to be a
+# map from input names to partials; Braid has no such data structure
+# and building one is not this file's job, so the record is two slots,
+# `gx` and `gy` seed them, and `gadd` adds two of them.  That is enough
+# for a two-input function and it is exactly as far as it goes.
+#
+# A `Rev` is the value and a CONTINUATION `Float ⇒ Grad`: given the
+# adjoint of this node (∂output/∂here), it returns the gradient of the
+# INPUTS.  That is the transpose of the linear map `Fwd` carries —
+# forward pushes a tangent along the arrow, reverse pulls an adjoint
+# back — and the slots build it during the forward pass.
+#
+# FAN-OUT NEEDS NO SPECIAL CASE.  Every continuation is LINEAR, so a
+# value used twice contributes twice, and calling its continuation
+# twice and adding is exactly right.  `k2` below is where that happens
+# and it is the whole of it: no tape, no node ids, no visit counting.
+
+data Grad = Float Float
+data Rev  = Float Fn⟨Float ⇒ Grad⟩
+
+def gzero = 0.0 0.0 ; Grad
+def gx    = (d -> d 0.0 ; Grad)
+def gy    = (d -> 0.0 d ; Grad)
+def gadd  = unGrad _ ; _ _ unGrad ; (u v s t -> (u s ; fadd) (v t ; fadd) ; Grad)
+
+# two continuations, each given its own share of the adjoint, summed.
+# Linearity is what makes this a sum rather than a merge.
+def k2 = (ka da kb db -> ka da ; ev ; (ga -> kb db ; ev ; (gb -> ga gb ; gadd)))
+
+# the linear map "scale by dx", as a continuation into the x slot
+def scaleK = (dx -> [(d -> (d dx ; fmul) ; gx)])
+
+def radd = unRev _ ; _ _ unRev ; (a ka b kb -> (a b ; fadd) [(d -> ka d kb d ; k2)] ; Rev)
+def rmul = unRev _ ; _ _ unRev ; (a ka b kb -> (a b ; fmul) [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev)
+def rneg = unRev ; (a ka -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev)
+# a literal depends on no input: its continuation is the zero map
+def rlit = (c -> c [(d -> gzero)] ; Rev)
+def rexp = unRev ; (a ka -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Rev))
+def rsin = unRev ; (a ka -> (a ; fsin) [(d -> ka (d (a ; fcos) ; fmul) ; ev)] ; Rev)
+def rvalue = unRev ; (v k -> v)
+
+# THE EXIT PROBLEM, and how it is resolved here.
+#
+# A theory's exit is a SLOT, so it has ONE type for every model:
+# `observe : a ⇒ Float`.  `Rev` has two things to hand back — the value
+# and the gradient — and the theory cannot ask for the second, because
+# `Floats` and `Fwd` have no gradient to give.  A per-model exit is not
+# expressible: that would be a slot whose type varies with the model,
+# which is not what a slot is.
+#
+# So the theory's exit is the VALUE, matching `Fwd`, and the gradient
+# is read by an ordinary base word OUTSIDE the theory.  `backward` runs
+# the accumulated continuation at adjoint 1.0 — "the derivative of the
+# output with respect to itself is 1" — and that is the whole of the
+# reverse sweep.
+def backward = unRev ; (v k -> k 1.0 ; ev)
+
+# the two input seeds: x is "the thing whose adjoint lands in slot 1"
+def seedX = (x -> x [gx] ; Rev)
+def seedY = (y -> y [gy] ; Rev)
+
+model Rev : Smooth(Rev) =
+    add     = radd
+    mul     = rmul
+    neg     = rneg
+    lit     = rlit
+    exp     = rexp
+    sin     = rsin
+    # the transpose of `Fwd`'s own sample: value 1.5, tangent 1.0
+    sample  = 1.5 (1.0 ; scaleK) ; Rev
+    observe = rvalue
+
+# ---------------------------------------------------------------------
+# 5. Programs, written ONCE, over the theory
+# ---------------------------------------------------------------------
+# `over Smooth` makes each of these a TEMPLATE: a morphism of the
+# theory, waiting for a model.  Nothing here knows what a derivative
+# is.
+
+#   p(x) = x³ − 2x + 1
+def poly = over Smooth ; (x -> ((x x ; mul) x ; mul) ((2.0 ; lit) x ; mul ; neg) ; add ; (1.0 ; lit) ... ; add)
+#   w(x) = sin(2x²)
+def wave = over Smooth ; (x -> (2.0 ; lit) (x x ; mul) ; mul ; sin)
+#   f(x, y) = x·y + sin x
+def fxy  = over Smooth ; (x y -> (x y ; mul) (x ; sin) ; add)
+
+def polyF = use Floats ; poly
+def polyD = use Fwd    ; poly
+def polyR = use Rev    ; poly
+def waveF = use Floats ; wave
+def waveD = use Fwd    ; wave
+def waveR = use Rev    ; wave
+def fxyF  = use Floats ; fxy
+def fxyD  = use Fwd    ; fxy
+def fxyR  = use Rev    ; fxy
+#   polyF : Float =Floats> Float,  polyD : Dual =Fwd> Dual,
+#   polyR : Rev =Rev> Rev — one body, three principal types, and the
+#   label on each arrow is the RECEIPT of the model that read it.
+
+"-- p(x) = x^3 - 2x + 1, at x = 2 --" ; print
+2.0 ; polyF ; print                                       # 5.0     = 8 - 4 + 1
+(2.0 1.0 ; Dual) ; polyD ; unDual ; print ... ; print      # 5.0, then
+                                                          # 10.0    = 3*4 - 2
+(2.0 ; seedX) ; polyR ; rvalue ; print                     # 5.0
+(2.0 ; seedX) ; polyR ; backward ; unGrad ; print ... ; print   # 10.0, then 0.0
+                                                          # (nothing depends on y)
+
+"-- w(x) = sin(2x^2), at x = 2 --" ; print
+2.0 ; waveF ; print                       # 0.9893582466233818  = sin 8
+(2.0 1.0 ; Dual) ; waveD ; tangent ; print
+                                          # -1.1640002704689083 = 8*cos 8,
+                                          #   cos 8 = -0.14550003380861354
+(2.0 ; seedX) ; waveR ; backward ; unGrad ; print ... ; print
+                                          # -1.1640002704689083, then 0.0
+
+"-- f(x, y) = x*y + sin x, at (2, 3) --" ; print
+2.0 3.0 ; fxyF ; print                    # 6.909297426825682  = 6 + sin 2,
+                                          #   sin 2 = 0.9092974268256817
+(2.0 1.0 ; Dual) (3.0 0.0 ; Dual) ; fxyD ; tangent ; print
+                                          # 2.5838531634528574 = y + cos x
+                                          #   = 3 - 0.4161468365471424
+(2.0 0.0 ; Dual) (3.0 1.0 ; Dual) ; fxyD ; tangent ; print   # 2.0  = x
+# ONE reverse sweep gives BOTH partials; forward mode needed two runs.
+(2.0 ; seedX) (3.0 ; seedY) ; fxyR ; backward ; unGrad ; print ... ; print
+                                          # 2.5838531634528574, then 2.0
+
+# ---------------------------------------------------------------------
+# 6. Newton's method, under `Fwd`
+# ---------------------------------------------------------------------
+# x ← x − p(x)/p′(x), with BOTH numbers coming out of one evaluation of
+# `polyD` — which is the reason to have a derivative at all.  `use
+# Recursive` puts `newton` in scope in its own body; the tolerance test
+# is `fabs` and `flt?`, because `eq?` on Floats is exact and exactness
+# is not what a root finder wants.
+
+def step = unDual ; (v d -> v d ; fdiv)
+
+def close? = (r -> (r ; value ; fabs) 0.0000001 ; flt?)
+
+def newton =
+    use Recursive
+    x ->
+    (x 1.0 ; Dual) ; polyD
+    (r -> r ; close? ; ((s t -> x) | (s t -> x (r ; step) ; fsub ; newton)) ; merge)
+#   newton : Float =Fwd Recursive> Float
+
+"-- a root of p, from x0 = 1.5 --" ; print
+1.5 ; newton ; print           # 1.0000000000000777 — p(1) = 1 - 2 + 1 = 0,
+                               #   so the root is 1.0 and this is it to
+                               #   within the tolerance asked for
+1.5 ; newton ; polyF ; print   # 0.00000000000007771561172376096 — under 1e-7.
+                               #   The display never uses exponent notation,
+                               #   so a small number is long; it is also
+                               #   exactly what it says it is.
+
+# ---------------------------------------------------------------------
+# 7. The morphisms — what the squares establish, and what they cannot
+# ---------------------------------------------------------------------
+# FORGETTING THE TANGENT IS A HOMOMORPHISM.  That single declaration is
+# the statement "AD computes the right value": for every generator, the
+# square
+#
+#     Fwd@s ; Value  =  Value…Value ; Floats@s
+#
+# commutes.  All EIGHT of them — add, mul, neg, lit, exp, sin, sample
+# and observe — are PROVED by the normalizer, for every input, not
+# sampled.  A `Dual` is two Float wires with a roll around it, so
+# `unDual` partitions into one track and the whole square normalizes.
+
+morphism Value : Fwd ⇒ Floats = value
+#   Value : Dual ⇒ Float — the component is an ordinary word
+
+# A TANGENT BECOMES THE LINEAR MAP THAT SCALES BY IT.  That is the
+# sentence "forward and reverse are two representations of the same
+# linear map", and `transpose` is the component that says it.
+def transpose = unDual ; (x dx -> x (dx ; scaleK) ; Rev)
+#   transpose : Dual ⇒ Rev
+
+# `morphism Transpose : Fwd ⇒ Rev = transpose` IS NOT DECLARED, and the
+# reason is a gap in the machinery rather than a fact about the maths.
+# Run as it stands, it is refused:
+#
+#   morphism Transpose: the square for slot 'add' does not commute at
+#   the theory's samples — a morphism of models is a homomorphism, slot
+#   by slot
+#
+# Why.  When a theory's parameter is a WIRE (rather than a hom-object),
+# the generated square is sampled by comparing two CARRIERS with `eq?`
+# directly — the exit is not applied, on the reasoning that "`eq?`
+# reaches an ordinary type".  It does; but a `Rev` holds a CLOSURE, and
+# `eq?` on two closures is syntactic.  The two sides of these squares
+# build extensionally equal continuations out of different code, so the
+# comparison answers `false` — and `false` here means "spelled
+# differently", not "different function".  `sameCode` answers `false`
+# too, for the same reason one step earlier.
+#
+# What DOES decide, measured rather than guessed:
+#   proved by the normalizer : sample, observe  (and `lit`, if `rlit`
+#                              is written `(c -> c (0.0 ; scaleK) ; Rev)`
+#                              — the zero linear map — instead of
+#                              `[(d -> gzero)]`)
+#   sampled, and FAILS       : add (and mul, neg, exp and sin, which
+#                              are the same comparison — the check stops
+#                              at the first)
+#   cannot be stated at all  : `lit`, whose input is a `Float` and not
+#                              the parameter, so no `sample` supplies it
+# The fix is one line in `sampledLaw` — apply the theory's exit for a
+# wire parameter too — and it is deliberately NOT made in this stage.
+#
+# So the squares are stated here by hand, through the exits: `rvalue`
+# for the value and `backward` for the gradient.  That is exactly what
+# the generated square would compare if the exit were applied.
+
+def revEq = (p q -> ((p ; rvalue) (q ; rvalue) ; eq? ; verdict) ((p ; backward) (q ; backward) ; eq? ; verdict) ; and)
+
+# two sample Duals, and the component applied to each
+def dA = 1.5 1.0 ; Dual
+def dB = 2.5 0.5 ; Dual
+def tA = dA ; transpose
+def tB = dB ; transpose
+
+def sqAdd = (dA dB ; dadd ; transpose) (tA tB ; radd) ; revEq
+def sqMul = (dA dB ; dmul ; transpose) (tA tB ; rmul) ; revEq
+def sqNeg = (dA ; dneg ; transpose) (tA ; rneg) ; revEq
+def sqExp = (dA ; dexp ; transpose) (tA ; rexp) ; revEq
+def sqSin = (dA ; dsin ; transpose) (tA ; rsin) ; revEq
+def sqLit = (2.0 ; dlit ; transpose) (2.0 ; rlit) ; revEq
+
+"-- Transpose's squares, through the exits (alt1 = commutes) --" ; print
+sqAdd ; print       # alt1()
+sqMul ; print       # alt1() — the square the chain rule would have been for
+sqNeg ; print       # alt1()
+sqExp ; print       # alt1()
+sqSin ; print       # alt1()
+sqLit ; print       # alt1() — the square the generator could not even state
+
+# …and here is the comparison the generated square makes instead: two
+# `Rev` carriers, weighed with `eq?`.  Same two values as `sqMul`.
+(dA dB ; dmul ; transpose) (tA tB ; rmul) ; eq? ; verdict ; print
+                    # alt2() — FALSE.  Not because the square fails but
+                    # because a `Rev` holds a closure and `eq?` on two
+                    # closures is syntactic.  That is the gap, shown
+                    # rather than described.
+
+# ---------------------------------------------------------------------
+# 8. The same functor with the adjoint THREADED
+# ---------------------------------------------------------------------
+# `Rev` above SUMS: every node returns a gradient and `gadd` merges
+# them on the way back.  The alternative is to thread one accumulator
+# through the whole reverse sweep and let the LEAVES add their adjoint
+# into it.  That accumulator is a resource, and the continuations then
+# return nothing at all.
+#
+# Note what has to be written out: `Fn⟨Gradient Float ⇒ Gradient⟩`.
+# The `=Gradient>` fold is display and does not run backwards, so a
+# `data` field that is a resource-threading function names the wire.
+
+resource Gradient = Grad
+data RevG = Float Fn⟨Gradient Float ⇒ Gradient⟩
+
+def emit = unGradient _ ; gadd ; Gradient          # Grad =Gradient> •
+def kx = [(gr d -> gr (d ; gx) ; emit)]
+def ky = [(gr d -> gr (d ; gy) ; emit)]
+
+def tadd = unRevG _ ; _ _ unRevG ; (a ka b kb -> (a b ; fadd) [(gr d -> ka gr d ; ev ; (g2 -> kb g2 d ; ev))] ; RevG)
+def tmul = unRevG _ ; _ _ unRevG ; (a ka b kb -> (a b ; fmul) [(gr d -> ka gr (d b ; fmul) ; ev ; (g2 -> kb g2 (d a ; fmul) ; ev))] ; RevG)
+def tneg = unRevG ; (a ka -> (a ; fneg) [(gr d -> ka gr (d ; fneg) ; ev)] ; RevG)
+def tlit = (c -> c [(gr d -> gr)] ; RevG)
+def texp = unRevG ; (a ka -> (a ; fexp) ; (e -> e [(gr d -> ka gr (d e ; fmul) ; ev)] ; RevG))
+def tsin = unRevG ; (a ka -> (a ; fsin) [(gr d -> ka gr (d (a ; fcos) ; fmul) ; ev)] ; RevG)
+def tvalue = unRevG ; (v k -> v)
+def tseedX = (x -> x kx ; RevG)
+
+model RevThread : Smooth(RevG) =
+    add     = tadd
+    mul     = tmul
+    neg     = tneg
+    lit     = tlit
+    exp     = texp
+    sin     = tsin
+    sample  = 1.5 kx ; RevG
+    observe = tvalue
+
+def polyT = use RevThread ; poly
+# run the reverse sweep at adjoint 1.0, threading the accumulator
+def discharge = (gr r -> r ; unRevG ; (v k -> k gr 1.0 ; ev))
+
+def gradPoly =
+    use Gradient
+    tseedX
+    polyT
+    discharge
+#   gradPoly : Float ρ0 =RevThread Gradient> ρ0 — TWO receipts on one
+#   arrow: which model read the template, and which resource the scope
+#   threaded.  The tail is open because a routed scope pads with `...`.
+
+"-- the same gradient, threaded instead of summed --" ; print
+(gzero ; Gradient) 2.0 ; gradPoly ; unGradient ; unGrad ; print ... ; print
+                                          # 10.0, then 0.0 — the same two
+                                          # numbers §5 printed for polyR
+# installed at the site with `gzero`, discharged with `unGradient`.
+# There is no handler keyword: a resource is installed by rolling one
+# and discharged by unrolling it, which is all `metered.braid` does too.
+
+# ---------------------------------------------------------------------
+# 9. What is NOT built, plainly
+# ---------------------------------------------------------------------
+# SECOND DERIVATIVES.  Nesting `Fwd` inside itself needs `Fwd` to be a
+# model of `Smooth(Dual(a))` for ANY model of `Smooth(a)` — a model
+# PARAMETERIZED BY A MODEL.  Braid has templates parameterized by a
+# model (`over Smooth`), but a `model` head names a declared type, not
+# a model variable, so `model Fwd(M) : Smooth(Dual(M))` cannot be
+# written.  Differentiating twice here means writing the second model
+# out by hand.
+#
+# THE PER-NODE ACCUMULATOR.  Wang & Rompf's shift/reset backpropagator
+# (READING) gives each node ONE accumulator cell visited once, rather
+# than a continuation called once per use.  That wants a reified graph
+# — a map from node ids to partial sums — which is a data structure,
+# and no data structure is built here.  §8's resource threads ONE
+# accumulator for the whole sweep, which is the same trick at the
+# leaves and not at the nodes.
+#
+# THE GRADIENT RECORD IS TWO SLOTS.  `Grad` is fixed at x and y.  A
+# real gradient is indexed by the inputs; `examples/index.braid` has
+# the machinery (`Fin(n)`, `at`, bundles) and joining it to this is a
+# different piece of work.
+#
+# THE TRANSPOSE SQUARE IS NOT MACHINE-CHECKED — see §7.  It is checked
+# here at points, by hand, through the exits.
+#
+# `examples/transpose.braid` is the linear-algebra view of the same
+# operation: reversing a diagram and dualizing each generator
+# (copy ↔ add) is transposition, done there on reflected `Code`.  This
+# file does it on VALUES instead, and the two never meet.

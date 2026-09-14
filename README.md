@@ -83,7 +83,7 @@ bare `use Log` line opens an ambient scope over the rest of the
 session — the resource threads itself through every later line, and a
 bare `use` leaves.
 
-## A tour, in fifteen ideas
+## A tour, in sixteen ideas
 
 1. **Everything exact.** Constants are maps from nothing (`1 : • ⇒
    Int`), operations consume exactly their inputs (`+ : Int Int ⇒
@@ -379,6 +379,36 @@ bare `use` leaves.
     reported. What does not travel is the imported file's main program,
     so a library keeps its own demo. Nothing needed machinery of its
     own; the composite is checked as a single module.
+16. **Differentiation is a model.** Not a library, not a macro, not a
+    `Code ⇒ Code` pass. Differentiation is a functor into pairs of a
+    value and a linear map (Elliott), a model of a theory *is* a
+    functor out of the free category on that theory's generators —
+    so writing arithmetic as a `theory` and AD as a `model` of it
+    leaves the chain rule with nothing to do. It appears nowhere in
+    `examples/autodiff.braid`. What appears instead is one slot per
+    generator, each saying what the derivative of that **one**
+    operation is; composition is the language's.
+    ```text
+    theory Smooth(a) = add : a a ⇒ a ; mul : a a ⇒ a ; … ; observe : a ⇒ Float
+
+    def dmul = unDual _ ; _ _ unDual
+             ; (a da b db -> (a b ; fmul) ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual)
+
+    def poly = over Smooth ; (x -> …)      # written once
+    def polyD = use Fwd ; poly             # Dual =Fwd> Dual
+    ```
+    Three models of the one theory: `Floats` evaluates, `Fwd` carries a
+    tangent (forward mode), `Rev` carries the **transpose** of that same
+    linear map as a continuation (reverse mode) — so forward and reverse
+    are two representations of one map rather than two algorithms, and
+    fan-out needs no special case because continuations are linear.
+    `morphism Value : Fwd ⇒ Floats = value` says *AD computes the right
+    value*, and all eight of its squares are **proved**, not sampled.
+    Newton's method comes along under `use Recursive`, and a fourth
+    model threads the adjoint through a `resource` instead of summing
+    it. `Float` itself arrived for this (a base type beside `Int`,
+    sharing no word with it), and the file says plainly what is not
+    built: second derivatives want a model parameterized by a model.
 
 ## Examples
 
@@ -406,6 +436,8 @@ meeting in one pass over data),
 `code`, `transpose`, `io`, `witness` (the program as its own witness),
 `traced` and `metered` (functors: a tracer that lifts at every cut,
 a resource metered by one checked interposition),
+`autodiff` (the flagship: automatic differentiation as three models of
+one theory of arithmetic — no `Code`, no chain rule),
 `imports` (one file's declarations in another file's scope) — and finish with
 `registrar`, which uses most of the language in forty lines about
 grade school.
@@ -424,7 +456,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1035-case test suite, a full
+(typechecker, interpreter, REPL), a 1036-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
