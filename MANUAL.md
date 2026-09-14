@@ -1646,9 +1646,11 @@ slot to theory Mag, or state the square as a law of the theory.* A
 square that runs and comes out false names the slot too: *the square
 for slot 'unit' does not commute at the theory's samples*.
 
-The component is an ordinary **word** under the morphism's own name —
-`Len : List(Int) ⇒ Int` — forward-declared at the type the two model
-heads wrote, so a def may use it wherever it sits. `use Len` (reading a
+The component is an ordinary **word** under the morphism's own name,
+forward-declared at the type the two model heads wrote
+(`List(Int) ⇒ Int`), so a def may use it wherever it sits — and then
+typed like any def, which may be more general (`Len : List(a) ⇒ Int`,
+since `len` counts anything). `use Len` (reading a
 template through one model and landing in another) is **not** shipped:
 it wants a second elaboration of the template, and nothing has asked
 for it yet.
@@ -2220,7 +2222,7 @@ per use:
 | `interpose [η]` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `interpose` itself, by subsumption |
 | `use Inst` for a model | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
 | a model of `Base`, `model Opt : Base = p = q, …` | a typed generator image, applied atomwise | `subsumes`, once per binding at the declaration (§8) |
-| a **transport** `use Circuits` on a model whose theory has a hom-object | a model applied to COMPOSITION: a stage ↦ the embedding, `;` ↦ the composition | `checkInstance` on the slots, once, plus the shape reading at the `model` line (§8) |
+| a **transport** `use Circuits` on a model whose theory is declared `over Doctrine` | a model applied to COMPOSITION: a stage ↦ the embedding, `;` ↦ the composition | `checkInstance` on the slots, once, plus the doctrine's claim checked at the `theory` line (§8) |
 | `lift2 [m]` on any `Code ⇒ Code` `m` | the runtime lift | per program, at run time; never fails — it falls back |
 
 Everything not in the table — delete a stage, reorder, reverse,

@@ -44,8 +44,11 @@ model ListMonoid : Monoid(List(Int)) =
 def len = [(acc x -> acc ; _ 1 ; +)] 0 ... ; fold
 
 morphism Len : ListMonoid ⇒ IntSum = len
-#   Len : List(Int) ⇒ Int — the component is an ordinary word, so it is
-#   usable in base code under its own name.
+#   Len : List(a) ⇒ Int — the component is an ordinary word, so it is
+#   usable in base code under its own name.  It is FORWARD-DECLARED at
+#   `List(Int) ⇒ Int`, the type the two model heads wrote, so a def may
+#   name it wherever the declaration sits; its own type is `len`'s, and
+#   `len` counts anything.
 
 1 2 3 ; pack ; Len ; print                     # 3
 

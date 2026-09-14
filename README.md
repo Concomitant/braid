@@ -391,9 +391,11 @@ the logged version of a function, game rules as lifted moves),
 `build` (one pipeline as a template, instantiated by two configurations),
 `arrows` (Control.Arrow's interface, as plain syntax), `circuits`
 (the arrows that aren't: stream transducers as ordinary data, and the
-shape rule that transports base programs into them) and `reified`
-(the same shape rule over a carrier that is the program AND its Code —
-`getCode` and `evalAs` as one model's embedding and exit),
+`over Doctrine` declaration that transports base programs into them),
+`reified` (the same doctrine over a carrier that is the program AND its
+Code — `getCode` and `evalAs` as one model's embedding and exit) and
+`morphisms` (a homomorphism between two models, its squares generated
+and decided — proved for an internal functor, sampled for a fold),
 `payroll` (a whole small program: a resource, a theory and a grade
 meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
