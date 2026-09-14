@@ -7,9 +7,8 @@ def z = alt1 >> Nat
 def s = alt2 >> Nat
 
 def fromInt =
-  [(self ... -> zero? >> (drop >> z | _ 1 >> - >> self ... >> ev >> s) >> merge)] ...
-  fix ...
-  ev
+  use Recursive
+  zero? >> (drop >> z | _ 1 >> - >> fromInt >> s) >> merge
 ## toInt by points: zero maps to 0, successor to +1 on the result
 def toInt = [0] [1 ... >> +] ... >> foldNat
 

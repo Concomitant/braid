@@ -1,40 +1,106 @@
-# Recursion is written with `fix`, at a typed boundary. A definition is
-# NOT in scope in its own body, so the knot is tied by a word with a
-# type — `fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩` — and the
-# body receives the recursive call DEEPEST, as an ordinary quoted
-# function. The three stages read: quote the body, tie the knot, ev
-# it. `Rec` is the receipt: `fix` and `loop` are the only words that can
-# run unbounded, so everything built from them says so on its arrow, and
-# a word with no `Rec` is fix-free and terminates by construction.
+# Recursion is a MARKER. `use Recursive` in a definition's header puts
+# the definition's OWN NAME in scope in its own body — nothing else. A
+# name that is not in scope stays not in scope, and the refusal says
+# which word to write.
+#
+# It is not a special form. Elaboration rewrites the body to the closed
+# form the language already had — a binder with the knot deepest, every
+# self-call routed through it — before inference, and INNERMOST among a
+# header's scopes, so `use Traced Recursive` traces the closed spine.
+# Every elaborated def is therefore still a closed spine over its prefix
+# scope, which is what keeps `reflect`, the per-stage schemes and every
+# functor total.
+#
+# `Recursive` is the RECEIPT of that scope, minted exactly as `use
+# Traced` mints `Traced`. It reads "may recurse without bound", not
+# "diverges": a word without it ties no knot and terminates by
+# construction. Structural recursors (`foldList`, `foldTree`, … —
+# emitted per `data` declaration) mint nothing, because they are bounded
+# by the value they eat.
 
 def decr = _ 1 >> -
 def lt2? = _ 2 >> lt? >> (_ drop | _ drop)
 def lt100? = _ 100 >> lt? >> (_ drop | _ drop)
 def double = 2 _ >> *
 
-# point-free: an OPEN binder (`self ... ->`) names only the knot and
-# lets the wire flow through, so the body reads exactly as before
+# POINT-FREE: the name is a word like any other, so a body with no
+# binder at all reads exactly as it would if the word were someone
+# else's.
+#   until100 : Int =Recursive> Int
 def until100 =
-  [ self ... ->
-    lt100?
-    double >> self ... >> ev | _
-    merge ] ...
-  fix ...
-  ev
+  use Recursive
+  lt100?
+  double >> until100 | _
+  merge
 
+# WITH BINDERS: `sumTo` names its two wires and calls itself in the
+# middle of a stage, where any other word could stand.
+#   sumTo : Int Int =Recursive> Int
 def sumTo =
-  [(self a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> self ... >> ev)) >> merge)] ...
-  fix ...
-  ev
+  use Recursive
+  (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)
 
+# TWO CALLS, one of them inside a group — the knot is a wire like any
+# other, so it needs no special placement.
+#   fib : Int =Recursive> Int
 def fib =
-  [ self ... ->
-    lt2?
-    _ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)
-    merge ] ...
-  fix ...
-  ev
+  use Recursive
+  lt2?
+  _ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)
+  merge
 
 7 >> until100 >> print
 0 5 >> sumTo >> print
 10 >> fib >> print
+
+# A parameter NAMED LIKE THE DEF shadows it, exactly as it shadows any
+# other word: `fac` below is the binder's wire, and nothing recurses.
+# The label is still there — a receipt says what the scope DID, and this
+# scope tied a knot; it is the written `use` that mints, always.
+#   fac : Int =Recursive> Int
+def fac = use Recursive ; (fac -> fac 1 >> +)
+7 >> fac >> print
+
+# ---------------------------------------------------------------------
+# `fix`, for open recursion
+#
+# The marker ties a def's own knot. When the BODY is a value someone
+# hands you — a memoizing `self`, a logging `self`, a body you built at
+# runtime — the fixpoint combinator is the word for it, and it is
+# ordinary derived code (MANUAL §10):
+#
+#   fix : Fn⟨Fn⟨ρ0 =Recursive> ρ1⟩ ρ0 ⇒ ρ1⟩ =Recursive> Fn⟨ρ0 =Recursive> ρ1⟩
+#
+# The body takes the knot DEEPEST and then its own arguments, so a
+# self-call is an ordinary quoted call: `self ... >> ev`.
+# ---------------------------------------------------------------------
+
+# an open body: it does not know what `self` is
+def facBody = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> self ... >> ev) >> *)) >> merge)]
+
+# tie it the plain way…
+def facPlain = facBody ... >> fix ... >> ev
+
+# …or wrap the body first, so every re-entry says so — the same body,
+# a different knot, which is the whole point of leaving the body open
+def loud = (b -> [(self ... -> ("step" >> print) ... >> self ... >> b ... >> ev)])
+
+def facLoud = facBody ... >> loud ... >> fix ... >> ev
+
+5 >> facPlain >> print
+3 >> facLoud >> print
+
+# ---------------------------------------------------------------------
+# `loop`, for iteration
+#
+# The Elgot dagger is derived under the same marker — `loop f` runs `f`
+# until it lands on the second track (MANUAL §11):
+#
+#   loop : Fn⟨ρ0 =Recursive> (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1
+#
+# `while` and `until` are two lines on top of it. Reach for them before
+# reaching for a knot: a tail call is one word and needs no self-call.
+# ---------------------------------------------------------------------
+
+[lt100? >> (double >> again | done) >> merge] 7 >> loop >> print
+[_ 100 >> less?] [double] 7 ... >> while >> print

@@ -269,7 +269,8 @@ elabIn st src = do
   term0 <- parseProgram src
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
-                       (rsTrans st) (rsKWords st) (rsBases st) Nothing False)
+                       (rsTrans st) (rsKWords st) (rsBases st) Nothing False
+                       Nothing)
     (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()

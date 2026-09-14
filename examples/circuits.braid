@@ -30,19 +30,20 @@
 # nothing is inferred or dispatched. Slots also carry their OWN
 # variables now (`a b c` below), each generalized per slot.
 
-data Circuit(a, b) = Fn⟨a =Rec> b Circuit(a, b)⟩
+data Circuit(a, b) = Fn⟨a =Recursive> b Circuit(a, b)⟩
 data Pair(a, b) = a b
 
-# The step function is `=Rec>`: every circuit below is built with `fix`,
-# and a written arrow means its manifest (MANUAL §14). The slots say so
+# The step function is `=Recursive>`: every circuit below is written
+# under `use Recursive`, and a written arrow means its manifest
+# (MANUAL §14). The slots say so
 # too — a slot declares the MOST a model may do, and the pure model
-# below passes under a `=Rec>` slot by absorption.
+# below passes under a `=Recursive>` slot by absorption.
 #
 # What the slots DO NOT say, since 2026-09-12: nothing about the
 # PROGRAM handed to `embed`. Composition joins grades now, so `arrC`
-# (which is built with `fix`) no longer demands that its argument
+# (which ties a knot) no longer demands that its argument
 # recurse; `Fn⟨a ⇒ b⟩` is what the embedding takes, and `Arr` wraps the
-# same pure arrow. Both spellings were `=Rec>` while composition
+# same pure arrow. Both spellings were `=Recursive>` while composition
 # unified grades, and both were wrong.
 
 # `Fn` itself cannot fill `k`: it is built in, it takes an ARROW rather
@@ -75,11 +76,11 @@ data Arr(a, b) = Fn⟨a ⇒ b⟩
 # keeps its laws honest about being finite tests of an infinite object.
 # A theory that declares neither gets no laws — see `Vault` below.
 theory Arrow(k(_, _)) over Doctrine =
-    embed   : Fn⟨a ⇒ b⟩ =Rec> k(a, b)
-    compose : k(a, b) k(b, c) =Rec> k(a, c)
-    first   : k(a, b) =Rec> k(Pair(a, c), Pair(b, c))
-    observe : k(Int, Int) =Rec> Int
-    sample  : • =Rec> k(Int, Int)
+    embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
+    compose : k(a, b) k(b, c) =Recursive> k(a, c)
+    first   : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
+    observe : k(Int, Int) =Recursive> Int
+    sample  : • =Recursive> k(Int, Int)
 
 # ---- model one: circuits ---------------------------------------------
 # A circuit consumes an input and returns an output AND ITS SUCCESSOR.
@@ -87,15 +88,15 @@ theory Arrow(k(_, _)) over Doctrine =
 def stepC = (c x -> c ; unCircuit ; _ x ; ev)
 
 # the identity circuit, `arr`, `>>>`, and `first`
-def idC    = [(self ... -> [(x -> x (self ... ; ev))] ; Circuit)] ... ; fix ... ; ev
-def arrC   = [(self g -> [(x -> g x ; ev ; (y -> y (g ; self ... ; ev)))] ; Circuit)] ... ; fix ... ; ev
-def compC  = [(self f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; self ... ; ev))))] ; Circuit)] ... ; fix ... ; ev
-def firstC = [(self f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; self ... ; ev))))] ; Circuit)] ... ; fix ... ; ev
+def idC    = use Recursive ; [(x -> x (idC))] ; Circuit
+def arrC   = use Recursive ; (g -> [(x -> g x ; ev ; (y -> y (g ; arrC)))] ; Circuit)
+def compC  = use Recursive ; (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
+def firstC = use Recursive ; (f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; firstC))))] ; Circuit)
 
 # A circuit that CANNOT be a pure function: its output depends on every
 # input it has already seen. This is the whole reason Arrows exist.
-def sumFrom = [(self n -> [(x -> n x ; + ; dup ; _ (self ... ; ev))] ; Circuit)] ... ; fix ... ; ev
-def scale   = [(self n -> [(x -> (n x ; *) (n ; self ... ; ev))] ; Circuit)] ... ; fix ... ; ev
+def sumFrom = use Recursive ; (n -> [(x -> n x ; + ; dup ; _ (sumFrom))] ; Circuit)
+def scale   = use Recursive ; (n -> [(x -> (n x ; *) (n ; scale))] ; Circuit)
 
 # feed 3 then 4, and report both outputs summed — two steps, because one
 # step cannot tell a stateful circuit from a stateless one
@@ -158,7 +159,7 @@ drop
 # the receipt `Circuits` exactly as any functor scope does, and the
 # carrier is the hom-object `Circuit(a, b)`.  The display folds the two
 # together — a transported word is `• ⇒ Circuit(Int, Int)` carrying
-# `Circuits` at the base, and prints `Int =Circuits Rec> Int`.  Objects
+# `Circuits` at the base, and prints `Int =Circuits Recursive> Int`.  Objects
 # are shared with the base category; composition is the model's own.
 
 def add1 = _ 1 ; +
@@ -168,7 +169,7 @@ def dbl  = 2 _ ; *
 # `easy` is what you write.
 def hand = over Circuits ; [add1] ... ; embed ... ; _ [dbl] ; _ embed ; compose
 def easy = use Circuits ; add1 ; dbl
-#   easy : Int =Circuits Rec> Int
+#   easy : Int =Circuits Recursive> Int
 
 # ENTERING is a marker, LEAVING is a model.  `observe` takes the carrier
 # and returns base — an EXIT, read off its declared arrow — so it is
@@ -191,7 +192,7 @@ def twice2Out = over Circuits ; twice2 ; observe
 twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 
 # OUTSIDE the scope, two of them side by side are two circuits side by
-# side: `• =Circuits Rec> Circuit(Int, Int) Circuit(Int, Int)`.  That is
+# side: `• =Circuits Recursive> Circuit(Int, Int) Circuit(Int, Int)`.  That is
 # well-typed and honestly not composition in Circuits — the display fold
 # wants exactly ONE carrier, so it does not fire and you can see the
 # two.  Composition is written under the marker.
@@ -210,13 +211,13 @@ pairOut ; print             # 40 — the same composite, spelled by hand
 #
 # So `dup ; *` transports, and squares:
 def sq = use Circuits ; dup ; *
-#   sq : Int =Circuits Rec> Int
+#   sq : Int =Circuits Recursive> Int
 def sqOut = over Circuits ; sq ; observe
 sqOut ; print               # 25 — 3² + 4²
 
 # three wires, and a stage on a wire that is not the deepest
 def poly = use Circuits ; dup ; _ dup ; _ _ add1 ; _ * ; +
-#   poly : Int =Circuits Rec> Int — x + x·(x+1)
+#   poly : Int =Circuits Recursive> Int — x + x·(x+1)
 def polyOut = over Circuits ; poly ; observe
 polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 
@@ -235,7 +236,7 @@ polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 # check is mechanical, and the def joins the K-word table beside the
 # ones `use Circuits` transported.
 def sum0 = over Circuits ; 0 ; sumFrom
-#   sum0 : • =Rec> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
+#   sum0 : • =Recursive> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
 #
 # That is the honest reading and it is worth the sentence.  A receipt is
 # PROVENANCE: `=Circuits>` says the code went through the functor.  `sum0`
@@ -249,7 +250,7 @@ def sum0 = over Circuits ; 0 ; sumFrom
 # Under the marker it composes like any other word of the category, and
 # THAT composite went through the functor, so it folds:
 def running    = use Circuits ; sum0 ; dbl
-#   running : Int =Circuits Rec> Int
+#   running : Int =Circuits Recursive> Int
 def runningOut = over Circuits ; running ; observe
 runningOut ; print          # 20 — 3 ⇒ 3 ⇒ 6, then 4 ⇒ 7 ⇒ 14
 
@@ -261,8 +262,8 @@ def scale3 = over Circuits ; 3 ; scale
 
 def byHand = over Circuits ; sum0 scale3 ; compose
 def byUse  = use Circuits ; sum0 ; scale3
-#   byHand : • =Rec> Circuit(Int, Int)   — no label: nothing was applied
-#   byUse  : Int =Circuits Rec> Int      — transported, so it folds
+#   byHand : • =Recursive> Circuit(Int, Int)   — no label: nothing was applied
+#   byUse  : Int =Circuits Recursive> Int      — transported, so it folds
 
 def handObs = over Circuits ; byHand ; observe
 def useObs  = over Circuits ; byUse  ; observe
@@ -339,7 +340,7 @@ guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 #
 # `Circuits` proves none of them, and the reason is structural rather
 # than incidental: `compC` applies the self wire of a `fix`, whose
-# arrow is `Fn⟨Σ =Rec> Θ⟩` with Σ an open stack variable — there is no
+# arrow is `Fn⟨Σ =Recursive> Θ⟩` with Σ an open stack variable — there is no
 # arity to give THAT.  Equality modulo a model's defining equations is
 # structural induction over an initial algebra, a different procedure
 # from normalizing in a free category (design-macros.md, "honest

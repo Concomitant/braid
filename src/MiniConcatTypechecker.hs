@@ -95,15 +95,24 @@ type EffSub = (EffRow, EffRow)
 ioLabel :: String
 ioLabel = "IO"
 
--- The second built-in label (2026-09-09).  `Rec` is minted by `fix` and
--- `loop`, the only two words that can run unbounded now that a def is
--- not in scope in its own body: it reads "may recurse without bound",
--- NOT "diverges" — a labelled word can still be total, and an
--- unlabelled one is fix-free, hence terminating by construction.
--- Structural recursors (`foldList`, `foldTree`, … — emitted per `data`
--- declaration) mint nothing: they are bounded by the value they eat.
+-- The second built-in label (2026-09-09; renamed and made a MARKER
+-- 2026-09-14).  `Recursive` is the name of a scope — `use Recursive`
+-- puts a def's own name in scope in its body — and, like every other
+-- scope, the name of the label its receipt mints.  It reads "may
+-- recurse without bound", NOT "diverges": a labelled word can still be
+-- total, and an unlabelled one never ties a knot, hence terminates by
+-- construction.  Structural recursors (`foldList`, `foldTree`, … —
+-- emitted per `data` declaration) mint nothing: they are bounded by
+-- the value they eat.
 recLabel :: String
-recLabel = "Rec"
+recLabel = "Recursive"
+
+-- The knot, under a name source cannot write: `#` opens a comment, so
+-- no program and no reflected atom can name or shadow it.  `use
+-- Recursive` is the only thing that emits it — the machinery that was
+-- the prim `fix` until 2026-09-14, when `fix` became a prelude def.
+knotPrimName :: String
+knotPrimName = "#fix"
 
 eIO :: EffRow -> Bool
 eIO = S.member ioLabel . eLabels
@@ -281,7 +290,7 @@ instance Show Arrow where
 -- constraints are what a derived higher-order word needs and a prim's
 -- shared ε expressed by hand — `loop`'s body row flows into `loop`'s
 -- own row, so an io body gives an io loop, without the body being
--- forced to carry `Rec`.
+-- forced to carry `Recursive`.
 data Scheme = Forall [TVar] [SVar] [RVar] [NVar] [EVar] [EffSub] Arrow
   deriving (Eq, Ord)
 
@@ -710,7 +719,7 @@ unifyEff s e1 e2 =
     -- naming: an unlabelled manifest is one that was WRITTEN (inference
     -- always leaves a tail to absorb into), so the repair is to write
     -- the label there — `Fn⟨Int ⇒ Int⟩` refusing a `fix`/`while` body
-    -- wants `Fn⟨Int =Rec> Int⟩`.
+    -- wants `Fn⟨Int =Recursive> Int⟩`.
     hint (Eff l1 _) (Eff l2 _)
       | S.null l1, not (S.null l2) = repair l2
       | S.null l2, not (S.null l1) = repair l1
@@ -728,7 +737,7 @@ unifyEff s e1 e2 =
     -- composition no longer unifies parts.  Verified and kept: two
     -- `Fn` types can still be forced equal while each carries a label
     -- the other lacks — `[yell] [spin] >> eq?` for an `=IO>` quote and
-    -- a `=Rec>` one — and under join semantics that program must
+    -- a `=Recursive>` one — and under join semantics that program must
     -- type.  A test pins it.
     bridge (EV a) (EV b) = EV ("ε<" ++ a ++ "|" ++ b ++ ">")
 
@@ -1234,7 +1243,7 @@ data Token
   | TokRAngle     -- ⟩ (close a Fn type)
   | TokFatArrow   -- ⇒ (the arrow inside a Fn type)
   | TokEffArrow [String]
-      -- =IO>, =Rec>, =IO Rec>, … (and the older ⇒! / ->!, which mean
+      -- =IO>, =Recursive>, =IO Recursive>, … (and the older ⇒! / ->!, which mean
       -- =IO>): a LABELLED arrow inside a Fn type.  The labels are the
       -- written manifest, in any order; display sorts them.
   deriving (Eq, Show)
@@ -1266,7 +1275,7 @@ tokenize = go
     go ('(':cs)         = (TokLParen :) <$> go cs
     go (')':cs)         = (TokRParen :) <$> go cs
     go (',':cs)         = (TokComma :) <$> go cs
-    -- `=IO Rec>`: what the manifest DISPLAYS, so also what you write.
+    -- `=IO Recursive>`: what the manifest DISPLAYS, so also what you write.
     -- Any label set, in any order, on one line; `=` that is not the
     -- head of such an arrow (a `def`'s `=`) falls through to an
     -- identifier.  (The older `⇒!`/`->!` spellings still lex as `=IO>`,
@@ -2697,7 +2706,7 @@ parseTyElem aliases dataSigs params toks = case toks of
                  (TokFatArrow : r)  -> Right (r, effPure)
                  (TokArrow : r)     -> Right (r, effPure)
                  (TokEffArrow ls : r) -> Right (r, Eff (S.fromList ls) Nothing)
-                 _ -> Left "Expected '⇒' (or '->', '=IO>', '=Rec>') \
+                 _ -> Left "Expected '⇒' (or '->', '=IO>', '=Recursive>') \
                            \inside a Fn type"
       (outSt, rest3) <- goStack rest2
       case rest3 of
@@ -2787,9 +2796,9 @@ substParams tmap m rmap nmap = goT
     goT TStr         = TStr
     goT TSym         = TSym
     -- substitute inside Fn, KEEPING its grade: a nested written arrow
-    -- (`Fn⟨a =Rec> b⟩` in a theory slot, `Fn⟨a =IO> •⟩` in an alias)
+    -- (`Fn⟨a =Recursive> b⟩` in a theory slot, `Fn⟨a =IO> •⟩` in an alias)
     -- carries a manifest, and dropping it here silently turned every
-    -- parameterized Fn pure (found 2026-09-09 by the Rec label).
+    -- parameterized Fn pure (found 2026-09-09 by the Recursive label).
     goT (TFn (Arrow i o e)) = TFn (Arrow (goS i) (goS o) e)
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goS as)
@@ -3371,7 +3380,7 @@ primEnv =
       epsV = EV "ε"
       epsR = Eff S.empty (Just epsV)
       arrEps i o = Arrow i o epsR
-      -- `{Rec} ∪ ε`: the same passed-through grade, plus the receipt
+      -- `{Recursive} ∪ ε`: the same passed-through grade, plus the receipt
       -- that this arrow may recurse without bound.  Open, like an io
       -- prim's row after `openEff`, so a pure neighbour absorbs it.
       recR = Eff (S.singleton recLabel) (Just epsV)
@@ -3403,22 +3412,25 @@ primEnv =
       thereTy = Forall [] [SV "Δ"] [RV "σ"] [] [] []
         (arrPure (SCons (TSum (RTail (RV "σ"))) SEnd)
                (SCons (TSum (RCons (STail (SV "Δ")) (RTail (RV "σ")))) SEnd))
-      -- fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
+      -- #fix : Fn⟨Fn⟨Σ ⇒ Θ⟩ Σ ⇒ Θ⟩ ⇒ Fn⟨Σ ⇒ Θ⟩ — the parameterized (Conway)
       -- fixpoint operator on Fn.  The body receives the knotted function
       -- DEEPEST, then its own arguments, so a recursive call is spelled
       -- `… >> self >> ev` exactly like any other quoted call; `fix`
       -- itself runs nothing, it ties the knot and hands back the Fn.
       -- This is to recursion what `loop` is to iteration: the operator
       -- that carries the laws (fixpoint, dinaturality, parameter), and
-      -- the ONE place a program may be unbounded now that a definition
-      -- is not in scope in its own body.  ε is shared with the inner
-      -- Fn, like `ev`/`loop`: a pure body ties a pure knot.
+      -- the ONE place a program may be unbounded.  ε is shared with the
+      -- inner Fn, like `ev`/`loop`: a pure body ties a pure knot.
       --
-      -- The `Rec` label (2026-09-09) rides on the KNOT, not on `fix`:
-      -- tying it runs nothing, so fix's own arrow is pure and openEff
+      -- Since 2026-09-14 no source program can name it: `use Recursive`
+      -- emits it, `fix` is a prelude def written under that scope, and
+      -- the prim set is 47 without it.
+      --
+      -- The `Recursive` label rides on the KNOT, not on `#fix`:
+      -- tying it runs nothing, so its own arrow is pure and openEff
       -- freshens it, while the self handed in and the Fn handed back
-      -- are `{Rec} ∪ ε`.  A body that never calls self is asked for no
-      -- grade at all; one that does absorbs Rec through ε, which is the
+      -- are `{Recursive} ∪ ε`.  A body that never calls self is asked for no
+      -- grade at all; one that does absorbs Recursive through ε, which is the
       -- fixpoint of the grade and settles in one step.
       fixTy =
         let sgF = SV "Σf"; thF = SV "Θf"
@@ -3603,7 +3615,7 @@ primEnv =
        , ("into",      intoTy)
        , ("there",     thereTy)
        , ("merge",     mergeTy)
-       , ("fix",       fixTy)
+       , (knotPrimName, fixTy)
        , ("foldExp",   foldExpTy)
        , ("foldExp2",  foldExp2Ty)
        , ("at",        atTy)
@@ -3667,8 +3679,7 @@ selfReferenceError name viaRecurse =
   "`" ++ name ++ "` refers to itself"
     ++ (if viaRecurse then " (`recurse` named the definition being written)"
                       else "")
-    ++ ": a definition is not in scope in its own body \
-       \— write the recursion with `fix` (MANUAL §8)"
+    ++ ": write `use " ++ recLabel ++ "` in its header (MANUAL §8)"
 
 
 inferProgram :: String -> Either String Arrow
@@ -3775,7 +3786,60 @@ data ElabCtx = ElabCtx
                                    -- spelling.  Source may not, and that
                                    -- refusal is what makes a slot
                                    -- reachable only through its scope.
+  , ecDef   :: Maybe String        -- the def whose body this is, if any:
+                                   -- the ONE name `use Recursive` puts
+                                   -- back in scope.  Nothing at the top
+                                   -- level, where there is no name to tie.
   }
+
+-- `use Recursive` (2026-09-14): the MARKER that puts a def's own name
+-- back in scope in its own body.  It is not a functor and not a model —
+-- it is a SYNTACTIC rewrite to the closed form the language already
+-- had, run before inference and INNERMOST among a header's scopes, so
+-- `use Traced Recursive` traces the closed spine:
+--
+--   def fac = use Recursive ; BODY
+--     ↦   use@Recursive
+--         [ (#self ... -> BODY[fac := #self ... >> ev]) ] ...
+--         #fix ...
+--         ev
+--
+-- so every elaborated def is STILL a closed spine over its prefix
+-- scope: `reflect`, the per-stage schemes and every functor keep the
+-- totality stage 5a½ bought.  No types are consulted — the rewrite is
+-- textual in the Term, and a binder parameter named like the def
+-- shadows it exactly as it shadows any other word.
+selfCallTerm :: Term
+selfCallTerm = Seq (Tensor [Prim selfKnotName, Prim "pass"]) (Prim "ev")
+
+tieKnot :: String -> Term -> Term
+tieKnot name body =
+  Seq (Seq (Tensor [Quote (OpenAbs [Just selfKnotName] True (subst body)),
+                    Prim "pass"])
+           (Tensor [Prim knotPrimName, Prim "pass"]))
+      (Prim "ev")
+  where
+    subst (Prim n) | n == name = selfCallTerm
+    subst (Seq a b)            = Seq (subst a) (subst b)
+    subst (Tensor ts)          = Tensor (map subst ts)
+    subst (Quote t)            = Quote (subst t)
+    subst (Alts cs r)          = Alts (map subst cs) r
+    subst t@(OpenAbs sl h b)
+      -- a parameter of the def's own name shadows it, as it shadows
+      -- any word: the rewrite stops at the binder that rebinds it
+      | name `elem` [ n | Just n <- sl ] = t
+      | otherwise                        = OpenAbs sl h (subst b)
+    subst (Use ns b)           = Use ns (subst b)
+    subst (Over ns b)          = Over ns (subst b)
+    subst t                    = t
+
+-- the refusal `use Recursive` fixes, and the one it gets itself when
+-- there is no name to tie
+noSelfToTieErr :: String
+noSelfToTieErr =
+  "`use " ++ recLabel ++ "` names the def it heads, and there is no def "
+    ++ "here: it puts a definition's OWN NAME in scope in its own body, so "
+    ++ "it may only be a def's header (MANUAL §8)"
 
 -- `model Opt : Base = dupInt = dup` — a PARTIAL model of the
 -- ambient presentation.  `Base` is the theory whose generators are every
@@ -3801,7 +3865,7 @@ type SlotTable = [(String, (String, [String]))]
 type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
-elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] [] [] Nothing False
+elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] [] [] Nothing False Nothing
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -4025,10 +4089,56 @@ checkFunctorWord env fname word =
              | otherwise -> Right ()
 
 elabUseWith :: ElabCtx -> Term -> Either String Term
-elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
+elabUseWith ctx t0 = do
+  t1 <- expandTemplates ctx [] [] t0
+  strayRec t1
+  go t1
   where
-    go (Use ns b) = do
-      b' <- go b
+    -- `use Recursive` is a def's HEADER.  The name it puts back in
+    -- scope is the DEF's, so a knot tied around part of a body would
+    -- quietly name that part instead — refused where it is written.
+    strayRec (Use _ b)  = strayRec b
+    strayRec (Over _ b) = strayRec b
+    strayRec t
+      | deepRec t = Left $ "`use " ++ recLabel ++ "` is a def's header — "
+                        ++ "the first thing in its body: the name it puts "
+                        ++ "back in scope is the DEF's, so a scope opened "
+                        ++ "part-way down would name only that part "
+                        ++ "(MANUAL §8)"
+      | otherwise = Right ()
+
+    deepRec (Use ns b)     = recLabel `elem` ns || deepRec b
+    deepRec (Over _ b)     = deepRec b
+    deepRec (Seq a b)      = deepRec a || deepRec b
+    deepRec (Tensor ts)    = any deepRec ts
+    deepRec (Quote t)      = deepRec t
+    deepRec (Alts cs _)    = any deepRec cs
+    deepRec (OpenAbs _ _ b) = deepRec b
+    deepRec (Prim _)       = False
+
+    go (Use ns0 b) = do
+      b0 <- go b
+      -- `Recursive` first, and INNERMOST: it is a rewrite to the closed
+      -- form, so every other scope on this header — a model's renaming,
+      -- a resource's routing, a functor's walk — sees the tied knot
+      -- rather than a name that is not in scope yet.
+      -- One spelling per thing: the marker owns the name, so a functor,
+      -- model or theory of the same name is a collision, not a shadow.
+      case [ () | recLabel `elem` ns0
+                , recLabel `elem` ecThs ctx
+                  || isJust (lookup recLabel (ecFuncs ctx))
+                  || isJust (lookup recLabel (ecSlots ctx))
+                  || isJust (lookup recLabel (ecBases ctx)) ] of
+        (_ : _) -> Left $ "`" ++ recLabel ++ "` is the built-in recursion "
+                       ++ "marker (MANUAL §8), so `use " ++ recLabel
+                       ++ "` cannot name your declaration: rename it"
+        []      -> Right ()
+      let ns = filter (/= recLabel) ns0
+      b' <- if length ns == length ns0
+              then pure b0
+              else case ecDef ctx of
+                     Just d  -> pure (tieKnot d b0)
+                     Nothing -> Left noSelfToTieErr
       -- four kinds of name, applied in a fixed order: templates expand
       -- (a phase earlier, in `expandTemplates`), models rename,
       -- resources route, functors rewrite — so a functor always sees
@@ -4094,11 +4204,11 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
       --
       -- The receipt says what RAN, so it carries the functor word's OWN
       -- labels beside the functor's name (2026-09-12).  Before this,
-      -- `checkFunctorWord` tested `eIO` alone, so a `Rec`-labelled word
+      -- `checkFunctorWord` tested `eIO` alone, so a `Recursive`-labelled word
       -- — a `fix`-built functor — ran at elaboration (fuel-bounded) and
-      -- its `Rec` escaped: the expansion said nothing about it.  `IO`
+      -- its `Recursive` escaped: the expansion said nothing about it.  `IO`
       -- cannot reach here (`checkFunctorWord` refuses it), so in
-      -- practice this mints `Rec` and any receipt the word itself wears.
+      -- practice this mints `Recursive` and any receipt the word itself wears.
       let wordLabels w = case M.lookup w (ecEnv ctx) of
             Just (Forall _ _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
             Nothing                                        -> []
@@ -4110,7 +4220,10 @@ elabUseWith ctx t0 = expandTemplates ctx [] [] t0 >>= go
           -- not apply the model to itself, and a slot's declared arrow
           -- carries no label.
           mine  = [ n | n <- map fst is ++ map fst bs, Just n /= ecSelf ctx ]
-          marks = nub (map receiptName mine
+          -- `use Recursive` mints like every other scope: the knot it
+          -- tied carries the label too, and a set unions to one.
+          marks = nub ([ receiptName recLabel | length ns /= length ns0 ]
+                       ++ map receiptName mine
                        ++ concat [ receiptName f : map receiptName (wordLabels w)
                                  | (f, w) <- fs ])
       pure (foldr (Seq . Prim) expanded marks)
@@ -5299,7 +5412,7 @@ type ConMap = Map String String
 -- against whatever the theory wrote, alpha) and its constructor
 -- parameters (matched against a NAME, and the same name every time).
 -- The effect is not compared: a grade is what a MODEL may do, and the
--- doctrine does not bound it — `Arrow`'s slots are `=Rec>` because
+-- doctrine does not bound it — `Arrow`'s slots are `=Recursive>` because
 -- circuits are built with `fix`, and that is the theory's business.
 matchArrow :: [String] -> Arrow -> Arrow -> Maybe ConMap
 matchArrow cons (Arrow i1 o1 _) (Arrow i2 o2 _) =
@@ -5870,7 +5983,7 @@ checkModuleWith base src = do
         term0 <- parseProgram mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
                                       thNames trans kwords ownBases Nothing
-                                      False)
+                                      False Nothing)
                              term0
         arr <- inferTermIn env' term1
         pure (Just (term1, arr))
@@ -5997,7 +6110,7 @@ checkModuleWith base src = do
           term0' <- either (Left . inDef) Right
                       (elabUseWith (ElabCtx env1 run slotTable funcs tmpls
                                             thNames trans kws bases self
-                                            ('@' `elem` name))
+                                            ('@' `elem` name) (Just name))
                                    termH)
           -- `over M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.
@@ -6240,7 +6353,7 @@ preludeSrc = unlines
   , "## sum and product of an Int list"
   , "def sum = [+] 0 ... >> fold"
   , "def product = [*] 1 ... >> fold"
-  , "def downFrom = [(self n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> self ... >> ev >> (m 1 >> -) ... >> cons)) >> merge)] ... >> fix ... >> ev"
+  , "def downFrom = use Recursive ; (n -> n >> zero? >> (drop >> nil | (m -> (m 1 >> -) >> downFrom >> (m 1 >> -) ... >> cons)) >> merge)"
   , "## list(0, 1, …, n-1)"
   , "def range = downFrom >> reverse"
   , "## conditionally swap two wires (the Fredkin gate): reversible routing"
@@ -6254,16 +6367,16 @@ preludeSrc = unlines
   , "def xor = (a b -> a [b >> not] [b] ... >> cond)"
   , "def implies = (a b -> a [b] [true] ... >> cond)"
   , "## take the first n elements; skip drops them instead"
-  , "def take = [(self n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> ev >> x ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> ev"
-  , "def skip = [(self n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> self ... >> ev)) >> merge)) >> merge)] ... >> fix ... >> ev"
+  , "def take = use Recursive ; (n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> take >> x ... >> cons)) >> merge)) >> merge)"
+  , "def skip = use Recursive ; (n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> skip)) >> merge)) >> merge)"
   , "## zip two lists into flat two-wire elements: List(a) List(b) => List(a b)"
-  , "def zip = [(self l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> self ... >> ev >> (x y >> Box) ... >> cons)) >> merge)) >> merge)] ... >> fix ... >> ev"
+  , "def zip = use Recursive ; (l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> zip >> (x y >> Box) ... >> cons)) >> merge)) >> merge)"
   , "## conjunction / disjunction over a Bool list"
   , "def all = [true] [and] ... >> foldList"
   , "def any = [false] [or] ... >> foldList"
   , "## split a list of sums into two lists (hits, misses) — two wires,"
   , "## no bundling: our products are the stack itself"
-  , "def partitionSum = [(self l -> l >> unList >> ((nil) (nil) | (x r -> r >> self ... >> ev >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)] ... >> fix ... >> ev"
+  , "def partitionSum = use Recursive ; (l -> l >> unList >> ((nil) (nil) | (x r -> r >> partitionSum >> (as bs -> x >> ((v -> (v as >> cons) bs) | (w -> as (w bs >> cons))) >> merge))) >> merge)"
   , "## print every element, front to back"
   , "def printAll = [(b x -> x >> print >> b)] 0 ... >> fold >> drop"
   , "## guard ladders as first-class words, one guard per line.  A lane"
@@ -6339,16 +6452,27 @@ preludeSrc = unlines
   , "## accumulator is (decided | default): a true lane decides once;"
   , "## later lanes leave a decision alone."
   , "def firstTrue = (d -> d >> alt2) ... >> [(acc b f -> acc >> (alt1 | (g -> b [f >> alt1] [g >> alt2] >> cond)) >> merge)] ... >> foldExp2 >> merge >> ev"
+  , "## OPEN RECURSION, derived.  `use Recursive` ties a def's own knot,"
+  , "## so the fixpoint COMBINATOR is only needed when the body is a"
+  , "## value someone hands you -- a memoizing or logging `self`.  Written"
+  , "## eta-expanded, because Braid is call-by-value: the self-application"
+  , "## sits under a quote and is tied only when the knot is run.  The"
+  , "## `id` says the knot is ONE wire -- a grouped atom in non-final"
+  , "## position is closed (MANUAL §4), and the knot's own arity is"
+  , "## what closing would otherwise erase."
+  , "##   fix : Fn⟨Fn⟨ρ0 =Recursive> ρ1⟩ ρ0 ⇒ ρ1⟩ =Recursive> Fn⟨ρ0 =Recursive> ρ1⟩"
+  , "def fix = use Recursive ; (b -> [(b >> fix >> id) ... >> b ... >> ev])"
   , "## ELGOT ITERATION, derived: the Elgot dagger f† = ∇ ∘ (f† + id) ∘ f."
   , "## The body routes into (continue | done): the continue track"
   , "## re-enters through the knot, the done track falls out, and"
   , "## `merge` -- the codiagonal -- joins them.  NOTE this needs no"
   , "## `into`: the row is CLOSED and two-track, so the copairing"
   , "## [f†, id] is just `(f† | pass) >> merge`.  `into` is for the OPEN"
-  , "## case (a residual, or more than one track left).  `Rec` is"
-  , "## INHERITED from `fix` here, not declared."
-  , "##   loop : Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1"
-  , "def loop = (f ... -> [(self ... -> f ... >> ev >> (self ... >> ev | pass) >> merge)] ... >> fix ... >> ev)"
+  , "## case (a residual, or more than one track left).  The knot is the"
+  , "## def's own name, under `use Recursive`; the label is that scope's"
+  , "## receipt."
+  , "##   loop : Fn⟨ρ0 =Recursive> (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1"
+  , "def loop = use Recursive ; (f ... -> f ... >> ev >> (f ... >> loop | pass) >> merge)"
   , "## assemble a loop body from a quoted predicate and step"
   , "def whileFn = (p f -> [p ... >> ev >> (f ... >> ev >> again | done) >> merge])"
   , "## run step while predicate hits; exit with the miss payload"
@@ -6816,8 +6940,16 @@ normTerm ctx defs seen term s0 = case term of
       -- one already being expanded is recursive, so treat it as opaque.
       -- Binders in the body are eliminated first — the same path
       -- `reflect` takes — so a def is no less decidable than its Code.
+      --
+      -- ...except a KNOT (a def written under `use Recursive`, whose
+      -- spine ends in `ev` of `#fix`).  Inlining one always lands on
+      -- `ev` of a wire whose arrow is the knot's — an open stack, no
+      -- arity — so it can only turn a verdict into a refusal.  Held
+      -- opaque it is an uninterpreted word of closed arity, which is
+      -- what the prim `fix` was until 2026-09-14 and what makes
+      -- `F(fix b) = fix (F b)` decide by congruence.
       | Just de <- M.lookup n defs, not (deOpen de), n `notElem` seen
-      , not (isRecursorEntry de)
+      , not (isRecursorEntry de), not (isKnotEntry de)
       , Right body <- (if hasOpenAbs (deBody de)
                          then elimAbsTerm env (deBody de)
                          else Right (deBody de)) =
@@ -6858,6 +6990,10 @@ normTerm ctx defs seen term s0 = case term of
     isRecursorEntry de = case deBody de of
       Prim p -> isJust (foldPrimSpec p)
       _      -> False
+
+    -- a def that ties its own knot: the same treatment, for the same
+    -- reason — its closed scheme decides more than its body would
+    isKnotEntry de = knotPrimName `elem` primsIn (deBody de)
 
 -- The pre-seeded input for ONE comparison.  Lazy invention alone is
 -- enough to get equality right when both sides are inferred alike, but
@@ -7466,16 +7602,17 @@ evalTerm env defs vars term st =
           if isFinal
             then pure ([], [], [])
             else pure ([], stk, [])
-    -- fix: tie the knot.  The quoted body is handed a self-reference
+    -- #fix: tie the knot — the compiler's own word, emitted by `use
+    -- Recursive` and by nothing else.  The quoted body is handed a self-reference
     -- DEEPEST and then its own arguments.  The knot is a DefEntry whose
     -- scope contains itself — the same lazy early-binding cycle
     -- `buildRunDefs` builds for a module — under a name (`#self`) the
     -- parser cannot produce, so nothing can capture it.  Every re-entry
     -- goes through `goAtoms`, so a fix under pure elaboration is
     -- fuel-bounded exactly like a def call or a `loop`.
-    applyAtom _ (Prim "fix") stk
-      | not (M.member "fix" vars), not (M.member "fix" defs) = do
-          (args, stk') <- takeWires "fix" 1 stk
+    applyAtom _ (Prim nm) stk
+      | nm == knotPrimName = do
+          (args, stk') <- takeWires knotPrimName 1 stk
           case args of
             [VFn scope cv body] -> do
               let knotted = Seq (Prim selfKnotName) body
@@ -7483,7 +7620,7 @@ evalTerm env defs vars term st =
                               (DefEntry 0 False (Quote knotted) scope' cv)
                               scope
               pure ([VFn scope' cv knotted], stk', [])
-            _ -> throwError "Runtime type error in fix: expected a body quotation"
+            _ -> throwError "Runtime type error in #fix: expected a body quotation"
     -- a generated structural recursor: dispatch on the tag, fold every
     -- recursive slot FIRST (moving it to the front), then run that
     -- alternative's case on folded-then-payload.  Terminating by

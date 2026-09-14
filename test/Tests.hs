@@ -257,7 +257,7 @@ passTests =
   , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
     -- STAGE 5a½: `fix` is the word that may run unbounded, so it MINTS
-    -- the `Rec` label the way `print` mints IO.  `loop` is a prelude
+    -- the `Recursive` label the way `print` mints IO.  `loop` is a prelude
     -- def built on it (2026-09-12) and is checked with the prelude.
     -- loop protocol aliases: again ≡ alt1 (continue), done ≡ alt2 (exit)
   , ("again",         "ρ0 ⇒ (ρ0 | σ0)")
@@ -346,7 +346,7 @@ moduleTypeTests =
   , ("rewrite",   "List(Sym) List(Sym) Code ⇒ Code")
     -- STAGE 5b: a rule set declares a WORD of its own name and a
     -- FUNCTOR of that name.  `use Opt` mints `=Opt>` like any other
-    -- scope, and unions with `Rec` when the body ties a knot.
+    -- scope, and unions with `Recursive` when the body ties a knot.
   , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\nOpt",
      "Code ⇒ Code")
   , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
@@ -354,18 +354,18 @@ moduleTypeTests =
   , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
      \def sumTo =\n    use Opt\n\
      \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
-     \    fix ...\n    ev\nsumTo", "Int Int =Opt Rec> Int")
+     \    fix ...\n    ev\nsumTo", "Int Int =Opt Recursive> Int")
   , ("undist2",  "(a0 ρ0 | a0 ρ1) ⇒ a0 (ρ0 | ρ1 | σ0)")
     -- distN follows caseN's arity family, and like caseN the sums nest
   , ("dist3",    "a0 (ρ0 | (ρ1 | ρ2)) ⇒ (a0 ρ0 | (a0 ρ1 | a0 ρ2 | σ0))")
   , ("undist3",  "(a0 ρ0 | (a0 ρ1 | a0 ρ2)) ⇒ a0 (ρ0 | (ρ1 | ρ2 | σ0) | σ1)")
     -- THE FUNCTOR RECEIPT SAYS WHAT RAN (2026-09-12).  `checkFunctorWord`
-    -- tests `eIO` alone, so a `Rec`-labelled functor word runs at
-    -- elaboration (fuel-bounded); before this its `Rec` escaped and the
+    -- tests `eIO` alone, so a `Recursive`-labelled functor word runs at
+    -- elaboration (fuel-bounded); before this its `Recursive` escaped and the
     -- expansion read `Int =RecId> Int`.  The receipt now carries the
     -- word's own labels beside the functor's name.
   , ("def idRec = [(self c -> c)] ... >> fix ... >> ev\nfunctor RecId = idRec\ndef twice =\n    use RecId\n    dup >> +\ntwice",
-     "Int =Rec RecId> Int")
+     "Int =RecId Recursive> Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
     -- routers, now derived in the prelude from eq?/lt?/mod via the
@@ -387,11 +387,11 @@ moduleTypeTests =
     -- 2026-09-12 PRIM REDUCTION.  `id` is the WORD for `_`, and `loop`
     -- is the Elgot dagger built on `fix` — both prelude defs now, with
     -- EXACTLY the schemes they had as prims.  `loop`'s body was briefly
-    -- `=Rec>` because composition unified grades instead of joining
+    -- `=Recursive>` because composition unified grades instead of joining
     -- them; stage 5a⁹⁄₁₀ fixed that and the prim's type came back.
   , ("id",                                      "a0 ⇒ a0")
   , ("id drop",                                 "a0 a1 ⇒ a0")
-  , ("loop",     "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1")
+  , ("loop",     "Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1")
     -- and the three derived comparators keep the prims' schemes exactly
   , ("gt?",      "Int Int ⇒ (Int Int | Int Int)")
   , ("gte?",     "Int Int ⇒ (Int Int | Int Int)")
@@ -427,10 +427,10 @@ moduleTypeTests =
     -- io spellings still mean `=IO>`
   , ("type Sink(a) = Fn⟨a =IO> •⟩\n[print]",       "• ⇒ Sink(a0)")
   , ("type Sink(a) = Fn(a ->! •)\n[print]",        "• ⇒ Sink(a0)")
-  , ("type Rep(a) = Fn⟨a =Rec> a⟩\n[[_ 100 >> less?] [2 _ >> *] ... >> while]",
+  , ("type Rep(a) = Fn⟨a =Recursive> a⟩\n[[_ 100 >> less?] [2 _ >> *] ... >> while]",
      "• ⇒ Rep(Int)")
     -- and a nested Fn keeps its grade through alias instantiation
-  , ("type Run(a) = Fn⟨Fn⟨a =Rec> a⟩ a =Rec> a⟩\ndata W = (Run(Int))\nunW",
+  , ("type Run(a) = Fn⟨Fn⟨a =Recursive> a⟩ a =Recursive> a⟩\ndata W = (Run(Int))\nunW",
      "W ⇒ Run(Int)")
   , ("type Pred(a) = Fn⟨a ⇒ (a | a)⟩\n[odd?]",    "• ⇒ Pred(Int)")
     -- a param substituted INSIDE the Fn (substStackVars into TFn), and
@@ -453,10 +453,10 @@ moduleTypeTests =
     -- …and a written label set is read back sorted, in a `data`
     -- declaration like anywhere else: this is the thunk a `fix`-built
     -- producer actually fills (examples/stream.braid)
-  , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\nStream",
-        "a0 Fn⟨• =Rec> Stream(a0)⟩ ⇒ Stream(a0)")
-  , ("data S2(a) = (a Fn⟨• =Rec IO> S2(a)⟩)\nS2",
-        "a0 Fn⟨• =IO Rec> S2(a0)⟩ ⇒ S2(a0)")
+  , ("data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)\nStream",
+        "a0 Fn⟨• =Recursive> Stream(a0)⟩ ⇒ Stream(a0)")
+  , ("data S2(a) = (a Fn⟨• =Recursive IO> S2(a)⟩)\nS2",
+        "a0 Fn⟨• =IO Recursive> S2(a0)⟩ ⇒ S2(a0)")
     -- pack: list introduction from a bundle — (elements ; pack) replaces
     -- the list(…) special form; elements are full programs, groups delimit
   , ("(1 2 3 >> pack)",          "• ⇒ List(Int)")
@@ -503,7 +503,7 @@ moduleTypeTests =
   , ("uncons",  "List(a0) ⇒ (• | a0 List(a0))")
   , ("cons",    "a0 List(a0) ⇒ List(a0)")
     -- stack-kinded parameters: zip without Pair
-  , ("zip",     "List(a0) List(a1) =Rec> List(Box(a0 a1))")
+  , ("zip",     "List(a0) List(a1) =Recursive> List(Box(a0 a1))")
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
     -- STRENGTH as an ordinary word: run a program one wire deeper.
     -- Composing it once per context wire is exactly what threads a
@@ -531,22 +531,51 @@ moduleTypeTests =
   , ("[dup >> *] 5 >> ev", "• ⇒ Int")
     -- reflect READS a program without running it: pure, any grade
   , ("reflect",   "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)")
-    -- STAGE 5a½: recursion is a word with a type.  `fix` is the
-    -- parameterized fixpoint on Fn: the body takes the knot DEEPEST and
-    -- then its own arguments, and fix hands back the knotted Fn.
-  , ("fix", "Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩")
-    -- `fix` itself runs nothing — tying the knot is pure — so the label
-    -- sits on the knot it hands out and on the self it hands in, not on
-    -- its own arrow.  The body is asked for no grade of its own.
+    -- STAGE 5e: RECURSION IS A MARKER.  `use Recursive` puts the def's
+    -- own name in scope in its own body; elaboration rewrites the body
+    -- to the closed form before inference, so the def is still a closed
+    -- spine and the label is the scope's receipt.
+  , ("def decr = _ 1 >> -\n\
+     \def fac = use Recursive ; (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
+     \fac", "Int =Recursive> Int")
+    -- point-free: the name is a word, so a body with no binder works
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\n\
+     \def double = 2 _ >> *\n\
+     \def until100 = use Recursive ; lt100? >> (double >> until100 | _) >> merge\n\
+     \until100", "Int =Recursive> Int")
+    -- a binder parameter of the def's own name SHADOWS it, as it
+    -- shadows any word — and the receipt is still minted, because a
+    -- receipt says what the SCOPE did, not what the body happened to
+  , ("def f = use Recursive ; (f -> f 1 >> +)\nf", "Int =Recursive> Int")
+    -- a self-call inside a quotation is a CAPTURE, and abstraction
+    -- elimination handles it: guarded corecursion, unchanged
+  , ("data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)\n\
+     \def from = use Recursive ; (n -> n [n 1 >> + >> from] >> Stream)\n\
+     \from", "Int =Recursive> Stream(Int)")
+    -- the label is a SET: a marked def that also calls `loop` says it
+    -- once
+  , ("def spin = use Recursive ; [done] ... >> loop\nspin", "ρ0 =Recursive> ρ0")
+    -- the marker is INNERMOST, so a functor on the same header sees the
+    -- closed spine rather than a name that is not in scope yet
+  , ("def idF = (c -> c)\nfunctor Same = idF\n\
+     \def down = use Same Recursive ; (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
+     \down", "Int =Recursive Same> Int")
+    -- `fix` is DERIVED now (it left the prim set 2026-09-14): the body
+    -- takes the knot DEEPEST and then its own arguments, and `fix`
+    -- hands back the knotted Fn.  Its own arrow carries the label the
+    -- scope it is written under minted.
+  , ("fix", "Fn⟨Fn⟨ρ0 =Recursive> ρ1⟩ ρ0 ⇒ ρ1⟩ =Recursive> Fn⟨ρ0 =Recursive> ρ1⟩")
+    -- the label sits on the knot it hands out and on the self it hands
+    -- in.  The body is asked for no grade of its own.
     -- GRADES JOIN (5a⁹⁄₁₀).  A derived higher-order word does not
     -- narrow its arguments: `while` runs a test and a body and may
-    -- recurse, so IT carries `Rec` — but neither quotation is asked
+    -- recurse, so IT carries `Recursive` — but neither quotation is asked
     -- for it, and a written pure `Fn` reaches both.
-  , ("while",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Rec> ρ2")
-  , ("until",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ2 ⇒ ρ0⟩ ρ0 =Rec> ρ1")
+  , ("while",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Recursive> ρ2")
+  , ("until",  "Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ2 ⇒ ρ0⟩ ρ0 =Recursive> ρ1")
     -- the join is a JOIN, not a unification: an io body makes the loop
-    -- io as well as Rec, and the labels sort
-  , ("[[dup >> print ...] ... >> ev >> done] ... >> loop", "a0 =IO Rec> a0")
+    -- io as well as Recursive, and the labels sort
+  , ("[[dup >> print ...] ... >> ev >> done] ... >> loop", "a0 =IO Recursive> a0")
     -- and a derived word that runs its argument and then prints does
     -- not demand IO OF the argument (the `logged` case from the plan)
   , ("(f -> f ... >> ev >> \"done\" ... >> print ...)",
@@ -559,7 +588,7 @@ moduleTypeTests =
     -- three labels from three sources still UNION on one arrow: the
     -- join is the whole point, and the set displays sorted
   , ("def tracer = (c -> c)\nfunctor Traced = tracer\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef report = use Traced ; fac ; toStr ; print\nreport",
-     "Int =IO Rec Traced> •")
+     "Int =IO Recursive Traced> •")
     -- structural recursors mint NOTHING: they are bounded by the value
     -- they eat, so the whole derived library stays unlabelled
   , ("foldList", "Fn⟨• ⇒ a0⟩ Fn⟨a0 a1 ⇒ a0⟩ List(a1) ⇒ a0")
@@ -567,17 +596,17 @@ moduleTypeTests =
   , ("map",    "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("filter", "Fn⟨a0 ⇒ (a1 | a2)⟩ List(a0) ⇒ List(a1)")
   , ("reverse", "List(a0) ⇒ List(a0)")
-    -- absorption: a recursive word beside a pure one is Rec, not an
+    -- absorption: a recursive word beside a pure one is Recursive, not an
     -- error — the union is what composition computes
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef twice = fac >> dup >> +\ntwice", "Int =Rec> Int")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef twice = fac >> dup >> +\ntwice", "Int =Recursive> Int")
     -- and the union with IO sorts: labels are a SET, displayed in order
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef shout = fac >> toStr >> print\nshout", "Int =IO Rec> •")
-    -- a WRITTEN `=Rec>` takes recursive code AND pure code (the pure
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef shout = fac >> toStr >> print\nshout", "Int =IO Recursive> •")
+    -- a WRITTEN `=Recursive>` takes recursive code AND pure code (the pure
     -- quotation's row is open, so it absorbs the label)
-  , ("data Step = (Fn⟨Int =Rec> Int⟩)\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\n[fac] >> Step", "• ⇒ Step")
-  , ("data Step = (Fn⟨Int =Rec> Int⟩)\n[dup >> *] >> Step", "• ⇒ Step")
+  , ("data Step = (Fn⟨Int =Recursive> Int⟩)\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\n[fac] >> Step", "• ⇒ Step")
+  , ("data Step = (Fn⟨Int =Recursive> Int⟩)\n[dup >> *] >> Step", "• ⇒ Step")
     -- a def built with fix keeps the arity its binder gives it
-  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\nfac", "Int =Rec> Int")
+  , ("def fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\nfac", "Int =Recursive> Int")
     -- the generated STRUCTURAL RECURSOR is a builtin now, and its
     -- scheme is derived from the declaration rather than inferred from
     -- generated source.  Four shapes pin the derivation: a recursive
@@ -628,7 +657,7 @@ moduleTypeTests =
     -- one def used at two different types = let-polymorphism
   , ("def discard = drop\n1 discard >> true discard", "a0 ⇒ Bool")
     -- recursive defs (monomorphic self-reference)
-  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)) >> merge)] ... >> fix ... >> ev\nfib", "Int =Rec> Int")
+  , ("def decr = _ 1 >> -\ndef lt2? = _ 2 >> lt? >> (_ drop | _ drop)\ndef fib = [(self ... -> lt2? >> (_ | (n -> n >> decr >> self ... >> ev >> _ (n 2 >> - >> self ... >> ev) >> +)) >> merge)] ... >> fix ... >> ev\nfib", "Int =Recursive> Int")
     -- a def body may leave a bracket open: the lines that close it
     -- belong to the body, so a blank line does not end the block and a
     -- `def`-looking line inside the bracket is code, not a declaration
@@ -777,12 +806,12 @@ moduleTypeTests =
     -- a functor's own word is UNLABELLED — it is called at elaboration,
     -- not elaborated under anything
   , (idF ++ "idF", "a0 ⇒ a0")
-    -- STAGE 5a½: `Rec` joins that same set.  A receipt, io and
+    -- STAGE 5a½: `Recursive` joins that same set.  A receipt, io and
     -- recursion union in one manifest and display sorted.
   , (idF ++ "def q = use Same >> [_ 100 >> less?] [2 _ >> *] ... >> while\nq",
-     "Int =Rec Same> Int")
+     "Int =Recursive Same> Int")
   , (idF ++ "def p = use Same >> [_ 100 >> less?] [2 _ >> *] ... >> while >> toStr >> print\np",
-     "Int =IO Rec Same> •")
+     "Int =IO Recursive Same> •")
     -- TEMPLATES: one body, two instantiations, two PRINCIPAL types.
     -- Nothing is dispatched and nothing is passed; the expansion is
     -- re-inferred where it lands, so there is no rank-1 wall.
@@ -1295,14 +1324,41 @@ evalTests =
     -- other literal (not an open-arity word)
   , ("[fin1 10 20 30 >> at] >> reflect >> ((c -> [10] c >> evalAs >> print) | print) >> forget", ["alt1(20)"], "")
     -- STAGE 5a½: an `evalAs` WITNESS is a written type, so an
-    -- unlabelled one refuses recursive code — the sandbox reads `Rec`
+    -- unlabelled one refuses recursive code — the sandbox reads `Recursive`
     -- exactly as it reads io, and the refusal rides the miss track
   , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [dup >> *] c (7) >> evalAs >> print) | print) >> forget",
-     ["alt2(Cannot unify effects: Rec vs pure (the expected type fixes the grade; this code must stay pure), 7)"], "")
-    -- a witness that itself recurses is `=Rec>`, and then the same
+     ["alt2(Cannot unify effects: Recursive vs pure (the expected type fixes the grade; this code must stay pure), 7)"], "")
+    -- a witness that itself recurses is `=Recursive>`, and then the same
     -- code is admitted
   , ("\"[_ 100 >> less?] [2 _ >> *] ... >> while\" >> parse >> ((c -> [[_ 200 >> less?] [3 _ >> *] ... >> while] c (7) >> evalAs >> print) | print) >> forget",
      ["alt1(112)"], "")
+    -- STAGE 5e: a MARKED def reflects and runs like any other — the
+    -- elaborated body is a closed spine, so `reflect` is total on it
+    -- and the label rides through the witness
+  , ("def decr = _ 1 >> -\n\
+     \def fac = use Recursive ; (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
+     \[fac] ([fac] >> getCode) (5) >> evalAs >> (print | print forget) >> merge",
+     ["120"], "")
+  , ("def decr = _ 1 >> -\n\
+     \def fac = use Recursive ; (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
+     \[dup >> *] ([fac] >> getCode) (5) >> evalAs >> (print | print forget) >> merge",
+     ["Cannot unify effects: Recursive vs pure (the expected type fixes the grade; this code must stay pure)"], "")
+    -- a FUNCTOR on the same header sees the closed spine: `use Ticked
+    -- Recursive` traces every stage of the knot, on every re-entry
+  , ("def tick = [\"tick\" ... >> print ...] >> getCode\n\
+     \def ticked = tick ... >> interpose\n\
+     \functor Ticked = ticked\n\
+     \def down = use Ticked Recursive ; (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
+     \2 >> down >> print",
+     ["tick", "tick", "tick", "0"], "")
+    -- OPEN recursion still works: `fix` takes a body someone else
+    -- wrote, and a wrapper around that body is a different knot
+  , ("def decr = _ 1 >> -\n\
+     \def facBody = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> self ... >> ev) >> *)) >> merge)]\n\
+     \def loud = (b -> [(self ... -> (\"step\" >> print) ... >> self ... >> b ... >> ev)])\n\
+     \def facLoud = facBody ... >> loud ... >> fix ... >> ev\n\
+     \3 >> facLoud >> print",
+     ["step", "step", "step", "step", "6"], "")
     -- STAGE 5a⁹⁄₁₀ — THE RULE THE PRIM REDUCTION WAS MISSING.  Every
     -- derived higher-order prelude word is checked to be AT LEAST AS
     -- GENERAL as the scheme its prim ancestor had, by the one routine
@@ -1312,8 +1368,13 @@ evalTests =
     -- granularity because a theory slot has one slot-local stack; the
     -- grades, which is what this stage moved, are exact.
     -- Under unifying grades `loopD`, `whileD` and `untilD` all failed
-    -- here ("Rec vs pure ... written and fixed").
-  , ("theory Derived =\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Rec> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Rec> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Rec> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\nmodel D : Derived =\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
+    -- here ("Recursive vs pure ... written and fixed").
+    -- `fixD` joined the theory when `fix` left the prim set (5e).  Its
+    -- slot is written `=Recursive>` where the PRIM's own arrow was
+    -- pure: the derived word runs the knot's `ev`, and the scope it is
+    -- written under mints unconditionally.  Everything INSIDE the
+    -- arrow — the body's grade, the knot's — is unchanged.
+  , ("theory Derived =\n    fixD       : Fn⟨Fn⟨a =Recursive> b⟩ a ⇒ b⟩ =Recursive> Fn⟨a =Recursive> b⟩\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Recursive> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Recursive> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Recursive> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\nmodel D : Derived =\n    fixD       = fix\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
     -- …and the consequence, run: a WRITTEN pure `Fn⟨Int ⇒ (Int|Int)⟩`
     -- in a data field reaches `loop`, which no derived word could take
     -- while composition unified grades.
@@ -1848,7 +1909,7 @@ evalTests =
     -- CODATA: an infinite stream, forced one cell at a time. Fn in the
     -- data declaration makes the thunked tail expressible; productive
     -- corecursion (from) is guarded by the quote.
-  , ("data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> ev\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
+  , ("data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)\ndef headS = unStream >> (h t -> h)\ndef tailS = unStream >> (h t -> t) >> ev\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> tailS >> tailS >> headS >> print", ["2"], "")
     -- vertical track-columns: flat 3-sum via inject-and-collapse, then
     -- bare rows each touching one track (empty arms pass)
   , ("def route3 = negative? >> (alt1 | zero? >> (alt2 | alt3) >> merge) >> merge\ndef describe =\n    route3\n    drop >> \"neg\" | |\n    | drop >> \"zero\" |\n    | | toStr\n    (print | print | print)\n    forget\n-4 >> describe\n0 >> describe\n7 >> describe", ["neg", "zero", "7"], "")
@@ -2233,19 +2294,19 @@ moduleFailTests =
   , ("data Quiet = (Fn⟨Str ⇒ •⟩)\n[print] >> Quiet >> drop",
      "Cannot unify effects")
     -- STAGE 5a½: …and it refuses a RECURSIVE one for the same reason.
-    -- A codata thunk built by `fix` must be declared `=Rec>`; the
+    -- A codata thunk built by `fix` must be declared `=Recursive>`; the
     -- message says which label to write.
   , ("data Stream(a) = (a Fn⟨• ⇒ Stream(a)⟩)\ndef from = [(self n -> n [n 1 >> + >> self ... >> ev] >> Stream)] ... >> fix ... >> ev\n0 >> from >> drop",
-     "Cannot unify effects: Rec vs pure (composition joins grades, and this arrow's manifest is written and fixed: write =Rec> on that arrow, or keep this code label-free)")
+     "Cannot unify effects: Recursive vs pure (composition joins grades, and this arrow's manifest is written and fixed: write =Recursive> on that arrow, or keep this code label-free)")
     -- a NESTED written Fn keeps its grade through the `k := <data>`
     -- substitution: substituting theory parameters used to rebuild every
     -- nested Fn pure, which silently dropped the declared manifest
-  , ("theory Emb(k(_, _)) =\n    embed : Fn⟨a =Rec> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A : Emb(Arr) =\n    embed = Arr\n\ndef go = use A ; embed\n[dup >> *] >> go >> drop",
-     "slot 'embed' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Rec> a1⟩ ⇒ Arr(a0, a1)")
+  , ("theory Emb(k(_, _)) =\n    embed : Fn⟨a =Recursive> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A : Emb(Arr) =\n    embed = Arr\n\ndef go = use A ; embed\n[dup >> *] >> go >> drop",
+     "slot 'embed' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Recursive> a1⟩ ⇒ Arr(a0, a1)")
     -- a theory slot declared pure refuses a `fix`-built body — the same
     -- rule that already refused an io body under a pure slot
   , ("theory Stepper =\n    step : Int ⇒ Int\n\nmodel Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go = use Fixed ; step\n5 >> go >> drop",
-     "slot 'step' is Int =Rec> Int but theory Stepper declares Int ⇒ Int (Cannot unify effects: Rec vs pure")
+     "slot 'step' is Int =Recursive> Int but theory Stepper declares Int ⇒ Int (Cannot unify effects: Recursive vs pure")
     -- the bound must agree with the bundle's actual width
   , ("fin0 >> 1 2 >> at",             "Cannot unify")
     -- a closed non-final open word that doesn't cover its wires is an
@@ -2257,13 +2318,26 @@ moduleFailTests =
   , ("type Fn(a) = (• | a)\n1",                  "Malformed type declaration")
   , ("type Bad = Fn\n1",                         "Fn must be written")
     -- STAGE 5a½: a definition is not in scope in its own body, under
-    -- either spelling.  Recursion is `fix`, at a typed boundary.
+    -- either spelling — unless its header SAYS so (5e).
   , ("def f = 1 ... >> + >> f\n1",
-     "`f` refers to itself: a definition is not in scope in its own body")
+     "`f` refers to itself")
   , ("def f = 1 ... >> + >> recurse\n1",
      "`f` refers to itself (`recurse` named the definition being written)")
-    -- and the refusal names the way out
-  , ("def f = 1 ... >> + >> f\n1",              "write the recursion with `fix` (MANUAL §8)")
+    -- and the refusal names the way out: the marker, by name
+  , ("def f = 1 ... >> + >> f\n1",
+     "write `use Recursive` in its header (MANUAL §8)")
+    -- STAGE 5e: the marker is a def's HEADER.  The name it puts back in
+    -- scope is the DEF's, so a scope opened part-way down the body
+    -- would quietly name only that part — refused where it is written.
+  , ("def f = 1 ... >> + >> (use Recursive ; drop)\n1",
+     "is a def's header")
+  , ("use Recursive ; 1", "there is no def here")
+    -- and the receipt is still unwritable by hand
+  , ("def f = use@Recursive ; 1\n1", "is the receipt of `use Recursive`")
+    -- one spelling per thing: the marker owns the name, so a functor
+    -- (or model, or theory) of that name is a collision, not a shadow
+  , ("def idF = (c -> c)\nfunctor Recursive = idF\ndef f = use Recursive ; (n -> n)\n1",
+     "is the built-in recursion marker")
     -- a non-final open-arity atom must report the placement rule, not
     -- panic in appendStack (regression: was a Haskell error).  Until
     -- 5a½ the shortest way to write one was a non-final recursive call

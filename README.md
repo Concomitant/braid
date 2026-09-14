@@ -6,14 +6,14 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (**48 morphisms**, counted
-2026-09-13) and prove it spans everything else **in the language
+The design bet: keep the primitive set tiny (**47 morphisms**, counted
+2026-09-14) and prove it spans everything else **in the language
 itself**. A word keeps its place in the kernel only if it is a
-structure map of the doctrine — cartesian, coproduct, exponential,
-recursion — or if it touches the implementation (arithmetic, io,
-reflection). The entire standard library is derived user code: `id`,
-booleans, three of the four comparisons, iteration (`loop` is the
-Elgot dagger, built on `fix`), `while` and `until`, the list type and
+structure map of the doctrine — cartesian, coproduct, exponential — or
+if it touches the implementation (arithmetic, io, reflection). The entire
+standard library is derived user code: `id`, booleans, three of the four
+comparisons, iteration (`loop` and `fix` are both derived under the
+`use Recursive` marker), `while` and `until`, the list type and
 its library, the sum monad, conditionals and guard ladders, data-type
 folds — and the metaprogramming layer, where reflected code is a list
 you munge with the same library.
@@ -112,7 +112,7 @@ bare `use` leaves.
    `reflect` compiles it back to dup/swap/drop to prove it — and, for a
    name a quotation or a row branch closed over, to `curry`/`ev`, the
    exponential's two maps. Closures are wiring too, so `reflect` is
-   total on binder code and `use F` over the `fix` idiom works.
+   total on binder code and `use Traced` over a `use Recursive` def works.
 6. **Guard ladders are ordinary words.** Bind the subject and a guard
    is a bare Bool beside its answer; `...` accumulates one lane per
    line and `decide` folds the product — first true lane wins:
@@ -126,19 +126,19 @@ bare `use` leaves.
    Guards-as-data variants (`firstTrue`, clause ladders + `choose`,
    `if`/`elif`/`else` fold-as-you-go) are all prelude defs. No guard
    syntax exists in the parser.
-7. **Loops are values, and so is the knot.** `loop` is Elgot
-   iteration; `while` and `until` are three-line prelude defs. A
-   definition is *not* in scope in its own body: general recursion is
-   `fix : Fn⟨Fn⟨ρ0 =Rec> ρ1⟩ ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 =Rec> ρ1⟩`, which hands
-   the body its own knot as an ordinary argument. `fix` and `loop` are
-   the only two words that can run unbounded, and both mint `Rec` on
-   the arrow — *may recurse without bound*, a receipt rather than a
-   termination proof (item 12).
+7. **Loops are values, and so is the knot.** Write `use Recursive` in a
+   def's header to put the def's own name in scope in its own body.
+   Elaboration rewrites the body to the closed form so the def is still a
+   closed spine; `Recursive` is the receipt that scope mints. `fix` and
+   `loop` are ordinary prelude defs written under the marker, as are
+   `while` and `until`. A word without `Recursive` ties no knot and
+   terminates by construction; an unmarked self-reference is refused with
+   a message that names the marker (MANUAL §8).
 8. **Data types are declared sums.** `data Tree(a) = (a | Tree(a)
    Tree(a))` — the name rolls, `unTree` unrolls (both free at
    runtime), and `foldTree` is *generated*: elimination by points — a
    structural recursor: it descends on a smaller value, so it
-   terminates by construction, needs no knot, and mints no `Rec`.
+   terminates by construction, needs no knot, and mints no `Recursive`.
 9. **The list defines itself.** `type List(a) = (• | a List(a))` in
    the prelude; literals, `map`, `fold`, `filter` are all derived. A
    cell is one wire — declaration parameters are kinded, a bare name
@@ -255,9 +255,10 @@ bare `use` leaves.
     `=IO>`, a pure one `⇒`, and the label sits on the arrow just like
     resource names do. The manifest is a SET, though: a functor scope
     mints its own label onto everything it rewrote (item 14), and
-    `=IO Traced>` is an ordinary type. `Rec` (item 7) is the second
-    built-in member: `fix` and `loop` mint it, structural recursors
-    (and so `fold`, `map`, `filter`) do not — so **fix-free pure code
+    `=IO Traced>` is an ordinary type. `Recursive` (item 7) is the second
+    built-in member: the `use Recursive` scope mints it, and `fix` and
+    `loop` (written under that marker) carry it; structural recursors
+    (and so `fold`, `map`, `filter`) do not — so **knot-free pure code
     terminates by construction**, and an unlabelled written type
     refuses recursive code exactly as it refuses io. Which labels you get is
     **inferred, never annotated**: four prims are marked
@@ -265,7 +266,7 @@ bare `use` leaves.
     other grade follows from composition, which **joins** the labels
     rather than forcing them equal, so a part is never asked for the
     composite's labels — `def shout = toStr >> print : a0 =IO> •`,
-    while `loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` recurses without
+    while `loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1` recurses without
     asking its body to.
     Quoting stays pure, since pushing an action isn't doing it:
     `[print] : • ⇒ Fn⟨a0 =IO> •⟩`, and `ev` is what transfers the grade out.
@@ -352,7 +353,7 @@ bare `use` leaves.
     have the structure the source has" is checked rather than assumed.
     The receipt is an ordinary label with a *carrier* — at the base the
     word is `• ⇒ Circuit(Int, Int)` carrying `Circuits`, and the display
-    folds the two into `Int =Circuits Rec> Int`. Entering is a marker,
+    folds the two into `Int =Circuits Recursive> Int`. Entering is a marker,
     leaving is a model: the theory's eliminators are refused inside the
     scope, which makes a theory with no eliminator a **sealed**
     category — abstract types for free. A morphism that is not the
@@ -420,7 +421,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 992-case test suite, a full
+(typechecker, interpreter, REPL), a 1006-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -432,7 +433,7 @@ the eliminator is a fold and not an unroll), and `design-macros.md`
 (elaboration as a library: functors over `Code`, the five invariants,
 and the transport of `⇒` into other categories). `READING.md` is the
 annotated bibliography behind all of them. Deliberately absent so
-far: floats, labeled record fields, totality checking (`Rec` marks
+far: floats, labeled record fields, totality checking (`Recursive` marks
 what *may* recurse without bound — provenance, not a proof), and the
 last stage of the effects staging —
 `resource` wires, `use` scopes, and theories/models with runnable

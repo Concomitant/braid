@@ -113,30 +113,37 @@ freshness; inside one expression nothing does. (ASCII `->!` and the old
 **Amendment (2026-09-09) — the label set has a second built-in member,
 and the written spelling generalizes.** Stage 5a½ took a definition out
 of scope in its own body, leaving `fix` and `loop` as the only words
-that can run unbounded; both now mint `Rec` the way the four io prims
-mint `IO`. `Rec` says *may recurse without bound*, not *diverges* — it
-is provenance, like every other label, and it unions along composition
-(`Int =IO Rec> •`). Generated structural recursors mint nothing, since
-they descend on a smaller value, so `fold`, `map`, `filter` and the
-rest of the derived library stay bare; the reading that buys is that an
-unlabelled word is `fix`-free and therefore terminates by construction.
-`fix`'s own arrow stays pure — tying the knot runs nothing — and the
-label rides on the knot it returns and the `self` it passes in. The
+that can run unbounded; both now mint `Recursive` the way the four io
+prims mint `IO`. `Recursive` says *may recurse without bound*, not
+*diverges* — it is provenance, like every other label, and it unions
+along composition (`Int =IO Recursive> •`). Generated structural
+recursors mint nothing, since they descend on a smaller value, so
+`fold`, `map`, `filter` and the rest of the derived library stay bare;
+the reading that buys is that an unlabelled word ties no knot and
+therefore terminates by construction. `fix`'s own arrow stays pure —
+tying the knot runs nothing — and the label rides on the knot it
+returns and the `self` it passes in. *(Superseded 2026-09-14:
+recursion is a MARKER. `use Recursive` in a def's header puts the
+def's own name back in scope in its own body and mints the label as
+that scope's receipt, so nothing is pre-applied but io; `fix` left the
+primitive set and is a prelude def written under the marker, whose own
+arrow therefore carries `Recursive`. See design-macros.md, "recursion
+is a marker".)* The
 written spelling widened to match: `=L1 L2>` is read wherever `=IO>`
-was, in any order, displayed sorted, so `Fn⟨• =Rec> Stream(a)⟩` and
-`Fn⟨a =IO Rec> b⟩` are ordinary written types. And the strictness above
+was, in any order, displayed sorted, so `Fn⟨• =Recursive> Stream(a)⟩` and
+`Fn⟨a =IO Recursive> b⟩` are ordinary written types. And the strictness above
 now bites in one more place, which is the honest cost: an unlabelled
 written `Fn⟨Int ⇒ Int⟩` refuses a quotation that uses `while`. Eight
 declarations across `examples/stream.braid` and
-`examples/circuits.braid` had to gain `=Rec>` for that reason,
+`examples/circuits.braid` had to gain `=Recursive>` for that reason,
 including a theory slot's *nested* argument
-(`arrP : Fn⟨a =Rec> b⟩ =Rec> k(a, b)`) — composition unifies rows
-rather than joining them, so a closed `=Rec>` codata field propagates
+(`arrP : Fn⟨a =Recursive> b⟩ =Recursive> k(a, b)`) — composition unifies rows
+rather than joining them, so a closed `=Recursive>` codata field propagates
 the label to the written type of every function its body applies.
 *(Amended 2026-09-12: six of the eight, not eight. That propagation
 WAS the bug; see "composition JOINS" below for which two came back to
 `⇒` and why the other six were always right.)* The
-full accounting, together with what `Rec` does *not* promise (it bounds
+full accounting, together with what `Recursive` does *not* promise (it bounds
 nothing, it unions rather than intersects, and elaboration-time
 recursion never meets it), is in `design-macros.md`, the 2026-09-09
 amendment "recursion at a typed boundary".
@@ -154,8 +161,8 @@ pushed back INTO the parameter's type. Two verified readings, both on
 the 2026-09-12 build before the fix:
 
 ```text
-loop   : Fn⟨ρ0 =Rec> (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1       -- the prim said `⇒`
-while  : Fn⟨ρ0 =Rec> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Rec> ρ0⟩ ρ0 =Rec> ρ2
+loop   : Fn⟨ρ0 =Recursive> (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1       -- the prim said `⇒`
+while  : Fn⟨ρ0 =Recursive> (ρ1 | ρ2)⟩ Fn⟨ρ1 =Recursive> ρ0⟩ ρ0 =Recursive> ρ2
 def logged = (f -> f ... >> ev >> "done" ... >> print ...)
 logged : Fn⟨• =IO> ρ0⟩ =IO> ρ0                     -- IO demanded OF f
 ```
@@ -165,7 +172,7 @@ and the consequence a user meets:
 ```text
 data Step = Fn⟨Int ⇒ (Int | Int)⟩
 … >> unStep >> _ 3 >> loop
-error: Cannot unify effects: pure vs Rec (the unlabelled side's
+error: Cannot unify effects: pure vs Recursive (the unlabelled side's
 manifest is written and fixed …)
 ```
 
@@ -232,7 +239,7 @@ types stay principal. Termination is immediate: the label universe is
 finite and each step adds a label. (Tarski; Talpin–Jouvelot for the
 effect reading.)
 
-**What came back.** `loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Rec> ρ1` — the
+**What came back.** `loop : Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1` — the
 prim's type, exactly; `while`/`until` likewise; `logged : Fn⟨• ⇒ ρ0⟩
 =IO> ρ0`. A test pins the rule that was missing: a theory whose slots
 ARE the pre-reduction schemes, and an instance filling each slot with
@@ -244,19 +251,19 @@ one row (a `Fn` type's, a prim's shared ε) is still unification, and
 `unifyEff`'s **bridge** — two open rows each carrying a label the other
 lacks, joined through a residual tail — is still reachable and still
 needed there. Stage 5a⁹⁄₁₀'s plan expected to delete it; it was kept,
-because `[yell] [spin] >> eq?` for an `=IO>` quote and a `=Rec>` one
+because `[yell] [spin] >> eq?` for an `=IO>` quote and a `=Recursive>` one
 forces two `Fn` rows equal and must succeed. Composition no longer
 reaches it. A test pins that program.
 
-**Which `=Rec>` declarations stage 5a½ added were the bug.** Two of the
-eight, both in `examples/circuits.braid`: `data Arr(a, b) = Fn⟨a =Rec>
+**Which `=Recursive>` declarations stage 5a½ added were the bug.** Two of the
+eight, both in `examples/circuits.braid`: `data Arr(a, b) = Fn⟨a =Recursive>
 b⟩` and the theory slot's NESTED argument
-`arrP : Fn⟨a =Rec> b⟩ =Rec> k(a, b)`. Both are `⇒` again; the example
+`arrP : Fn⟨a =Recursive> b⟩ =Recursive> k(a, b)`. Both are `⇒` again; the example
 prints the same five numbers. The other six are still required and
-always were: `data Circuit(a, b) = Fn⟨a =Rec> b Circuit(a, b)⟩` and
-`data Stream(a) = (a Fn⟨• =Rec> Stream(a)⟩)` are codata whose thunk
+always were: `data Circuit(a, b) = Fn⟨a =Recursive> b Circuit(a, b)⟩` and
+`data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)` are codata whose thunk
 really does recurse, and `arrP`'s OUTER row plus `thenP`, `firstP`,
-`observe` and `sample` are `=Rec>` because the `Circuit` model builds
+`observe` and `sample` are `=Recursive>` because the `Circuit` model builds
 every circuit with `fix`. The paragraph above that blamed "composition
 unifies rows" for all eight is corrected by this list.
 

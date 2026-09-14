@@ -95,17 +95,17 @@ def mapped =
 
 (1 2 3 >> pack) >> mapped >> print        # list(2, 4, 6)
 
-# ... and inside a `fix` body, because the engine recurses into quotes.
+# ... and inside a KNOT body.  `use Recursive` is innermost among a
+# header's scopes, so `Opt` sees the closed spine the marker wrote, not
+# the name it put back in scope.
 def sumTo =
-    use Opt
-    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...
-    fix ...
-    ev
+    use Opt Recursive
+    (a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> sumTo)) >> merge)
 
 0 5 >> sumTo >> print                     # 15
 
 # THE RECEIPT.  `use Opt` leaves `Opt` on the manifest of everything it
-# rewrote — `poly : Int =Opt> Int`, `sumTo : Int Int =Opt Rec> Int` —
+# rewrote — `poly : Int =Opt> Int`, `sumTo : Int Int =Opt Recursive> Int` —
 # and a written type must carry it too, so an unlabelled witness refuses
 # optimized code exactly as a pure one refuses io.  That is the whole
 # difference between an optimizer you can audit and one you must trust.
@@ -230,9 +230,10 @@ def inImage = sameCodeC >> ("in the image of Opt" | "NOT in the image of Opt") >
 # 8. Transport of recursion: F(fix b) = fix (F b).
 #
 # It holds for `Opt` because the engine recurses into quotes, so it
-# meets `fix`'s body where the body is.  Since 2026-09-13 the normalizer
-# enters quotations, and `fix` has a closed arity, so `[b] ; fix` is an
-# uninterpreted operator applied to a value whose BODY is compared in
+# meets the body where the body is.  Since 2026-09-13 the normalizer
+# enters quotations, and `fix` — a prelude def since 2026-09-14, held
+# OPAQUE because it ties a knot — has a closed arity, so `[b] ; fix` is
+# an uninterpreted operator applied to a value whose BODY is compared in
 # normal form.  Transport is therefore DECIDED for a fix body that does
 # not call itself:
 # ---------------------------------------------------------------------
@@ -248,9 +249,11 @@ def fastFix = [[drop ... >> dup    >> +] ... >> fix ...]
 # The SELF-CALLING body is the honest boundary, and since 2026-09-13 it
 # is one word narrower than it was.  `ev` of a WIRE is decided when the
 # wire's arrow is CLOSED — the normalizer gives it the arity the type
-# wrote down.  `self` is a binder parameter, so abstraction elimination
-# turns it into a wire whose type is `Fn⟨Σf =Rec> Θf⟩`, and Σf is an
-# open stack variable: no arity, and nothing to decide with.
+# wrote down.  The knot is a binder parameter, so abstraction
+# elimination turns it into a wire whose type is `Fn⟨Σf =Recursive> Θf⟩`,
+# and Σf is an open stack variable: no arity, and nothing to decide
+# with.  (A def written under `use Recursive` is held opaque for the
+# same reason: inlining it could only trade a verdict for a refusal.)
 # `sameCodeC` says so by name rather than guessing:
 #
 #   sameCodeC: outside the structural fragment: `ev` of a value whose

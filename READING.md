@@ -80,6 +80,10 @@ copies where they exist.
   (LICS 2000) — completeness for those axioms, via a syntactic
   characterization of the free iteration theory; the standard to hold
   a future runnable law block for `fix` against.
+- Leijen, *Koka: Programming with Row Polymorphic Effect Types* (MSFP
+  2014) — the `div` effect marks code that may diverge; the precedent
+  for `Recursive` as a label on the arrow marking *may recurse without
+  bound*.
 
 ## Grading, coeffects, cost
 
