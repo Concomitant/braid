@@ -2600,6 +2600,21 @@ moduleFailTests =
     -- the sandbox already named the fix; what it lacked was the line
   , ("data Quiet = (Fn\10216Str \8658 \8226\10217)\n[print] ; Quiet ; drop",
      "line 2: Cannot unify effects")
+    -- ATTRIBUTION (2026-09-15).  `in def X` is wrapped ONCE around
+    -- everything a def's check can refuse, so the lexer's `\`
+    -- continuation, the parser, and the refusals about the def's own
+    -- NAME carry it too — and so does the location.
+  , ("def f =\n  1 2 \\ x\n  ; +\n1 ; f ; print",
+     "line 2, in def f: A `\\` continues a tensor stage onto the next \
+     \line, so it must be the last thing on its line")
+  , ("def g =\n  1 2\n  ; ; +\n1 ; g ; print",
+     "line 2, in def g: Expected a tensor stage")
+  , ("def h =\n  1 2\n  ( a -> a\n1 ; h ; print",
+     "line 3, in def h: Unclosed group (expected ')')")
+  , ("def dup2 = 1\ndef dup2 = 2\n1 ; print",
+     "in def dup2: Duplicate definition: dup2")
+  , ("def selfie = 1 ... >> + >> selfie\n1",
+     "in def selfie: `selfie` refers to itself")
   ] ++
     -- NAMED FIELDS refuse five things by name (2026-09-14).  A field
     -- name is a WORD, so it collides like one; fields name the

@@ -1572,10 +1572,12 @@ tokenize = go 1
       | Just rest <- afterLine cs =
           case dropWhile (`elem` (" \t\r" :: String)) rest of
             (c : _) | c /= '\n' && c /= '#' -> go (n + 1) rest
-            _ -> Left "A `\\` continues a tensor stage onto the next line, \
-                      \so the next line must have something on it"
-      | otherwise = Left "A `\\` continues a tensor stage onto the next \
-                         \line, so it must be the last thing on its line"
+            _ -> Left (atLine (Just n)
+                   "A `\\` continues a tensor stage onto the next line, \
+                   \so the next line must have something on it")
+      | otherwise = Left (atLine (Just n)
+                     "A `\\` continues a tensor stage onto the next \
+                     \line, so it must be the last thing on its line")
       where
         afterLine str = case dropWhile (`elem` (" \t\r" :: String)) str of
           ('\n' : r) -> Just r
@@ -2056,7 +2058,7 @@ parseProgramAt lineOf datas = fmap fst . parseProgramFrom lineOf datas
 -- inference as the fallback for anything the term did not stamp.
 parseProgramFrom :: (Int -> Int) -> [DataDecl] -> String
                  -> Either String (Term, Int)
-parseProgramFrom lineOf datas input = do
+parseProgramFrom lineOf datas input = first (remapMark lineOf) $ do
   (start, toks0) <- normalizeToksAt <$> tokenize input
   toks  <- expandPatterns (patCons datas) toks0
   (term, rest) <- parseProgramToks start toks
@@ -2067,6 +2069,14 @@ parseProgramFrom lineOf datas input = do
 -- Rewrite every stage stamp through a map.  The parser counts lines
 -- from 1 within the text it was given; this puts them where the reader
 -- can see them.  A 0 stamp is the compiler's own code and stays 0.
+-- ...and the same for a refusal the LEXER or PARSER wrote, which
+-- counted the lines of the text it was given and knows nothing of the
+-- file it came out of.
+remapMark :: (Int -> Int) -> String -> String
+remapMark f s = case takeLocMark s of
+  Just (n, rest) | n /= 0 -> locMark (f n) ++ rest
+  _                       -> s
+
 remapLines :: (Int -> Int) -> Term -> Term
 remapLines f = go
   where
@@ -2366,18 +2376,18 @@ parseStage ln = go []
       (t, rest') <- parseDelimited ln rest
       case rest' of
         (TokRBrack : rest'') -> go (Quote t : acc) rest''
-        _ -> Left "Unclosed quotation (expected ']')"
+        _ -> here "Unclosed quotation (expected ']')"
     -- (p): grouping only — the enclosed program is an ordinary atom,
     -- not reified.  (x y -> p): named open abstraction.
     go acc (TokLParen : rest)     = do
       (t, rest') <- parseDelimited ln rest
       case rest' of
         (TokRParen : rest'') -> go (t : acc) rest''
-        _ -> Left "Unclosed group (expected ')')"
+        _ -> here "Unclosed group (expected ')')"
     go acc (TokEllipsis : rest)   =
       case rest of
         (t : _) | isStageTok t ->
-          Left "'...' must be the final atom of a tensor stage"
+          here "'...' must be the final atom of a tensor stage"
         _ -> Right (Stage (reverse acc) True, rest)
     -- `-> names` closes the stage it follows and is left for
     -- parseProgramToks (the body is the rest of the SCOPE, which only
@@ -2387,8 +2397,11 @@ parseStage ln = go []
       | null acc  = Right (Stage [Prim "pass"] False, rest)
       | otherwise = Right (Stage (reverse acc) False, rest)
     go acc rest
-      | null acc  = Left $ "Expected a tensor stage" ++ context rest
+      | null acc  = here ("Expected a tensor stage" ++ context rest)
       | otherwise = Right (Stage (reverse acc) False, rest)
+
+    -- a parse refusal knows its line the same way a stage does
+    here msg = Left (atLine (Just ln) msg)
 
     isStageTok (TokIdent _) = True
     isStageTok (TokInt _)   = True
@@ -7604,7 +7617,15 @@ checkModuleRaw base src = do
                , ownAl, dd : ownDt, docs'' )
     addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans bases
            resources instNames datas
-           (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) = do
+           (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) =
+      -- ATTRIBUTION, ONCE (2026-09-15).  Everything a def's own check
+      -- can refuse — the parse, the destructuring rewrite, the `\`
+      -- continuation, `over`'s target, the `use` elaborator, the
+      -- functor and transport expansions, inference, the K-word shape,
+      -- and the module-level refusals about the def's NAME — is wrapped
+      -- here rather than at each site, so no path can be added that
+      -- forgets to say which def it is in.
+      first inDef $ do
       -- where this body sits in the file: a run of consecutive lines
       -- starting at `base`, or nothing at all for text the compiler
       -- wrote (a model's slot, a transport word, a square)
@@ -7620,8 +7641,7 @@ checkModuleRaw base src = do
            || isJust (lookup name tmpls)
         then Left $ "Duplicate definition: " ++ name
         else Right ()
-      (term0, bodyStart) <- either (Left . inDef) Right
-                              (parseProgramFrom bodyAt datas bodySrc)
+      (term0, bodyStart) <- parseProgramFrom bodyAt datas bodySrc
       let tmplHdr = templateHeader thNames term0
       case tmplHdr of
         -- A TEMPLATE is recorded, not defined.  It has no body that runs
@@ -7640,9 +7660,9 @@ checkModuleRaw base src = do
           -- no receipt.  It is consumed here, where a def is recorded.
           (asc, termH) <- case term0 of
             Over (n : _) b ->
-              either (Left . inDef) (\m -> Right (Just m, b))
-                     (overTarget thNames trans slotTable funcs bases
-                                 resources n)
+              (\m -> (Just m, b))
+                <$> overTarget thNames trans slotTable funcs bases
+                               resources n
             _ -> Right (Nothing, term0)
           let env1 = M.delete name env   -- a shadowed def must not leak in
           -- `use` scopes are written out here, between parse and infer: a
@@ -7682,13 +7702,12 @@ checkModuleRaw base src = do
           -- "is in the image of F".  Membership is carried by the TYPE
           -- (checked below) and by the K-word table, and nothing else:
           -- only a `use` mints, and every `use` does.
-          term0' <- either (Left . inDef) Right
-                      (elabUseWith (ElabCtx env1 run slotTable funcs tmpls
-                                            thNames trans kws bases self
-                                            ('@' `elem` name
-                                               || name `elem` tblGen)
-                                            (Just name) tblTypes)
-                                   termH)
+          term0' <- elabUseWith
+                      (ElabCtx env1 run slotTable funcs tmpls
+                               thNames trans kws bases self
+                               ('@' `elem` name || name `elem` tblGen)
+                               (Just name) tblTypes)
+                      termH
           -- `over M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.
           let term = case asc of
@@ -7704,8 +7723,7 @@ checkModuleRaw base src = do
           if "recurse" `elem` mentions && not (M.member "recurse" env1)
             then Left (selfReferenceError name True)
             else Right ()
-          (arr, dsubs) <- either (Left . inDef) Right
-                            (inferTermSubAt bodyStart env1 term)
+          (arr, dsubs) <- inferTermSubAt bodyStart env1 term
           -- `over M` classifies BY SHAPE.  A def that builds one carrier
           -- out of nothing is a morphism of M and joins the K-word
           -- table; one that does not is a base word written in M's
@@ -7715,13 +7733,12 @@ checkModuleRaw base src = do
           -- happens to produce a carrier is still not a word of M, so
           -- no inferred type is ever scanned for membership.
           case asc of
-            Just m -> either (Left . inDef) Right
-                             (checkKWordShape m name
-                                (any (`elem` primsIn term)
-                                     [ slotDefName (tpName m) sl
-                                     | Just (_, sls) <- [lookup (tpName m) slotTable]
-                                     , sl <- sls ])
-                                (normalizeArrow arr))
+            Just m -> checkKWordShape m name
+                        (any (`elem` primsIn term)
+                             [ slotDefName (tpName m) sl
+                             | Just (_, sls) <- [lookup (tpName m) slotTable]
+                             , sl <- sls ])
+                        (normalizeArrow arr)
             _ -> Right ()
           let kws2 = case asc of
                 Just m | isKWordShape m (normalizeArrow arr) ->
