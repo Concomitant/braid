@@ -1215,6 +1215,30 @@ sealedMod = unlines
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- DESTRUCTURING BINDERS (2026-09-14).  A constructor pattern in a
+    -- binder head is SYNTAX: it rewrites, before the parse tree exists,
+    -- to the un-constructor stage a hand wrote until today.  All four
+    -- forms — alone, mixed with a plain parameter, with the open `...`,
+    -- and nested one deep.
+  [ ("data Dual = Float Float\ndata Wrap = Dual Int\n\
+     \def dneg = Dual(a, da) -> (a ; fneg) (da ; fneg) ; Dual\n\
+     \def mix = (Dual(a, da) x -> (a da ; fadd) x ; fadd)\n\
+     \def open = (Dual(a, da) ... -> a da ; fadd)\n\
+     \def deep = Wrap(Dual(a, da), n) -> (a da ; fadd) (n ; toFloat) ; fadd\n\
+     \(1.0 2.0 ; Dual) ; dneg ; unDual ; print ... ; print\n\
+     \(1.0 2.0 ; Dual) 4.0 ; mix ; print\n\
+     \(1.0 2.0 ; Dual) ; open ; print\n\
+     \((1.0 2.0 ; Dual) 3 ; Wrap) ; deep ; print",
+     ["-1.0", "-2.0", "7.0", "3.0", "6.0"], "")
+    -- ...and because the rewrite lands on an ordinary binder, `reflect`
+    -- is free: the two spellings reflect to the SAME code, character
+    -- for character.
+  , ("data Dual = Float Float\n\
+     \def getCode = reflect ; ((c -> c) | drop ; nil) ; merge\n\
+     \([Dual(a, da) -> da a ; Dual] ; getCode ; unparse) \
+     \([unDual ; (a da -> da a ; Dual)] ; getCode ; unparse) \
+     \; eq? ; verdict ; print",
+     ["alt1()"], "")
     -- FUNCTORS (stage 3): `use` grows a third kind of name.  A functor
     -- is any pure `Code ⇒ Code` word; the scope's body is reified, the
     -- word RUNS at elaboration, and the result is spliced back and
@@ -1224,7 +1248,7 @@ evalTests =
     -- notation, always with a point.  So every finite Float prints as a
     -- Float LITERAL — `0.1 fadd 0.2` prints the seventeen digits that
     -- are true rather than the three that are convenient.
-  [ ("0.5 ; print\n2.0 ; print\n-0.0 ; print\n(1.0 3.0 ; fdiv) ; print\n(2.0 ; fsqrt) ; print\n(0.1 0.2 ; fadd) ; print\n(7 ; toFloat) ; print\n(-2.7 ; floor) ; print\n(2.0 ; fexp) ; print",
+  , ("0.5 ; print\n2.0 ; print\n-0.0 ; print\n(1.0 3.0 ; fdiv) ; print\n(2.0 ; fsqrt) ; print\n(0.1 0.2 ; fadd) ; print\n(7 ; toFloat) ; print\n(-2.7 ; floor) ; print\n(2.0 ; fexp) ; print",
      ["0.5", "2.0", "-0.0", "0.3333333333333333", "1.4142135623730951",
       "0.30000000000000004", "7.0", "-3", "7.38905609893065"], "")
     -- every Float word once, against hand arithmetic
@@ -2272,6 +2296,13 @@ optimizerTheory =
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- A BINDER PATTERN refuses two things by name (2026-09-14): a
+    -- multi-alternative carrier (it un-constructs ONE alternative) and
+    -- an arity that is not the constructor's.
+  [ ("data Shape = (Int | Int Int)\ndef f = Shape(a) -> a\n1 ; print",
+     "`Shape` has 2 alternatives and a pattern un-constructs ONE")
+  , ("data Dual = Float Float\ndef f = Dual(a, b, c) -> a\n1 ; print",
+     "names 3 fields, but `Dual` has 2")
     -- HYGIENE: abstraction elimination EMITS `capture` and `dist2` into
     -- reflected code, so a module def of either name would capture code
     -- that never mentioned it.  They are the two prelude names a module
@@ -2279,7 +2310,7 @@ moduleFailTests =
     -- `fdiv` keeps `div`'s one refusal: dividing by zero has no answer
     -- worth inventing.  Everything else that leaves the finite doubles
     -- is IEEE and prints as itself.
-  [ ("1.0 0.0 ; fdiv ; print", "division by zero")
+  , ("1.0 0.0 ; fdiv ; print", "division by zero")
   , ("def capture = dup\n1 >> print",
      "`capture` cannot be shadowed: abstraction elimination EMITS it")
   , ("def dist2 = dup\n1 >> print",

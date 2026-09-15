@@ -426,6 +426,30 @@ a tensor stage, and are in scope as constants — including inside quotes
 (closure capture). Bound names shadow prims/defs; duplicate parameters
 are rejected.
 
+**Destructuring binders** *(2026-09-14)*. A slot of a binder head may be
+a constructor pattern over a **single-alternative** `data` type, naming
+its fields:
+
+```braid
+def dneg = Dual(a, da) -> (a ; fneg) (da ; fneg) ; Dual
+(Dual(a, da) Dual(b, db) -> …)   # one per slot
+(Dual(a, da) x -> …)             # mixed with plain parameters
+(Dual(a, da) ... -> …)           # and with the open form
+(Wrap(Dual(a, da), n) -> …)      # a field may itself be a pattern
+```
+
+This is SYNTAX, and it dies before the parse tree exists: a pattern
+rewrites, token for token, to the un-constructor stage a hand wrote
+until today. `Dual(a, da) Dual(b, db) -> p` *is* `unDual _ ; _ _ unDual
+; (a da b db -> p)`, and `Dual(a, da) -> p` *is* `unDual ; (a da -> p)`
+— the `un`-stage for the j-th slot pads with `_`, one for each wire
+already un-constructed to its left and one for each slot still whole to
+its right. So nothing downstream knows about patterns: inference, the
+runtime and `reflect` see ordinary binders, and reflecting a
+destructuring binder prints exactly what reflecting the hand-written
+form prints. The fields bind leftmost = deepest and shadow like any
+parameter (§14 has what a pattern refuses).
+
 **Binders are wiring, closures included** *(2026-09-12)*. `reflect`
 (§12) compiles a binder away into the vocabulary Code already has. A
 parameter used plainly is a `dup` on the parameter block; a parameter
@@ -2658,6 +2682,16 @@ holds for them too: final atom of their stage (§9).
   such restriction; it ends whatever stage it follows.
 - A binder with nothing after it is an error: its body is the rest of
   the scope, so there has to be a rest.
+- A binder pattern un-constructs ONE alternative, so it wants a
+  single-alternative `data` type: `Shape(a)` where `data Shape = (Int |
+  Int Int | Int Int Int)` is *`Shape` has 3 alternatives and a pattern
+  un-constructs ONE — use a row, `(… | … | …)`* *(2026-09-14)*.
+- A pattern's arity is the constructor's: `Dual(a, b, c)` against `data
+  Dual = Float Float` is *names 3 fields, but `Dual` has 2*. A name the
+  module never declared is *`Nope` is not a `data` type in scope, and a
+  pattern un-constructs one* — patterns are read against the types in
+  scope, so a `parse` of a string at runtime (which has none) refuses
+  every pattern by that message *(2026-09-14)*.
 - A binder's body only sees what the parameter list gives it. Need the
   remainder inside the body? Use an open binder (`x ... -> …`), not
   `(x -> …) ...` — the latter routes the rest *around* the binder.

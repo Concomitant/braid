@@ -96,17 +96,17 @@ model Floats : Smooth(Float) =
 
 data Dual = Float Float
 
-def dadd = unDual _ ; _ _ unDual ; (a da b db -> (a b ; fadd) (da db ; fadd) ; Dual)
-def dmul = unDual _ ; _ _ unDual ; (a da b db -> (a b ; fmul) ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual)
-def dneg = unDual ; (a da -> (a ; fneg) (da ; fneg) ; Dual)
+def dadd = Dual(a, da) Dual(b, db) -> (a b ; fadd) (da db ; fadd) ; Dual
+def dmul = Dual(a, da) Dual(b, db) -> (a b ; fmul) ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual
+def dneg = Dual(a, da) -> (a ; fneg) (da ; fneg) ; Dual
 # a literal is constant, so its tangent is 0
 def dlit = (c -> c 0.0 ; Dual)
 # d(exp x) = exp x · dx, and the value is shared with the tangent
-def dexp = unDual ; (a da -> (a ; fexp) ; (e -> e (e da ; fmul) ; Dual))
+def dexp = Dual(a, da) -> (a ; fexp) ; (e -> e (e da ; fmul) ; Dual)
 # d(sin x) = cos x · dx — the one place `fcos` is needed at all
-def dsin = unDual ; (a da -> (a ; fsin) ((a ; fcos) da ; fmul) ; Dual)
-def value   = unDual ; (v t -> v)
-def tangent = unDual ; (v t -> t)
+def dsin = Dual(a, da) -> (a ; fsin) ((a ; fcos) da ; fmul) ; Dual
+def value   = Dual(v, t) -> v
+def tangent = Dual(v, t) -> t
 
 model Fwd : Smooth(Dual) =
     add     = dadd
@@ -144,7 +144,7 @@ data Rev  = Float Fn⟨Float ⇒ Grad⟩
 def gzero = 0.0 0.0 ; Grad
 def gx    = (d -> d 0.0 ; Grad)
 def gy    = (d -> 0.0 d ; Grad)
-def gadd  = unGrad _ ; _ _ unGrad ; (u v s t -> (u s ; fadd) (v t ; fadd) ; Grad)
+def gadd  = Grad(u, v) Grad(s, t) -> (u s ; fadd) (v t ; fadd) ; Grad
 
 # two continuations, each given its own share of the adjoint, summed.
 # Linearity is what makes this a sum rather than a merge.
@@ -153,16 +153,16 @@ def k2 = (ka da kb db -> ka da ; ev ; (ga -> kb db ; ev ; (gb -> ga gb ; gadd)))
 # the linear map "scale by dx", as a continuation into the x slot
 def scaleK = (dx -> [(d -> (d dx ; fmul) ; gx)])
 
-def radd = unRev _ ; _ _ unRev ; (a ka b kb -> (a b ; fadd) [(d -> ka d kb d ; k2)] ; Rev)
-def rmul = unRev _ ; _ _ unRev ; (a ka b kb -> (a b ; fmul) [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev)
-def rneg = unRev ; (a ka -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev)
+def radd = Rev(a, ka) Rev(b, kb) -> (a b ; fadd) [(d -> ka d kb d ; k2)] ; Rev
+def rmul = Rev(a, ka) Rev(b, kb) -> (a b ; fmul) [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev
+def rneg = Rev(a, ka) -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev
 # a literal depends on no input: its continuation is the ZERO linear
 # map, which is `scaleK` at 0.0 — the same map `[(d -> gzero)]` is, and
 # the same CODE the `lit` square's other side normalizes to (§7)
 def rlit = (c -> c (0.0 ; scaleK) ; Rev)
-def rexp = unRev ; (a ka -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Rev))
-def rsin = unRev ; (a ka -> (a ; fsin) [(d -> ka (d (a ; fcos) ; fmul) ; ev)] ; Rev)
-def rvalue = unRev ; (v k -> v)
+def rexp = Rev(a, ka) -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Rev)
+def rsin = Rev(a, ka) -> (a ; fsin) [(d -> ka (d (a ; fcos) ; fmul) ; ev)] ; Rev
+def rvalue = Rev(v, k) -> v
 
 # THE EXIT PROBLEM, and how it is resolved here.
 #
@@ -178,7 +178,7 @@ def rvalue = unRev ; (v k -> v)
 # the accumulated continuation at adjoint 1.0 — "the derivative of the
 # output with respect to itself is 1" — and that is the whole of the
 # reverse sweep.
-def backward = unRev ; (v k -> k 1.0 ; ev)
+def backward = Rev(v, k) -> k 1.0 ; ev
 
 # the two input seeds: x is "the thing whose adjoint lands in slot 1"
 def seedX = (x -> x [gx] ; Rev)
@@ -258,7 +258,7 @@ def fxyR  = use Rev    ; fxy
 # is `fabs` and `flt?`, because `eq?` on Floats is exact and exactness
 # is not what a root finder wants.
 
-def step = unDual ; (v d -> v d ; fdiv)
+def step = Dual(v, d) -> v d ; fdiv
 
 def close? = (r -> (r ; value ; fabs) 0.0000001 ; flt?)
 
@@ -299,7 +299,7 @@ transformation Value : Fwd ⇒ Floats = value
 # A TANGENT BECOMES THE LINEAR MAP THAT SCALES BY IT.  That is the
 # sentence "forward and reverse are two representations of the same
 # linear map", and it is a declaration too, since 2026-09-14.
-def transpose = unDual ; (x dx -> x (dx ; scaleK) ; Rev)
+def transpose = Dual(x, dx) -> x (dx ; scaleK) ; Rev
 #   transpose : Dual ⇒ Rev
 
 transformation Transpose : Fwd ⇒ Rev = transpose
@@ -344,13 +344,13 @@ def emit = unGradient _ ; gadd ; Gradient          # Grad =Gradient> •
 def kx = [(gr d -> gr (d ; gx) ; emit)]
 def ky = [(gr d -> gr (d ; gy) ; emit)]
 
-def tadd = unRevG _ ; _ _ unRevG ; (a ka b kb -> (a b ; fadd) [(gr d -> ka gr d ; ev ; (g2 -> kb g2 d ; ev))] ; RevG)
-def tmul = unRevG _ ; _ _ unRevG ; (a ka b kb -> (a b ; fmul) [(gr d -> ka gr (d b ; fmul) ; ev ; (g2 -> kb g2 (d a ; fmul) ; ev))] ; RevG)
-def tneg = unRevG ; (a ka -> (a ; fneg) [(gr d -> ka gr (d ; fneg) ; ev)] ; RevG)
+def tadd = RevG(a, ka) RevG(b, kb) -> (a b ; fadd) [(gr d -> ka gr d ; ev ; (g2 -> kb g2 d ; ev))] ; RevG
+def tmul = RevG(a, ka) RevG(b, kb) -> (a b ; fmul) [(gr d -> ka gr (d b ; fmul) ; ev ; (g2 -> kb g2 (d a ; fmul) ; ev))] ; RevG
+def tneg = RevG(a, ka) -> (a ; fneg) [(gr d -> ka gr (d ; fneg) ; ev)] ; RevG
 def tlit = (c -> c [(gr d -> gr)] ; RevG)
-def texp = unRevG ; (a ka -> (a ; fexp) ; (e -> e [(gr d -> ka gr (d e ; fmul) ; ev)] ; RevG))
-def tsin = unRevG ; (a ka -> (a ; fsin) [(gr d -> ka gr (d (a ; fcos) ; fmul) ; ev)] ; RevG)
-def tvalue = unRevG ; (v k -> v)
+def texp = RevG(a, ka) -> (a ; fexp) ; (e -> e [(gr d -> ka gr (d e ; fmul) ; ev)] ; RevG)
+def tsin = RevG(a, ka) -> (a ; fsin) [(gr d -> ka gr (d (a ; fcos) ; fmul) ; ev)] ; RevG
+def tvalue = RevG(v, k) -> v
 def tseedX = (x -> x kx ; RevG)
 
 model RevThread : Smooth(RevG) =
@@ -365,7 +365,7 @@ model RevThread : Smooth(RevG) =
 
 def polyT = use RevThread ; poly
 # run the reverse sweep at adjoint 1.0, threading the accumulator
-def discharge = (gr r -> r ; unRevG ; (v k -> k gr 1.0 ; ev))
+def discharge = (gr RevG(v, k) -> k gr 1.0 ; ev)
 
 def gradPoly =
     use Gradient

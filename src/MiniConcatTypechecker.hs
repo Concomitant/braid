@@ -1460,6 +1460,184 @@ lineDepth = go 0
     skipStr []          = []
 
 --------------------------------------------------------------------------------
+-- 6.0½ Destructuring binders (2026-09-14)
+--
+-- `(Dual(a, da) Dual(b, db) -> …)` is SYNTAX, and it dies here.  The
+-- rewrite is purely token-level, before any parse tree exists, and what
+-- it produces is exactly the source a user wrote by hand until today:
+-- the data type's generated `un` word applied in place, then an
+-- ORDINARY binder over the fields.
+--
+--   (Dual(a, da) Dual(b, db) -> p)  ≡  unDual _ >> _ _ unDual >> (a da b db -> p)
+--   (Dual(a, da) x -> p)            ≡  unDual _ >> (a da x -> p)
+--   (Dual(a, da) ... -> p)          ≡  unDual >> (a da ... -> p)
+--
+-- so there is no destructuring binder downstream of this function: no
+-- new Term, no new case in inference, in the runtime, in `reflect`.  A
+-- field may itself be a pattern (`Pair(Dual(a, da), b)`), because the
+-- rewrite lands on a binder head the same scan reaches again.
+--
+-- The un-stage for the j-th slot pads with `_`: one for each wire
+-- already un-constructed to its left, one for each slot still whole to
+-- its right — which is what makes `_ _ unDual` the second stage of a
+-- two-`Dual` head.
+--------------------------------------------------------------------------------
+
+-- What a pattern needs to know about a data type: how many ALTERNATIVES
+-- it has (a pattern un-constructs one, so more than one is refused) and
+-- how many FIELDS that alternative holds (the pattern's arity).
+data PatCon = PatCon
+  { pcAlts   :: Int
+  , pcFields :: Int
+  } deriving (Eq, Show)
+
+patCons :: [DataDecl] -> [(String, PatCon)]
+patCons ds = [ (dName d, con (dBody d)) | d <- ds ]
+  where
+    con (TSum (RCons st RNil)) = PatCon 1 (closedArity st)
+    con (TSum row)             = PatCon (rowLen row) 0
+    con _                      = PatCon 1 1
+    rowLen (RCons _ r) = 1 + rowLen r
+    rowLen _           = 0 :: Int
+
+-- one slot of a binder head: a name (or `_`), or a constructor pattern
+data PatSlot = PSPlain Token | PSPat String [PatSlot]
+  deriving (Eq, Show)
+
+isPatSlot :: PatSlot -> Bool
+isPatSlot (PSPat _ _) = True
+isPatSlot _           = False
+
+-- how many wires the slot leaves once its own `un` has run
+patWidth :: PatSlot -> Int
+patWidth (PSPlain _)  = 1
+patWidth (PSPat _ fs) = length fs
+
+-- back to tokens: a plain slot is its token, a pattern is written out
+-- again (the scan reaches it once it heads a binder of its own)
+patToks :: PatSlot -> [Token]
+patToks (PSPlain t)  = [t]
+patToks (PSPat c fs) =
+  TokIdent c : TokLParen : intercalate [TokComma] (map patToks fs) ++ [TokRParen]
+
+-- Rewrite every destructuring binder in a token stream.  `tbl` is the
+-- data types in scope; with none (a `parse` of a string at runtime) a
+-- pattern is refused by name rather than guessed at.
+expandPatterns :: [(String, PatCon)] -> [Token] -> Either String [Token]
+expandPatterns tbl = go Nothing
+  where
+    go _ [] = Right []
+    go prev ts@(t : rest)
+      | binderPos prev
+      , Just (slots, hasRest, after) <- scanHead ts
+      , any isPatSlot slots = do
+          mapM_ validate slots
+          go prev (rewrite slots hasRest after)
+      | otherwise = (t :) <$> go (Just t) rest
+
+    -- exactly where `parseProgramToks` consults `binderPrefix`: the
+    -- start of a scope, a new line, the inside edge of a bracket, or
+    -- the body of a header word
+    binderPos Nothing  = True
+    binderPos (Just t) =
+      t `elem` [TokNewline, TokLParen, TokLBrack, TokSeq, TokArrow]
+
+    -- the un-stages, then the plain binder, then the rest of the SCOPE
+    -- as its body — which is where the inserted `)` goes
+    rewrite slots hasRest after =
+      intercalate [TokSeq] stages ++ [TokSeq, TokLParen]
+        ++ concatMap headOf slots ++ [TokEllipsis | hasRest] ++ [TokArrow]
+        ++ body ++ [TokRParen] ++ tl
+      where
+        -- a pattern slot becomes its FIELDS; a field that is itself a
+        -- pattern is written back out, and the same scan reaches it
+        headOf (PSPlain t)  = [t]
+        headOf (PSPat _ fs) = concatMap patToks fs
+        ws  = map patWidth slots
+        n   = length slots
+        (body, tl) = splitScope after
+        stages =
+          [ replicate (sum (take (j - 1) ws)) (TokIdent "_")
+              ++ [TokIdent ("un" ++ c)]
+              ++ replicate (n - j) (TokIdent "_")
+          | (j, PSPat c _) <- zip [1 :: Int ..] slots ]
+
+    validate (PSPlain _) = Right ()
+    validate (PSPat c fs) =
+      case lookup c tbl of
+        Nothing -> Left $ "`" ++ c ++ "(…)` in a binder: `" ++ c
+                       ++ "` is not a `data` type in scope, and a pattern "
+                       ++ "un-constructs one"
+        Just pc
+          | pcAlts pc /= 1 ->
+              Left $ "`" ++ c ++ "(…)` in a binder: `" ++ c ++ "` has "
+                  ++ show (pcAlts pc) ++ " alternatives and a pattern "
+                  ++ "un-constructs ONE — use a row, `(… | … | …)`"
+          | length fs /= pcFields pc ->
+              Left $ "`" ++ c ++ "(…)` in a binder names "
+                  ++ show (length fs) ++ " field"
+                  ++ (if length fs == 1 then "" else "s") ++ ", but `" ++ c
+                  ++ "` has " ++ show (pcFields pc)
+          | otherwise -> mapM_ validate fs
+
+    -- the rest of the current scope: up to the bracket that closes it
+    splitScope = walk (0 :: Int) []
+      where
+        walk d acc (x : xs)
+          | x == TokLParen || x == TokLBrack = walk (d + 1) (x : acc) xs
+          | x == TokRParen || x == TokRBrack =
+              if d == 0 then (reverse acc, x : xs) else walk (d - 1) (x : acc) xs
+          | otherwise = walk d (x : acc) xs
+        walk _ acc [] = (reverse acc, [])
+
+    -- a run of slots closed by `->`, with at least one slot.  Nothing
+    -- means "not a binder head", and then not one token is touched.
+    scanHead = run []
+      where
+        run acc (TokEllipsis : TokArrow : r)
+          | not (null acc) = Just (reverse acc, True, r)
+        run acc (TokArrow : r)
+          | not (null acc) = Just (reverse acc, False, r)
+        run acc ts = case slotAt ts of
+          Just (s, r) -> run (s : acc) r
+          Nothing     -> Nothing
+
+    -- `C(f, …)` is a pattern when the parens hold a field list AND
+    -- either a comma settles it (a comma is not a program token, so
+    -- nothing else can be meant) or `C` is a data type in scope.  Any
+    -- other `word (` ends the run, and the head is not a binder head.
+    slotAt (TokIdent c : TokLParen : r)
+      | Just (inner, r') <- balanced r
+      , Just fs <- mapM field (splitCommaToks inner)
+      , TokComma `elem` inner || isJust (lookup c tbl) = Just (PSPat c fs, r')
+    slotAt (TokIdent n : r) = Just (PSPlain (TokIdent n), r)
+    slotAt _                = Nothing
+
+    field piece = case slotAt piece of
+      Just (s, []) -> Just s
+      _            -> Nothing
+
+    balanced = walk (0 :: Int) []
+      where
+        walk 0 acc (TokRParen : r) = Just (reverse acc, r)
+        walk d acc (x : xs)
+          | x == TokLParen || x == TokLBrack = walk (d + 1) (x : acc) xs
+          | x == TokRParen || x == TokRBrack = walk (d - 1) (x : acc) xs
+          | otherwise                        = walk d (x : acc) xs
+        walk _ _ [] = Nothing
+
+    splitCommaToks = walk (0 :: Int) [] []
+      where
+        walk _ cur acc [] = reverse (addCur cur acc)
+        walk d cur acc (x : xs)
+          | x == TokComma && d == 0 = walk d [] (addCur cur acc) xs
+          | x == TokLParen || x == TokLBrack = walk (d + 1) (x : cur) acc xs
+          | x == TokRParen || x == TokRBrack = walk (d - 1) (x : cur) acc xs
+          | otherwise                        = walk d (x : cur) acc xs
+        addCur []  acc = acc
+        addCur cur acc = reverse cur : acc
+
+--------------------------------------------------------------------------------
 -- 6.1 Parser: stages, >>, >>>, newline, and ... (juxtaposition binds
 -- tighter than sequencing; both left-associative)
 --------------------------------------------------------------------------------
@@ -1483,8 +1661,15 @@ data Stmt = Stmt Stage [(StageOp, Stage)]
 -- the type grammar, where juxtaposition binds tighter than | — and
 -- `p >=> a >> b >=> q` Kleisli-composes whole >>-chains.
 parseProgram :: String -> Either String Term
-parseProgram input = do
-  toks <- normalizeToks <$> tokenize input
+parseProgram = parseProgramIn []
+
+-- ...and the same, with the data types a destructuring binder's
+-- patterns are read against (§6.0½).  Every site that has them passes
+-- them; `parseProgram` is the site that has none.
+parseProgramIn :: [DataDecl] -> String -> Either String Term
+parseProgramIn datas input = do
+  toks0 <- normalizeToks <$> tokenize input
+  toks  <- expandPatterns (patCons datas) toks0
   (term, rest) <- parseProgramToks toks
   case rest of
     [] -> Right term
@@ -6225,7 +6410,7 @@ checkModuleWith base src = do
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
     foldM (addDef slotTable funcs thNames trans ownBases resNames
-                  (map inName insts))
+                  (map inName insts) allDatas)
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
@@ -6254,7 +6439,7 @@ checkModuleWith base src = do
     if all isSpace mainSrc
       then pure Nothing
       else do
-        term0 <- parseProgram mainSrc
+        term0 <- parseProgramIn allDatas mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
                                       thNames trans kwords ownBases Nothing
                                       False Nothing)
@@ -6309,7 +6494,7 @@ checkModuleWith base src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
-    addDef slotTable funcs thNames trans bases resources instNames
+    addDef slotTable funcs thNames trans bases resources instNames datas
            (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) = do
       if name `elem` elimEmits && M.member name env
         then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
@@ -6321,7 +6506,7 @@ checkModuleWith base src = do
            || isJust (lookup name tmpls)
         then Left $ "Duplicate definition: " ++ name
         else Right ()
-      term0 <- either (Left . inDef) Right (parseProgram bodySrc)
+      term0 <- either (Left . inDef) Right (parseProgramIn datas bodySrc)
       let tmplHdr = templateHeader thNames term0
       case tmplHdr of
         -- A TEMPLATE is recorded, not defined.  It has no body that runs

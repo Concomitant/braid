@@ -279,7 +279,7 @@ renderStack st =
 -- whole existence is elaboration-time, could not be inspected at all.
 elabIn :: ReplState -> String -> Either String Term
 elabIn st src = do
-  term0 <- parseProgram src
+  term0 <- parseProgramIn (rsDatas st) src
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
                        (rsTrans st) (rsKWords st) (rsBases st) Nothing False

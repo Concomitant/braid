@@ -12,8 +12,8 @@
 
 data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)
 
-def headS = unStream >> (h t -> h)               # observe the first cell
-def tailS = unStream >> (h t -> t) >> ev       # force one step
+def headS = Stream(h, t) -> h                    # observe the first cell
+def tailS = Stream(h, t) -> t >> ev            # force one step
 
 # the integers upward from n — the self-call sits UNDER a quote, so the
 # stream is produced lazily, one cell per force.  A self-call inside a
