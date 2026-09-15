@@ -198,6 +198,10 @@ renderData st d =
       case M.lookup (dName d) (rsDocs st) of
         Just doc -> "\n  ## " ++ doc
         Nothing  -> ""
+      -- the projections a named declaration generates are ordinary
+      -- words, so they are listed exactly as the recursor is
+      ++ concat [ "\n  " ++ f ++ " : " ++ showSchemeA (dispOf st) sc
+                | ((f, sc), _) <- dataFieldArtifacts d ]
       ++ case dataFoldArtifact d of
            Just (fn, sc, _, _) ->
              "\n  " ++ fn ++ " : " ++ showSchemeA (dispOf st) sc

@@ -2188,6 +2188,17 @@ data DataDecl = DataDecl
                         -- generates no fold — you unroll it, you do not
                         -- eliminate it by points — and (b) folds onto
                         -- the ARROW as `=Name>` when it rides a suffix.
+  , dFields :: [String] -- NAMED FIELDS (2026-09-14).  A single-alternative
+                        -- `data` declaration may name its positions —
+                        -- `data Trade = (sym: Str, px: Float, qty: Int)`
+                        -- — and each name becomes a PROJECTION WORD,
+                        -- `sym : Trade ⇒ Str`, generated beside `unTrade`
+                        -- and `foldTrade`.  The names die at the parse:
+                        -- the TYPE is the positional stack it always
+                        -- was, and what survives is this list, so
+                        -- `unTrade` and a destructuring binder keep
+                        -- working unchanged.  Empty when none were
+                        -- written; column names are words, never types.
   } deriving (Eq, Show)
 
 -- A THEORY is named slots plus laws.  Not a typeclass: nothing is
@@ -2284,11 +2295,12 @@ dataDeclArtifacts :: DataDecl
 dataDeclArtifacts d =
   ( [ (dName d,          Forall tvs svs rvs nvs [] [] (Arrow bodyStack namedStack effPure))
     , ("un" ++ dName d,  Forall tvs svs rvs nvs [] [] (Arrow namedStack bodyStack effPure)) ]
-      ++ mergeSchemes ++ foldSchemes
+      ++ mergeSchemes ++ foldSchemes ++ map fst fieldArts
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
     , ("un" ++ dName d, (1, False, unrollTerm)) ]
-      ++ mergeRuns ++ foldRuns )
+      ++ mergeRuns ++ foldRuns ++ map snd fieldArts )
   where
+    fieldArts  = dataFieldArtifacts d
     (foldSchemes, foldRuns) =
       case dataFoldArtifact d of
         Just (fn, fsc, frun, _) -> ([(fn, fsc)], [(fn, frun)])
@@ -2328,6 +2340,42 @@ dataDeclArtifacts d =
         _ ->
           (SCons (dBody d) SEnd, 1, Prim "_", Prim "_")
     -- (rollOpen marks splice-shaped field stacks segment-consuming)
+
+-- NAMED FIELDS, as words (2026-09-14).  One PROJECTION per name a
+-- single-alternative declaration wrote:
+--
+--   data Trade = (sym: Str, px: Float, qty: Int)
+--     sym : Trade ⇒ Str      px : Trade ⇒ Float      qty : Trade ⇒ Int
+--
+-- Each is `unTrade` and then the tensor stage that keeps one wire —
+-- ordinary wiring, compiler-written exactly as `unTrade` and
+-- `foldTrade` are, so it is an ordinary word: it shows in `:defs`, it
+-- reflects, it can be quoted and handed to `map`.  Nothing about the
+-- TYPE changes; the positional door and the destructuring binder are
+-- untouched, and a field name is a WORD rather than a piece of the
+-- type, which is what lets a frame's column names be ordinary
+-- definitions (MANUAL §5, §12).
+dataFieldArtifacts :: DataDecl
+                   -> [((String, Scheme), (String, (Int, Bool, Term)))]
+dataFieldArtifacts d =
+  [ ( (f, Forall tvs svs rvs nvs [] [] (arrPure namedStack (SCons t SEnd)))
+    , (f, (1, False, Seq (Prim "merge") (Tensor (keepOnly i)))) )
+  | (i, f, t) <- zip3 [0 :: Int ..] (dFields d) elems ]
+  where
+    ps         = dParams d
+    tvs        = [ tv | PWire tv  <- ps ]
+    svs        = [ sv | PStack sv <- ps ]
+    rvs        = [ rv | PRow   rv <- ps ]
+    nvs        = [ nv | PWidth nv <- ps ]
+    namedStack = SCons (TData (dName d) (map paramStack ps)) SEnd
+    elems      = case dBody d of
+                   TSum (RCons st RNil) -> stackElems st
+                   t                    -> [t]
+    n          = length elems
+    keepOnly i = [ if j == i then Prim "_" else Prim "drop"
+                 | j <- [0 .. n - 1] ]
+    stackElems (SCons t st) = t : stackElems st
+    stackElems _            = []
 
 -- Generated eliminator: definition by points — and, since 5a½, a
 -- STRUCTURAL RECURSOR rather than a definition that called itself.  For
@@ -2690,14 +2738,126 @@ parseInstance aliases dataSigs theories header body = do
         (lhs, '=' : rhs) | [nm] <- words lhs -> Right (nm, rhs)
         _ -> Left $ "Malformed model binding: " ++ dropWhile isSpace l
 
+-- FIELD NAMES, and where they die (2026-09-14).
+--
+--   data Trade = (sym: Str, px: Float, qty: Int)
+--
+-- names the POSITIONS OF ONE CONSTRUCTOR.  The names are stripped here,
+-- before a single type is parsed: `parseTyBody` sees `(Str Float Int)`,
+-- the positional body the declaration always had.  So the TYPE is
+-- unchanged — `Trade : Str Float Int ⇒ Trade`, `unTrade` the other way,
+-- and `Trade(s, p, q) -> …` still destructures by position — and what
+-- travels on is a list of WORDS, which `dataFieldArtifacts` turns into
+-- one projection each.  Column names are words, not types, and this is
+-- the line where that is decided.
+parseFieldNames :: String -> String -> String
+                -> Either String ([String], String)
+parseFieldNames kw name rhs
+  | all isNothing leads = Right ([], rhs)
+  | kw /= "data" =
+      Left $ "Type " ++ name ++ ": field names are for `data` "
+          ++ "declarations.  A `type` alias is transparent, so there is "
+          ++ "no wire to project from, and a `resource` is threaded "
+          ++ "rather than read.  Write `data " ++ name ++ " = …`."
+  | any hasTopBar pieces =
+      Left $ "Type " ++ name ++ ": field names name the positions of ONE "
+          ++ "constructor, and this declaration has more than one "
+          ++ "alternative.  Drop the names, or give the alternative you "
+          ++ "meant to name its own single-alternative `data` type."
+  | otherwise = do
+      fs <- sequence [ maybe (Left (unnamed p)) Right l
+                     | (p, l) <- zip pieces leads ]
+      let ns = map fst fs
+      mapM_ checkName ns
+      case [ n | n <- ns, length (filter (== n) ns) > 1 ] of
+        (n : _) -> Left $ "Type " ++ name ++ ": duplicate field name '"
+                       ++ n ++ "' — one name per position, and each one "
+                       ++ "becomes a word of its own."
+        []      -> Right ()
+      Right (ns, "(" ++ unwords (map snd fs) ++ ")")
+  where
+    pieces = splitTopLevel ',' (stripOuterParens (trimSpace rhs))
+    leads  = map leadingFieldName pieces
+    unnamed p = "Type " ++ name ++ ": every field is named, or none is — '"
+             ++ trimSpace p ++ "' has no name.  Write `name: type`."
+    checkName n
+      | tokenize n == Right [TokIdent n], n /= "_" = Right ()
+      | otherwise = Left $ "Type " ++ name ++ ": '" ++ n
+                        ++ "' is not a word, so it cannot name a field — "
+                        ++ "a field name becomes an ordinary definition."
+
+-- split on a separator that is not nested inside brackets of any kind
+splitTopLevel :: Char -> String -> [String]
+splitTopLevel sep = go (0 :: Int) ""
+  where
+    go _ cur []       = [reverse cur]
+    go d cur (c : cs)
+      | c == sep, d == 0             = reverse cur : go d "" cs
+      | c `elem` ("([\10216" :: String) = go (d + 1) (c : cur) cs
+      | c `elem` (")]\10217" :: String) = go (d - 1) (c : cur) cs
+      | otherwise                    = go d (c : cur) cs
+
+-- `(a, b)` → `a, b`; anything whose outer parens are not a matched pair
+-- wrapping the WHOLE body is left alone
+stripOuterParens :: String -> String
+stripOuterParens s
+  | ('(' : rest) <- s, not (null rest), last rest == ')'
+  , balanced (init rest) = trimSpace (init rest)
+  | otherwise            = s
+  where
+    balanced = go (0 :: Int)
+      where
+        go d []       = d == 0
+        go d (c : cs)
+          | c `elem` ("([\10216" :: String) = go (d + 1) cs
+          | c `elem` (")]\10217" :: String) = d > 0 && go (d - 1) cs
+          | otherwise                    = go d cs
+
+hasTopBar :: String -> Bool
+hasTopBar = go (0 :: Int)
+  where
+    go _ []       = False
+    go d (c : cs)
+      | c == '|', d == 0             = True
+      | c `elem` ("([\10216" :: String) = go (d + 1) cs
+      | c `elem` (")]\10217" :: String) = go (d - 1) cs
+      | otherwise                    = go d cs
+
+leadingFieldName :: String -> Maybe (String, String)
+leadingFieldName p =
+  case span isFieldChar (trimSpace p) of
+    (nm, ':' : rest) | not (null nm) -> Just (nm, rest)
+    _                                -> Nothing
+  where isFieldChar ch = isAlphaNum ch || ch `elem` ("_'?!" :: String)
+
+-- how many wires a parsed body stands for; Nothing when it is open
+-- (a stack parameter or an exponent), which a named field list cannot
+-- account for
+bodyWireCount :: Ty -> Maybe Int
+bodyWireCount (TSum (RCons st RNil)) = go st
+  where
+    go SEnd        = Just 0
+    go (SCons _ r) = (1 +) <$> go r
+    go _           = Nothing
+bodyWireCount _ = Just 1
+
 parseTypeLine :: [Alias] -> [(String, [TyParam])] -> String
               -> Either String (Either Alias DataDecl)
 parseTypeLine aliases dataSigs line =
   case break (== '=') line of
-    (lhs, '=' : rhs) -> do
+    (lhs, '=' : rhs0) -> do
       (kw, name, params) <- parseHead lhs
+      (fields, rhs) <- parseFieldNames kw name rhs0
       let sigs = (name, params) : dataSigs
       body <- parseTyBody aliases sigs params rhs
+      case (fields, bodyWireCount body) of
+        ([], _) -> Right ()
+        (fs, Just k) | length fs == k -> Right ()
+        (fs, k) ->
+          Left $ "Type " ++ name ++ ": " ++ show (length fs)
+              ++ " field names for "
+              ++ maybe "an open stack of" show k
+              ++ " field positions — a named field is exactly one wire."
       -- KINDS BY USE: every named parameter parses as a wire, and an
       -- occurrence under `^` makes it an exponent variable in the body.
       -- So the body's own free-variable sets settle the kinds.
@@ -2739,7 +2899,7 @@ parseTypeLine aliases dataSigs line =
       -- a resource is nominal by keyword, never an alias: its whole
       -- point is that `Int Int` must NOT silently become a GameState
       pure $ if kw == "data" || kw == "resource" || occursData name body
-               then Right (DataDecl name params body (kw == "resource"))
+               then Right (DataDecl name params body (kw == "resource") fields)
                else Left  (Alias name params body)
     _ -> Left $ "Malformed type declaration (missing '='): " ++ line
   where
@@ -6587,16 +6747,32 @@ checkModuleWith base src = do
                , datasIn, al : ownAl, ownDt, docs' )
         Right dd -> do
           -- shadowing a prelude data type replaces its constructors
-          let envC
+          let shadowed = [ f | d0 <- datasIn, dName d0 == n, f <- dFields d0 ]
+              envC
                 | n `elem` preludeTypeNames =
                     foldr M.delete env
-                          [n, "un" ++ n, "merge" ++ n, "fold" ++ n]
+                          ([n, "un" ++ n, "merge" ++ n, "fold" ++ n]
+                             ++ shadowed)
                 | otherwise = env
           if M.member n envC || M.member ("un" ++ n) envC
                || M.member ("merge" ++ n) envC
             then Left $ "Type " ++ n
                      ++ ": constructor name collides with an existing definition"
             else Right ()
+          -- A FIELD NAME IS A WORD, so it collides like one.  Objects
+          -- are added, never merged: two declarations may not share a
+          -- projection, and a projection may not quietly replace a def
+          -- or a prim.
+          case [ f | f <- dFields dd
+                   , M.member f envC
+                     || f `elem` [n, "un" ++ n, "merge" ++ n, "fold" ++ n] ] of
+            (f : _) ->
+              Left $ "Type " ++ n ++ ": field name '" ++ f
+                  ++ "' is already a word in scope.  A field name becomes "
+                  ++ "an ordinary definition of that name, and Braid adds "
+                  ++ "objects rather than merging them — rename " ++ n
+                  ++ "'s field, or rename the existing '" ++ f ++ "'."
+            [] -> Right ()
           -- constructors/unrollers must be CALLABLE by a functor, so the
           -- data artifacts join the elaboration-time scope too
           let (scs, runs) = dataDeclArtifacts dd

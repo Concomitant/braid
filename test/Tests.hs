@@ -478,6 +478,10 @@ moduleTypeTests =
   , ("dist2",    "a0 (ρ0 | ρ1) ⇒ (a0 ρ0 | a0 ρ1 | σ0)")
     -- STAGE 5b: the Code-level twin of `sameCode`, and the rule engine
   , ("sameCodeC", "Code Code ⇒ Bool")
+    -- a generated PROJECTION is an ordinary word with an ordinary
+    -- principal type; the declaration's parameters generalize
+  , ("data Trade = (sym: Str, px: Float, qty: Int)\npx", "Trade ⇒ Float")
+  , ("data Cell(a) = (val: a, tag: Str)\nval", "Cell(a0) ⇒ a0")
   , ("rewrite",   "List(Sym) List(Sym) Code ⇒ Code")
     -- STAGE 5b: a rule set declares a WORD of its own name and a
     -- FUNCTOR of that name.  `use Opt` mints `=Opt>` like any other
@@ -1296,6 +1300,32 @@ evalTests =
      \(1.0 2.0 ; Dual) ; open ; print\n\
      \((1.0 2.0 ; Dual) 3 ; Wrap) ; deep ; print",
      ["-1.0", "-2.0", "7.0", "3.0", "6.0"], "")
+    -- NAMED FIELDS (2026-09-14).  A single-alternative `data` may name
+    -- its positions, and each name becomes a PROJECTION WORD generated
+    -- beside `unTrade` and `foldTrade`.  The type stays positional, so
+    -- the roll, the unroll and the destructuring binder are untouched —
+    -- which is what the last two lines check.
+  , ("data Trade = (sym: Str, px: Float, qty: Int)\n\
+     \def t = \"AAPL\" 191.25 100 ; Trade\n\
+     \t ; sym ; print\n\
+     \t ; px ; print\n\
+     \t ; qty ; print\n\
+     \t ; unTrade ; print ... ; print ... ; print\n\
+     \t ; Trade(s, p, q) -> q ; print",
+     ["AAPL", "191.25", "100", "AAPL", "191.25", "100", "100"], "")
+    -- a projection is an ORDINARY WORD: it quotes, it maps, and a
+    -- nested pattern reaches a field of a field
+  , ("data Pt = (x: Float, y: Float)\n\
+     \data Seg = (from: Pt, to: Pt)\n\
+     \def s = (0.0 1.0 ; Pt) (2.0 3.0 ; Pt) ; Seg\n\
+     \s ; from ; y ; print\n\
+     \((s ; from) ((s ; to) nil ; cons) ; cons) ; [x] ... ; map ; printAll\n\
+     \s ; Seg(Pt(a, b), q) -> b ; print",
+     ["1.0", "0.0", "2.0", "1.0"], "")
+    -- ...and it REFLECTS, like every other compiler-written word
+  , ("data Trade = (sym: Str, px: Float, qty: Int)\n\
+     \[px] ; reflect ; ((c -> c ; unparse ; print) | print) ; merge",
+     ["px"], "")
     -- ...and because the rewrite lands on an ordinary binder, `reflect`
     -- is free: the two spellings reflect to the SAME code, character
     -- for character.
@@ -2362,10 +2392,27 @@ optimizerTheory =
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- NAMED FIELDS refuse five things by name (2026-09-14).  A field
+    -- name is a WORD, so it collides like one; fields name the
+    -- positions of ONE constructor; and a named position is one wire.
+  [ ("data Bad = (a: Int | b: Str)\n1 ; print",
+     "field names name the positions of ONE constructor")
+  , ("data T1 = (px: Int)\ndata T2 = (px: Str)\n1 ; print",
+     "field name 'px' is already a word in scope")
+  , ("data T3 = (len: Int, b: Str)\n1 ; print",
+     "field name 'len' is already a word in scope")
+  , ("type T5 = (a: Int, b: Str)\n1 ; print",
+     "field names are for `data` declarations")
+  , ("data T6 = (a: Int, a: Str)\n1 ; print",
+     "duplicate field name 'a'")
+  , ("data W = (x: Int Str, y: Int)\n1 ; print",
+     "2 field names for 3 field positions")
+  , ("data W2 = (2x: Int, y: Str)\n1 ; print",
+     "'2x' is not a word, so it cannot name a field")
     -- ONE COMPONENT PER PARAMETER (2026-09-14): a natural
     -- transformation between models of a two-parameter theory is two
     -- components, and one is refused by name.
-  [ ("data Dual = Float Float\n\
+  , ("data Dual = Float Float\n\
      \def zt = (d -> 0.0)\n\
      \def dadd = Dual(a, da) Dual(b, db) -> (a b ; fadd) (da db ; fadd) ; Dual\n\
      \def val = Dual(v, t) -> v\n\

@@ -416,6 +416,33 @@ Type formers:
 - **Named types**: `type` aliases and `data` declarations (§8).
   Display folds structural types back to their alias names when they
   match exactly (`:t!` shows raw).
+
+  **Named fields** *(2026-09-14)*. A **single-alternative** `data`
+  declaration may name its positions, and each name becomes a
+  **projection word**:
+
+  ```braid
+  data Trade = (sym: Str, px: Float, qty: Int)
+  #   sym : Trade ⇒ Str      px : Trade ⇒ Float      qty : Trade ⇒ Int
+  ```
+
+  The names die at the parse. What is declared is the positional type
+  it always was — `Trade : Str Float Int ⇒ Trade`, `unTrade` the other
+  way, `Trade(s, p, q) -> …` destructuring by position — and what
+  survives is a list of **words**, one projection each, generated
+  beside `unTrade` and `foldTrade` and no different from them: they
+  show in `:defs`, they `reflect`, they quote and go to `map`.
+  A projection is `unTrade` and then the tensor stage that keeps one
+  wire, which is why it is one wire: **a named field is exactly one
+  wire**.
+
+  **Column names are words, not types.** Nothing in the type system
+  knows that `px` is called `px` — two declarations with the same
+  layout are the same type, and a field name is looked up exactly as a
+  `def` is. That is what makes a data frame's column names ordinary
+  definitions (§12, `examples/frame.braid`) rather than a second kind
+  of name with its own scoping. It is also why a name that is already
+  a word is an **error**: objects are added, never merged (§14).
 - **Resources**: `resource Name = <stack>` (§8) — a `data` declaration
   under another keyword. One nominal wire, carrying its contents boxed,
   meant to be threaded rather than consumed; a run of them shared by
@@ -2772,6 +2799,21 @@ holds for them too: final atom of their stage (§9).
   pattern un-constructs one* — patterns are read against the types in
   scope, so a `parse` of a string at runtime (which has none) refuses
   every pattern by that message *(2026-09-14)*.
+- **Named fields refuse five things**, each naming the fix
+  *(2026-09-14)*. Fields name the positions of ONE constructor, so
+  `data Bad = (a: Int | b: Str)` is *field names name the positions of
+  ONE constructor, and this declaration has more than one alternative*.
+  A field name becomes an ordinary definition, so a name already in
+  scope — a def, a prim, another type's field, this type's own
+  `unT`/`foldT` — is *field name `px` is already a word in scope …
+  rename `T2`'s field, or rename the existing `px`*, and a name that is
+  not a word (`2x`) is *not a word, so it cannot name a field*. A
+  duplicate within one declaration is *one name per position*. Every
+  position is named or none is (*`Str` has no name. Write `name:
+  type`*), and a named position is **one wire**: `data W = (x: Int Str,
+  y: Int)` is *2 field names for 3 field positions*. Finally, the form
+  is `data`'s alone — a `type` alias is transparent and a `resource` is
+  threaded, so neither has a wire to project from.
 - A binder's body only sees what the parameter list gives it. Need the
   remainder inside the body? Use an open binder (`x ... -> …`), not
   `(x -> …) ...` — the latter routes the rest *around* the binder.
