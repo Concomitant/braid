@@ -1,0 +1,4 @@
+## an imported file with a refusal on a line of its own
+def snapped =
+    1 2 ; +
+    "x" ; +

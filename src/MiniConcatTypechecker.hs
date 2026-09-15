@@ -422,7 +422,97 @@ data Constraint
   -- inside a `Fn` type, where a prim's scheme shares ε on purpose.
   | CSubEff EffRow EffRow
   | CFail String   -- carry a deferred inference error to the solver
+  -- WHERE this constraint came from: the line of the stage `infer` was
+  -- looking at when it emitted it (2026-09-15).  The solver reports the
+  -- line of the first constraint that fails, which is how a refusal
+  -- names a stage instead of a whole file.  Nothing else reads it.
+  | CAt Int Constraint
   deriving (Eq, Show)
+
+-- Stamp every constraint a stage emitted with that stage's line.  An
+-- INNER stamp wins: a group's own stage is more precise than the stage
+-- that contains it.
+stampAt :: Int -> [Constraint] -> [Constraint]
+stampAt 0 cs = cs
+stampAt n cs = map one cs
+  where
+    one c@(CAt _ _) = c
+    one c           = CAt n c
+
+-- …and the other way: the line, and the constraint underneath it.
+unAt :: Constraint -> (Maybe Int, Constraint)
+unAt (CAt n c) = case unAt c of
+  (Nothing, c') -> (Just n, c')
+  p             -> p
+unAt c = (Nothing, c)
+
+-- A LOCATION, carried inside the message.  Every refusal in this module
+-- is an `Either String`, and threading a position through all of it
+-- would have touched every line that can fail; instead a located
+-- refusal writes its line into the message behind a marker, and the
+-- printer (`resolveLoc`) turns the marker into `file:line`.  `\SOH`
+-- cannot occur in source: the tokenizer would read it as an identifier
+-- character, and no Braid file has one.
+locMark :: Int -> String
+locMark n = '\SOH' : show n ++ "\SOH"
+
+atLine :: Maybe Int -> String -> String
+atLine Nothing  msg = msg
+atLine (Just n) msg
+  | '\SOH' `elem` msg = msg          -- an inner stage already said where
+  | otherwise         = locMark n ++ msg
+
+-- Turn the marker into the thing a reader can act on.  With a map (a
+-- file was loaded) that is `path:line`; without one (a REPL line, a
+-- module checked from a string) it is `line N`, which is still the line
+-- of the text that was handed over.  The separator is `, ` in front of
+-- `in def …` and `: ` otherwise, so the whole reads as one sentence:
+--
+--   examples/frame.braid:212, in def notional: Cannot unify stacks: • vs Str
+--   examples/frame.braid:376: Cannot unify stacks: • vs Str
+--
+-- A message with no marker is returned untouched, so nothing that could
+-- not be located grows a fake location.
+-- How a refusal about THIS source should name its place.  With a map
+-- the file is known; without one the line number is still the line of
+-- the text that was handed over — unless there is only one line of it,
+-- in which case a location says nothing and is dropped.  That is the
+-- REPL: a typed line is one line, and `line 1` is not news.
+locFor :: LineMap -> String -> (String -> String)
+locFor lm src
+  | not (null lm)           = resolveLoc lm
+  | length (lines src) <= 1 = stripLoc
+  | otherwise               = resolveLoc []
+
+-- Drop every marker, rendering nothing.
+stripLoc :: String -> String
+stripLoc s = case break (== '\SOH') s of
+  (pre, '\SOH' : more) -> case break (== '\SOH') more of
+    (ds, '\SOH' : post) | not (null ds), all isDigit ds -> pre ++ stripLoc post
+    _ -> pre ++ more
+  _ -> s
+
+resolveLoc :: LineMap -> String -> String
+resolveLoc lm msg =
+  case takeMark msg of
+    Nothing            -> msg
+    Just (n, rest) ->
+      let r = stripMarks rest
+      in whereAt lm n ++ (if "in def " `isPrefixOf` r then ", " else ": ") ++ r
+  where
+    takeMark s = case break (== '\SOH') s of
+      (pre, '\SOH' : more) -> case break (== '\SOH') more of
+        (ds, '\SOH' : post) | not (null ds), all isDigit ds ->
+          Just (read ds :: Int, pre ++ post)
+        _ -> Nothing
+      _ -> Nothing
+    stripMarks s = maybe s (stripMarks . snd) (takeMark s)
+
+-- The n-th line of the assembled source, named where its author wrote it.
+whereAt :: LineMap -> Int -> String
+whereAt lm n = case drop (n - 1) lm of
+  ((fp, k) : _) | n >= 1 -> fp ++ ":" ++ show k
+  _                      -> "line " ++ show n
 
 -- All variables (type, stack, row, exponent) in order of first
 -- appearance, recursing through Fn⟨Γ ⇒ Δ⟩ and (… | …) element types.
@@ -870,26 +960,32 @@ dropRigid v = fromMaybe v (stripPrefix rigidTag v)
 -- universe is finite — every label comes from some constraint — and
 -- each step adds at least one label to some variable's value.
 solve :: [Constraint] -> Either String Subst
-solve cs = do
+solve cs0 = do
     s <- foldM step emptySubst eqs
     fixSubs (0 :: Int) (0 :: Int) s
   where
-    (subs, eqs) = partition isSub cs
+    -- the line each constraint was stamped with, alongside it: every
+    -- refusal below is reported AT that line (2026-09-15)
+    cs = map unAt cs0
+    (subs, eqs) = partition (isSub . snd) cs
     isSub (CSubEff _ _) = True
     isSub _             = False
 
-    step s (CEqTy t1 t2)      = unifyTy s t1 t2
-    step s (CEqStack st1 st2) = unifyStack s st1 st2
-    step s (CEqEff e1 e2)     = unifyEff s e1 e2
-    step s (CSubEff _ _)      = Right s            -- pass 2
-    step _ (CFail msg)        = Left msg
+    step s (ln, c) = first (atLine ln) (raw s c)
+
+    raw s (CEqTy t1 t2)      = unifyTy s t1 t2
+    raw s (CEqStack st1 st2) = unifyStack s st1 st2
+    raw s (CEqEff e1 e2)     = unifyEff s e1 e2
+    raw s (CSubEff _ _)      = Right s            -- pass 2
+    raw _ (CFail msg)        = Left msg
+    raw s (CAt _ c)          = raw s c
 
     -- a generous bound on the number of rounds, from the termination
     -- argument above: rounds cannot exceed one per (constraint, label).
     -- Reaching it would be a bug in this pass, not a program error.
     rounds = (length subs + 1) * (S.size allLabels + 1) + 1
     allLabels = S.unions [ eLabels p `S.union` eLabels c
-                         | CSubEff p c <- subs ]
+                         | (_, CSubEff p c) <- subs ]
 
     fixSubs r n s
       | r > rounds = Left "internal: the effect fixpoint did not converge"
@@ -897,15 +993,15 @@ solve cs = do
           (s', n', changed) <- foldM flow (s, n, False) subs
           if changed then fixSubs (r + 1) n' s' else Right s'
 
-    flow acc@(s, n, _) (CSubEff p0 c0) =
+    flow acc@(s, n, _) (ln, CSubEff p0 c0) =
       let p@(Eff lp _)  = apply s p0
           c@(Eff lc tc) = apply s c0
           missing       = lp S.\\ lc
       in if S.null missing then Right acc else
          case tc of
-           Nothing -> Left (closedGradeErr p c)
+           Nothing -> Left (atLine ln (closedGradeErr p c))
            Just v
-             | isRigidE v -> Left (fixedGradeErr p c)
+             | isRigidE v -> Left (atLine ln (fixedGradeErr p c))
              | otherwise  -> do
                  -- the composite grows by exactly what it was missing,
                  -- keeping a fresh tail so it can grow again
@@ -1198,7 +1294,13 @@ spineExpVars _                           = []
 data Term
   = Prim String
   | Tensor [Term]         -- n-ary tensor chain, atoms aligned with wires left to right
-  | Seq Term Term         -- t >> u
+  | Seq Int Term Term     -- t >> u, stamped with the LINE the right-hand
+                          -- stage was written on (0 = the compiler wrote
+                          -- it, so it has no line of its own).  This is
+                          -- the whole of the location mechanism: a
+                          -- refusal names the stage that failed because
+                          -- the `>>` that put it there remembers where
+                          -- it came from (2026-09-15).
   | Quote Term            -- [p]: push the reified program p
                           -- must be a pure push (• ⇒ A)
   | OpenAbs [Maybe String] Bool Term
@@ -1233,9 +1335,38 @@ data Term
                           -- functor action; one component per
                           -- alternative, residual flag = identity on
                           -- the remaining alternatives
-  -- Ord because a quotation is a symbolic VALUE in the normalizer
-  -- (§12.9) and a case split keys a map on symbolic values.
-  deriving (Eq, Ord, Show)
+  deriving (Show)
+
+-- Ord because a quotation is a symbolic VALUE in the normalizer (§12.9)
+-- and a case split keys a map on symbolic values — and BOTH skip a
+-- stage's line stamp, because provenance is not structure: two programs
+-- written on different lines are the same program, and `eq?` on two
+-- quotes must say so.  The constructor order is the declaration order,
+-- exactly what `deriving` gave until 2026-09-15.
+termTag :: Term -> Int
+termTag Prim{}    = 0
+termTag Tensor{}  = 1
+termTag Seq{}     = 2
+termTag Quote{}   = 3
+termTag OpenAbs{} = 4
+termTag Use{}     = 5
+termTag Over{}    = 6
+termTag Alts{}    = 7
+
+instance Eq Term where
+  a == b = compare a b == EQ
+
+instance Ord Term where
+  compare (Prim a)        (Prim b)        = compare a b
+  compare (Tensor a)      (Tensor b)      = compare a b
+  compare (Seq _ a b)     (Seq _ c d)     = compare a c <> compare b d
+  compare (Quote a)       (Quote b)       = compare a b
+  compare (OpenAbs a b c) (OpenAbs d e f) =
+    compare a d <> compare b e <> compare c f
+  compare (Use a b)       (Use c d)       = compare a c <> compare b d
+  compare (Over a b)      (Over c d)      = compare a c <> compare b d
+  compare (Alts a b)      (Alts c d)      = compare a c <> compare b d
+  compare a b = compare (termTag a) (termTag b)
 
 --------------------------------------------------------------------------------
 -- 6.0 Tokenizer
@@ -1251,7 +1382,13 @@ data Token
   | TokSeqPass    -- >>>
   | TokEllipsis   -- ...
   | TokDashes     -- --- (the ROW tail: "and more alternatives")
-  | TokNewline    -- line break (strict >>)
+  | TokNewline Int
+      -- line break (strict >>), stamped with the number of the line it
+      -- OPENS.  A stage begins after a break, so the break is where the
+      -- lexer can say which line the next stage was written on — the
+      -- one fact every refusal in §14 wanted and none of them had
+      -- (2026-09-15).  Nothing else needs a stamp: within one line a
+      -- stage cannot move.
   | TokLBrack     -- [ (open quotation)
   | TokRBrack     -- ] (close quotation)
   | TokLParen     -- ( (grouping / list literal)
@@ -1273,12 +1410,12 @@ data Token
   deriving (Eq, Show)
 
 tokenize :: String -> Either String [Token]
-tokenize = go
+tokenize = go 1
   where
-    go [] = Right []
-    go ('\r':'\n':cs) = (TokNewline :) <$> go cs
-    go ('\n':cs)      = (TokNewline :) <$> go cs
-    go ('#':cs)         = go (dropWhile (/= '\n') cs)  -- comment to EOL
+    go _ [] = Right []
+    go n ('\r':'\n':cs) = (TokNewline (n + 1) :) <$> go (n + 1) cs
+    go n ('\n':cs)      = (TokNewline (n + 1) :) <$> go (n + 1) cs
+    go n ('#':cs)         = go n (dropWhile (/= '\n') cs)  -- comment to EOL
     -- A LINE THAT WRAPS (2026-09-14).  A newline is a strict `>>`, so a
     -- tensor stage that will not fit on one line needs a way to say
     -- "not yet": a `\` closing the line drops the newline, and the next
@@ -1289,10 +1426,10 @@ tokenize = go
     -- indented deeper than its `def` line and relies on newline = `>>`.
     -- `\` collides with nothing: it is unwritable in a program today,
     -- and it is stage-final where `|`, `...` and `---` are not.
-    go ('\\':cs)
+    go n ('\\':cs)
       | Just rest <- afterLine cs =
           case dropWhile (`elem` (" \t\r" :: String)) rest of
-            (c : _) | c /= '\n' && c /= '#' -> go rest
+            (c : _) | c /= '\n' && c /= '#' -> go (n + 1) rest
             _ -> Left "A `\\` continues a tensor stage onto the next line, \
                       \so the next line must have something on it"
       | otherwise = Left "A `\\` continues a tensor stage onto the next \
@@ -1304,69 +1441,69 @@ tokenize = go
                           ('\n' : r') -> Just r'
                           _           -> Nothing
           _          -> Nothing
-    go ('"':cs)         = do
+    go n ('"':cs)         = do
       (str, rest) <- lexStr cs
-      (TokIdent ('"' : str) :) <$> go rest
-    go ('>':'=':'>':cs) = (TokKleisli :) <$> go cs
-    go ('>':'?':'>':cs) = (TokOrElse :) <$> go cs
-    go ('>':'!':'>':cs) = (TokOrClose :) <$> go cs
-    go ('>':'>':'>':cs) = (TokSeqPass :) <$> go cs
-    go ('>':'>':cs)     = (TokSeq :) <$> go cs
-    go ('>':_)          = Left "Unexpected '>' without matching '>>'"
-    go ('.':'.':'.':cs) = (TokEllipsis :) <$> go cs
-    go ('.':cs)
+      (TokIdent ('"' : str) :) <$> go n rest
+    go n ('>':'=':'>':cs) = (TokKleisli :) <$> go n cs
+    go n ('>':'?':'>':cs) = (TokOrElse :) <$> go n cs
+    go n ('>':'!':'>':cs) = (TokOrClose :) <$> go n cs
+    go n ('>':'>':'>':cs) = (TokSeqPass :) <$> go n cs
+    go n ('>':'>':cs)     = (TokSeq :) <$> go n cs
+    go _ ('>':_)          = Left "Unexpected '>' without matching '>>'"
+    go n ('.':'.':'.':cs) = (TokEllipsis :) <$> go n cs
+    go n ('.':cs)
       | (nm, rest) <- span isIdentChar cs
-      , not (null nm) = (TokIdent ('.' : nm) :) <$> go rest
-    go ('…':cs)         = (TokEllipsis :) <$> go cs   -- U+2026, autocorrect's ...
-    go ('.':_)          = Left "Unexpected '.' (did you mean '...'?)"
-    go ('[':cs)         = (TokLBrack :) <$> go cs
-    go (']':cs)         = (TokRBrack :) <$> go cs
-    go ('(':cs)         = (TokLParen :) <$> go cs
-    go (')':cs)         = (TokRParen :) <$> go cs
-    go (',':cs)         = (TokComma :) <$> go cs
+      , not (null nm) = (TokIdent ('.' : nm) :) <$> go n rest
+    go n ('…':cs)         = (TokEllipsis :) <$> go n cs   -- U+2026, autocorrect's ...
+    go _ ('.':_)          = Left "Unexpected '.' (did you mean '...'?)"
+    go n ('[':cs)         = (TokLBrack :) <$> go n cs
+    go n (']':cs)         = (TokRBrack :) <$> go n cs
+    go n ('(':cs)         = (TokLParen :) <$> go n cs
+    go n (')':cs)         = (TokRParen :) <$> go n cs
+    go n (',':cs)         = (TokComma :) <$> go n cs
     -- `=IO Recursive>`: what the manifest DISPLAYS, so also what you write.
     -- Any label set, in any order, on one line; `=` that is not the
     -- head of such an arrow (a `def`'s `=`) falls through to an
     -- identifier.  (The older `⇒!`/`->!` spellings still lex as `=IO>`,
     -- for source that predates the 2026-09-06 move of io into the
     -- manifest.)
-    go ('=':cs)
-      | Just (labels, rest) <- lexEffArrow cs = (TokEffArrow labels :) <$> go rest
-    go ('-':'>':'!':cs) = (TokEffArrow [ioLabel] :) <$> go cs
+    go n ('=':cs)
+      | Just (labels, rest) <- lexEffArrow cs = (TokEffArrow labels :) <$> go n rest
+    go n ('-':'>':'!':cs) = (TokEffArrow [ioLabel] :) <$> go n cs
     -- `---` is ONE token, and only one: `----` is `---` then minus.
-    go ('-':'-':'-':cs) = (TokDashes :) <$> go cs
-    go ('-':'>':cs)     = (TokArrow :) <$> go cs
-    go ('-':cs)
+    go n ('-':'-':'-':cs) = (TokDashes :) <$> go n cs
+    go n ('-':'>':cs)     = (TokArrow :) <$> go n cs
+    go n ('-':cs)
       | (ds@(_:_), rest) <- span isDigit cs =
           case floatTail rest of
             Just (frac, rest') ->                      -- negative Float
-              expNote rest' ((TokIdent ('-' : ds ++ "." ++ frac) :) <$> go rest')
-            Nothing -> expNote rest ((TokIdent ('-' : ds) :) <$> go rest)
-      | otherwise = (TokIdent "-" :) <$> go cs         -- subtraction
-    go ('|':cs)         = (TokBar :) <$> go cs
-    go ('^':cs)         = (TokCaret :) <$> go cs
-    go (';':cs)         = (TokSeq :) <$> go cs   -- ; is a synonym for >>
-    go ('⟨':cs)         = (TokLAngle :) <$> go cs     -- Fn⟨…⟩ type brackets
-    go ('⟩':cs)         = (TokRAngle :) <$> go cs
-    go ('⇒':'!':cs)     = (TokEffArrow [ioLabel] :) <$> go cs
-    go ('⇒':cs)         = (TokFatArrow :) <$> go cs
+              expNote rest' ((TokIdent ('-' : ds ++ "." ++ frac) :) <$> go n rest')
+            Nothing -> expNote rest ((TokIdent ('-' : ds) :) <$> go n rest)
+      | otherwise = (TokIdent "-" :) <$> go n cs         -- subtraction
+    go n ('|':cs)         = (TokBar :) <$> go n cs
+    go n ('^':cs)         = (TokCaret :) <$> go n cs
+    go n (';':cs)         = (TokSeq :) <$> go n cs   -- ; is a synonym for >>
+    go n ('⟨':cs)         = (TokLAngle :) <$> go n cs     -- Fn⟨…⟩ type brackets
+    go n ('⟩':cs)         = (TokRAngle :) <$> go n cs
+    go n ('⇒':'!':cs)     = (TokEffArrow [ioLabel] :) <$> go n cs
+    go n ('⇒':cs)         = (TokFatArrow :) <$> go n cs
 
-    go (c:cs)
-      | isSpace c = go cs
+    go n (c:cs)
+      | isSpace c = go n cs
       -- Unicode superscripts lex as ^ + the translated exponent
       | Just _ <- unSup c =
           let (sups, rest) = span (isJust . unSup) (c:cs)
               plain = map (fromJust . unSup) sups
-          in ((TokCaret :) . (supTok plain :)) <$> go rest
+          in ((TokCaret :) . (supTok plain :)) <$> go n rest
       | isDigit c =
           let (digits, rest) = span isDigit (c:cs)
           in case floatTail rest of
                Just (frac, rest') ->
-                 expNote rest' ((TokIdent (digits ++ "." ++ frac) :) <$> go rest')
-               Nothing -> expNote rest ((TokInt (read digits) :) <$> go rest)
+                 expNote rest' ((TokIdent (digits ++ "." ++ frac) :) <$> go n rest')
+               Nothing -> expNote rest ((TokInt (read digits) :) <$> go n rest)
       | otherwise =
           let (ident, rest) = span isIdentChar (c:cs)
-          in (TokIdent ident :) <$> go rest
+          in (TokIdent ident :) <$> go n rest
 
     -- A FLOAT LITERAL is digits `.` digits (2026-09-14), lexed as one
     -- identifier so that it travels the whole pipeline — scheme, spine,
@@ -1426,10 +1563,27 @@ tokenize = go
     lexStr (c:cs)         = first (c :) <$> lexStr cs
     lexStr []             = Left "Unterminated string literal"
 
+-- Is this token a line break?  A break carries the number of the line
+-- it opens (2026-09-15), so it is no longer comparable with `==`.
+isNewlineTok :: Token -> Bool
+isNewlineTok (TokNewline _) = True
+isNewlineTok _              = False
+
 -- Collapse newline runs, drop leading/trailing newlines, and absorb
 -- newlines adjacent to an operator or a bracket delimiter.
 normalizeToks :: [Token] -> [Token]
-normalizeToks = trim . collapse
+normalizeToks = snd . normalizeToksAt
+
+-- ...and the line the FIRST stage sits on.  Blank and comment lines
+-- before it are not stages, so `trim` drops their breaks — and with
+-- them the only stamp that could have said where the program starts.
+-- It is returned instead of thrown away (2026-09-15).
+normalizeToksAt :: [Token] -> (Int, [Token])
+normalizeToksAt ts =
+  let c            = collapse ts
+      (lead, rest) = span isNewlineTok c
+      start        = last (1 : [ l | TokNewline l <- lead ])
+  in (start, dropTrailing rest)
   where
     -- A newline is a strict `>>`.  Two things absorb one:
     --
@@ -1446,17 +1600,27 @@ normalizeToks = trim . collapse
     -- is `(1 >> 2)`, exactly as at top level.  `|` never absorbs: the
     -- row separator must stay put so aligned track-columns work (`f |`
     -- ⏎ `| g` is two rows, not one collided `| |`).
+    --
+    -- A RUN of breaks collapses to the LAST one's stamp: blank lines
+    -- are not stages, so the line that opens the next stage is the one
+    -- the final break names.  An ABSORBED break takes its stamp with
+    -- it, so a stage carried onto the next line by `;`/`>>`/`\\` — or
+    -- opened against a bracket edge — reports the line the stage
+    -- STARTED on.  That is the honest answer for a stage that spans
+    -- lines, and it is the only one a token stream with no stamp left
+    -- in it can give.
     collapse [] = []
-    collapse (TokNewline : ts) =
-      case dropWhile (== TokNewline) ts of
-        rest@(t : _) | absorbsBefore t -> collapse rest
-        rest                           -> TokNewline : collapse rest
+    collapse (TokNewline k : ts) =
+      let (run, ts') = span isNewlineTok ts
+          ln         = last (k : [ l | TokNewline l <- run ])
+      in case ts' of
+           (t : _) | absorbsBefore t -> collapse ts'
+           _                         -> TokNewline ln : collapse ts'
     collapse (t : ts)
-      | absorbsAfter t = t : collapse (dropWhile (== TokNewline) ts)
+      | absorbsAfter t = t : collapse (dropWhile isNewlineTok ts)
       | otherwise      = t : collapse ts
 
-    trim = dropWhile (== TokNewline) . dropTrailing
-    dropTrailing = reverse . dropWhile (== TokNewline) . reverse
+    dropTrailing = reverse . dropWhile isNewlineTok . reverse
 
     -- newlines FOLLOWING this token are absorbed
     absorbsAfter t = railway t || seqTok t || t == TokLParen || t == TokLBrack
@@ -1596,7 +1760,8 @@ expandPatterns tbl = go Nothing
     -- the body of a header word
     binderPos Nothing  = True
     binderPos (Just t) =
-      t `elem` [TokNewline, TokLParen, TokLBrack, TokSeq, TokArrow]
+      isNewlineTok t
+        || t `elem` [TokLParen, TokLBrack, TokSeq, TokArrow]
 
     -- the un-stages, then the plain binder, then the rest of the SCOPE
     -- as its body — which is where the inserted `)` goes
@@ -1723,13 +1888,44 @@ parseProgram = parseProgramIn []
 -- patterns are read against (§6.0½).  Every site that has them passes
 -- them; `parseProgram` is the site that has none.
 parseProgramIn :: [DataDecl] -> String -> Either String Term
-parseProgramIn datas input = do
-  toks0 <- normalizeToks <$> tokenize input
+parseProgramIn = parseProgramAt id
+
+-- ...and the same, told where in the FILE this text starts.  A def body
+-- is a run of consecutive lines, so its map is `(+ (start - 1))`; a main
+-- program is the lines a module did not spend on declarations, so its
+-- map is a lookup.  Everything downstream of here — every stage stamp,
+-- every constraint, every refusal — is already in the file's own
+-- numbering (2026-09-15).
+parseProgramAt :: (Int -> Int) -> [DataDecl] -> String -> Either String Term
+parseProgramAt lineOf datas = fmap fst . parseProgramFrom lineOf datas
+
+-- ...and the line its FIRST stage sits on, which no `>>` introduced and
+-- which therefore carries no stamp of its own.  Callers hand it back to
+-- inference as the fallback for anything the term did not stamp.
+parseProgramFrom :: (Int -> Int) -> [DataDecl] -> String
+                 -> Either String (Term, Int)
+parseProgramFrom lineOf datas input = do
+  (start, toks0) <- normalizeToksAt <$> tokenize input
   toks  <- expandPatterns (patCons datas) toks0
-  (term, rest) <- parseProgramToks toks
+  (term, rest) <- parseProgramToks start toks
   case rest of
-    [] -> Right term
+    [] -> Right (remapLines lineOf term, lineOf start)
     _  -> Left $ "Unexpected tokens at end: " ++ show rest
+
+-- Rewrite every stage stamp through a map.  The parser counts lines
+-- from 1 within the text it was given; this puts them where the reader
+-- can see them.  A 0 stamp is the compiler's own code and stays 0.
+remapLines :: (Int -> Int) -> Term -> Term
+remapLines f = go
+  where
+    go (Seq n a b)       = Seq (if n == 0 then 0 else f n) (go a) (go b)
+    go (Tensor ts)       = Tensor (map go ts)
+    go (Quote a)         = Quote (go a)
+    go (OpenAbs ps r a)  = OpenAbs ps r (go a)
+    go (Use ns a)        = Use ns (go a)
+    go (Over ns a)       = Over ns (go a)
+    go (Alts as r)       = Alts (map go as) r
+    go p@(Prim _)        = p
 
 -- program level: rows joined by newline
 -- `x y z ->` is a postfix binder: it names the top wires and the REST
@@ -1742,46 +1938,46 @@ parseProgramIn datas input = do
 -- arrow's side says which: names BEFORE it are cut from the stack,
 -- names AFTER it label wires that keep flowing.  Both take the rest of
 -- the scope as their body, which is why both are recognized here.
-parseProgramToks :: [Token] -> Either String (Term, [Token])
-parseProgramToks toks =
+parseProgramToks :: Int -> [Token] -> Either String (Term, [Token])
+parseProgramToks ln0 toks =
   case toks of
     -- `use R1 R2` opens an AMBIENT SCOPE, taking the rest of the scope
     -- as its body exactly as the binders do
-    (TokIdent "use" : ts) | Just (rs, r) <- usePrefix ts -> mkUse rs r
+    (TokIdent "use" : ts) | Just (rs, r) <- usePrefix ts -> mkUse ln0 rs r
     -- `over X` is the other header word: it opens no scope and applies
     -- nothing, it says what this def is a morphism OF
-    (TokIdent "over" : ts) | Just (rs, r) <- usePrefix ts -> mkOver rs r
+    (TokIdent "over" : ts) | Just (rs, r) <- usePrefix ts -> mkOver ln0 rs r
     -- a leading arrow names the wires this scope was handed
-    (TokArrow : ts) -> mkName ts
+    (TokArrow : ts) -> mkName ln0 ts
     _ ->
       case binderPrefix toks of
-        Just (ps, rest) -> mkAbs ps rest
+        Just (ps, rest) -> mkAbs ln0 ps rest
         Nothing -> do
-          (t0, rest) <- parseRow toks
-          loop t0 rest
+          (t0, rest) <- parseRow ln0 toks
+          loop ln0 t0 rest
   where
     -- `stage -> names`: the stage ends at the arrow (parseStage leaves
     -- it), and the names label the wires the stage just produced
-    loop acc (TokArrow : rest) = do
-      (nm, r') <- mkName rest
-      Right (Seq acc nm, r')
-    loop acc (TokNewline : rest)
+    loop ln acc (TokArrow : rest) = do
+      (nm, r') <- mkName ln rest
+      Right (Seq ln acc nm, r')
+    loop _ acc (TokNewline ln : rest)
       | (TokIdent "use" : ts) <- rest, Just (rs, r) <- usePrefix ts = do
-          (u, r') <- mkUse rs r
-          Right (Seq acc u, r')
+          (u, r') <- mkUse ln rs r
+          Right (Seq ln acc u, r')
       | (TokIdent "over" : ts) <- rest, Just (rs, r) <- usePrefix ts = do
-          (u, r') <- mkOver rs r
-          Right (Seq acc u, r')
+          (u, r') <- mkOver ln rs r
+          Right (Seq ln acc u, r')
       | (TokArrow : ts) <- rest = do
-          (nm, r') <- mkName ts
-          Right (Seq acc nm, r')
+          (nm, r') <- mkName ln ts
+          Right (Seq ln acc nm, r')
       | Just (ps, r) <- binderPrefix rest = do
-          (abs', r') <- mkAbs ps r
-          Right (Seq acc abs', r')
+          (abs', r') <- mkAbs ln ps r
+          Right (Seq ln acc abs', r')
       | otherwise = do
-          (t, rest') <- parseRow rest
-          loop (Seq acc t) rest'
-    loop acc rest = Right (acc, rest)
+          (t, rest') <- parseRow ln rest
+          loop ln (Seq ln acc t) rest'
+    loop _ acc rest = Right (acc, rest)
 
     -- `-> x _ y` is the NAMING binder: identity on the wires it names.
     -- They stay on the stack and pick up names for the rest of the
@@ -1798,7 +1994,7 @@ parseProgramToks toks =
     --
     -- The body is the rest of the scope, introduced by an explicit `->`
     -- or by an ordinary stage break (`;`, `>>`, or a newline).
-    mkName ts = do
+    mkName ln ts = do
       let (params, rest0) = span isParamTok ts
       slots <- mapM slotOf params
       case slots of
@@ -1809,9 +2005,9 @@ parseProgramToks toks =
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
       bodyToks <- case rest0 of
-        (TokArrow : more)   -> Right more     -- `-> names -> body`
-        (TokSeq : more)     -> Right more
-        (TokNewline : more) -> Right more
+        (TokArrow : more)     -> Right more     -- `-> names -> body`
+        (TokSeq : more)       -> Right more
+        (TokNewline _ : more) -> Right more
         r | endsScope r ->
               Left "'-> …' ends its scope: nothing is left to use the names"
         (t : _) -> Left $
@@ -1824,7 +2020,7 @@ parseProgramToks toks =
       -- them; reuse the parser so the desugaring is exactly the stage a
       -- user would have written
       let repush = [ TokIdent (fromMaybe "_" s) | s <- slots ] ++ [TokEllipsis]
-      (body, rest') <- parseProgramToks (repush ++ TokNewline : bodyToks)
+      (body, rest') <- parseProgramToks ln (repush ++ TokNewline ln : bodyToks)
       Right (OpenAbs slots True body, rest')
 
     -- a run of resource names, then the body (a stage break or `->`)
@@ -1839,27 +2035,27 @@ parseProgramToks toks =
     -- differ only in what they then do with it.
     headerBody word noBody rest =
       case rest of
-        (TokArrow : more)   -> Right more
-        (TokSeq : more)     -> Right more
-        (TokNewline : more) -> Right more
+        (TokArrow : more)     -> Right more
+        (TokSeq : more)       -> Right more
+        (TokNewline _ : more) -> Right more
         (t : _) | not (endsScope (t : [])) ->
           Left $ "'" ++ word ++ " …' must be followed by its body (a \
                  \newline, ';' or '->'), got: " ++ show t
         _ -> Left $ "'" ++ word ++ " …' ends its scope: " ++ noBody
 
-    mkUse names rest = do
+    mkUse ln names rest = do
       case [ n | (n, i) <- zip names [0 :: Int ..], n `elem` take i names ] of
         (n : _) -> Left $ "Duplicate resource in `use`: " ++ n
         []      -> Right ()
       bodyToks <- headerBody "use" "there is no body for the resources to \
                                    \be ambient in" rest
-      (body, rest') <- parseProgramToks bodyToks
+      (body, rest') <- parseProgramToks ln bodyToks
       Right (Use names body, rest')
 
     -- `over X ; body` reads exactly as `use` does — one header word, the
     -- rest of the scope as its body — so the two are one shape and the
     -- difference is entirely in what the elaborator does with it.
-    mkOver names rest = do
+    mkOver ln names rest = do
       case names of
         [_] -> Right ()
         _   -> Left $ "`over " ++ unwords names ++ "`: an `over` header "
@@ -1867,7 +2063,7 @@ parseProgramToks toks =
                    ++ "template) or one model with a carrier (making it a word of that category)"
       bodyToks <- headerBody "over" "there is nothing for it to be the \
                                     \morphism of" rest
-      (body, rest') <- parseProgramToks bodyToks
+      (body, rest') <- parseProgramToks ln bodyToks
       Right (Over names body, rest')
 
     slotOf (TokIdent "_") = Right Nothing
@@ -1881,7 +2077,7 @@ parseProgramToks toks =
     endsScope (TokRBrack : _) = True
     endsScope _               = False
 
-    mkAbs toks0 rest = do
+    mkAbs ln toks0 rest = do
       -- split the parameter list into names, `_` passthroughs and a
       -- trailing `...`.  The stage vocabulary applies, with one
       -- ordering rule: names come first (they sit deepest), then any
@@ -1891,7 +2087,7 @@ parseProgramToks toks =
       case [ p | (p, n) <- zip ns [0 :: Int ..], p `elem` take n ns ] of
         (p : _) -> Left $ "Duplicate parameter: " ++ p
         []      -> Right ()
-      (body, rest') <- parseProgramToks rest
+      (body, rest') <- parseProgramToks ln rest
       Right (OpenAbs slots hasRest body, rest')
 
     -- slots in written order; `_` is an unnamed slot, `...` (last only)
@@ -1912,21 +2108,21 @@ parseProgramToks toks =
     binderPrefix ts =
       case span isParamTok ts of
         (ids@(_ : _), TokArrow : r) ->
-          Just (ids, dropWhile (== TokNewline) r)
+          Just (ids, dropWhile isNewlineTok r)
         _                           -> Nothing
     isParamTok (TokIdent _) = True
     isParamTok TokEllipsis  = True
     isParamTok _            = False
 
 -- row level: sequences joined by |, optional trailing `| ---` residual
-parseRow :: [Token] -> Either String (Term, [Token])
-parseRow toks =
+parseRow :: Int -> [Token] -> Either String (Term, [Token])
+parseRow ln toks =
   case toks of
     -- a leading `|` defaults the first alternative to identity:
     -- `(| f)` ≡ `(pass | f)`, `(| f | g)` ≡ `(pass | f | g)`.  Lets a
     -- vertical row put every arm on a `|`-led line.
     (TokBar : _) -> loop [Prim "pass"] toks
-    _            -> do (t0, rest) <- parseKleisli toks
+    _            -> do (t0, rest) <- parseKleisli ln toks
                        loop [t0] rest
   where
     -- `| ---` is the RESIDUAL: identity on every remaining alternative.
@@ -1953,12 +2149,12 @@ parseRow toks =
     loop acc (TokBar : rest@(TokBar : _)) =
       loop (Prim "pass" : acc) rest
     loop acc (TokBar : rest) = do
-      (t, rest') <- parseKleisli rest
+      (t, rest') <- parseKleisli ln rest
       loop (t : acc) rest'
     loop [t] rest = Right (t, rest)
     loop acc rest = Right (Alts (reverse acc) False, rest)
 
-    endsRow (TokNewline : _) = True
+    endsRow (TokNewline _ : _) = True
     endsRow (TokRParen : _)  = True
     endsRow (TokRBrack : _)  = True
     endsRow []               = True
@@ -1968,35 +2164,35 @@ parseRow toks =
 -- composition in the sum monad — the desugaring is the `and` idiom:
 --   t1 >=> t2   ≡   t1 >> (t2 | alt2) >> merge
 -- (t2 runs on the hit track; the miss track re-injects untouched).
-parseKleisli :: [Token] -> Either String (Term, [Token])
-parseKleisli toks = do
-  (s0, rest) <- parseSeqStmt toks
-  loop (desugarStmt s0) rest
+parseKleisli :: Int -> [Token] -> Either String (Term, [Token])
+parseKleisli ln toks = do
+  (s0, rest) <- parseSeqStmt ln toks
+  loop (desugarStmt ln s0) rest
   where
     loop acc (TokKleisli : rest) = do
-      (s, rest') <- parseSeqStmt rest
-      loop (kleisli acc (desugarStmt s)) rest'
+      (s, rest') <- parseSeqStmt ln rest
+      loop (kleisli acc (desugarStmt ln s)) rest'
     loop acc (TokOrElse : rest) = do
-      (s, rest') <- parseSeqStmt rest
-      loop (orElse acc (desugarStmt s)) rest'
+      (s, rest') <- parseSeqStmt ln rest
+      loop (orElse acc (desugarStmt ln s)) rest'
     loop acc (TokOrClose : rest) = do
-      (s, rest') <- parseSeqStmt rest
-      loop (orClose acc (desugarStmt s)) rest'
+      (s, rest') <- parseSeqStmt ln rest
+      loop (orClose acc (desugarStmt ln s)) rest'
     loop acc rest = Right (acc, rest)
 
     -- >=> threads the hit track (bind of (·|E)); >?> threads the miss
     -- track (bind of (B|·)): keep an answer, else try the next stage
     kleisli t1 t2 =
-      Seq t1 (Seq (Alts [t2, Prim "alt2"] False) (Prim "merge"))
+      Seq ln t1 (Seq ln (Alts [t2, Prim "alt2"] False) (Prim "merge"))
     orElse t1 t2 =
-      Seq t1 (Seq (Alts [Prim "alt1", t2] False) (Prim "merge"))
+      Seq ln t1 (Seq ln (Alts [Prim "alt1", t2] False) (Prim "merge"))
     orClose t1 t2 =
-      Seq t1 (Seq (Alts [Prim "pass", t2] False) (Prim "merge"))
+      Seq ln t1 (Seq ln (Alts [Prim "pass", t2] False) (Prim "merge"))
 
 -- sequence level: stages joined by >> / >>> only
-parseSeqStmt :: [Token] -> Either String (Stmt, [Token])
-parseSeqStmt toks = do
-  (s0, rest) <- parseStage toks
+parseSeqStmt :: Int -> [Token] -> Either String (Stmt, [Token])
+parseSeqStmt ln toks = do
+  (s0, rest) <- parseStage ln toks
   (ops, rest') <- go [] rest
   Right (Stmt s0 ops, rest')
   where
@@ -2005,24 +2201,24 @@ parseSeqStmt toks = do
     go acc rest'                = Right (reverse acc, rest')
 
     next acc op rest' = do
-      (stage, rest'') <- parseStage rest'
+      (stage, rest'') <- parseStage ln rest'
       go ((op, stage) : acc) rest''
 
-parseStage :: [Token] -> Either String (Stage, [Token])
-parseStage = go []
+parseStage :: Int -> [Token] -> Either String (Stage, [Token])
+parseStage ln = go []
   where
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
     go acc (TokLBrack : rest)     = do
-      (t, rest') <- parseDelimited rest
+      (t, rest') <- parseDelimited ln rest
       case rest' of
         (TokRBrack : rest'') -> go (Quote t : acc) rest''
         _ -> Left "Unclosed quotation (expected ']')"
     -- (p): grouping only — the enclosed program is an ordinary atom,
     -- not reified.  (x y -> p): named open abstraction.
     go acc (TokLParen : rest)     = do
-      (t, rest') <- parseDelimited rest
+      (t, rest') <- parseDelimited ln rest
       case rest' of
         (TokRParen : rest'') -> go (t : acc) rest''
         _ -> Left "Unclosed group (expected ')')"
@@ -2060,7 +2256,7 @@ parseStage = go []
 -- A delimited scope (group or quote body).  Binder recognition lives
 -- in parseProgramToks now, so `(x y -> body)` and `[x y -> body]` are
 -- handled there (a leading binder in the delimited scope).
-parseDelimited :: [Token] -> Either String (Term, [Token])
+parseDelimited :: Int -> [Token] -> Either String (Term, [Token])
 parseDelimited = parseProgramToks
 
 --------------------------------------------------------------------------------
@@ -2360,7 +2556,7 @@ dataFieldArtifacts :: DataDecl
                    -> [((String, Scheme), (String, (Int, Bool, Term)))]
 dataFieldArtifacts d =
   [ ( (f, Forall tvs svs rvs nvs [] [] (arrPure namedStack (SCons t SEnd)))
-    , (f, (1, False, Seq (Prim "merge") (Tensor (keepOnly i)))) )
+    , (f, (1, False, Seq 0 (Prim "merge") (Tensor (keepOnly i)))) )
   | (i, f, t) <- zip3 [0 :: Int ..] (dFields d) elems ]
   where
     ps         = dParams d
@@ -3478,12 +3674,12 @@ desugarStage (Stage atoms hasPass) =
 
 -- `>>>` opens only the immediately preceding tensor stage, never the
 -- accumulated program:  a >> b >>> c  ≡  a >> (b pass) >> c.
-desugarStmt :: Stmt -> Term
-desugarStmt (Stmt firstStage rest) =
+desugarStmt :: Int -> Stmt -> Term
+desugarStmt ln (Stmt firstStage rest) =
   let stages    = firstStage : map snd rest
       followOps = map (Just . fst) rest ++ [Nothing]
       desugared = zipWith openIf stages followOps
-  in foldl1 Seq desugared
+  in foldl1 (Seq ln) desugared
   where
     openIf stage (Just StageSeqPass) = appendPassTerm (desugarStage stage)
     openIf stage _                   = desugarStage stage
@@ -3570,7 +3766,7 @@ infer env (Tensor ts) = do
   -- are what future grades must earn, not legality itself.
   pure (Arrow inS outS stageG, cs ++ gcs)
 
-infer env (Seq t u) = do
+infer env (Seq ln t u) = do
   (Arrow i1 o1 e1, c1) <- infer env t
   (Arrow i2 o2 e2, c2) <- infer env u
   let c = CEqStack o1 i2
@@ -3580,7 +3776,12 @@ infer env (Seq t u) = do
   -- parameter's `Fn` row through the row `ev` shares — the bug this
   -- constraint form exists to fix (design-effects.md, 2026-09-12).
   e <- freshEffRow
-  pure (Arrow i1 o2 e, c1 ++ c2 ++ [c, CSubEff e1 e, CSubEff e2 e])
+  -- everything the RIGHT stage said, and the cut between the two, is
+  -- reported at the right stage's line: that is the stage that did not
+  -- fit, and the one a reader has to change.
+  pure ( Arrow i1 o2 e
+       , c1 ++ stampAt ln c2
+            ++ stampAt ln [c] ++ [CSubEff e1 e] ++ stampAt ln [CSubEff e2 e] )
 
 -- Infer one operand of a tensor chain.  Only the final operand may keep
 -- its remainder variable open; all earlier operands are closed (ρ := •).
@@ -4168,7 +4369,7 @@ primEnv =
 primsIn :: Term -> [String]
 primsIn (Prim n)        = [n]
 primsIn (Tensor ts)     = concatMap primsIn ts
-primsIn (Seq t u)       = primsIn t ++ primsIn u
+primsIn (Seq _ t u)     = primsIn t ++ primsIn u
 primsIn (Quote t)       = primsIn t
 primsIn (OpenAbs slots _ t) =
   [ n | n <- primsIn t, n `notElem` [ x | Just x <- slots ] ]
@@ -4178,14 +4379,25 @@ primsIn (Over _ b)     = primsIn b
 
 -- Infer a term's principal arrow in a given environment.
 inferTermIn :: Env -> Term -> Either String Arrow
-inferTermIn env = fmap fst . inferTermSub env
+inferTermIn = inferTermInAt 0
+
+-- ...and the same, told which line to blame for anything the term did
+-- not stamp itself — a def's or a main program's FIRST stage, which no
+-- `>>` introduced and which therefore carries no stamp of its own
+-- (2026-09-15).  0 means "no line", and the refusal then names only the
+-- def it is in.
+inferTermInAt :: Int -> Env -> Term -> Either String Arrow
+inferTermInAt ln env = fmap fst . inferTermSubAt ln env
 
 -- …and the ⊆ constraints that survive, for callers about to
 -- GENERALIZE the result (a def, a runtime `evalAs` check).  A caller
 -- that only wants to read the arrow can drop them: they relate rows
 -- the display hides anyway.
 inferTermSub :: Env -> Term -> Either String (Arrow, [EffSub])
-inferTermSub env term =
+inferTermSub = inferTermSubAt 0
+
+inferTermSubAt :: Int -> Env -> Term -> Either String (Arrow, [EffSub])
+inferTermSubAt ln0 env term =
   case nub [ n | n <- primsIn term
                , not (isIntLiteral n)
                , not (isFloatLiteral n)
@@ -4196,11 +4408,19 @@ inferTermSub env term =
                , Nothing <- [finIndex n]
                , Nothing <- [receiptLabel n]
                , Nothing <- [distPrimArity n] ] of
-    (n : _) -> Left $ "Unknown primitive: " ++ n
+    (n : _) -> Left $ atLine (whichStage n) ("Unknown primitive: " ++ n)
     [] -> do
-      let (arr, cs) = runInfer0 (infer env term)
+      let (arr, cs0) = runInfer0 (infer env term)
+          cs           = stampAt ln0 cs0
       s <- solve cs
       pure (apply s arr, residualSubs s cs)
+  where
+    -- an unknown word is named where it is WRITTEN: the first stage
+    -- that mentions it, quotes and groups included
+    whichStage n =
+      listToMaybe ([ l | (l, atoms) <- spineLines term
+                       , n `elem` concatMap primsIn atoms
+                       , l /= 0 ] ++ [ ln0 | ln0 /= 0 ])
 
 -- A definition is not in scope in its own body (5a½): recursion is
 -- written with `fix`, at a typed boundary, so every def is a CLOSED
@@ -4215,9 +4435,9 @@ selfReferenceError name viaRecurse =
 
 
 inferProgram :: String -> Either String Arrow
-inferProgram src = do
+inferProgram src = first (locFor [] src) $ do
   term <- parseProgram src
-  inferTermIn primEnv term
+  inferTermInAt 1 primEnv term
 
 exampleSrc :: String
 exampleSrc = "1 2 >> f g >> + >> print"
@@ -4346,17 +4566,17 @@ data ElabCtx = ElabCtx
 -- textual in the Term, and a binder parameter named like the def
 -- shadows it exactly as it shadows any other word.
 selfCallTerm :: Term
-selfCallTerm = Seq (Tensor [Prim selfKnotName, Prim "pass"]) (Prim "ev")
+selfCallTerm = Seq 0 (Tensor [Prim selfKnotName, Prim "pass"]) (Prim "ev")
 
 tieKnot :: String -> Term -> Term
 tieKnot name body =
-  Seq (Seq (Tensor [Quote (OpenAbs [Just selfKnotName] True (subst body)),
-                    Prim "pass"])
-           (Tensor [Prim knotPrimName, Prim "pass"]))
-      (Prim "ev")
+  Seq 0 (Seq 0 (Tensor [Quote (OpenAbs [Just selfKnotName] True (subst body)),
+                        Prim "pass"])
+               (Tensor [Prim knotPrimName, Prim "pass"]))
+        (Prim "ev")
   where
     subst (Prim n) | n == name = selfCallTerm
-    subst (Seq a b)            = Seq (subst a) (subst b)
+    subst (Seq n a b)          = Seq n (subst a) (subst b)
     subst (Tensor ts)          = Tensor (map subst ts)
     subst (Quote t)            = Quote (subst t)
     subst (Alts cs r)          = Alts (map subst cs) r
@@ -4646,7 +4866,7 @@ elabUseWith ctx t0 = do
 
     deepRec (Use ns b)     = recLabel `elem` ns || deepRec b
     deepRec (Over _ b)     = deepRec b
-    deepRec (Seq a b)      = deepRec a || deepRec b
+    deepRec (Seq _ a b)    = deepRec a || deepRec b
     deepRec (Tensor ts)    = any deepRec ts
     deepRec (Quote t)      = deepRec t
     deepRec (Alts cs _)    = any deepRec cs
@@ -4763,7 +4983,7 @@ elabUseWith ctx t0 = do
                        ++ map receiptName mine
                        ++ concat [ receiptName f : map receiptName (wordLabels w)
                                  | (f, w) <- fs ])
-      pure (foldr (Seq . Prim) expanded marks)
+      pure (foldr (Seq 0 . Prim) expanded marks)
     -- `over` declares what a def IS, so it is consumed where a def is
     -- recorded (`addDef`) and never reaches here except out of place.
     go (Over ns _) = Left $ "`over " ++ unwords ns ++ "` may only be a def's "
@@ -4771,7 +4991,7 @@ elabUseWith ctx t0 = do
                          ++ "says what the def is a morphism of, and a def "
                          ++ "is one thing.  `use` is the word that opens a "
                          ++ "scope."
-    go (Seq a b)       = Seq <$> go a <*> go b
+    go (Seq n a b)     = Seq n <$> go a <*> go b
     go (Tensor ts)     = Tensor <$> mapM go ts
     go (Quote t)       = Quote <$> go t
     go (Alts cs r)     = Alts <$> mapM go cs <*> pure r
@@ -4834,7 +5054,7 @@ expandTemplates ctx scope busy = go
                            <$> expandTemplates ctx ((i, th) : scope) (n : busy) body
               []      -> Left $ n ++ " needs a model of " ++ th
                              ++ " in scope (`use <model>` before calling it)"
-    go (Seq a b)        = Seq <$> go a <*> go b
+    go (Seq n a b)      = Seq n <$> go a <*> go b
     go (Tensor ts)      = Tensor <$> mapM go ts
     go (Quote t)        = Quote <$> go t
     go (Alts cs r)      = Alts <$> mapM go cs <*> pure r
@@ -4935,7 +5155,7 @@ renameWordsT :: [(String, String)] -> Term -> Term
 renameWordsT tbl = go
   where
     go (Prim n) | Just n' <- lookup n tbl = Prim n'
-    go (Seq a b)        = Seq (go a) (go b)
+    go (Seq n a b)      = Seq n (go a) (go b)
     go (Tensor ts)      = Tensor (map go ts)
     go (Quote t)        = Quote (go t)
     go (Alts cs r)      = Alts (map go cs) r
@@ -4946,15 +5166,15 @@ renameWordsT tbl = go
 
 elabScope :: Env -> [String] -> Term -> Either String Term
 elabScope env rs body = do
-  stages <- mapM routeStage (spineOf body)
+  stages <- mapM routeStage (spineLines body)
   -- `use Log Counter` is a CLAIM about the incoming wires, so make it
   -- one: `unLog >> Log` is the identity on a Log and typechecks on
   -- nothing else.  Without this a body that never touches a resource
   -- would leave its wires unconstrained, and the scope would be padding
   -- rather than a statement.
-  let assert = [ [ Seq (Prim ("un" ++ r)) (Prim r) | r <- rs ]
-                 ++ [Prim "pass"] | not (null rs) ]
-  pure (chainTerm (assert ++ concat stages))
+  let assert = [ (0, [ Seq 0 (Prim ("un" ++ r)) (Prim r) | r <- rs ]
+                      ++ [Prim "pass"]) | not (null rs) ]
+  pure (chainLines (assert ++ concat stages))
   where
     k = length rs
     pad n = replicate n (Prim "_")
@@ -4973,7 +5193,11 @@ elabScope env rs body = do
       Just (Forall _ _ _ _ _ _ (Arrow i o _)) -> openTailedS i || openTailedS o
       _                                     -> False
 
-    routeStage atoms0 =
+    -- the stage's line rides through the rewrite: every stage this
+    -- one becomes reports the line this one was written on
+    routeStage (ln, atoms0) = map ((,) ln) <$> routeAtoms atoms0
+
+    routeAtoms atoms0 =
       let atoms = [ a | a <- atoms0, a /= Prim "pass" ]
           tailPass = [ Prim "pass" | not (null atoms), not (isOpen (last atoms)) ]
           touching = [ (a, u) | a <- atoms, let u = resUse a, not (null u) ]
@@ -5784,7 +6008,7 @@ residualSubs :: Subst -> [Constraint] -> [EffSub]
 residualSubs s cs =
   S.toList (S.fromList
     [ (p, c)
-    | CSubEff p0 c0 <- cs
+    | (_, CSubEff p0 c0) <- map unAt cs
     , let p = apply s p0
     , let c = apply s c0
     , Just v <- [eTail p]
@@ -5830,11 +6054,27 @@ splitDefs :: String
                            , [String]
                            , String )
 splitDefs src = do
-  (defs, tys, decls, imps, tbls, progLines) <- go Nothing (lines src)
-  pure (defs, tys, decls, imps, tbls, intercalate "\n" progLines)
+  (defs, tys, decls, imps, tbls, progLines) <- splitDefsIx src
+  pure ( [ (n, b, d) | (n, b, d, _) <- defs ]
+       , tys, decls, imps, tbls, intercalate "\n" (map snd progLines) )
+
+-- ...and the same split with the FILE LINES it came off: each def body
+-- knows the line its first line sits on (a body is a run of consecutive
+-- lines, so one number places all of it), and the main program — which
+-- is every line the declarations did not take, so not a run at all —
+-- comes back line by line (2026-09-15).  This is the only place that
+-- knows both, which is why it is the only place that has to say so.
+splitDefsIx :: String
+            -> Either String ( [(String, String, Maybe String, Int)]
+                             , [(String, Maybe String)]
+                             , [(String, [String], Maybe String)]
+                             , [String]
+                             , [String]
+                             , [(Int, String)] )
+splitDefsIx src = go Nothing (zip [1 ..] (lines src))
   where
     go _ [] = Right ([], [], [], [], [], [])
-    go doc (l : rest)
+    go doc ((lineNo, l) : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
       | ("import" : _) <- words l = do
@@ -5889,7 +6129,7 @@ splitDefs src = do
             then Left $ "Empty " ++ kw ++ " body: " ++ l
             else do
               (ds, ts, bs, is, tb, ps) <- go Nothing rest'
-              pure (ds, ts, (l, block, doc) : bs, is, tb, ps)
+              pure (ds, ts, (l, map snd block, doc) : bs, is, tb, ps)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
           -- a `#` comment on the `=` line is not code: treat a
@@ -5904,28 +6144,32 @@ splitDefs src = do
                 then Left $ "Empty definition body: " ++ name
                 else do
                   (ds, ts, bs, is, tb, ps) <- go Nothing rest'
-                  pure ((name, intercalate "\n" block, doc) : ds, ts, bs, is, tb, ps)
+                  -- a block body starts on the line after the `def`
+                  pure ( (name, intercalate "\n" (map snd block), doc, lineNo + 1)
+                           : ds, ts, bs, is, tb, ps )
             else do
               -- inline body: it may leave a bracket open, in which case
               -- the following lines belong to it, not to the module
               let (cont, rest') = spanOpen l rest
               (ds, ts, bs, is, tb, ps) <- go Nothing rest'
-              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, bs, is, tb, ps)
+              -- an inline body starts on the `def` line itself
+              pure ( (name, intercalate "\n" (body : map snd cont), doc, lineNo)
+                       : ds, ts, bs, is, tb, ps )
       | otherwise = do
           -- a program line may leave a bracket open; the lines that
           -- close it are part of it, so `def`/`type`/`##` inside an open
           -- bracket is code, not a declaration
           let (cont, rest') = spanOpen l rest
           (ds, ts, bs, is, tb, ps) <- go Nothing rest'
-          pure (ds, ts, bs, is, tb, l : cont ++ ps)
+          pure (ds, ts, bs, is, tb, (lineNo, l) : cont ++ ps)
 
     indented ln = not (all isSpace ln) && isSpace (head ln)
 
     -- an indented block body, continuing across blank/dedented lines
     -- while a bracket opened inside it is still unclosed
-    spanBlock d (ln : ls)
+    spanBlock d (p@(_, ln) : ls)
       | d > 0 || indented ln =
-          let (b, r) = spanBlock (d + lineDepth ln) ls in (ln : b, r)
+          let (b, r) = spanBlock (d + lineDepth ln) ls in (p : b, r)
     spanBlock _ ls = ([], ls)
 
     -- the lines AFTER `l` needed to close a bracket `l` left open — or
@@ -5936,7 +6180,7 @@ splitDefs src = do
           | d <= 0 && not cont = (reverse acc, ls)
         walk _ _ acc [] = (reverse acc, [])
         walk d _ acc (x : xs) =
-          walk (d + lineDepth x) (lineContinues x) (x : acc) xs
+          walk (d + lineDepth (snd x)) (lineContinues (snd x)) (x : acc) xs
 
     docLine l =
       case dropWhile isSpace l of
@@ -6432,28 +6676,39 @@ parseImportLine l =
 -- documents nothing, and must not drift onto the next declaration when
 -- the file is included somewhere else).
 stripLines :: [String] -> [String] -> [String]
-stripLines = go []
+stripLines ls rs = map snd (stripLinesIx (zip [1 ..] ls) rs)
+
+-- ...on lines that remember where they came from, which is what the
+-- loader keeps so that a refusal in an included file names THAT file
+-- and THAT line (2026-09-15).
+stripLinesIx :: [(Int, String)] -> [String] -> [(Int, String)]
+stripLinesIx = go []
   where
     go acc ls [] = reverse acc ++ ls
     go acc [] _  = reverse acc
-    go acc (l : ls) rs@(r : rs')
-      | l == r    = go (dropWhile isDocLine acc) ls rs'
-      | otherwise = go (l : acc) ls rs
+    go acc (p@(_, l) : ls) rs@(r : rs')
+      | l == r    = go (dropWhile (isDocLine . snd) acc) ls rs'
+      | otherwise = go (p : acc) ls rs
 
 -- A module's declarations as source: everything but its main program
 -- and its own import lines.  This is what an import includes.
 moduleDecls :: String -> Either String String
-moduleDecls src = do
-  (_, _, _, imps, _, mainSrc) <- splitDefs src
-  let kept = stripLines (stripLines (lines src) imps) (lines mainSrc)
-  pure (unlines kept)
+moduleDecls = fmap (unlines . map snd) . moduleLinesIx False
 
 -- The root file, with its import lines resolved away and its main
 -- program kept.
 moduleSansImports :: String -> Either String String
-moduleSansImports src = do
-  (_, _, _, imps, _, _) <- splitDefs src
-  pure (unlines (stripLines (lines src) imps))
+moduleSansImports = fmap (unlines . map snd) . moduleLinesIx True
+
+-- What a file contributes to the assembled source, line by line, each
+-- line paired with the number it has in ITS OWN file.  `True` keeps the
+-- main program (the root), `False` drops it (an import).
+moduleLinesIx :: Bool -> String -> Either String [(Int, String)]
+moduleLinesIx keepMain src = do
+  (_, _, _, imps, _, mainSrc) <- splitDefs src
+  let sansImports = stripLinesIx (zip [1 ..] (lines src)) imps
+  pure (if keepMain then sansImports
+                    else stripLinesIx sansImports (lines mainSrc))
 
 --------------------------------------------------------------------------------
 -- 10.4b Tables: a CSV header is a PRESENTATION
@@ -6711,12 +6966,14 @@ tableText nm cols hcells = unlines $
 -- that the line stays where it was written and the text it stands for
 -- reads as part of the file.  The blocks come in file order, exactly
 -- the order `splitDefs` collected the lines in.
-spliceTables :: [(String, String)] -> [String] -> [String]
+spliceTables :: [(String, String)] -> [(Int, String)] -> [(Int, String)]
 spliceTables [] ls = ls
 spliceTables _  [] = []
-spliceTables bs@((raw, blk) : bs') (l : ls)
-  | l == raw  = l : lines blk ++ spliceTables bs' ls
-  | otherwise = l : spliceTables bs ls
+spliceTables bs@((raw, blk) : bs') (p@(k, l) : ls)
+  -- generated text has no line of its own, so every line of it reports
+  -- the DECLARATION it stands for (2026-09-15)
+  | l == raw  = p : [ (k, g) | g <- lines blk ] ++ spliceTables bs' ls
+  | otherwise = p : spliceTables bs ls
 
 -- The public words a table generates.  `load…` is the only one whose
 -- body names a `@` helper, so it is the only one the `@` refusal must
@@ -6733,21 +6990,29 @@ data Load = Load
   { lSeen :: [FilePath]           -- canonical paths already included
   , lDefs :: [(String, FilePath)] -- def names, and the file that declared them
   , lText :: String               -- the source assembled so far
+  , lMap  :: LineMap              -- and where each of its lines came from
   }
 
 emptyLoad :: Load
-emptyLoad = Load [] [] ""
+emptyLoad = Load [] [] "" []
 
-loadSource :: FilePath -> IO (Either String String)
+-- Where the n-th line of an assembled source was written: the file, and
+-- the line it has THERE.  Built by the loader, which is the only thing
+-- that knows; read by `resolveLoc`, which is the only thing that needs
+-- to (2026-09-15).
+type LineMap = [(FilePath, Int)]
+
+loadSource :: FilePath -> IO (Either String (String, LineMap))
 loadSource = loadWith True
 
 -- the same, as a DEPENDENCY: declarations only, main dropped.  This is
 -- what an `import` line pulls in, and what the REPL's `:import` runs.
-loadDecls :: FilePath -> IO (Either String String)
+loadDecls :: FilePath -> IO (Either String (String, LineMap))
 loadDecls = loadWith False
 
-loadWith :: Bool -> FilePath -> IO (Either String String)
-loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
+loadWith :: Bool -> FilePath -> IO (Either String (String, LineMap))
+loadWith isRoot0 root =
+  fmap (fmap (\a -> (lText a, lMap a))) (load [] emptyLoad root isRoot0)
   where
     -- `path` is already resolved: the root is what the user named, an
     -- import is what `resolve` found.  The root is never checked for
@@ -6791,13 +7056,14 @@ loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
                                  ++ f)
               [] -> Right ()
             blks <- first (inFile path) (sequence blocks)
-            own  <- first (inFile path)
-                     ((if isRoot then moduleSansImports else moduleDecls) src)
-            let own' = unlines (spliceTables (zip tbls blks) (lines own))
+            own  <- first (inFile path) (moduleLinesIx isRoot src)
+            let spliced = spliceTables (zip tbls blks) own
+                own'    = unlines (map snd spliced)
                 genDefs = [ (n, path)
                           | tb <- tables, n <- tableGenNames tb ]
             pure acc' { lDefs = lDefs acc' ++ [ (n, path) | (n, _, _) <- defs ]
                                            ++ genDefs
+                      , lMap  = lMap acc' ++ [ (path, k) | (k, _) <- spliced ]
                       , lText = lText acc' ++ own' }
 
     child _ acc@(Left _) _  = pure acc
@@ -6862,7 +7128,10 @@ slotWords trans th i =
 -- shadow prelude ones (once each); the prelude's defs, aliases, and
 -- docs are folded into the result so the runtime and printer see them.
 checkModule :: String -> Either String Module
-checkModule src = do
+checkModule = checkModuleAt []
+
+checkModuleAt :: LineMap -> String -> Either String Module
+checkModuleAt lm src = do
   -- the prelude's THEORIES ride in too: `Doctrine` is ambient, because
   -- `theory T(k(_, _)) over Doctrine` is a claim and a claim needs
   -- something to point at in every module.
@@ -6871,7 +7140,7 @@ checkModule src = do
                          (modAliases preludeModule)
                          (modDatas preludeModule))
                { mbTheories = modTheories preludeModule }
-  m <- checkModuleWith base src
+  m <- checkModuleWithAt lm base src
   let shadowed = map aName (modAliases m) ++ map dName (modDatas m)
       keptPreludeAl =
         [ al | al <- modAliases preludeModule, aName al `notElem` shadowed ]
@@ -6921,13 +7190,32 @@ moduleBase env run shadow aliases datas =
   ModuleBase env run shadow aliases datas [] [] [] [] [] [] []
 
 checkModuleWith :: ModuleBase -> String -> Either String Module
-checkModuleWith base src = do
+checkModuleWith = checkModuleWithAt []
+
+-- ...with the loader's line map, so that every refusal this raises is
+-- printed as `file:line` rather than as the line of an assembled source
+-- nobody wrote.  This is the ONE place a located refusal is turned back
+-- into text; below it, a location travels inside the message.
+checkModuleWithAt :: LineMap -> ModuleBase -> String -> Either String Module
+checkModuleWithAt lm base src = first (locFor lm src) (checkModuleRaw base src)
+
+checkModuleRaw :: ModuleBase -> String -> Either String Module
+checkModuleRaw base src = do
   let env0     = mbEnv base
       run0     = mbRun base
       shadow0  = mbShadow base
       aliases0 = mbAliases base
       datas0   = mbDatas base
-  (defSrcs, tyLines, declLines, importLines, tableLines, mainSrc) <- splitDefs src
+  (defSrcs0, tyLines, declLines, importLines, tableLines, mainLines)
+    <- splitDefsIx src
+  -- every generated def is the compiler's own text and reports the def,
+  -- not a line (0); a written one reports the line its body starts on
+  let defSrcs  = [ (n, b, d) | (n, b, d, _) <- defSrcs0 ]
+      defLine  = \n -> maybe 0 id (lookup n [ (nm, k) | (nm, _, _, k) <- defSrcs0 ])
+      mainSrc  = intercalate "\n" (map snd mainLines)
+      mainLine = \k -> case drop (k - 1) mainLines of
+                         ((orig, _) : _) | k >= 1 -> orig
+                         _                        -> 0
   -- the loader resolves imports into the source it hands over, so one
   -- reaching here means there was no file to resolve it against
   case importLines of
@@ -7056,8 +7344,8 @@ checkModuleWith base src = do
   -- model bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
-    foldM (addDef (tblTypes, tblGen) slotTable funcs thNames trans ownBases
-                  resNames (map inName insts) allDatas)
+    foldM (addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
+                  ownBases resNames (map inName insts) allDatas)
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
@@ -7086,12 +7374,12 @@ checkModuleWith base src = do
     if all isSpace mainSrc
       then pure Nothing
       else do
-        term0 <- parseProgramIn allDatas mainSrc
+        (term0, mainStart) <- parseProgramFrom mainLine allDatas mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
                                       thNames trans kwords ownBases Nothing
                                       False Nothing tblTypes)
                              term0
-        arr <- inferTermIn env' term1
+        arr <- inferTermInAt mainStart env' term1
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
@@ -7162,9 +7450,14 @@ checkModuleWith base src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
-    addDef (tblTypes, tblGen) slotTable funcs thNames trans bases resources
-           instNames datas
+    addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans bases
+           resources instNames datas
            (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) = do
+      -- where this body sits in the file: a run of consecutive lines
+      -- starting at `base`, or nothing at all for text the compiler
+      -- wrote (a model's slot, a transport word, a square)
+      let base    = defLine name
+          bodyAt k = if base == 0 then 0 else base + k - 1
       if name `elem` elimEmits && M.member name env
         then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
                  ++ "elimination EMITS it, so a def of that name would "
@@ -7175,7 +7468,8 @@ checkModuleWith base src = do
            || isJust (lookup name tmpls)
         then Left $ "Duplicate definition: " ++ name
         else Right ()
-      term0 <- either (Left . inDef) Right (parseProgramIn datas bodySrc)
+      (term0, bodyStart) <- either (Left . inDef) Right
+                              (parseProgramFrom bodyAt datas bodySrc)
       let tmplHdr = templateHeader thNames term0
       case tmplHdr of
         -- A TEMPLATE is recorded, not defined.  It has no body that runs
@@ -7258,7 +7552,8 @@ checkModuleWith base src = do
           if "recurse" `elem` mentions && not (M.member "recurse" env1)
             then Left (selfReferenceError name True)
             else Right ()
-          (arr, dsubs) <- either (Left . inDef) Right (inferTermSub env1 term)
+          (arr, dsubs) <- either (Left . inDef) Right
+                            (inferTermSubAt bodyStart env1 term)
           -- `over M` classifies BY SHAPE.  A def that builds one carrier
           -- out of nothing is a morphism of M and joins the K-word
           -- table; one that does not is a base word written in M's
@@ -7924,7 +8219,7 @@ sumTracks ctx v = case v of
 -- free (it re-infers), so it is run only where it can do something.
 hasOpenAbs :: Term -> Bool
 hasOpenAbs (OpenAbs {}) = True
-hasOpenAbs (Seq a b)    = hasOpenAbs a || hasOpenAbs b
+hasOpenAbs (Seq _ a b)  = hasOpenAbs a || hasOpenAbs b
 hasOpenAbs (Tensor ts)  = any hasOpenAbs ts
 hasOpenAbs (Quote t)    = hasOpenAbs t
 hasOpenAbs (Alts cs _)  = any hasOpenAbs cs
@@ -7934,7 +8229,7 @@ hasOpenAbs _            = False
 
 normTerm :: NCtx -> RunDefs -> [String] -> Term -> NState -> Either NErr NState
 normTerm ctx defs seen term s0 = case term of
-  Seq a b   -> normTerm ctx defs seen a s0 >>= normTerm ctx defs seen b
+  Seq _ a b -> normTerm ctx defs seen a s0 >>= normTerm ctx defs seen b
   Tensor ts -> goAtoms ts s0
   Use _ _   -> outside "an unelaborated `use`"
   Over _ _  -> outside "an unelaborated `over`"
@@ -8650,7 +8945,7 @@ evalTerm :: EvalM m => Env -> RunDefs -> VarEnv -> Term -> [Value]
          -> m ([Value], [String])
 evalTerm env defs vars term st =
   case term of
-    Seq t u -> do
+    Seq _ t u -> do
       (st1, l1) <- evalTerm env defs vars t st
       (st2, l2) <- evalTerm env defs vars u st1
       pure (st2, l1 ++ l2)
@@ -8762,7 +9057,7 @@ evalTerm env defs vars term st =
           (args, stk') <- takeWires knotPrimName 1 stk
           case args of
             [VFn scope cv body] -> do
-              let knotted = Seq (Prim selfKnotName) body
+              let knotted = Seq 0 (Prim selfKnotName) body
                   scope'  = M.insert selfKnotName
                               (DefEntry 0 False (Quote knotted) scope' cv)
                               scope
@@ -9283,18 +9578,37 @@ encodeBoolV b = VSum (if b then 0 else 1) []
 
 -- spine normal form of a term: stages of atoms
 spineOf :: Term -> [[Term]]
-spineOf (Seq a b)  = spineOf a ++ spineOf b
-spineOf (Tensor ts) = [ts]
-spineOf t          = [[t]]
+spineOf = map snd . spineLines
+
+-- ...and the same with each stage's LINE, which is what the `use`
+-- elaborator keeps so that a rewritten stage still says where it was
+-- written (2026-09-15).  A stage inherits the stamp of the `>>` that
+-- introduced it; 0 means the compiler wrote it.
+spineLines :: Term -> [(Int, [Term])]
+spineLines = go 0
+  where
+    go ln (Seq n a b) = go ln a ++ go (if n == 0 then ln else n) b
+    go ln (Tensor ts) = [(ln, ts)]
+    go ln t           = [(ln, [t])]
 
 chainTerm :: [[Term]] -> Term
-chainTerm ss =
-  case map stageT (filter (not . null) ss) of
-    [] -> Prim "pass"
-    ts -> foldr1 Seq ts
+chainTerm = chainLines . map ((,) 0)
+
+-- The inverse of `spineLines`: rebuild the chain, giving each `>>` the
+-- line of the stage it introduces — exactly the stamp the parser puts
+-- there, so an elaborated body is addressable the same way a written
+-- one is.
+chainLines :: [(Int, [Term])] -> Term
+chainLines ss =
+  case [ (l, stageT s) | (l, s) <- ss, not (null s) ] of
+    []  -> Prim "pass"
+    sts -> chain sts
   where
     stageT [t] = t
     stageT ts' = Tensor ts'
+    chain [(_, t)]                   = t
+    chain ((_, t) : r@((l, _) : _))  = Seq l t (chain r)
+    chain []                         = Prim "pass"
 
 -- render code back to source text (inverse-ish of the parser; spine
 -- normal form in, canonical text out)
@@ -9403,7 +9717,7 @@ valueToCode env (VFn _ cv t) = do
 valueToCode env (VSum tag vs) = do
   fields <- mapM (valueToCode env) vs
   let inj = Prim ("alt" ++ show (tag + 1))
-  pure $ if null fields then inj else Seq (Tensor fields) inj
+  pure $ if null fields then inj else Seq 0 (Tensor fields) inj
 
 -- substitute captured closure values (shadow-aware)
 groundTerm :: Env -> VarEnv -> Term -> Either String Term
@@ -9412,7 +9726,7 @@ groundTerm env cv = go cv
     go vars t@(Prim n)
       | Just v <- M.lookup n vars = valueToCode env v
       | otherwise                 = Right t
-    go vars (Seq a b)    = Seq <$> go vars a <*> go vars b
+    go vars (Seq n a b)  = Seq n <$> go vars a <*> go vars b
     go vars (Tensor ts)  = Tensor <$> mapM (go vars) ts
     go vars (Quote t)    = Quote <$> go vars t
     go vars (Alts cs r)  = Alts <$> mapM (go vars) cs <*> pure r
@@ -9446,7 +9760,7 @@ groundTerm env cv = go cv
 elimAbsTerm :: Env -> Term -> Either String Term
 elimAbsTerm env = go []
   where
-    go o (Seq a b)      = Seq <$> go o a <*> go o b
+    go o (Seq n a b)    = Seq n <$> go o a <*> go o b
     go o (Tensor ts)    = Tensor <$> mapM (go o) ts
     go o (Quote t)      = Quote <$> go o t
     go o (Alts cs r)    = Alts <$> mapM (go o) cs <*> pure r
@@ -9460,7 +9774,7 @@ elimAbsTerm env = go []
       -- interleaves a body wire with the names; then a permutation
       -- prefix sinks the names below the unnamed wires.
       inner <- compileAbs env o ps b'
-      pure (foldr Seq inner (paramsBelowStages slots))
+      pure (foldr (Seq 0) inner (paramsBelowStages slots))
     go _ t = Right t
 
 -- Adjacent-transposition stages that stably sink the NAMED slots below
@@ -9486,7 +9800,7 @@ freeNamesIn :: Term -> [String]
 freeNamesIn = go
   where
     go (Prim n)       = [n]
-    go (Seq a b)      = go a ++ go b
+    go (Seq _ a b)    = go a ++ go b
     go (Tensor ts)    = concatMap go ts
     go (Quote t)      = go t
     go (Alts cs _)    = concatMap go cs
@@ -9641,8 +9955,12 @@ openTailedS SEnd          = False
 
 -- Typecheck and run a whole module; main runs on the empty stack.
 runModule :: String -> IO (Either String ([Value], [String]))
-runModule src = runExceptT $ do
-  m <- liftEither (checkModule src)
+runModule = runModuleAt []
+
+-- ...with the loader's line map, so a refusal names the file it is in.
+runModuleAt :: LineMap -> String -> IO (Either String ([Value], [String]))
+runModuleAt lm src = runExceptT $ do
+  m <- liftEither (checkModuleAt lm src)
   -- AUDITED MODELS: every law runs before main and must answer true.
   -- A model that fails its theory's laws is not a model, and
   -- saying so at module start is the whole difference between a law

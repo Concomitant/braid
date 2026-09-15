@@ -6,6 +6,7 @@ import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Char (isSpace, isAlphaNum)
 import Data.List (isPrefixOf, intercalate)
+import Data.Bifunctor (first)
 import System.Environment (getArgs)
 import System.Exit (exitFailure)
 import System.IO
@@ -33,11 +34,11 @@ runFile path = do
     Left err -> do
       hPutStrLn stderr $ "error: " ++ err
       exitFailure
-    Right src -> runLoaded src
+    Right (src, lmap) -> runLoaded lmap src
 
-runLoaded :: String -> IO ()
-runLoaded src = do
-  res <- runModule src
+runLoaded :: LineMap -> String -> IO ()
+runLoaded lmap src = do
+  res <- runModuleAt lmap src
   case res of
     Left err -> do
       hPutStrLn stderr $ "error: " ++ err
@@ -295,7 +296,7 @@ elabIn st src = do
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
 typeOfWith render st src =
-  case elabIn st src >>= inferTermIn (rsEnv st) of
+  case first (locFor [] src) (elabIn st src >>= inferTermIn (rsEnv st)) of
     Left err  -> putStrLn $ "error: " ++ err
     Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
 
@@ -312,11 +313,12 @@ importLine st arg =
       loaded <- loadDecls path
       case loaded of
         Left err -> putStrLn ("error: " ++ err) >> pure st
-        Right src ->
-          case checkModuleWith (baseOf st) src
+        Right (src, lmap) ->
+          case checkModuleWithAt lmap (baseOf st) src
                  >>= \m -> (,) m <$> moduleSlotTable m of
-            Left err -> putStrLn ("error: in " ++ path ++ ": " ++ err)
-                          >> pure st
+            -- the refusal already names the file and line it came off,
+            -- so the session does not say `in <path>` a second time
+            Left err -> putStrLn ("error: " ++ err) >> pure st
             Right (m, slots) -> do
               let names = [ n | (n, _, _) <- modDefs m ]
                   shadowed = map aName (modAliases m) ++ map dName (modDatas m)

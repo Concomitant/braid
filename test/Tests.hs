@@ -14,8 +14,8 @@ runExample name = do
   loaded <- loadSource ("examples/" ++ name)
   case loaded of
     Left err  -> pure (Just ("examples/" ++ name ++ ": " ++ err))
-    Right src -> do
-      r <- runModule src
+    Right (src, lmap) -> do
+      r <- runModuleAt lmap src
       pure $ case r of
         Right _  -> Nothing
         Left err -> Just ("examples/" ++ name ++ ": " ++ err)
@@ -93,7 +93,7 @@ transformationVerdictTests =
 runTransformationVerdicts :: (String, String, String) -> IO (Maybe String)
 runTransformationVerdicts (file, name, expected) = do
   loaded <- loadSource ("examples/" ++ file)
-  pure $ case loaded >>= checkModule of
+  pure $ case loaded >>= \(src, lmap) -> checkModuleAt lmap src of
     Left err -> Just (file ++ " (" ++ name ++ "): " ++ err)
     Right m  ->
       case [ mi | mi <- modTransformations m, tiName mi == name ] of
@@ -134,6 +134,15 @@ importFailTests =
                       \test/imports/nope.braid and in the current directory)")
     -- a module checked without a file context cannot import
   , ("bad-syntax.braid", "Malformed import")
+    -- LOCATIONS (2026-09-15).  A refusal in an imported file names THAT
+    -- file and THAT line, not the assembled source the loader built.
+  , ("uses-broken.braid",
+     "test/imports/broken-dep.braid:4, in def snapped: \
+     \Cannot unify types: Str vs Int")
+    -- ...and a main-program refusal names the line of the STAGE that
+    -- failed, not the line the program starts on
+  , ("mainline.braid",
+     "test/imports/mainline.braid:4: Cannot unify types: Str vs Int")
   ]
 
 -- TABLES (stage 6c part 3).  `table Trades = "x.csv"` is a declaration
@@ -191,8 +200,8 @@ runTable (name, wantLog, wantStack) = do
   loaded <- loadSource ("test/tables/" ++ name)
   case loaded of
     Left err  -> pure (Just (name ++ ": " ++ err))
-    Right src -> do
-      r <- runModule src
+    Right (src, lmap) -> do
+      r <- runModuleAt lmap src
       pure $ case r of
         Left err -> Just (name ++ ": " ++ err)
         Right (stack, logs)
@@ -209,8 +218,8 @@ runTableFail (name, frag) = do
   loaded <- loadSource ("test/tables/" ++ name)
   err <- case loaded of
     Left e    -> pure (Just e)
-    Right src -> do
-      r <- runModule src
+    Right (src, lmap) -> do
+      r <- runModuleAt lmap src
       pure (either Just (const Nothing) r)
   pure $ case err of
     Nothing -> Just (name ++ ": expected failure containing " ++ show frag)
@@ -223,7 +232,7 @@ runTableImport (name, frag, want) = do
   loaded <- loadDecls ("test/tables/" ++ name)
   pure $ case loaded of
     Left err -> Just (name ++ ": " ++ err)
-    Right src
+    Right (src, _)
       | (frag `isInfixOf` src) == want -> Nothing
       | want      -> Just (name ++ ": expected " ++ show frag ++ " in the \
                                   \imported declarations")
@@ -235,8 +244,8 @@ runImport (name, wantLog, wantStack) = do
   loaded <- loadSource ("test/imports/" ++ name)
   case loaded of
     Left err  -> pure (Just (name ++ ": " ++ err))
-    Right src -> do
-      r <- runModule src
+    Right (src, lmap) -> do
+      r <- runModuleAt lmap src
       pure $ case r of
         Left err -> Just (name ++ ": " ++ err)
         Right (stack, logs)
@@ -253,8 +262,8 @@ runImportFail (name, frag) = do
   loaded <- loadSource ("test/imports/" ++ name)
   err <- case loaded of
     Left e    -> pure (Just e)
-    Right src -> do
-      r <- runModule src
+    Right (src, lmap) -> do
+      r <- runModuleAt lmap src
       pure (either Just (const Nothing) r)
   pure $ case err of
     Nothing -> Just (name ++ ": expected failure containing " ++ show frag)
@@ -2515,8 +2524,27 @@ optimizerTheory =
   \    law idempotent  = (sample >> ap >> ap) (sample >> ap) >> sameCodeC\n"
 
 -- (module source, substring expected in the error)
+-- A module that must fail, and whose message must NOT contain the
+-- fragment (2026-09-15).  The negatives of the located hints: a
+-- heuristic that fires where it has no business is worse than no
+-- heuristic, so each one is pinned from both sides.
+-- (source, fragment that must be absent)
+moduleNoHintTests :: [(String, String)]
+moduleNoHintTests =
+    -- a one-line source has one line, and naming it says nothing
+  [ ("\"x\" 1 ; +", "line ")
+  ]
+
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- LOCATIONS (2026-09-15).  Checked without a file, a refusal still
+    -- names the line of the text it was handed: the stage that failed
+    -- inside a def body, and the stage that failed in a main program.
+  [ ("def f =\n    1 2 ; +\n    \"x\" ; +\n1 ; print",
+     "line 3, in def f: Cannot unify types: Str vs Int")
+  , ("1 ; print\n2 ; print\n\"x\" 1 ; +",
+     "line 3: Cannot unify types: Str vs Int")
+  ] ++
     -- NAMED FIELDS refuse five things by name (2026-09-14).  A field
     -- name is a WORD, so it collides like one; fields name the
     -- positions of ONE constructor; and a named position is one wire.
@@ -3165,6 +3193,18 @@ runEval (src, wantLog, wantStack) = do
                ++ ", got log " ++ show logs
                ++ " stack " ++ show (unwords (map show stack))
 
+runModuleNoHint :: (String, String) -> IO (Maybe String)
+runModuleNoHint (src, fragment) = do
+  r <- runModule src
+  pure $ case r of
+    Right _ ->
+      Just $ show src ++ ": expected a failure, but it ran"
+    Left err
+      | fragment `isInfixOf` err ->
+          Just $ show src ++ ": message must NOT contain " ++ show fragment
+               ++ ", got: " ++ err
+      | otherwise -> Nothing
+
 runModuleFail :: (String, String) -> IO (Maybe String)
 runModuleFail (src, fragment) = do
   r <- runModule src
@@ -3272,6 +3312,7 @@ main :: IO ()
 main = do
   evalFs <- mapM runEval evalTests
   mfailFs <- mapM runModuleFail moduleFailTests
+  nohintFs <- mapM runModuleNoHint moduleNoHintTests
   exNames <- sort . filter (".braid" `isSuffixOf`) <$> listDirectory "examples"
   exFs <- mapM runExample exNames
   impFs  <- mapM runImport importTests
@@ -3286,6 +3327,7 @@ main = do
         ++ map runModuleType moduleTypeTests
         ++ evalFs
         ++ mfailFs
+        ++ nohintFs
         ++ map runUnif unifTests
         ++ map runPureE pureEvalTests
         ++ exFs
@@ -3298,6 +3340,7 @@ main = do
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
+            + length moduleNoHintTests
             + length unifTests + length pureEvalTests + length exNames
             + length importTests + length importFailTests
             + length tableTests + length tableFailTests
