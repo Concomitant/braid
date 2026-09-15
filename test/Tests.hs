@@ -2,7 +2,7 @@
 module Main (main) where
 
 import MiniConcatTypechecker
-import Data.List (isInfixOf, isSuffixOf, sort)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
 import System.Exit (exitFailure, exitSuccess)
 import System.Directory (listDirectory)
 
@@ -585,9 +585,93 @@ failTests =
   ]
 
 -- (module source, expected alpha-normalized type of main)
+-- THE FAMILY every stage-6f test is written against: one theory, one
+-- ordinary model, and `Fwd` — a model PARAMETERIZED by a model, whose
+-- slot bodies are templates over the PARAMETER's theory.
+famSrc :: String
+famSrc =
+  "theory Ring(a) =\n\
+\    add    : a a \8658 a\n\
+\    mul    : a a \8658 a\n\
+\    lit    : Float \8658 a\n\
+\    sample : \8226 \8658 a\n\
+\    observe : a \8658 Float\n\
+\    law addComm = (sample (2.0 ; lit) ; add ; observe) ((2.0 ; lit) sample ; add ; observe) ; eq? ; verdict\n\
+\model Floats : Ring(Float) =\n\
+\    add = fadd\n\
+\    mul = fmul\n\
+\    lit = id\n\
+\    sample = 1.5\n\
+\    observe = id\n\
+\data Dual(a) = a a\n\
+\model Fwd(R : Ring(a)) : Ring(Dual(a)) =\n\
+\    add = Dual(x, dx) Dual(y, dy) -> (x y ; add) (dx dy ; add) ; Dual\n\
+\    mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual\n\
+\    lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)\n\
+\    sample = sample (1.0 ; lit) ; Dual\n\
+\    observe = Dual(v, t) -> v ; observe\n\
+\def cube = over Ring ; (x -> ((x x ; mul) x ; mul) (1.0 ; lit) ; add)\n\
+\def tangent = Dual(v, t) -> t\n"
+
+-- ...and the same family with its `add` broken on the VALUE side.  A
+-- family cannot be audited once: that would need equality modulo the
+-- parameter theory's laws.  Its laws run AT EACH INSTANTIATION, on the
+-- member's own evidence, so this is refused where it is first APPLIED
+-- and the refusal names the member — the family and the argument at
+-- once, because the applied form is the name.
+badFamSrc :: String
+badFamSrc = go famSrc
+  where
+    go str@(c : cs)
+      | pat `isPrefixOf` str = "(x x ; add)" ++ drop (length pat) str
+      | otherwise            = c : go cs
+    go []                    = []
+    pat = "(x y ; add)"
+
+-- What `:defs` and `:import` read off a module that declares a family:
+-- the family itself (not a def, not a model — it is what `use F(M)`
+-- applies), and every MEMBER the module's `use` headers asked for.
+-- (source, the `:defs` lines, the model names in order)
+familyReportTests :: [(String, [String], [String])]
+familyReportTests =
+  [ ( famSrc ++ "def d = use Fwd(Floats) ; cube\n\
+      \def dd = use Fwd(Fwd(Floats)) ; cube\n\
+      \\"ok\" ; print"
+    , [ "model Fwd(R : Ring) : Ring   (a FAMILY \8212 apply it: \
+        \`use Fwd(<model of Ring>)`)" ]
+    , [ "Floats", "Fwd(Floats)", "Fwd(Fwd(Floats))" ] )
+  ]
+
+runFamilyReport :: (String, [String], [String]) -> Maybe String
+runFamilyReport (src, wantFams, wantModels) =
+  case checkModule src of
+    Left err -> Just ("family report: " ++ err)
+    Right m
+      | gotFams == wantFams && gotModels == wantModels -> Nothing
+      | otherwise -> Just $ "family report: expected " ++ show wantFams
+                         ++ " / " ++ show wantModels ++ ", got "
+                         ++ show gotFams ++ " / " ++ show gotModels
+      where
+        gotFams   = map renderFamily (modFamilies m)
+        gotModels = map inName (modInstances m)
+
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
+    -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `use Fwd(Floats)`
+    -- APPLIES the family and mints a member; the receipt on the arrow is
+    -- the APPLICATION, one label, because one model read the template.
+  , (famSrc ++ "def d = use Fwd(Floats) ; cube\nd",
+     "Dual(Float) =Fwd(Floats)> Dual(Float)")
+    -- ...and the family applies to a member of ITSELF, which is what
+    -- "a functor Mod(T) → Mod(T)" buys: the carrier nests, the slot
+    -- bodies are unchanged, and the receipt says which member read it
+  , (famSrc ++ "def dd = use Fwd(Fwd(Floats)) ; cube\ndd",
+     "Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float))")
+    -- the head is read by SUBSTITUTION and nothing else: `Ring(Dual(a))`
+    -- at `a := Dual(Float)` is the carrier the slots are declared at
+  , (famSrc ++ "use Fwd(Fwd(Floats)) ; sample",
+     "• =Fwd(Fwd(Floats))> Dual(Dual(Float))")
     -- THE CLOSED STRUCTURE (stage 5a¾).  `ev` is the exponential's
     -- counit — the prim formerly spelled `apply` — and `curry` is the
     -- other half, a prelude def whose own body is the one
@@ -1376,6 +1460,21 @@ sealedMod = unlines
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- A FAMILY'S SLOT BODY NAMES THE PARAMETER'S SLOT (2026-09-15).
+    -- `lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)` — every theory name in
+    -- a family's body is R's, the slot being defined included, so `lit`
+    -- inside `lit` is Floats' `lit` and the body is unambiguous with no
+    -- self-reference rule.  The zero tangent is `0.0 ; lit` and not a
+    -- `zero` slot: the theory already names its zero, and `addUnit`
+    -- already pins it.
+  [ (famSrc ++ "def l = use Fwd(Floats) ; lit\n3.0 ; l ; unDual ; print ... ; print",
+     ["3.0", "0.0"], "")
+    -- SECOND DERIVATIVES, by applying the family to a member of itself.
+    -- cube(x) = x\179 + 1, so cube''(2) = 6*2 = 12, and the file that
+    -- wrote `cube` knows nothing about any of it.
+  , (famSrc ++ "def dd = use Fwd(Fwd(Floats)) ; cube\n\
+      \((2.0 1.0 ; Dual) (1.0 0.0 ; Dual) ; Dual) ; dd ; tangent ; tangent ; print",
+     ["12.0"], "")
     -- A CONSTRUCTOR PARAMETER OF ARITY ONE (2026-09-15).  A theory
     -- parameter `f(_)` is what an exit whose RESULT varies by model
     -- wants when the result is itself parameterized — `report :
@@ -1384,7 +1483,7 @@ evalTests =
     -- assumption that one is always a hom-object, so a transformation
     -- over such a theory was refused with `Wrap(a0, a1) ⇒ Twice(a0,
     -- a1)`.  The arity is written in the declaration; it is read now.
-  [ ("data Wrap(a) = a\ndata Twice(a) = a a\n\
+  , ("data Wrap(a) = a\ndata Twice(a) = a a\n\
      \theory H(f(_)) =\n\
      \    sample  : \8226 \8658 f(Int)\n\
      \    bump    : f(Int) \8658 f(Int)\n\
@@ -2604,7 +2703,26 @@ moduleFailTests =
     -- LOCATIONS (2026-09-15).  Checked without a file, a refusal still
     -- names the line of the text it was handed: the stage that failed
     -- inside a def body, and the stage that failed in a main program.
-  [ ("def f =\n    1 2 ; +\n    \"x\" ; +\n1 ; print",
+    -- APPLYING A FAMILY (2026-09-15).  Four ways to get it wrong, each
+    -- refused with the spelling that is right: a family is not a model,
+    -- a model is not a family, the argument must be a model in scope,
+    -- and it must model the theory the parameter declares.
+  [ (famSrc ++ "def d = use Fwd ; cube\nd ; drop",
+     "`use Fwd`: Fwd is a model PARAMETERIZED by a model")
+  , (famSrc ++ "def d = use Floats(Fwd) ; cube\nd ; drop",
+     "Floats is not a parameterized model at this point")
+  , (famSrc ++ "def d = use Fwd(Nope) ; cube\nd ; drop",
+     "`use Fwd(Nope)`: Nope is not a model declared at this point")
+  , (famSrc ++ "theory Mon(a) =\n    op : a a \8658 a\n\
+      \model Ints : Mon(Int) =\n    op = +\n\
+      \def d = use Fwd(Ints) ; cube\nd ; drop",
+     "the parameter 'R' of model Fwd takes a model of Ring, and Ints models Mon")
+    -- ...and a FALSE family, refused where it is first applied
+  , (badFamSrc ++ "def d = use Fwd(Floats) ; cube\nd ; drop",
+     "law 'addComm' fails for model Fwd(Floats)")
+  , (badFamSrc ++ "def d = use Fwd(Floats) ; cube\nd ; drop",
+     "laws are checked AT EACH INSTANTIATION")
+  , ("def f =\n    1 2 ; +\n    \"x\" ; +\n1 ; print",
      "line 3, in def f: Cannot unify types: Str vs Int")
   , ("1 ; print\n2 ; print\n\"x\" 1 ; +",
      "line 3: Cannot unify types: Str vs Int")
@@ -3445,6 +3563,7 @@ main = do
   tbFFs  <- mapM runTableFail tableFailTests
   tbIFs  <- mapM runTableImport tableImportTests
   mvFs   <- mapM runTransformationVerdicts transformationVerdictTests
+  let famFs = map runFamilyReport familyReportTests
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
         ++ map runFail failTests
@@ -3461,6 +3580,7 @@ main = do
         ++ tbFFs
         ++ tbIFs
         ++ mvFs
+        ++ famFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
@@ -3470,6 +3590,7 @@ main = do
             + length tableTests + length tableFailTests
             + length tableImportTests
             + length transformationVerdictTests
+            + length familyReportTests
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

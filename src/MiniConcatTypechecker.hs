@@ -3287,9 +3287,20 @@ parseInstance aliases dataSigs theories header body = do
 -- `Smooth(Dual(a), a)` is read off.  No type-level functions.
 familyInstances :: [Instance] -> [Instance] -> [ModelApp]
                 -> Either String [Instance]
-familyInstances fams concrete apps = reverse . snd <$> foldM one (concrete, []) wanted
+familyInstances fams concrete apps = do
+    -- heads first, outer and inner alike: `use Floats(Fwd)` is about
+    -- `Floats`, and reporting the `Fwd` inside it would name the wrong
+    -- half of the mistake
+    mapM_ checkHead wanted
+    reverse . snd <$> foldM one (concrete, []) wanted
   where
     wanted = nub (concatMap appClosure apps)
+    checkHead (ModelApp f as@(_ : _)) | f `notElem` famNames =
+      Left $ "`use " ++ renderModelApp (ModelApp f as) ++ "`: " ++ f
+          ++ " is not a parameterized model at this point — a model is "
+          ++ "applied to another model only when its own head declares a "
+          ++ "parameter (`model " ++ f ++ "(R : <Theory>) : …`)"
+    checkHead _ = Right ()
     famNames = map inName fams
     one (known, made) app
       | any ((== renderModelApp app) . inName) known = Right (known, made)
@@ -3357,6 +3368,12 @@ modelApps fams src = case tokenize src of
   Left _     -> []
   Right toks -> go toks
   where
+    -- On a `use` HEADER every name is read, whatever heads it, so that
+    -- `use Floats(Fwd)` is refused as "Floats is not parameterized"
+    -- rather than as an unknown scope name.
+    go (TokIdent "use" : r) = header r
+    -- Anywhere else only a declared family's name can head an
+    -- application: `Dual(x, dx) -> …` is a destructuring binder.
     go ts@(TokIdent f : TokLParen : _)
       | f `elem` fams, Just (a, r) <- appTok ts = a : go r
     -- a family's name ALONE is collected too, so that `use Fwd` is
@@ -3364,9 +3381,18 @@ modelApps fams src = case tokenize src of
     go (TokIdent f : r) | f `elem` fams = ModelApp f [] : go r
     go (_ : r) = go r
     go []      = []
-    appTok (TokIdent n : TokLParen : r)
-      | n `elem` fams = do (as, r') <- appList r
-                           pure (ModelApp n as, r')
+
+    header ts@(TokIdent _ : TokLParen : _)
+      | Just (a, r) <- appTok ts = a : header r
+    header (TokIdent n : r)
+      | n `elem` fams = ModelApp n [] : header r
+      | otherwise     = header r
+    header ts = go ts
+
+    -- inside a name, parentheses are always application
+    appTok (TokIdent n : TokLParen : r) = do
+      (as, r') <- appList r
+      pure (ModelApp n as, r')
     appTok (TokIdent n : r) = Just (ModelApp n [], r)
     appTok _                = Nothing
     appList ts = do
@@ -5828,6 +5854,18 @@ data TransformationInfo = TransformationInfo
   , tiSquares :: [(String, TransformationVerdict)]
   , tiNoExit  :: [String]   -- slots whose carriers `eq?` weighed directly
   } deriving (Eq, Show)
+
+-- A FAMILY, as `:defs` prints it.  It is not a def and not a model: it
+-- is what `use F(M)` applies, so the line says how to apply it — a
+-- session that has `:import`ed a file gets the spelling with the name.
+renderFamily :: Instance -> String
+renderFamily i =
+  "model " ++ inName i ++ "("
+    ++ intercalate ", " [ mpName p ++ " : " ++ mpTheory p | p <- inParams i ]
+    ++ ") : " ++ inTheory i ++ "   (a FAMILY \8212 apply it: `use "
+    ++ inName i ++ "("
+    ++ intercalate ", " [ "<model of " ++ mpTheory p ++ ">" | p <- inParams i ]
+    ++ ")`)"
 
 -- one verdict, as `:transformations` and `:doc` print it.  A square with no
 -- inputs is run at no sample points and simply reads `sampled`.
@@ -10485,6 +10523,15 @@ runLaw m (n, t) = do
       let (inst, lw) = maybe ("?", n) id (lawParts n)
       in throwError $ "law '" ++ lw ++ "' fails for model " ++ inst
                    ++ ": a model must be an audited model of its theory"
+                   ++ (if '(' `elem` inst
+                         then "  (a model PARAMETERIZED by a model cannot be \
+                              \audited once for the family \8212 that needs \
+                              \equality modulo the parameter theory's laws, \
+                              \which the checker has not got \8212 so its \
+                              \laws are checked AT EACH INSTANTIATION, on \
+                              \that member's own evidence, and this is the \
+                              \first one that named it)"
+                         else "")
 
 -- Was this square left to the samples?  A transformation the module does not
 -- know about (there is none) is sampled, which is what the check did

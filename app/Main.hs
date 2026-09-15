@@ -70,6 +70,8 @@ data ReplState = ReplState
   , rsTrans    :: [Transport] -- carrier models `:import` brought in
   , rsKWords   :: [(String, String)]   -- def -> the category it is a word of
   , rsBases    :: [BaseInstance]        -- models of `Base` it imported
+  , rsFamilies :: [Instance]  -- parameterized models `:import` brought in
+  , rsModels   :: [Instance]  -- ...and the models, members included
   , rsTransformations :: [TransformationInfo]
                          -- transformations it imported, with their verdicts
     -- a session cannot DECLARE a theory, a model or a functor, but
@@ -83,7 +85,8 @@ initialState =
             (modAliases preludeModule)
             (modDatas preludeModule)
             (modDocs preludeModule)
-            [] SEnd [] [] [] [] (modTheories preludeModule) [] [] [] [] []
+            [] SEnd [] [] [] [] (modTheories preludeModule) [] [] [] []
+            [] [] []
 
 repl :: IO ()
 repl = do
@@ -125,6 +128,9 @@ loop st = do
             mapM_ (\(n, (th, _)) ->
                      putStrLn ("def " ++ n ++ " : template over " ++ th))
                   (reverse (rsTmpls st))
+            -- a FAMILY is not a def and not a model: it is what `use
+            -- F(M)` applies, so `:defs` says how to apply it
+            mapM_ (putStrLn . renderFamily) (reverse (rsFamilies st))
           loop st
         ":transformations" -> do
           liftIO $ case rsTransformations st of
@@ -170,7 +176,11 @@ baseOf st =
     { mbSlots = rsSlots st, mbFuncs = rsFuncs st
     , mbTheories = rsTheories st, mbTemplates = rsTmpls st
     , mbTrans = rsTrans st, mbKWords = rsKWords st
-    , mbBases = rsBases st }
+    , mbBases = rsBases st
+    -- a PARAMETERIZED model an `:import` brought in, and the members
+    -- already minted out of it: a second import may apply the one and
+    -- must not mint the others twice
+    , mbFamilies = rsFamilies st, mbGenerated = rsModels st }
 
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
@@ -342,6 +352,8 @@ importLine st arg =
                     , rsTrans    = modTrans m
                     , rsKWords   = modKWords m
                     , rsBases    = modBases m
+                    , rsFamilies = modFamilies m
+                    , rsModels   = modInstances m
                     , rsTransformations   = modTransformations m
                                      ++ [ mi | mi <- rsTransformations st
                                              , tiName mi `notElem`
@@ -353,6 +365,8 @@ importLine st arg =
                             , count (length (modDatas m) + length (modAliases m)) "type"
                             , models (length (modInstances m))
                                      (length (modTrans m))
+                            , count (length (modFamilies m))
+                                    "parameterized model" 
                             , count (length (modFunctors m)) "functor"
                             , count (length (modTemplates m)
                                        - length (rsTmpls st)) "template"
@@ -398,7 +412,10 @@ handleLine st line
                         ++ "   (:clear or a bare `use` to leave)")
               pure st { rsUse = names }
   where
-    plainName n = not (null n) && all (\c -> isAlphaNum c || c == '_') n
+    -- ...and an APPLIED model is a name too: `use Fwd(Floats)` names
+    -- the member `Fwd(Floats)`, which an imported file already minted
+    plainName n = not (null n)
+               && all (\c -> isAlphaNum c || c `elem` ("_(), " :: String)) n
     firstUnknown ns =
       case [ n | n <- ns
                , not (any (\d -> dName d == n && dResource d) (rsDatas st))

@@ -3797,3 +3797,181 @@ strongest case yet for a `left` slot in the Doctrine.
   the same day, tested, and worth noting as a class: a message that
   names a **missing** thing must say missing-*for-what*, or it sends the
   reader to add what is already there.
+
+## Amendment (2026-09-15): a model parameterized by a model
+
+`examples/autodiff.braid` ended, from the day it was written, with a
+paragraph saying what it could not do: differentiate twice. Nesting
+forward mode inside itself needs `Fwd` to be a model of `Smooth(Dual(a))`
+for **any** model of `Smooth(a)` — a model parameterized by a model —
+and a `model` head named a declared type, not a model variable. It does
+now:
+
+```braid
+data Dual(a) = a a
+
+model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a) =
+    add = Dual(x, dx) Dual(y, dy) -> (x y ; add) (dx dy ; add) ; Dual
+    mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual
+    lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)
+    …
+
+def polyDD = use Fwd(Fwd(Floats)) ; poly
+#   polyDD : Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float))
+```
+
+**What it is.** Not one model: a **family**, a functor Mod(Smooth) →
+Mod(Smooth). It is ML's higher-order functor, Kiselyov's interpreter
+transformer, and the ring construction R ↦ R[ε]/ε², and the three are
+the same thing said in three vocabularies. A model of a theory is a
+functor out of the free category on the theory's generators; a family is
+a map between such functors' *sources of definition*, one level up.
+
+**The spelling is an application, and it is the name.** `use
+Fwd(Floats)` applies the family and mints a model called `Fwd(Floats)`.
+The alternative considered was a scope stack — `use Floats Fwd`, "a
+parameterized model takes the nearest enclosing model of its parameter
+theory" — and it was rejected on one decisive ground and two supporting
+ones. Decisive: a `transformation` names a model, and `transformation
+Value : Fwd(Floats) ⇒ Floats` has to be *writable*; only the applied
+form is a name. Supporting: the receipt has to print the model that read
+the template, and `=Fwd(Floats)>` is exactly the text you would write to
+reproduce it; and iteration is unwritable in the stack form, where `use
+Floats Fwd Fwd` would have to mean association the reader cannot see.
+One spelling per thing, and this is the one.
+
+**The receipt is the whole application, as one label.** `use
+Fwd(Floats)` mints `Fwd(Floats)`, not `Fwd` and `Floats`. A receipt says
+*which model read this code*; one model did; `Floats` never saw the
+template. Grades are sets of labels and this contributes a singleton,
+which is also why nesting reads `=Fwd(Fwd(Floats))>` and not two marks.
+
+**The carrier is substitution, never a type-level function.** The
+parameter clause binds a name to each of the argument's own theory
+arguments — `R : Smooth(a, g)` — and the head writes its own in terms of
+them. `Floats : Smooth(Float, Float)` gives `a := Float`, so the head
+`Smooth(Dual(a), a)` reads `Smooth(Dual(Float), Float)`; `Fwd(Floats) :
+Smooth(Dual(Float), Float)` gives `a := Dual(Float)` and the head reads
+`Smooth(Dual(Dual(Float)), Dual(Float))`. Nothing is applied at the type
+level; a name is replaced. `Dual(a)` is an ordinary parameterized `data`
+declaration, and that is the whole type story.
+
+**A family's slot bodies are templates over the parameter's theory.**
+Inside a body every theory name is R's — the name of the slot being
+defined included, because the slot is not in scope in its own body. That
+is what makes `add = … add …` unambiguous with no self-reference rule to
+learn, and it is why the bodies read as the arithmetic they are.
+Mechanically it is the renaming that already existed: an ordinary
+model's slot defs are wrapped in `use <itself>`, and a family member's
+are wrapped in `use <its argument>`. Its **laws** are still wrapped in
+`use <itself>`, because they are the theory's and are about this member.
+
+**Laws are checked at each instantiation.** Checking them for the family
+would need equality modulo the parameter theory's laws — "R's `add` is
+associative, therefore `Fwd(R)`'s is" — and there is no such judgement
+here. So every member runs the theory's laws on its own evidence, and a
+false family is refused at its **first** instantiation, naming the
+member, which names the family and the argument at once. The refusal
+says why it is happening there.
+
+### The two problems the example posed, and what they decided
+
+**The zero tangent.** `Fwd`'s `lit` needs "the zero of R's carrier". The
+two candidates were a new `zero : • ⇒ a` slot on `Smooth` (filled
+trivially by `Floats` and `Rev`) and `0.0 ; lit`. `0.0 ; lit` wins, and
+not on economy: the theory **already names its zero** and `law addUnit`
+already pins it — `(sample (0.0 ; lit) ; add ; observe)` is `sample`. A
+`zero` slot would be a second spelling of a thing the theory has, and at
+`Fwd(Fwd(Floats))` the two spellings would have to be proved to agree
+anyway. As written, `0.0 ; lit` at `Fwd(Floats)` *is* `Dual(0.0, 0.0)`,
+which is the zero of the first-order duals, by construction.
+
+**The `g` parameter.** `Fwd(R)`'s gradient type is R's **carrier**, not
+R's `g`: the head is `Smooth(Dual(a), a)` and the `gradient` slot is the
+projection `Dual(v, t) -> t`. At `Fwd(Floats)` that is `Float`, which is
+what the hand-written model had, so nothing changed. At
+`Fwd(Fwd(Floats))` it is `Dual(Float)` — a first derivative carrying its
+own tangent, which is the second derivative. Nothing had to be asked of
+R, which is the honest answer and a better one than expected: a tangent
+lives in the carrier, so the exit for it is a projection and never a
+computation.
+
+**A third problem the example found on its own: `cos`.** `Fwd`'s `sin`
+needs R's cosine. While `Fwd` was hand-written over `Float` it reached
+the base word `fcos`; a family has no base words — the only vocabulary
+it has is the theory's. So `Smooth` grew `cos : a ⇒ a`. The general
+statement is worth keeping: **a theory closed under `Fwd` must be closed
+under differentiation**, in the sense that every generator's derivative
+is writable in the theory's own words. `exp` ↦ `exp`, `sin` ↦ `cos`,
+`cos` ↦ `sin`·`neg`, and the ring operations are their own. That is a
+real constraint on theories a family can be built over, and it was
+invisible until the family was.
+
+### The head, and the one construct it is a step toward
+
+A model head is now a **sequence of clauses**, each after the name
+optional:
+
+```text
+model NAME [ ( R : Theory(binders) ) ] : THEORY [ ( args ) ]
+```
+
+The record carries a third field, `inObjMap`, empty today: the **object
+map** clause to come — `model FwdAD : Base(Float ↦ Dual)`, a functor
+given on generators with a substitution on types. It rides beside the
+theory's arguments rather than replacing them, so adding it moves
+nothing that exists.
+
+The general form the clauses collapse into: **a model is a presentation
+interpreted in a category, given by an object map and an image for each
+generator.** Today's three kinds are the three ways that reads:
+
+| kind | object map | generator images |
+|---|---|---|
+| `model Opt : Base = dupInt = dup, …` | the **identity** | a table, partial — every generator it does not name maps to itself |
+| a Doctrine model (`model Circuits : Arrow(Circuit)`) | the identity on base types, with `embed` total (every base program has an image) | the theory's slots, and `;` goes to `compose` |
+| a parameterized model (`model Fwd(R : Smooth(a, g))`) | a type-level **substitution**, `a ↦ Dual(a)` | written over the **parameter's** words, not the base's |
+
+A written object map is the first row's map made explicit, and when it
+arrives all three are one declaration read three ways.
+
+### What did not fall out
+
+**`over Prob` is still not instantiable by `use Enum`.** The pragmatics
+note above stands, and it is not this mechanism's to fix. Checked
+directly: a template over a Doctrine theory *does* expand under `use M`
+— its slot names resolve to `M@…` correctly — and is then **transported
+a second time**, because `use M` on a Doctrine model both instantiates
+the template and embeds every base stage. The expansion's own `embed`
+and `compose` get embedded, and the refusal is a stack failure about
+`Plain(•, b)`. Separating "instantiate" from "transport" is a second
+knob on one header word, and the one-spelling rule says it needs a
+better answer than a flag. It is still the largest single cost in
+`prob.braid`.
+
+**Kleisli, the other motivating example, does not type** — and the two
+refusals name the same missing thing twice: a type constructor that can
+be applied to a **variable** and applied **partially**.
+
+- `data Kl(m(_), a, b) = Fn⟨a ⇒ m(b)⟩` → *Malformed type parameter
+  list*. A `data` declaration's parameters are wires, stacks, widths and
+  rows; a **constructor** parameter is a theory's alone. For the body to
+  hold `m(b)` a type would need a *variable in head position*, and `Ty`
+  has `TData String [SType]` — a name. That is type-level application,
+  which is exactly what the substitution discipline above exists to
+  avoid.
+- `model Kleisli(M : Monad(m)) : Arrow(Kl(m))` → *theory `Arrow`
+  declares 'k' as a type constructor of arity 2, so its argument must be
+  a bare constructor name, not `Kl(m)`*. An `InstArg` at a constructor
+  parameter is a name; there is no partial application to write.
+
+A family whose carrier is `C(a)` for a **wire** parameter — the
+dual-number construction — needs neither, which is why it is the one
+that shipped. `Kleisli` is a decision about whether Braid gets a type
+level with application in it, and this amendment deliberately does not
+make it.
+
+**One parameter only.** Two would give one slot name two meanings inside
+a body, since a body is written in the parameter's vocabulary. The head
+refuses a second and says that; qualified slot names (`R@add`) are the
+obvious answer and are not worth their cost until something wants them.

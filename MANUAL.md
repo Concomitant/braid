@@ -256,9 +256,12 @@ The built-in labels, then:
 | `F` (any functor) | `use F` on a `functor` (§12) | none | was rewritten by `F` |
 | `R` (any resource) | `use R` on a `resource` (§8) | a wire of type `R` | threads the `R` wire |
 | `M` (any model with a carrier) | `use M` on a `model` whose theory has a hom-object (§8) | the hom-object `K(a, b)` | was built in the category `M` presents |
+| `F(M)` (a family applied) | `use F(M)` on a `model F(R : T(a))` (§8) | the member's own carrier | was read by the model `F(M)` |
 
-One mechanism, five readings; union along composition for all of them,
-and every difference is in the carrier column.
+One mechanism, six readings; union along composition for all of them,
+and every difference is in the carrier column. An applied family mints
+**one** label, the whole application: one model read the template, and
+its argument never saw it.
 
 ## 4. The remainder discipline
 
@@ -1202,7 +1205,9 @@ indented lines, the same shape as `def name =` with an indented body. A
 theory's entries are `slot : Σ ⇒ Θ` and `law name = <program>`; an
 model's are `slot = <program>`. Theory parameters are kinded: a bare
 name is one wire, `...` a stack, and `k(_, _)` a type **constructor**
-(below).
+(below). A **model** head may carry a parameter of its own — `model
+Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a)` — and is then a *family*,
+applied by `use Fwd(Floats)` (below).
 
 ```braid
 theory Monoid(a) =
@@ -1346,6 +1351,9 @@ against five runnable laws.
 | completeness, and no extras | `model Partial: no binding for 'op' (declared by theory Monoid)` · `model Extra: 'huh' is not an operation of theory Monoid` |
 | a law is a program `• ⇒ Bool` | `law 'silly' of I must be a program with type '• ⇒ Bool', but is • ⇒ Int` |
 
+…and a **family** is audited once per member, at the member's own
+evidence (below).
+
 **Laws run.** They are ordinary Braid programs, and they execute **at
 module start, before main**. A failing one rejects the module:
 
@@ -1357,6 +1365,104 @@ audited model of its theory
 `theory` and `model` are file declarations, not REPL lines (the
 REPL says so). See `examples/theories.braid`, §14 for the limits, and
 `design-effects.md` for the position.
+
+**A model parameterized by a model** *(2026-09-15)*. A model head takes
+an optional **parameter list**, and a model that has one is not a model
+at all — it is a **family**:
+
+```braid
+data Dual(a) = a a
+
+model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a) =
+    add = Dual(x, dx) Dual(y, dy) -> (x y ; add) (dx dy ; add) ; Dual
+    lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)
+    …
+```
+
+Read it as a **functor Mod(Smooth) → Mod(Smooth)**: a map from models of
+a theory to models of a theory, which is what an ML higher-order functor
+is, what Kiselyov calls an interpreter transformer, and what the ring
+construction R ↦ R[ε]/ε² is. `examples/autodiff.braid` is the case
+worth having: `Fwd` is forward-mode differentiation, so applying it
+twice differentiates twice.
+
+**`use Fwd(Floats)` applies it**, and that is the one spelling. The
+application is also the **name** of the model it mints — an ordinary
+model, with ordinary slot defs, whose laws run at module start like any
+other's. That is why the spelling is an application and not a scope
+stack (`use Floats Fwd`): a `transformation` names a model, a receipt
+prints one, and only the applied form is a name that can be written in
+both places. `Fwd(Floats)` is minted once per module however many
+headers ask for it, and
+
+```braid
+def polyDD = use Fwd(Fwd(Floats)) ; poly
+#   polyDD : Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float))
+```
+
+iterates: a family may be applied to a member of itself.
+
+**The receipt is the whole application, as one label.** `use Fwd(Floats)`
+mints `Fwd(Floats)` and not `Fwd` and `Floats`: a receipt says *which
+model read the template*, one model did, and `Floats` never saw it. A
+grade is a set of labels, and this contributes one.
+
+**The carrier is substitution, never a type-level function.** The
+parameter clause `R : Smooth(a, g)` **binds a name to each of the
+argument model's own theory arguments**, and the head writes its own in
+terms of them. At `Fwd(Floats)`, `Floats : Smooth(Float, Float)` gives
+`a := Float` and the head reads `Smooth(Dual(Float), Float)`; at
+`Fwd(Fwd(Floats))` it gives `a := Dual(Float)` and reads
+`Smooth(Dual(Dual(Float)), Dual(Float))`. Nothing is applied at the type
+level; a name is replaced.
+
+**A family's slot bodies are templates over the PARAMETER's theory.**
+Inside a body every theory name is R's — including the name of the slot
+being defined, which is *not* in scope in its own body. So `add = …
+add …` is unambiguous with no rule to learn, and `lit = (c -> (c ; lit)
+(0.0 ; lit) ; Dual)` reads exactly as it looks: R's `lit` twice. (The
+zero tangent is `0.0 ; lit` rather than a new `zero` slot because the
+theory already names its zero and `law addUnit` already pins it — one
+spelling per thing.)
+
+**Laws are checked at each instantiation, not once for the family.**
+Checking them generically would need equality modulo the parameter
+theory's laws, and there is no such thing here. So every member runs the
+theory's laws on **its own evidence**, and a false family is refused at
+its **first instantiation**, naming the member — which names the family
+and the argument at once:
+
+```text
+law 'mulAssoc' fails for model Fwd(Floats): a model must be an audited
+model of its theory  (a model PARAMETERIZED by a model cannot be
+audited once for the family … so its laws are checked AT EACH
+INSTANTIATION, on that member's own evidence, and this is the first
+one that named it)
+```
+
+**One parameter, for now.** Two would give one slot name two meanings
+inside a body, since a body is written in the parameter's vocabulary;
+the head says so rather than guessing.
+
+**`:defs` lists a family** with the spelling that applies it, and
+`:import` counts it apart from the models (`5 models, 1 parameterized
+model`): a family is not a model and not a def.
+
+**The head is a sequence of optional clauses.** Today:
+
+```text
+model NAME [ ( R : Theory(binders) ) ] : THEORY [ ( args ) ]
+```
+
+and a third clause is coming — an **object map**, `model FwdAD : Base(Float
+↦ Dual)`, a functor given on generators with a substitution on types.
+The general form the two collapse into: *a model is a presentation
+interpreted in a category, given by an object map and an image for each
+generator.* Today's `Base` models are the identity-object-map case with
+an explicit generator table; doctrine models are the identity on base
+types with `embed` total; a parameterized model is a type-level
+**substitution** with generator images written over the parameter's
+words. See `design-macros.md` (2026-09-15).
 
 ### `over T`: a template — a def written over a theory
 
@@ -2470,6 +2576,16 @@ a ; op : a a ⇒ a` names generators and their types, and laws that run.
 Nothing is dispatched and nothing is inferred: a theory is a
 vocabulary with a signature.
 
+**1½. A model may be built out of another model** *(2026-09-15)*.
+`model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a)` is a **family** — a
+functor Mod(Smooth) → Mod(Smooth) — and `use Fwd(Floats)` applies it,
+minting a model whose name is the application. It is the *presentation*
+level of the same move `functor` makes at the *code* level: a functor
+rewrites a program, a family rewrites a model. Neither is a dictionary
+and neither is inferred. Laws cannot be checked for the family (that
+would need equality modulo the parameter theory's laws); they are
+checked at each instantiation (§8).
+
 **2. `over T` declares a morphism of it** — a **template**. `def fold1
 = over Monoid ; [op] unit ... ; foldExp` is a body written in the
 theory's vocabulary, waiting for a model. It applies nothing and mints
@@ -2514,19 +2630,27 @@ rule. Differentiation is a functor into pairs of a value and a linear
 map (Elliott; §16), a model of a theory *is* a functor out of the free
 category on the theory's generators, so the chain rule is the
 statement that composition goes to composition — which is what a model
-already promises. The file writes `theory Smooth(a)` (a ring with
-`exp` and `sin`), three models of it — `Floats` evaluates, `Fwd`
+already promises. The file writes `theory Smooth(a, g)` (a ring with
+`exp`, `sin` and `cos`), three models of it — `Floats` evaluates, `Fwd`
 carries a tangent, `Rev` carries the transpose of the same linear map
 as a continuation — and one body per program, written `over Smooth`
 and read by all three. Each slot says what the derivative of **one**
 operation is; nothing composes derivatives by hand, because `;` does.
-`transformation Value : Fwd ⇒ Floats = value, zeroTangent` is the sentence *AD
-computes the right value*, and all eight of its squares are **proved**
-by the normalizer rather than sampled; `transformation Transpose : Fwd ⇒
-Rev` is
+`transformation Value : Fwd(Floats) ⇒ Floats = value, zeroTangent` is
+the sentence *AD computes the right value*, and all ten of its squares
+are **proved** by the normalizer rather than sampled; `transformation
+Transpose : Fwd(Floats) ⇒ Rev` is
 the sentence *forward and reverse are one linear map*, and its
-verdicts are mixed — three proved, five sampled through the exit
-*(2026-09-14)*.
+verdicts are mixed — three proved, seven sampled through the exit
+*(2026-09-14, 2026-09-15)*.
+
+`Fwd` is a **family** *(2026-09-15)* — `model Fwd(R : Smooth(a, g)) :
+Smooth(Dual(a), a)` — so `use Fwd(Fwd(Floats))` differentiates the same
+three templates **twice** and the file prints second derivatives. That
+is also why the theory declares `cos`: a theory closed under `Fwd` must
+be able to write each generator's derivative in its **own** vocabulary,
+and while `Fwd` was hand-written over `Float` it could reach the base
+word `fcos` instead.
 
 **The second worked example is `examples/frame.braid`** *(2026-09-14)*
 — a **data frame**, and it is worth reading for the same reason: there
@@ -3197,6 +3321,22 @@ corrected in place rather than dated one by one.
   left alone inside the scope. Everything else is a stage, and the
   embedding will refuse it. Membership is *written*, never read off an
   inferred type.
+- **Applying a family, four ways to get it wrong** *(2026-09-15)*. A
+  model whose head declares a parameter is a **family**, not a model,
+  and each mistake is refused with the spelling that is right: `use
+  Fwd` is *`Fwd` is a model PARAMETERIZED by a model, so it is a family
+  and not a model — apply it, `use Fwd(<model of Smooth>)`*; `use
+  Floats(Fwd)` is *`Floats` is not a parameterized model at this point —
+  a model is applied to another model only when its own head declares a
+  parameter*; `use Fwd(Nope)` is *`Nope` is not a model declared at this
+  point*; and `use Fwd(IntSum)` is *the parameter 'R' of model `Fwd`
+  takes a model of `Smooth`, and `IntSum` models `Monoid`*. A head with
+  two parameters is refused where it is written — *two would give one
+  slot name two meanings inside a body* — since a family's bodies are
+  written in the parameter's vocabulary. And a **false** family is
+  refused at its first instantiation, by the theory's own laws run at
+  that member's evidence, naming the member: `law 'mulAssoc' fails for
+  model Fwd(Floats)` names the family and the argument at once (§8).
 - **`over` is not `use`** *(2026-09-13)*. `over X` declares that a def
   is a morphism of X; `use X` applies X to a block. So `over` takes a
   theory (the def is a template) or a model with a carrier (the def is
@@ -3492,6 +3632,7 @@ made of*, not by how exotic it feels.
 | a new **combinator** or control form | an ordinary `def` | loops are values, guards are words, `...` accumulates |
 | a swappable **interface with laws** | `theory` + `model` | models selected by name, audited by running the laws |
 | one body over **every** model of a theory | a `def` headed `over <theory>` (a *template*) | expanded and re-inferred per model — its own principal type each time |
+| a model built **out of another model** | `model F(R : T(a)) : T(C(a))` — a *family*, applied by `use F(M)` | a functor Mod(T) → Mod(T); the carrier is a substitution, and `use F(F(M))` iterates |
 | a category of **processes** | `data` + your own composition word | then present it as a `theory` if it has laws |
 
 Worked examples, in that order: `lifting.braid` first (every functor
@@ -3520,11 +3661,35 @@ decided three ways proved and five at the samples — Newton's method
 under `use Recursive`, and a fourth model in which the adjoint is
 threaded through a `resource` instead of summed. It contains no
 `Code`, no `functor` and no chain rule: the chain rule is what a model
-*is*. It also records, in the file, the place the declaration
-layer does not reach — a model parameterized by a model (second
-derivatives) — and, since the sampled square over a closure-holding
-carrier was fixed *(2026-09-14, §14)*, what a sampled square costs:
-it establishes its claim at the theory's exit.
+*is*. Since *(2026-09-15)* forward mode is a **family** — `model
+Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a)`, applied by `use
+Fwd(Floats)` — the file also prints **second derivatives**, by applying
+that family to a member of itself (`use Fwd(Fwd(Floats))`), and the
+three templates it reads are untouched. And, since the sampled square
+over a closure-holding carrier was fixed *(2026-09-14, §14)*, it
+records what a sampled square costs: it establishes its claim at the
+theory's exit.
+
+**What a family still cannot be built over** *(2026-09-15)*. The other
+motivating example, `model Kleisli(M : Monad(m)) : Arrow(Kl(m))`, does
+**not** type, and the two refusals say precisely what is missing —
+both of them the same missing thing, a type constructor that can be
+applied to a *variable* and applied *partially*:
+
+- `data Kl(m(_), a, b) = Fn⟨a ⇒ m(b)⟩` — `Malformed type parameter
+  list`. A `data` declaration's parameters are wires, stacks, widths and
+  rows; a **constructor** parameter is a theory's alone. For the body to
+  hold `m(b)` a type would have to have a *variable in head position*,
+  and `Ty` has `TData String [SType]` — a name. That is type-level
+  application, which the substitution discipline above exists to avoid.
+- `model Kleisli(M : Monad(m)) : Arrow(Kl(m))` — `theory Arrow declares
+  'k' as a type constructor of arity 2, so its argument must be a bare
+  constructor name, not 'Kl(m)'`. An `InstArg` at a constructor
+  parameter is a **name**; there is no partial application to write.
+
+A family whose carrier is `C(a)` for a *wire* parameter — the
+dual-number construction — needs neither, which is why it is the one
+that shipped.
 
 **Probability is a model** *(2026-09-15)* — and it is the example that
 says what the `theory`/`model` row of the table *buys*, because the

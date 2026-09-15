@@ -392,21 +392,23 @@ bare `use` leaves.
     generator, each saying what the derivative of that **one**
     operation is; composition is the language's.
     ```text
-    theory Smooth(a) = add : a a ⇒ a ; mul : a a ⇒ a ; … ; observe : a ⇒ Float
+    theory Smooth(a, g) = add : a a ⇒ a ; mul : a a ⇒ a ; … ; observe : a ⇒ Float
 
-    def dmul = unDual _ ; _ _ unDual
-             ; (a da b db -> (a b ; fmul) ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual)
+    model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a) =
+        mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual
+        …
 
-    def poly = over Smooth ; (x -> …)      # written once
-    def polyD = use Fwd ; poly             # Dual =Fwd> Dual
+    def poly   = over Smooth ; (x -> …)         # written once
+    def polyD  = use Fwd(Floats) ; poly         # Dual(Float) =Fwd(Floats)> …
+    def polyDD = use Fwd(Fwd(Floats)) ; poly    # …and second derivatives
     ```
     Three models of the one theory: `Floats` evaluates, `Fwd` carries a
     tangent (forward mode), `Rev` carries the **transpose** of that same
     linear map as a continuation (reverse mode) — so forward and reverse
     are two representations of one map rather than two algorithms, and
     fan-out needs no special case because continuations are linear.
-    `transformation Value : Fwd ⇒ Floats = value, zeroTangent` says *AD
-    computes the right value*, and all nine of its squares are
+    `transformation Value : Fwd(Floats) ⇒ Floats = value, zeroTangent`
+    says *AD computes the right value*, and all ten of its squares are
     **proved**, not sampled.  The theory's gradient exit is
     `gradient : a ⇒ g` — an exit whose result varies by model is a
     theory **parameter**, filled `Float` by `Fwd` and `Grad` by `Rev` —
@@ -415,8 +417,24 @@ bare `use` leaves.
     Newton's method comes along under `use Recursive`, and a fourth
     model threads the adjoint through a `resource` instead of summing
     it. `Float` itself arrived for this (a base type beside `Int`,
-    sharing no word with it), and the file says plainly what is not
-    built: second derivatives want a model parameterized by a model.
+    sharing no word with it).
+
+    And `Fwd` is **a model parameterized by a model** (2026-09-15): the
+    head `model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a)` makes it a
+    *family* — a functor Mod(Smooth) → Mod(Smooth), which is ML's
+    higher-order functor, Kiselyov's interpreter transformer and the
+    ring construction R ↦ R[ε]/ε² — and `use Fwd(Floats)` **applies**
+    it, minting a model whose name is the application. So a family can
+    be applied to a member of itself: `use Fwd(Fwd(Floats))` types at
+    `Dual(Dual(Float))` and computes **second derivatives**, with the
+    three templates untouched. The carrier is a *substitution*, never a
+    type-level function: the head's binders take the argument's own
+    theory arguments and `Smooth(Dual(a), a)` is read off. A family's
+    slot bodies are templates over the **parameter's** theory, so `add`
+    inside `add`'s body is R's `add`; its laws cannot be checked for the
+    family (that needs equality modulo the parameter theory's laws), so
+    they are checked **at each instantiation** and a false family is
+    refused where it is first applied.
 17. **A data frame is a model too — so you never write a loop over
     rows.** You write a program on ONE ROW, a stack of scalars, and
     `use Frame` lifts it to the whole frame. `Frame` models the same
@@ -526,7 +544,9 @@ meeting in one pass over data),
 `traced` and `metered` (functors: a tracer that lifts at every cut,
 a resource metered by one checked interposition),
 `autodiff` (the flagship: automatic differentiation as three models of
-one theory of arithmetic — no `Code`, no chain rule),
+one theory of arithmetic — no `Code`, no chain rule — where forward
+mode is a model **parameterized by a model**, so applying it twice
+gives second derivatives),
 `frame` (a data frame as a model of the same doctrine: row programs
 lifted by `use Frame`, the columns being the `data` declaration's field
 words, and two CSVs loaded by one `table` line each — the second with a
@@ -545,14 +565,16 @@ so "a new kind of computation" is never a new arrow. It is a `data`
 (a new carrier, codata included), a `resource` (state threaded through a
 region), a plain `def` (a new combinator — loops and guards are already
 values), a `theory` + `model` (a swappable interface with runnable
-laws), or, for a genuinely different category like a stream transducer,
+laws), a `model F(R : T(a))` — a model built out of another model, a
+*family*, applied by `use F(M)` and iterable — or, for a genuinely
+different category like a stream transducer,
 a `data` plus your own composition word. MANUAL §15 is the table, with a
 worked example for each row.
 
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1120-case test suite, a full
+(typechecker, interpreter, REPL), a 1132-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

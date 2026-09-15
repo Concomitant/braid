@@ -568,13 +568,23 @@ def gradPoly =
 # ---------------------------------------------------------------------
 # 10. What is NOT built, plainly
 # ---------------------------------------------------------------------
-# SECOND DERIVATIVES.  Nesting `Fwd` inside itself needs `Fwd` to be a
-# model of `Smooth(Dual(a))` for ANY model of `Smooth(a)` — a model
-# PARAMETERIZED BY A MODEL.  Braid has templates parameterized by a
-# model (`over Smooth`), but a `model` head names a declared type, not
-# a model variable, so `model Fwd(M) : Smooth(Dual(M))` cannot be
-# written.  Differentiating twice here means writing the second model
-# out by hand.
+# (SECOND DERIVATIVES used to be listed here.  They wanted `Fwd` to be
+# a model of `Smooth(Dual(a))` for ANY model of `Smooth(a)` — a model
+# PARAMETERIZED BY A MODEL — and a `model` head named a declared type,
+# not a model variable.  Since 2026-09-15 a head takes a parameter
+# clause and `use Fwd(Fwd(Floats))` is the whole of it: §6.)
+#
+# A KLEISLI CATEGORY, as the same construction over a monad.  `model
+# Kleisli(M : Monad(m)) : Arrow(Kl(m))` wants two things this file's
+# family does not: a `data` declaration with a CONSTRUCTOR parameter
+# (`data Kl(m(_), a, b) = Fn⟨a ⇒ m(b)⟩`, whose body would hold a type
+# with a VARIABLE in head position), and a PARTIALLY applied
+# constructor as a theory argument (`Arrow(Kl(m))`, where a
+# constructor argument is a bare name).  Both are type-level
+# application, which the substitution discipline here exists to avoid;
+# `design-macros.md` (2026-09-15) records the two refusals verbatim.
+# A family whose carrier is `C(a)` for a WIRE parameter — this one —
+# needs neither.
 #
 # THE PER-NODE ACCUMULATOR.  Wang & Rompf's shift/reset backpropagator
 # (READING) gives each node ONE accumulator cell visited once, rather
