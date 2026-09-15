@@ -5844,11 +5844,17 @@ componentArrows theories insts mo = do
   sequence (zipWith3 one (thParams th) (inArgs a) (inArgs b))
   where
     here = "transformation " ++ tfName mo ++ ": "
-    one (PCon _ _) (IACon ca) (IACon cb) =
-      let x = SCons (TVarTy (TV "\945")) SEnd
-          y = SCons (TVarTy (TV "\946")) SEnd
-      in Right (arrPure (SCons (TData ca [x, y]) SEnd)
-                        (SCons (TData cb [x, y]) SEnd))
+    -- A constructor parameter of arity n is applied to n fresh wires:
+    -- `k(_, _)` gives `k(\945, \946) \8658 k\8242(\945, \946)`, and the
+    -- arity-1 parameter a parameterized EXIT wants (`report : k(Int, b)
+    -- \8658 d(b)`) gives `d(\945) \8658 d\8242(\945)`.  It used to write
+    -- two, always, which refused every theory whose parameter was not a
+    -- hom-object (2026-09-15).
+    one (PCon _ ar) (IACon ca) (IACon cb) =
+      let vs = [ SCons (TVarTy (TV v)) SEnd
+               | v <- take ar (map (: []) "\945\946\947\948\949\950") ]
+      in Right (arrPure (SCons (TData ca vs) SEnd)
+                        (SCons (TData cb vs) SEnd))
     one (PWire _) (IAStack sa) (IAStack sb) = Right (arrPure sa sb)
     one q _ _ = Left $ here ++ "theory parameter '" ++ pName q
              ++ "' and the models' arguments are not at one kind"

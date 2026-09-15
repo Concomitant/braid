@@ -1,0 +1,382 @@
+# PROBABILITY, as a MARKOV CATEGORY.
+#
+# The thesis (Fritz, *A synthetic approach to Markov kernels,
+# conditional independence and theorems on sufficient statistics*;
+# READING): a Markov category is a monoidal category in which every
+# object carries a comonoid — every wire can be COPIED and DISCARDED —
+# and in which copying is NOT NATURAL.  That last clause is the whole
+# of probability.  Copy after a coin flip gives two EQUAL bits; two coin
+# flips give two INDEPENDENT bits; and a category where those two
+# programs agree is a category with no randomness in it.
+#
+# Braid's base is cartesian.  `dup` there IS natural — `examples/laws.braid`
+# has the normalizer PROVE `dup ; f f = f ; dup` for an arbitrary word,
+# which is exactly the statement that the base has no randomness.  A
+# model of the Doctrine whose hom-object is a STOCHASTIC MAP is a Markov
+# category, and `use Enum` is the functor from the deterministic world
+# into it.  The distinction is then drawn STRUCTURALLY, not by a
+# convention about what `flip` means:
+#
+#     def twoEqual = use Enum ; half ; flip ; dup        # ONE flip, copied
+#     def twoIndep = use Enum ; twoBiases ; bothFlip     # TWO flips
+#
+# and §6 prints the two distributions, which differ.  Nothing in the
+# file declares that they should.  `dup` is transported by the functor
+# and the functor is the model; the disagreement is what the model IS.
+#
+# THREE MODELS of one theory: `Enum` enumerates exactly (the finite
+# distribution monad's Kleisli category), `Sampler` threads a random
+# number RESOURCE and draws (a small LCG in Braid, so every number
+# below is reproducible), `Nondet` keeps only the SUPPORT — the
+# possibilistic Markov category, where a weight is a bit.  The
+# Doctrine's seven arrow laws run for all three before anything prints.
+#
+# There is no `Code`, no `functor` and no `getCode` anywhere below.
+# Binders and destructuring throughout.
+#
+# The DataFrame library is this file's client: `import` below brings
+# `groupBy`, `sumF`, `keep` and `printFrame` in, and every distribution
+# printed is a frame — outcome, weight — with the weights summed per
+# outcome by `groupBy`.  A posterior is a frame operation.
+
+import "frame.braid"
+#   `Pair` comes from there too: the pairing the Doctrine's strength
+#   packs a wide stage with is the same `Pair(a, b) = a b` the frame's
+#   `first` unzips.  One spelling per thing, across two files.
+
+# ---------------------------------------------------------------------
+# 1. The theory: a Markov category, presented
+# ---------------------------------------------------------------------
+# `over Doctrine` is the declaration that `compose`, `embed` and `first`
+# are the prelude doctrine's, at its signatures — so `use M` of a model
+# transports base programs into the category M presents, and the
+# doctrine's seven arrow laws are inherited.
+#
+# The GENERATORS are the distributions, and each is an ENTRY: a slot
+# that builds a carrier out of nothing, `• ⇒ k(_, _)`, read off its
+# declared arrow.  That is the answer to "how does `flip` take its
+# Float?" — it does NOT take one.  A hom-object `k(a, b)` names one
+# object on each side and there is no `k(•, Bool)`, because `•` is not
+# a wire; so a distribution is written as the KERNEL it is, `flip :
+# k(Float, Bool)`, the bias arriving on the wire the kernel consumes.
+# The bias is then an ordinary base stage INSIDE the transported scope
+# — `half = (n -> 0.5)` is one wire in, one wire out, so it embeds —
+# and the composition of the scope routes it into `flip`'s domain.
+# Nothing special-cases a parameter.
+#
+# `report` is the EXIT, and its result is a THEORY PARAMETER: what a
+# model hands back about a kernel is not one type — `Enum` gives a
+# weighted list, `Sampler` a list of draws, `Nondet` a support — so
+# `d(_)` is a CONSTRUCTOR parameter the model fills, the same rule
+# `examples/autodiff.braid` uses for `gradient : a ⇒ g` one kind up
+# (2026-09-15, MANUAL §8).  It is declared at `k(Int, b)` because a
+# kernel must be run SOMEWHERE: `Int` is the stand-in for the monoidal
+# unit the Doctrine has no name for, and `report` runs at 0.  Every
+# program below therefore begins by ignoring an Int.
+#
+# `condition` is the sub-Markov generator: it takes a Bool beside a
+# value and keeps the branch, at weight 1, or kills it.  A category
+# with it is AFFINE rather than Markov — §9 prints the mass that says
+# so — and Bayes' rule is `condition` plus renormalizing, which is a
+# frame operation.
+#
+# Every slot is `=Recursive>`: `Sampler`'s `report` folds a draw over a
+# range and `Enum`'s `compose` walks a list, and a slot declares the
+# MOST a model may do.
+
+theory Prob(k(_, _), d(_)) over Doctrine =
+    compose   : k(a, b) k(b, c) =Recursive> k(a, c)
+    embed     : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
+    first     : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
+    observe   : k(Int, Int) =Recursive> Int
+    sample    : • =Recursive> k(Int, Int)
+    flip      : • =Recursive> k(Float, Bool)
+    uniform   : • =Recursive> k(Int, Int)
+    condition : • =Recursive> k(Pair(Bool, a), a)
+    report    : k(Int, b) =Recursive> d(b)
+
+# ---------------------------------------------------------------------
+# 2. Model one: `Enum` — exact enumeration
+# ---------------------------------------------------------------------
+# The hom-object is a function into a WEIGHTED LIST: the Kleisli
+# category of the finite distribution monad.  `compose` is bind with
+# the weights multiplied, `first` is the strength, `embed` is the point
+# mass.  That is the entire model, and every law it obeys it obeys
+# because those three lines are what they are.
+
+data Weighted(b) = List(Box(b Float))
+data Kern(a, b)  = Fn⟨a =Recursive> Weighted(b)⟩
+
+## run a kernel at a point, down to the bare list of (outcome, weight)
+def atK   = (c x -> c ; unKern ; _ x ; ev ; unWeighted)
+## the point mass — `embed`'s whole content, and `dirac` is its name
+def dirac = (y -> (y 1.0 ; Box) ; single ; Weighted)
+
+def eEmbed = (f -> [(x -> f ; _ x ; ev ; dirac)] ; Kern)
+def scaleBy = (w e -> e ; unBox ; (y v -> y (w v ; fmul) ; Box))
+def eCompose =
+    c e ->
+    [(x -> (c x ; atK)
+         ; [(b -> b ; unBox
+                    ; (y w -> (e y ; atK) ; [(e2 -> w e2 ; scaleBy)] ... ; map))] ... ; map
+         ; concat ; Weighted)] ; Kern
+def eFirst =
+    c ->
+    [(p -> p ; unPair
+             ; (x r -> (c x ; atK)
+                     ; [(b -> b ; unBox ; (y w -> (y r ; Pair) w ; Box))] ... ; map
+                     ; Weighted))] ; Kern
+
+def eFlip = [(p -> ((true p ; Box) (false (1.0 p ; fsub) ; Box) ; pack) ; Weighted)] ; Kern
+def eUniform =
+    [(n -> (n ; range) ; [(i -> i (1.0 (n ; toFloat) ; fdiv) ; Box)] ... ; map ; Weighted)] ; Kern
+def eCondition =
+    [(p -> p ; unPair ; (b y -> b (y ; dirac) (nil ; Weighted) ; select))] ; Kern
+def eReport = (c -> c ; unKern ; _ 0 ; ev)
+
+## The doctrine's own evidence, and it is STOCHASTIC on purpose: the
+## seven arrow laws are then a real test of the model's bind, not of a
+## deterministic special case.  The weights are dyadic, so every sum
+## and product the laws take is an exact double.
+def eSample =
+    [(x -> (((x ; _ 1 ; +) 0.5 ; Box) ((x 2 ; *) 0.5 ; Box) ; pack) ; Weighted)] ; Kern
+
+## the expected value of a weighted list of Ints, and the doctrine's
+## `observe` built from it — two points, scaled and floored, because
+## the doctrine asks an exit for an `Int`
+def eExpect =
+    w ->
+    w ; unWeighted
+      ; [(acc b -> b ; unBox ; (y p -> acc ((y ; toFloat) p ; fmul) ; fadd))] 0.0 ... ; fold
+def eObserve =
+    c ->
+    (((c 3 ; atK ; Weighted ; eExpect) (c 4 ; atK ; Weighted ; eExpect) ; fadd) 1000.0 ; fmul)
+      ; floor
+
+model Enum : Prob(Kern, Weighted) =
+    compose   = eCompose
+    embed     = eEmbed
+    first     = eFirst
+    observe   = eObserve
+    sample    = eSample
+    flip      = eFlip
+    uniform   = eUniform
+    condition = eCondition
+    report    = eReport
+
+# ---------------------------------------------------------------------
+# 3. Model two: `Sampler` — a random-number RESOURCE, threaded
+# ---------------------------------------------------------------------
+# The hom-object is a function that threads an `Rng` — a seed — so a
+# kernel is `Rng a ⇒ Rng b` and composition is the ordinary threading
+# `examples/metered.braid` does for Fuel.  The generator is a linear
+# congruential one, written in Braid over Int, so it is DETERMINISTIC:
+# every count printed below is reproducible, and a different seed is a
+# different test rather than a different program.
+
+resource Rng = Int
+data Draws(b)   = List(b)
+data Samp(a, b) = Fn⟨Rng a =Recursive> Rng b⟩
+
+## Numerical Recipes' LCG, modulo 2^31.  The whole source of randomness.
+def stepRng = unRng ; (s -> ((s 1103515245 ; *) 12345 ; +) 2147483648 ; mod)
+def drawRaw = (r -> r ; stepRng ; dup ; Rng _)          # Rng ⇒ Rng Int
+## …read as a Float in [0, 1).  Reading the WHOLE word rather than
+## `mod`-ing it matters: an LCG's low bits have short periods, and
+## `u mod 2` is the worst bit there is.
+def unitOf  = (u -> (u ; toFloat) 2147483648.0 ; fdiv)
+
+def runS    = (c r x -> c ; unSamp ; _ r x ; ev)
+def sEmbed  = (f -> [(r x -> r (f ; _ x ; ev))] ; Samp)
+def sCompose = (c e -> [(r x -> c r x ; runS ; (r2 y -> e r2 y ; runS))] ; Samp)
+def sFirst =
+    c ->
+    [(r p -> p ; unPair ; (x d -> c r x ; runS ; (r2 y -> r2 (y d ; Pair))))] ; Samp
+
+## a p-coin: one draw in [0, 1), true when it lands below p
+def sFlip =
+    [(r p -> r ; drawRaw ; (r2 u -> r2 ((u ; unitOf) p ; flt? ; verdict)))] ; Samp
+def sUniform =
+    [(r n -> r ; drawRaw ; (r2 u -> r2 (((u ; unitOf) (n ; toFloat) ; fmul) ; floor)))] ; Samp
+## a sampler cannot drop a branch, so `condition` KEEPS: the model is a
+## forward sampler and rejection is not part of it (§12).
+def sCondition = [(r p -> p ; unPair ; (b y -> r y))] ; Samp
+def sSample =
+    [(r x -> r ; drawRaw
+           ; (r2 u -> r2 (((u ; unitOf) 0.5 ; flt? ; verdict) (x ; _ 1 ; +) (x 2 ; *) ; select)))] ; Samp
+
+def theSeed  = 20260915
+def sOnce    = (c x -> c (theSeed ; Rng) x ; runS ; (r y -> y))
+def sObserve = (c -> (c 3 ; sOnce) (c 4 ; sOnce) ; +)
+
+## `report` draws 200 samples, threading ONE seed through all of them —
+## which is what makes the tally below a tally and not 200 copies of
+## one number.
+data Acc(b) = Int List(b)
+def drawsWanted = 200
+def sInto =
+    c ->
+    [(a i -> a ; unAcc
+               ; (s ys -> c (s ; Rng) 0 ; runS
+                        ; (r y -> (r ; unRng) (y ys ; cons) ; Acc)))]
+def sReport =
+    c ->
+    ((drawsWanted ; range) ; (c ; sInto) (theSeed nil ; Acc) ... ; fold)
+      ; unAcc ; (s ys -> ys ; reverse ; Draws)
+
+model Sampler : Prob(Samp, Draws) =
+    compose   = sCompose
+    embed     = sEmbed
+    first     = sFirst
+    observe   = sObserve
+    sample    = sSample
+    flip      = sFlip
+    uniform   = sUniform
+    condition = sCondition
+    report    = sReport
+
+# ---------------------------------------------------------------------
+# 4. Model three: `Nondet` — the support, and nothing else
+# ---------------------------------------------------------------------
+# The possibilistic Markov category: a weight is a bit, so the
+# hom-object is a function into a plain list and `compose` is `flatMap`.
+# It is here because it is the model that says what a weight ADDS: the
+# seven doctrine laws run over it word for word, and the copy/two-flips
+# distinction below VANISHES in it — both programs have support {HH, HT,
+# TH, TT}… no: `twoEqual`'s support is {HH, TT}, and that is the
+# possibilistic shadow of the same fact.  A model with no numbers in it
+# still tells copying from sampling.
+
+data Reach(b)   = List(b)
+data Poss(a, b) = Fn⟨a =Recursive> Reach(b)⟩
+
+def atP      = (c x -> c ; unPoss ; _ x ; ev ; unReach)
+def nEmbed   = (f -> [(x -> f ; _ x ; ev ; single ; Reach)] ; Poss)
+def nCompose = (c e -> [(x -> (c x ; atP) ; [(y -> e y ; atP)] ... ; map ; concat ; Reach)] ; Poss)
+def nFirst =
+    c ->
+    [(p -> p ; unPair ; (x r -> (c x ; atP) ; [(y -> y r ; Pair)] ... ; map ; Reach))] ; Poss
+def nFlip      = [(p -> true false ; pack ; Reach)] ; Poss
+def nUniform   = [(n -> n ; range ; Reach)] ; Poss
+def nCondition = [(p -> p ; unPair ; (b y -> b (y ; single) nil ; select ; Reach))] ; Poss
+def nSample    = [(x -> (x ; _ 1 ; +) (x 2 ; *) ; pack ; Reach)] ; Poss
+def nObserve   = (c -> ((c 3 ; atP) ; sum) ((c 4 ; atP) ; sum) ; +)
+def nReport    = (c -> c ; unPoss ; _ 0 ; ev)
+
+model Nondet : Prob(Poss, Reach) =
+    compose   = nCompose
+    embed     = nEmbed
+    first     = nFirst
+    observe   = nObserve
+    sample    = nSample
+    flip      = nFlip
+    uniform   = nUniform
+    condition = nCondition
+    report    = nReport
+
+# ---------------------------------------------------------------------
+# 5. The words a Markov program needs, and where they come from
+# ---------------------------------------------------------------------
+# `first` acts on the DEEPER wire of a pairing.  Acting on the other one
+# is `swap ; first ; swap`, and the swap is an ordinary base program
+# embedded — which is the whole construction of the monoidal product
+# `f ⊗ g` out of a strength, written once per model because a template
+# `over Prob` is not instantiable by `use Enum` (§12, pragmatics).
+
+def swapP = unPair ; swap ; Pair
+
+def secondE =
+    over Enum
+    (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
+def secondS =
+    over Sampler
+    (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
+#   secondE : Kern(a, b) ⇒ Kern(Pair(c, a), Pair(c, b))
+
+## two independent flips, as `flip ⊗ flip`: the strength twice, with a
+## swap between.  This is the word the thesis turns on.
+def bothFlipE =
+    over Enum
+    (flip ; first)
+    _ ([swapP] ; embed) ; compose
+    _ (flip ; first) ; compose
+    _ ([swapP] ; embed) ; compose
+def bothFlipS =
+    over Sampler
+    (flip ; first)
+    _ ([swapP] ; embed) ; compose
+    _ (flip ; first) ; compose
+    _ ([swapP] ; embed) ; compose
+#   bothFlipE : • ⇒ Kern(Pair(Float, Float), Pair(Bool, Bool)) — a word
+#   of the category built BY HAND, so `over` and not `use`, and it
+#   composes inside a `use Enum` scope like any transported stage.
+
+## the biases, as ordinary base stages: one wire in, one wire out, so
+## the functor embeds them and nothing knows they are parameters
+def half      = (n -> 0.5)
+def twoBiases = (n -> 0.5 0.5)
+
+# ---------------------------------------------------------------------
+# 6. COPY IS NOT NATURAL — the two programs, and the two distributions
+# ---------------------------------------------------------------------
+
+def twoEqualE = use Enum ; half ; flip ; dup
+def twoIndepE = use Enum ; twoBiases ; bothFlipE
+#   twoEqualE : Int =Enum Recursive> Pair(Bool, Bool)
+#   twoIndepE : Int =Enum Recursive> Pair(Bool, Bool) — the SAME type,
+#   and `use Enum` is the only reason either of them is a kernel at all.
+
+def twoEqualS = use Sampler ; half ; flip ; dup
+def twoIndepS = use Sampler ; twoBiases ; bothFlipS
+def bothFlipN =
+    over Nondet
+    (flip ; first)
+    _ ([swapP] ; embed) ; compose
+    _ (flip ; first) ; compose
+    _ ([swapP] ; embed) ; compose
+def twoEqualN = use Nondet ; half ; flip ; dup
+def twoIndepN = use Nondet ; twoBiases ; bothFlipN
+#   `bothFlipE` is ENUM's word, and the elaborator says so if it is
+#   written here: "bothFlipE is a word of Enum, so it builds a carrier
+#   rather than being a program the embedding could embed".  A category
+#   is entered from the base, and each model enters its own.
+
+## reading a distribution as a FRAME — outcome, weight — with the
+## weights summed per outcome by the frame library's `groupBy`
+def showBits = (p -> p ; unPair ; (a b -> (a "H" "T" ; select) (b "H" "T" ; select) ; cat))
+def tallyW =
+    sh w ->
+    w ; unWeighted
+      ; (es -> ((es ; [(b -> b ; unBox ; (y p -> sh ; _ y ; ev))] ... ; map) \
+                (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map) ; groupBy) \
+             ; [(g -> (g ; key) ((g ; part ; sumF) ; toStr) ; pack)] ... ; map)
+def tallyD =
+    sh d ->
+    d ; unDraws
+      ; (ys -> ((ys ; [(y -> sh ; _ y ; ev)] ... ; map) ys ; groupBy) \
+             ; [(g -> (g ; key) ((g ; part ; len) ; toStr) ; pack)] ... ; map)
+def distHead  = "outcome" "weight" ; pack
+def countHead = "outcome" "draws" ; pack
+
+"" ; print
+"== one flip, copied — `use Enum ; half ; flip ; dup` ==" ; print
+distHead ([showBits] (twoEqualE ; eReport) ; tallyW) ; printFrame
+#   HH | 0.5      the coin, and the same bit twice
+#   TT | 0.5
+
+"" ; print
+"== two flips — `use Enum ; twoBiases ; bothFlipE` ==" ; print
+distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; printFrame
+#   HH | 0.25     HT | 0.25     TH | 0.25     TT | 0.25
+#   — 1/2 · 1/2 four times, and every weight is exact
+
+"" ; print
+"== the same two programs, SAMPLED (200 draws, seed 20260915) ==" ; print
+countHead ([showBits] (twoEqualS ; sReport) ; tallyD) ; printFrame
+"" ; print
+countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
+
+"" ; print
+"== and possibilistically: the SUPPORT, weights forgotten ==" ; print
+(twoEqualN ; nReport ; unReach) ; [showBits] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
+(twoIndepN ; nReport ; unReach) ; [showBits] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
