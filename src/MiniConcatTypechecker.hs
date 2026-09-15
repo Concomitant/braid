@@ -3893,7 +3893,7 @@ data ElabCtx = ElabCtx
                                    -- slot names and mints nothing, because
                                    -- a model does not apply itself
   , ecGen   :: Bool                -- a def the COMPILER wrote (a
-                                   -- morphism's squares), which may name
+                                   -- transformation's squares), which may name
                                    -- a slot in the compiler's own
                                    -- spelling.  Source may not, and that
                                    -- refusal is what makes a slot
@@ -4641,7 +4641,8 @@ instanceDefs theories trans inst = do
                | (nm, body) <- thLaws th ++ inherited ]
   pure (cons ++ slots ++ laws)
 
--- A MORPHISM OF MODELS: `morphism Len : ListMonoid \8658 IntSum = len`.
+-- A NATURAL TRANSFORMATION BETWEEN MODELS:
+-- `transformation Len : ListMonoid \8658 IntSum = len`.
 --
 -- Two models of ONE theory, and a base word between their carriers.
 -- The claim is naturality: for every slot `s : s \8658 j` of the theory,
@@ -4656,26 +4657,26 @@ instanceDefs theories trans inst = do
 -- complete: a morphism of presentations is determined on generators.
 --
 -- The arrow is written `\8658` because that is the arrow of every written
--- type in Braid (`->` is only its ASCII synonym there); a morphism of
--- models is an arrow between two named things, so it is written with
+-- type in Braid (`->` is only its ASCII synonym there); a transformation
+-- between models is an arrow between two named things, so it is written with
 -- the arrow.
-data Morphism = Morphism
-  { moName :: String
-  , moFrom :: String
-  , moTo   :: String
-  , moWord :: String
+data Transformation = Transformation
+  { tfName :: String
+  , tfFrom :: String
+  , tfTo   :: String
+  , tfWord :: String
   } deriving (Eq, Show)
 
 -- one slot's square: the two sides as generated defs, and the sampled
 -- law that decides it when the normalizer will not
-data MorphSquare = MorphSquare
-  { msSlot   :: String
-  , msLhs    :: String
-  , msRhs    :: String
-  , msLaw    :: Maybe String
-  , msWhy    :: String        -- why there is no sampled law, if there is none
-  , msPoints :: Int           -- sample points the law runs at, if it has one
-  , msExit   :: Bool          -- ...and whether it compares through the exit
+data TransformationSquare = TransformationSquare
+  { tsqSlot   :: String
+  , tsqLhs    :: String
+  , tsqRhs    :: String
+  , tsqLaw    :: Maybe String
+  , tsqWhy    :: String        -- why there is no sampled law, if there is none
+  , tsqPoints :: Int           -- sample points the law runs at, if it has one
+  , tsqExit   :: Bool          -- ...and whether it compares through the exit
   }
 
 -- A square's sampled law: the def it becomes, its source, how many of
@@ -4689,68 +4690,70 @@ data SampledLaw = SampledLaw
   , slExit   :: Bool
   }
 
--- What the checker decided about one square, kept so that `:morphisms`
--- READS the verdict rather than deciding it again.  `MVProved` is
--- `sameCode` — for every input; `MVSampled n` is the theory's own
+-- What the checker decided about one square, kept so that
+-- `:transformations`
+-- READS the verdict rather than deciding it again.  `TVProved` is
+-- `sameCode` — for every input; `TVSampled n` is the theory's own
 -- evidence, at n sample points (a square with no inputs runs at none).
-data MorphVerdict = MVProved | MVSampled Int
+data TransformationVerdict = TVProved | TVSampled Int
   deriving (Eq, Show)
 
--- A declared morphism and its verdicts, slot by slot, in the theory's
--- order.  A morphism whose square neither proved nor sampled never gets
+-- A declared transformation and its verdicts, slot by slot, in the
+-- theory's order.  A transformation whose square neither proved nor
+-- sampled never gets
 -- one of these: the module was refused.
-data MorphInfo = MorphInfo
-  { miName    :: String
-  , miFrom    :: String
-  , miTo      :: String
-  , miSquares :: [(String, MorphVerdict)]
-  , miNoExit  :: [String]   -- slots whose carriers `eq?` weighed directly
+data TransformationInfo = TransformationInfo
+  { tiName    :: String
+  , tiFrom    :: String
+  , tiTo      :: String
+  , tiSquares :: [(String, TransformationVerdict)]
+  , tiNoExit  :: [String]   -- slots whose carriers `eq?` weighed directly
   } deriving (Eq, Show)
 
--- one verdict, as `:morphisms` and `:doc` print it.  A square with no
+-- one verdict, as `:transformations` and `:doc` print it.  A square with no
 -- inputs is run at no sample points and simply reads `sampled`.
-showVerdict :: MorphVerdict -> String
-showVerdict MVProved      = "proved"
-showVerdict (MVSampled 0) = "sampled"
-showVerdict (MVSampled n) = "sampled (" ++ show n ++ " point"
+showVerdict :: TransformationVerdict -> String
+showVerdict TVProved      = "proved"
+showVerdict (TVSampled 0) = "sampled"
+showVerdict (TVSampled n) = "sampled (" ++ show n ++ " point"
                               ++ (if n == 1 then "" else "s") ++ ")"
 
--- A declared morphism and what the checker decided about each of its
--- squares, as `:morphisms` prints it.  The verdicts are READ off the
+-- A declared transformation and what the checker decided about each of
+-- its squares, as `:transformations` prints it.  The verdicts are READ off the
 -- module the declaration was checked in, never decided again here.
-renderMorph :: MorphInfo -> String
-renderMorph mi =
+renderTransformation :: TransformationInfo -> String
+renderTransformation mi =
   intercalate "\n"
-    ( (miName mi ++ " : " ++ miFrom mi ++ " \8658 " ++ miTo mi)
-      : [ "  " ++ pad sl ++ showVerdict v | (sl, v) <- miSquares mi ] )
+    ( (tiName mi ++ " : " ++ tiFrom mi ++ " \8658 " ++ tiTo mi)
+      : [ "  " ++ pad sl ++ showVerdict v | (sl, v) <- tiSquares mi ] )
   where
-    width  = maximum (1 : map (length . fst) (miSquares mi))
+    width  = maximum (1 : map (length . fst) (tiSquares mi))
     pad sl = sl ++ replicate (width - length sl + 2) ' '
 
 -- the same verdicts on ONE line, for `:doc`
-morphDocLine :: MorphInfo -> String
-morphDocLine mi =
+transformationDocLine :: TransformationInfo -> String
+transformationDocLine mi =
   "  squares: " ++ intercalate ", " (filter (not . null) [proved, sampled])
   where
-    vs      = map snd (miSquares mi)
-    proved  = count (length [ () | MVProved <- vs ]) "proved"
-    sampled = count (length [ () | MVSampled _ <- vs ]) "sampled"
+    vs      = map snd (tiSquares mi)
+    proved  = count (length [ () | TVProved <- vs ]) "proved"
+    sampled = count (length [ () | TVSampled _ <- vs ]) "sampled"
     count 0 _    = ""
     count n what = show n ++ " " ++ what
 
-morphDefName :: String -> String -> String -> String
-morphDefName nm side slot = nm ++ "@" ++ side ++ "@" ++ slot
+transformationDefName :: String -> String -> String -> String
+transformationDefName nm side slot = nm ++ "@" ++ side ++ "@" ++ slot
 
--- a generated side or square of a morphism's naturality square, and the
--- (morphism, slot) it came from
-morphNameParts :: String -> Maybe (String, String)
-morphNameParts n = case break (== '@') n of
+-- a generated side or square of a transformation's naturality square,
+-- and the (transformation, slot) it came from
+transformationNameParts :: String -> Maybe (String, String)
+transformationNameParts n = case break (== '@') n of
   (mo, '@' : rest) -> case break (== '@') rest of
     (side, '@' : sl) | side `elem` ["lhs", "rhs", "square"] -> Just (mo, sl)
     _ -> Nothing
   _ -> Nothing
 
--- a generated square def, and the (morphism, slot) it came from
+-- a generated square def, and the (transformation, slot) it came from
 squareParts :: String -> Maybe (String, String)
 squareParts n = case breakOnStr "@square@" n of
   Just (i, l) -> Just (i, l)
@@ -4764,23 +4767,25 @@ breakOnStr pat = go ""
       | take (length pat) r == pat = Just (reverse acc, drop (length pat) r)
       | otherwise = go (c : acc) cs
 
--- `morphism Name : A \8658 B = word` \8212 a declaration line, no block.
-parseMorphismLine :: String -> Either String Morphism
-parseMorphismLine l =
+-- `transformation Name : A \8658 B = word` \8212 a declaration line,
+-- no block.
+parseTransformationLine :: String -> Either String Transformation
+parseTransformationLine l =
   case break (== '=') (takeWhile (/= '#') l) of
     (lhs, '=' : rhs)
       | [w] <- words rhs ->
           case break (== ':') lhs of
-            (hd, ':' : nms) | ["morphism", nm] <- words hd ->
+            (hd, ':' : nms) | ["transformation", nm] <- words hd ->
               case words nms of
                 [a, arr, b] | arr `elem` ["\8658", "->", "\8594"] ->
-                  Right (Morphism nm a b w)
+                  Right (Transformation nm a b w)
                 _ -> Left (malformed l)
             _ -> Left (malformed l)
     _ -> Left (malformed l)
   where
-    malformed t = "Malformed morphism declaration (want `morphism Name : "
-               ++ "ModelA \8658 ModelB = word`): " ++ dropWhile isSpace t
+    malformed t = "Malformed transformation declaration (want "
+               ++ "`transformation Name : ModelA \8658 ModelB = word`): "
+               ++ dropWhile isSpace t
 
 -- Is this wire the theory's parameter \8212 the thing the component acts
 -- on?  A wire parameter is the wire itself; a constructor parameter is
@@ -4790,41 +4795,42 @@ paramWire (PWire (TV n)) (TVarTy (TV m)) = n == m
 paramWire (PCon n _)     (TData m _)     = n == m
 paramWire _              _               = False
 
--- The defs a morphism declaration contributes: the component under its
+-- The defs a transformation declaration contributes: the component under its
 -- own name, the two sides of every square, and \8212 where the theory's
 -- evidence allows it \8212 a sampled law per square.
-morphismDefs :: [Theory] -> [Instance] -> Morphism
+transformationDefs :: [Theory] -> [Instance] -> Transformation
              -> Either String ( [(String, String, Maybe String)]
-                              , [MorphSquare] )
-morphismDefs theories insts mo = do
-  a  <- modelOf (moFrom mo)
-  b  <- modelOf (moTo mo)
+                              , [TransformationSquare] )
+transformationDefs theories insts mo = do
+  a  <- modelOf (tfFrom mo)
+  b  <- modelOf (tfTo mo)
   if inTheory a == inTheory b then Right () else
-    Left $ here ++ moFrom mo ++ " models " ++ inTheory a ++ " and "
-        ++ moTo mo ++ " models " ++ inTheory b ++ ": a morphism is a "
-        ++ "component between two models of ONE theory."
+    Left $ here ++ tfFrom mo ++ " models " ++ inTheory a ++ " and "
+        ++ tfTo mo ++ " models " ++ inTheory b ++ ": a transformation is "
+        ++ "a component between two models of ONE theory."
   th <- theoryOf theories (inTheory a)
   param <- case thParams th of
     [p] -> Right p
     ps  -> Left $ here ++ "theory " ++ thName th ++ " has "
-               ++ show (length ps) ++ " parameters, and a morphism is a "
+               ++ show (length ps) ++ " parameters, and a transformation "
+               ++ "is a "
                ++ "component at ONE of them.  Split the theory, or write "
                ++ "the homomorphism by hand and state its squares as laws."
   built <- mapM (square th param a b) (thSlots th)
-  let word  = ( moName mo, moWord mo
-              , Just ("morphism " ++ moName mo ++ " : " ++ moFrom mo
-                       ++ " \8658 " ++ moTo mo ++ " \8212 the component, as "
+  let word  = ( tfName mo, tfWord mo
+              , Just ("transformation " ++ tfName mo ++ " : " ++ tfFrom mo
+                       ++ " \8658 " ++ tfTo mo ++ " \8212 the component, as "
                        ++ "an ordinary word") )
-      defs  = concat [ [ (msLhs sq, l, note sq "the model's side")
-                       , (msRhs sq, r, note sq "the component's side") ]
+      defs  = concat [ [ (tsqLhs sq, l, note sq "the model's side")
+                       , (tsqRhs sq, r, note sq "the component's side") ]
                        ++ [ (nm, src, note sq "the square, at the samples")
-                          | (Just nm, Just src) <- [(msLaw sq, mlaw)] ]
+                          | (Just nm, Just src) <- [(tsqLaw sq, mlaw)] ]
                      | (sq, l, r, mlaw) <- built ]
   pure (word : defs, [ sq | (sq, _, _, _) <- built ])
   where
-    here = "morphism " ++ moName mo ++ ": "
-    nm   = moName mo
-    note sq what = Just ("morphism " ++ nm ++ ", slot '" ++ msSlot sq
+    here = "transformation " ++ tfName mo ++ ": "
+    nm   = tfName mo
+    note sq what = Just ("transformation " ++ nm ++ ", slot '" ++ tsqSlot sq
                           ++ "' \8212 " ++ what)
     modelOf n = case [ i | i <- insts, inName i == n ] of
       (i : _) -> Right i
@@ -4841,17 +4847,17 @@ morphismDefs theories insts mo = do
       Just ws
         | not (any (paramWire param) ws) -> Right ""
         | otherwise -> Right (unwords [ if paramWire param w
-                                          then moWord mo else "_" | w <- ws ])
+                                          then tfWord mo else "_" | w <- ws ])
 
     square th param a b (sName, Arrow sIn sOut _) = do
       kIn  <- stageFor param sName sIn
       kOut <- stageFor param sName sOut
       let lhsS = joinSrc [slotDefName (inName a) sName, kOut]
           rhsS = joinSrc [kIn, slotDefName (inName b) sName]
-          lhsN = morphDefName nm "lhs" sName
-          rhsN = morphDefName nm "rhs" sName
+          lhsN = transformationDefName nm "lhs" sName
+          rhsN = transformationDefName nm "rhs" sName
       (mlaw, why) <- pure (sampledLaw th param a b sName sIn sOut)
-      pure ( MorphSquare sName lhsN rhsN (fmap slName mlaw) why
+      pure ( TransformationSquare sName lhsN rhsN (fmap slName mlaw) why
                          (maybe 0 slPoints mlaw) (maybe False slExit mlaw)
            , lhsS, rhsS, fmap slSrc mlaw )
 
@@ -4870,7 +4876,7 @@ morphismDefs theories insts mo = do
                   rhsRun = joinSrc [unwords atoms, compAt sIn
                                    , slotDefName (inName b) sName, obs]
               in ( Just (SampledLaw
-                          (morphDefName nm "square" sName)
+                          (transformationDefName nm "square" sName)
                           ("(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
                             ++ "(forget >> true | forget >> false) >> merge")
                           (length [ () | w <- ins, paramWire param w ])
@@ -4926,12 +4932,13 @@ morphismDefs theories insts mo = do
 -- What a component must be: the source model's carrier to the target's.
 -- `k(a, b) \8658 k\8242(a, b)` for a hom-object, `A \8658 B` for a wire
 -- parameter.  It is DECLARED in the sense that matters — the two model
--- heads wrote it — so a morphism's word can be forward-declared at it,
+-- heads wrote it — so a transformation's word can be forward-declared
+-- at it,
 -- exactly as a theory slot is.
-componentArrow :: [Theory] -> [Instance] -> Morphism -> Either String Arrow
+componentArrow :: [Theory] -> [Instance] -> Transformation -> Either String Arrow
 componentArrow theories insts mo = do
-  a  <- modelOf (moFrom mo)
-  b  <- modelOf (moTo mo)
+  a  <- modelOf (tfFrom mo)
+  b  <- modelOf (tfTo mo)
   th <- theoryOf theories (inTheory a)
   case (thParams th, listToMaybe (inArgs a), listToMaybe (inArgs b)) of
     ([PCon _ _], Just (IACon ca), Just (IACon cb)) ->
@@ -4940,60 +4947,60 @@ componentArrow theories insts mo = do
       in Right (arrPure (SCons (TData ca [x, y]) SEnd)
                         (SCons (TData cb [x, y]) SEnd))
     ([PWire _], Just (IAStack sa), Just (IAStack sb)) -> Right (arrPure sa sb)
-    _ -> Left $ "morphism " ++ moName mo ++ ": theory " ++ thName th
+    _ -> Left $ "transformation " ++ tfName mo ++ ": theory " ++ thName th
              ++ "'s parameter and the models' arguments are not at one kind"
   where
     modelOf n = case [ i | i <- insts, inName i == n ] of
       (i : _) -> Right i
-      []      -> Left $ "morphism " ++ moName mo ++ ": " ++ n
+      []      -> Left $ "transformation " ++ tfName mo ++ ": " ++ n
                      ++ " is not a model declared at this point"
 
 -- The component's own type, and the verdict on every square.  Run after
 -- the module's defs are in: the squares are ordinary defs by then, so
 -- the normalizer can be asked whether the two sides are the same
 -- morphism, and where it cannot say, the sampled law does.
-checkMorphism :: Env -> RunDefs -> [Theory] -> [Instance] -> Morphism
-              -> [MorphSquare] -> Either String MorphInfo
-checkMorphism env defs theories insts mo squares = do
-  a  <- modelOf (moFrom mo)
-  b  <- modelOf (moTo mo)
+checkTransformation :: Env -> RunDefs -> [Theory] -> [Instance] -> Transformation
+              -> [TransformationSquare] -> Either String TransformationInfo
+checkTransformation env defs theories insts mo squares = do
+  a  <- modelOf (tfFrom mo)
+  b  <- modelOf (tfTo mo)
   th <- theoryOf theories (inTheory a)
   case thParams th of
     [_] -> do
       wanted <- componentArrow theories insts mo
-      sc <- maybe (Left (here ++ "no word " ++ moWord mo)) Right
-                  (M.lookup (moWord mo) env)
+      sc <- maybe (Left (here ++ "no word " ++ tfWord mo)) Right
+                  (M.lookup (tfWord mo) env)
       case subsumes sc wanted of
         Right () -> Right ()
-        Left e   -> Left $ here ++ "the component " ++ moWord mo ++ " is "
+        Left e   -> Left $ here ++ "the component " ++ tfWord mo ++ " is "
                         ++ show (normalizeArrow (runInfer0 (instantiate sc)))
-                        ++ " but a component from " ++ moFrom mo ++ " to "
-                        ++ moTo mo ++ " is " ++ show (normalizeArrow wanted)
+                        ++ " but a component from " ++ tfFrom mo ++ " to "
+                        ++ tfTo mo ++ " is " ++ show (normalizeArrow wanted)
                         ++ " (" ++ e ++ ")"
-    _ -> Right ()   -- refused earlier, at `morphismDefs`
+    _ -> Right ()   -- refused earlier, at `transformationDefs`
   vs <- mapM verdict squares
-  pure (MorphInfo (moName mo) (moFrom mo) (moTo mo) vs
-                  [ msSlot sq | sq <- squares
-                              , isJust (msLaw sq), not (msExit sq) ])
+  pure (TransformationInfo (tfName mo) (tfFrom mo) (tfTo mo) vs
+                  [ tsqSlot sq | sq <- squares
+                              , isJust (tsqLaw sq), not (tsqExit sq) ])
   where
-    here = "morphism " ++ moName mo ++ ": "
+    here = "transformation " ++ tfName mo ++ ": "
     modelOf n = case [ i | i <- insts, inName i == n ] of
       (i : _) -> Right i
       []      -> Left $ here ++ n ++ " is not a model declared at this point"
-    verdict sq = case (termOf (msLhs sq), termOf (msRhs sq)) of
+    verdict sq = case (termOf (tsqLhs sq), termOf (tsqRhs sq)) of
       (Just tl, Just tr) ->
         case sameProgram env defs defs tl tr of
           -- proved, for every input
-          Right True -> Right (msSlot sq, MVProved)
+          Right True -> Right (tsqSlot sq, TVProved)
           -- decided at the samples
-          _ | isJust (msLaw sq) -> Right (msSlot sq, MVSampled (msPoints sq))
-          _ -> Left $ here ++ "the square for slot '" ++ msSlot sq
+          _ | isJust (tsqLaw sq) -> Right (tsqSlot sq, TVSampled (tsqPoints sq))
+          _ -> Left $ here ++ "the square for slot '" ++ tsqSlot sq
                    ++ "' does not decide \8212 `sameCode` cannot prove it, and "
-                   ++ "it cannot be sampled: " ++ msWhy sq ++ ".  Add a "
+                   ++ "it cannot be sampled: " ++ tsqWhy sq ++ ".  Add a "
                    ++ "`sample` slot to theory " ++ inTheory (head
-                        [ i | i <- insts, inName i == moFrom mo ])
+                        [ i | i <- insts, inName i == tfFrom mo ])
                    ++ ", or state the square as a law of the theory."
-      _ -> Left (here ++ "internal: missing square def for " ++ msSlot sq)
+      _ -> Left (here ++ "internal: missing square def for " ++ tsqSlot sq)
     termOf n = listToMaybe [ t | (dn, de) <- M.toList defs, dn == n
                                , let t = deBody de ]
 
@@ -5241,7 +5248,8 @@ data Module = Module
   , modTrans     :: [Transport]         -- models with a carrier
   , modKWords    :: [(String, String)]  -- def -> the category it is a word of
   , modBases     :: [BaseInstance]      -- `model Name : Base`
-  , modMorphs    :: [MorphInfo]         -- `morphism Name`, with its verdicts
+  , modTransformations :: [TransformationInfo]  -- `transformation Name`,
+                                                -- with its verdicts
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -5279,7 +5287,7 @@ splitDefs src = do
       -- `theory` / `model`: a header plus its indented block, raw
       -- `functor F = word`: a declaration line with no block, so it
       -- rides the block bucket with an empty body
-      | (kw : _) <- words l, kw `elem` ["functor", "morphism"] = do
+      | (kw : _) <- words l, kw `elem` ["functor", "transformation"] = do
           (ds, ts, bs, is, ps) <- go Nothing rest
           pure (ds, ts, (l, [], doc) : bs, is, ps)
       -- `rules` was a keyword until 2026-09-13; it is a model now.
@@ -5288,6 +5296,13 @@ splitDefs src = do
               ++ "ambient presentation, so it is written `model Name : "
               ++ "Base = p = q, …` (or one `p = q` per indented line).  "
               ++ "MANUAL §8."
+      -- `morphism` was the keyword until 2026-09-14.
+      | ("morphism" : _) <- words l =
+          Left $ "`morphism` is spelled `transformation` since 2026-09-14: "
+              ++ "a map between two models of a theory is a NATURAL "
+              ++ "TRANSFORMATION between the functors they are — write `"
+              ++ ("transformation " ++ unwords (drop 1 (words l)))
+              ++ "`.  MANUAL §8."
       -- `instance` and `mode` were keywords until 2026-09-13.
       | ("instance" : _) <- words l =
           Left $ "`instance` is spelled `model` since 2026-09-13: write `"
@@ -6069,8 +6084,9 @@ checkModuleWith base src = do
                        , isNothing (baseInstanceName h) ]
   ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]
-  ownMorphs <- sequence [ parseMorphismLine h
-                        | (h, _, _) <- declLines, take 8 h == "morphism" ]
+  ownTransformations <- sequence [ parseTransformationLine h
+                        | (h, _, _) <- declLines
+                        , take 14 h == "transformation" ]
   -- A model of `Base` declares a WORD of its own name (so `[Opt]`
   -- is an ordinary quote and `lift2 [Opt]` lifts it at runtime); the
   -- scope itself is the renaming every `use Inst` performs, receipt
@@ -6087,7 +6103,7 @@ checkModuleWith base src = do
       funcs = ownFuncs ++ mbFuncs base
       -- one namespace for every name a `use` header may carry
       useNames = map fst funcs ++ map fst ownBases
-                 ++ [ inName i | i <- insts ] ++ map moName ownMorphs
+                 ++ [ inName i | i <- insts ] ++ map tfName ownTransformations
   case [ n | (n, i) <- zip useNames [0 :: Int ..]
            , n `elem` take i useNames ] of
     (n : _) | n `elem` map fst ownBases || n `elem` map inName insts ->
@@ -6097,27 +6113,27 @@ checkModuleWith base src = do
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories trans) insts
-  -- A MORPHISM contributes its component as a word, the two sides of
+  -- A TRANSFORMATION contributes its component as a word, the two sides of
   -- every square, and the sampled law for each square the theory's
   -- evidence can decide.  They are ordinary defs, named with the
   -- compiler's `@` so no source can reach them.
-  morphParts <- mapM (morphismDefs theories insts) ownMorphs
-  let morphDefs' = concatMap fst morphParts
+  transformationParts <- mapM (transformationDefs theories insts) ownTransformations
+  let transformationDefSrcs = concatMap fst transformationParts
   slotTable <- (++ mbSlots base)
                  <$> sequence [ (\th -> (inName i, (thName th, slotWords trans th i)))
                                   <$> theoryOf theories (inTheory i)
                               | i <- insts ]
   slotSigs <- concat <$> mapM (declaredSlots theories) insts
-  -- a morphism's component is forward-declared at the type the two
+  -- a transformation's component is forward-declared at the type the two
   -- model heads wrote, so a def may name it however the declarations
   -- are ordered — the same courtesy a theory slot gets
-  morphSigs <- sequence [ (,) (moName mo) . generalize M.empty
+  transformationSigs <- sequence [ (,) (tfName mo) . generalize M.empty
                             <$> componentArrow theories insts mo
-                        | mo <- ownMorphs ]
+                        | mo <- ownTransformations ]
   -- a functor's receipt is a word in the environment from here on: defs,
   -- model bodies and main are all inferred with it in scope
   let envSig = foldr (\(n, sc) e -> M.insert n sc e) (receiptEnv funcs env1)
-                     (slotSigs ++ morphSigs)
+                     (slotSigs ++ transformationSigs)
   -- The Base-model words are hoisted ABOVE the module's own defs:
   -- their bodies mention nothing but the prelude, and `use Opt` inside a
   -- def needs the word to be runnable by then (the ordering rule).
@@ -6142,10 +6158,10 @@ checkModuleWith base src = do
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
     foldM (addDef slotTable funcs thNames trans ownBases resNames
                   (map inName insts))
-          (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst morphSigs,
+          (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
-          (baseDefs ++ transDefs ++ defSrcs ++ instDefs ++ morphDefs')
+          (baseDefs ++ transDefs ++ defSrcs ++ instDefs ++ transformationDefSrcs)
   -- the generated transport word is checked like any other functor's
   -- word: if a model's slots ever stop composing, the message says so
   -- here
@@ -6161,11 +6177,11 @@ checkModuleWith base src = do
         ownBases0
   mapM_ (checkLawType env') [ n | (n, _, _) <- instDefs, isJust (lawParts n) ]
   mapM_ (checkLawType env')
-        [ n | (n, _, _) <- morphDefs', isJust (squareParts n) ]
+        [ n | (n, _, _) <- transformationDefSrcs, isJust (squareParts n) ]
   -- every square decided, by the normalizer or at the samples; the
   -- verdicts are kept on the module, so nothing decides them twice
-  morphInfos <- sequence [ checkMorphism env' runFinal theories insts mo sqs
-                         | (mo, (_, sqs)) <- zip ownMorphs morphParts ]
+  transformationInfos <- sequence [ checkTransformation env' runFinal theories insts mo sqs
+                         | (mo, (_, sqs)) <- zip ownTransformations transformationParts ]
   mainPart <-
     if all isSpace mainSrc
       then pure Nothing
@@ -6180,7 +6196,7 @@ checkModuleWith base src = do
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
                 theories insts funcs tmpls ownTrans kwords ownBases
-                morphInfos)
+                transformationInfos)
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
@@ -6348,9 +6364,9 @@ checkModuleWith base src = do
                , maybe docs (\d -> M.insert name d docs) doc
                , tmpls, kws2 )
       where
-        inDef e = case morphNameParts name of
+        inDef e = case transformationNameParts name of
           Just (mo, sl) ->
-            "morphism " ++ mo ++ ": the square for slot '" ++ sl
+            "transformation " ++ mo ++ ": the square for slot '" ++ sl
               ++ "' does not typecheck (" ++ e ++ ") \8212 the component "
               ++ "must be a word from the source model's carrier to the "
               ++ "target's, and every slot's square must be writable at it"
@@ -8700,7 +8716,7 @@ runModule src = runExceptT $ do
   -- saying so at module start is the whole difference between a law
   -- that documents and a law that holds.
   mapM_ (runLaw m) [ (n, t) | (n, _, t) <- modDefs m, isJust (lawParts n) ]
-  -- ...and every square a morphism could only decide at the samples.
+  -- ...and every square a transformation could only decide at the samples.
   -- A square the normalizer PROVED is not sampled again: its law was
   -- generated before the verdict was in, and sampling a proved square
   -- could only weigh two carriers `eq?` has nothing true to say about.
@@ -8730,16 +8746,16 @@ runLaw m (n, t) = do
       in throwError $ "law '" ++ lw ++ "' fails for model " ++ inst
                    ++ ": a model must be an audited model of its theory"
 
--- Was this square left to the samples?  A morphism the module does not
+-- Was this square left to the samples?  A transformation the module does not
 -- know about (there is none) is sampled, which is what the check did
 -- before the verdicts were recorded.
 sampledSquare :: Module -> String -> String -> Bool
 sampledSquare m mo sl =
-  or [ True | mi <- modMorphs m, miName mi == mo
-            , (s, MVSampled _) <- miSquares mi, s == sl ]
-    || null [ () | mi <- modMorphs m, miName mi == mo ]
+  or [ True | mi <- modTransformations m, tiName mi == mo
+            , (s, TVSampled _) <- tiSquares mi, s == sl ]
+    || null [ () | mi <- modTransformations m, tiName mi == mo ]
 
--- One generated square, run at the theory's samples.  A morphism whose
+-- One generated square, run at the theory's samples.  A transformation whose
 -- square the normalizer could not prove is checked here instead, and a
 -- failure names the slot whose square does not commute.
 runSquare :: Module -> (String, Term) -> ExceptT String IO ()
@@ -8754,11 +8770,12 @@ runSquare m (n, t) = do
           -- themselves: say so, because `eq?` on a carrier holding a
           -- quotation is syntactic and answers `false` for two
           -- extensionally equal continuations
-          bare = or [ sl `elem` miNoExit mi | mi <- modMorphs m
-                                            , miName mi == mo ]
-      in throwError $ "morphism " ++ mo ++ ": the square for slot '" ++ sl
-                   ++ "' does not commute at the theory's samples \8212 a "
-                   ++ "morphism of models is a homomorphism, slot by slot"
+          bare = or [ sl `elem` tiNoExit mi | mi <- modTransformations m
+                                            , tiName mi == mo ]
+      in throwError $ "transformation " ++ mo ++ ": the square for slot '"
+                   ++ sl ++ "' does not commute at the theory's samples "
+                   ++ "\8212 a transformation between models is a "
+                   ++ "homomorphism, slot by slot"
                    ++ (if bare
                          then ".  The two carriers were compared with `eq?` "
                                ++ "directly, since the theory declares no "

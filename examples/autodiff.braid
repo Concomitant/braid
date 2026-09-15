@@ -15,14 +15,14 @@
 # tangent (forward mode), `Rev` carries the TRANSPOSE of the same
 # linear map as a continuation (reverse mode).  Forward and reverse are
 # not two algorithms here; they are two REPRESENTATIONS of one linear
-# map, and `morphism Transpose : Fwd ⇒ Rev` is the sentence that says
-# so — §7 declares it, and records which of its squares the normalizer
-# proves and which the theory's samples decide.  A fourth model in §8
-# threads the adjoint through a resource.
+# map, and `transformation Transpose : Fwd ⇒ Rev` is the sentence that
+# says so — §7 declares it, and records which of its squares the
+# normalizer proves and which the theory's samples decide.  A fourth
+# model in §8 threads the adjoint through a resource.
 #
 # There is no `Code`, no `functor`, no `getCode` anywhere below.  This
 # is not metaprogramming: it is one theory, four models, two declared
-# morphisms and a resource.  Binders throughout, so every slot body
+# transformations and a resource.  Binders throughout, so every slot body
 # reads as the arithmetic it is.
 
 # ---------------------------------------------------------------------
@@ -279,7 +279,8 @@ def newton =
                                #   exactly what it says it is.
 
 # ---------------------------------------------------------------------
-# 7. The morphisms — two declarations, and what their squares establish
+# 7. The transformations — two declarations, and what their squares
+#    establish
 # ---------------------------------------------------------------------
 # FORGETTING THE TANGENT IS A HOMOMORPHISM.  That single declaration is
 # the statement "AD computes the right value": for every generator, the
@@ -292,7 +293,7 @@ def newton =
 # sampled.  A `Dual` is two Float wires with a roll around it, so
 # `unDual` partitions into one track and the whole square normalizes.
 
-morphism Value : Fwd ⇒ Floats = value
+transformation Value : Fwd ⇒ Floats = value
 #   Value : Dual ⇒ Float — the component is an ordinary word
 
 # A TANGENT BECOMES THE LINEAR MAP THAT SCALES BY IT.  That is the
@@ -301,10 +302,10 @@ morphism Value : Fwd ⇒ Floats = value
 def transpose = unDual ; (x dx -> x (dx ; scaleK) ; Rev)
 #   transpose : Dual ⇒ Rev
 
-morphism Transpose : Fwd ⇒ Rev = transpose
+transformation Transpose : Fwd ⇒ Rev = transpose
 
-# What its eight squares establish (`:morphisms` in the REPL prints the
-# verdicts): `lit`, `sample` and `observe` are PROVED by the
+# What its eight squares establish (`:transformations` in the REPL
+# prints the verdicts): `lit`, `sample` and `observe` are PROVED by the
 # normalizer, for every input — which is why `rlit` builds the ZERO
 # LINEAR MAP `(0.0 ; scaleK)` rather than `[(d -> gzero)]`: the two are
 # the same map and only the first is the same CODE, and `lit`'s input
@@ -402,11 +403,11 @@ def gradPoly =
 # different piece of work.
 #
 # THE GRADIENT HALF OF THE TRANSPOSE IS NOT MACHINE-CHECKED — see §7.
-# `morphism Transpose` is declared and its eight squares are decided,
-# but the five sampled ones are compared through the theory's exit, and
-# the exit is the VALUE: a theory whose exit could also hand back the
-# gradient is the per-model exit that a slot is not.  §5's printed
-# gradients are the evidence for the other half.
+# `transformation Transpose` is declared and its eight squares are
+# decided, but the five sampled ones are compared through the theory's
+# exit, and the exit is the VALUE: a theory whose exit could also hand
+# back the gradient is the per-model exit that a slot is not.  §5's
+# printed gradients are the evidence for the other half.
 #
 # `examples/transpose.braid` is the linear-algebra view of the same
 # operation: reversing a diagram and dualizing each generator

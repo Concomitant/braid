@@ -69,7 +69,8 @@ data ReplState = ReplState
   , rsTrans    :: [Transport] -- carrier models `:import` brought in
   , rsKWords   :: [(String, String)]   -- def -> the category it is a word of
   , rsBases    :: [BaseInstance]        -- models of `Base` it imported
-  , rsMorphs   :: [MorphInfo]  -- morphisms it imported, with their verdicts
+  , rsTransformations :: [TransformationInfo]
+                         -- transformations it imported, with their verdicts
     -- a session cannot DECLARE a theory, a model or a functor, but
     -- `:import` can bring them in, and then `use` must know them
   }
@@ -87,7 +88,7 @@ repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :import \"f.braid\", :s stack, :defs, :morphisms, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :import \"f.braid\", :s stack, :defs, :transformations, :clear, :q quit"
   runInputT defaultSettings (loop initialState)
 
 -- haskeline supplies line editing, history (up-arrow), and ctrl-d;
@@ -124,11 +125,11 @@ loop st = do
                      putStrLn ("def " ++ n ++ " : template over " ++ th))
                   (reverse (rsTmpls st))
           loop st
-        ":morphisms" -> do
-          liftIO $ case rsMorphs st of
-            [] -> putStrLn "no morphisms in scope   (:import a file that \
-                           \declares one)"
-            ms -> mapM_ (putStrLn . renderMorph) ms
+        ":transformations" -> do
+          liftIO $ case rsTransformations st of
+            [] -> putStrLn "no transformations in scope   (:import a file \
+                           \that declares one)"
+            ms -> mapM_ (putStrLn . renderTransformation) ms
           loop st
         l | ":t! " `isPrefixOf` l -> do
               liftIO (typeOfWith show st (drop 4 l))
@@ -235,11 +236,11 @@ docOf st name
         Nothing -> putStrLn "(no doc)" >> putStrLn renderTypeLine >> verdicts
   | otherwise = putStrLn $ "unknown name: " ++ name
   where
-    -- a morphism's word is a def like any other, and its squares are
-    -- one line of its documentation (`:morphisms` for the slots)
+    -- a transformation's word is a def like any other, and its squares
+    -- are one line of its documentation (`:transformations` for the slots)
     verdicts =
-      mapM_ (putStrLn . morphDocLine)
-            [ mi | mi <- rsMorphs st, miName mi == name ]
+      mapM_ (putStrLn . transformationDocLine)
+            [ mi | mi <- rsTransformations st, tiName mi == name ]
     isAlias = any ((== name) . aName) (rsAliases st)
               || any ((== name) . dName) (rsDatas st)
     renderTypeLine =
@@ -332,10 +333,10 @@ importLine st arg =
                     , rsTrans    = modTrans m
                     , rsKWords   = modKWords m
                     , rsBases    = modBases m
-                    , rsMorphs   = modMorphs m
-                                     ++ [ mi | mi <- rsMorphs st
-                                             , miName mi `notElem`
-                                                 map miName (modMorphs m) ]
+                    , rsTransformations   = modTransformations m
+                                     ++ [ mi | mi <- rsTransformations st
+                                             , tiName mi `notElem`
+                                                 map tiName (modTransformations m) ]
                     }
               putStrLn $ "imported " ++ path ++ "   ("
                        ++ intercalate ", " (filter (not . null)
@@ -346,7 +347,8 @@ importLine st arg =
                             , count (length (modFunctors m)) "functor"
                             , count (length (modTemplates m)
                                        - length (rsTmpls st)) "template"
-                            , count (length (modMorphs m)) "morphism" ])
+                            , count (length (modTransformations m))
+                                    "transformation" ])
                        ++ ")"
               pure st'
   where

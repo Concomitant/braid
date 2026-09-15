@@ -1900,7 +1900,7 @@ had to be stated syntactically, with `eq?`, and labelled as such:
   category (`2 _ ; *` and `dup ; +`).
 
 **Natural transformations, the three readings** (recorded 2026-09-08,
-now partly cashed). (1) *Model homomorphisms* — `morphism Len :
+now partly cashed). (1) *Model homomorphisms* — `transformation Len :
 ListMonoid -> IntSum = len`, one generated law per slot, naturality
 finite because the base is free. Designed, not shipped: the generator
 is easy, the **verdict** is not (slots are recursive defs the
@@ -1923,8 +1923,8 @@ stage is not central, so it is not a transformation `Id ⇒ Id` even
 though its type says so — a pure one is, and is the identity.
 Transformations are stated between functors into the *same* fibre;
 crossing fibres needs a handler first (a grade-decrementing model
-morphism). Non-local functors get no generator check — they are not by
-generators — and stay sampled.
+transformation). Non-local functors get no generator check — they are
+not by generators — and stay sampled.
 
 ## Amendment (2026-09-13): the normal form for sums
 
@@ -2247,7 +2247,7 @@ refusal is right: the two modes present two different categories, and
 a functor between them is a piece of data neither declaration carries.
 The way to cross is to leave `K2` first — its exit — and re-enter,
 which is exactly "entering is a marker, leaving is a model" applied
-twice. A transport `K2 → K` would be the `morphism` declaration, still
+twice. A transport `K2 → K` would be the `transformation` declaration, still
 unbuilt for the reason recorded above.
 
 **The category axioms are NOT decided, and the reason is structural.**
@@ -2258,7 +2258,7 @@ the structural fragment: `ev` of a value that is not a literal
 quotation*. An Arrow's composition must APPLY a program that arrived
 as a wire — `compC` through `fix`, `Funcs` through `unArr ; ev` — and
 an `Fn` whose input stack is an open variable has no arity to give it.
-This is not a gap peculiar to modes: it is the `morphism` verdict
+This is not a gap peculiar to modes: it is the `transformation` verdict
 again, equality modulo a model's defining equations, which is
 structural induction over an initial algebra and not normalization in
 a free category. The five laws stay finite tests of an infinite
@@ -2636,12 +2636,12 @@ they were stated by `observe` at sample points, and they still are. The
 flips are pinned in `test/Tests.hs` and described where they are true,
 in `examples/circuits.braid`'s closing comment.
 
-## Amendment (2026-09-13): `morphism`, shipped
+## Amendment (2026-09-13): `transformation`, shipped
 
 *Stage 5d, part three. Designed on 2026-09-13 and shipped the same
 day, once `ev` gave the verdict something to stand on.*
 
-**The declaration.** `morphism Len : ListMonoid ⇒ IntSum = len` — two
+**The declaration.** `transformation Len : ListMonoid ⇒ IntSum = len` — two
 models of ONE theory and a base word between their carriers. The
 elaborator generates one square per slot,
 
@@ -2663,7 +2663,7 @@ is what this amendment is.
    commits ago: a hom-object pins its own `Fn⟨a ⇒ b⟩` to one wire per
    side, so `ev` of it has an arity and a whole internal functor's
    squares go through. All five of `Forget`'s do, in
-   `examples/morphisms.braid`.
+   `examples/transformations.braid`.
 2. **Sampled**, at the theory's own evidence, when the normalizer will
    not: `sample : • ⇒ a` supplies the inputs, an exit observes a result
    that is a carrier (a carrier cannot be compared), `eq?` decides, and
@@ -2676,8 +2676,9 @@ is what this amendment is.
 
 **Decisions worth the record.**
 
-- *Evidence is a generator.* `sample` is a slot, so a morphism must
-  preserve it. The example's list has seven elements because `IntSum`'s
+- *Evidence is a generator.* `sample` is a slot, so a transformation
+  must preserve it. The example's list has seven elements because
+  `IntSum`'s
   sample is 7. The alternative — exempting evidence slots — would have
   been a second class of slot, and there is no such thing in a theory.
 - *`⇒`, not `->`.* The arrow of every written type in Braid; `->` is
@@ -2691,8 +2692,9 @@ is what this amendment is.
   the compiler spells it, while source still may not. That is cheaper
   and more honest than wrapping each side in a scope that would
   transport what it touched.
-- *One parameter.* A morphism is a component AT the theory's parameter,
-  so a theory with two is refused, naming the count. `Doctrine` itself
+- *One parameter.* A transformation is a component AT the theory's
+  parameter, so a theory with two is refused, naming the count.
+  `Doctrine` itself
   has two (the hom-object and the pairing); the theories that extend it
   have one, which is the case that matters.
 - *`use Len` is not shipped.* Transporting a template's result from one
@@ -2945,7 +2947,7 @@ would have expected to need syntax.
 **Forward and reverse are one linear map, twice.** `Fwd` carries the
 tangent — the map applied to a seeded direction. `Rev` carries the
 map's **transpose** as a continuation `Float ⇒ Grad`: given the adjoint
-of this node, return the gradient of the inputs. `morphism Transpose :
+of this node, return the gradient of the inputs. `transformation Transpose :
 Fwd ⇒ Rev` is the sentence that says they are the same map, and it is
 a declaration rather than a comment. Two consequences fall out that are
 usually engineering:
@@ -2958,8 +2960,9 @@ usually engineering:
   one run per input. The file prints both, at the same function, to
   make the difference visible rather than asserted.
 
-**What the morphisms establish, measured.** `morphism Value : Fwd ⇒
-Floats = value` — forgetting the tangent — is the claim *AD computes
+**What the transformations establish, measured.**
+`transformation Value : Fwd ⇒ Floats = value` — forgetting the tangent
+— is the claim *AD computes
 the right value*, and **all eight squares are PROVED** by the
 normalizer (add, mul, neg, lit, exp, sin, sample, observe), not
 sampled. A `Dual` is two Float wires under a roll, `unDual` partitions
@@ -2983,7 +2986,7 @@ leaving is a model* already said the shape of this; what the flagship
 adds is that a carrier may have more to say on the way out than one
 slot can carry, and the answer is a word and not a bigger slot.
 
-**The gap `morphism` has, stated exactly.** `morphism Transpose : Fwd
+**The gap `transformation` has, stated exactly.** `transformation Transpose : Fwd
 ⇒ Rev = transpose` **cannot be declared as the machinery stands**, and
 the reason is the machinery and not the maths. When a theory's
 parameter is a WIRE rather than a hom-object, `sampledLaw`'s `observer`
@@ -2996,7 +2999,7 @@ answers `false`, and the module is refused with *the square for slot
 'add' does not commute at the theory's samples*. `sameCode` answers
 `false` one step earlier for the same reason.
 
-Measured, not guessed, by instrumenting `checkMorphism`:
+Measured, not guessed, by instrumenting `checkTransformation`:
 
 | slot | verdict |
 |---|---|
@@ -3008,7 +3011,7 @@ Note where the gap lives: it is exactly the **wire-parameter** case. A
 theory declared `over Doctrine`, whose parameter is a hom-object, takes
 the other branch of `observer` and goes through the exit already. So
 the machinery was right for the case it was written against
-(`examples/morphisms.braid`'s `Forget`) and wrong for the first theory
+(`examples/transformations.braid`'s `Forget`) and wrong for the first theory
 that put a function inside an ordinary carrier. `Smooth(a)` is an
 algebraic theory over one carrier — a ring — and not a category with a
 hom-object, which is why it is not declared `over Doctrine`: Elliott's
@@ -3025,7 +3028,7 @@ states the six squares by hand instead, through `rvalue` and
 shown rather than described.
 
 *(Made in stage 6a½, 2026-09-14. The `PCon` case is deleted, the exit
-is applied whatever the parameter's kind, and `morphism Transpose :
+is applied whatever the parameter's kind, and `transformation Transpose :
 Fwd ⇒ Rev = transpose` is a declaration in the file: `lit`, `sample`
 and `observe` **proved**, `add`, `mul`, `neg`, `exp` and `sin`
 **sampled** through the exit. `lit` proves only because `rlit` now
@@ -3038,7 +3041,7 @@ three sentences and a declaration. Two things the fix did NOT buy: a
 theory with no exit still compares carriers directly — there is
 nothing else — though a failure now names the fix, and the sampled
 squares establish their claim at the exit, which here is the value.
-The verdicts are stored on the module and printed by `:morphisms`,
+The verdicts are stored on the module and printed by `:transformations`,
 because the gap was found by instrumenting the compiler with
 `Debug.Trace`, and a verdict that takes a recompile to read is a
 verdict nobody checks.)*
@@ -3097,7 +3100,7 @@ is a different piece of work.
   slot — each applies an `Fn` whose input stack is an open variable, so
   there is no arity to give it. Those laws are still stated with `eq?`
   and labelled syntactic.
-- **A sampled `morphism` square over a wire parameter compares
+- **A sampled `transformation` square over a wire parameter compares
   CARRIERS with `eq?`** (2026-09-14), and a carrier may hold a closure,
   where `eq?` is syntactic. The theory's exit is applied only when the
   parameter is a constructor. Found by `examples/autodiff.braid`'s
@@ -3108,7 +3111,7 @@ is a different piece of work.
   *different morphism*, and here it means *spelled differently*.
   **CLOSED 2026-09-14 (stage 6a½)**: the `PCon` case is gone, so the
   exit is applied whatever the parameter's kind, and
-  `morphism Transpose : Fwd ⇒ Rev` is declared in the flagship. What a
+  `transformation Transpose : Fwd ⇒ Rev` is declared in the flagship. What a
   theory with no exit does is unchanged — it compares the carriers —
   but a failure now names the fix (*declare an exit `observe` in the
   theory*), and a square the normalizer PROVED is no longer sampled
@@ -3122,7 +3125,7 @@ is a different piece of work.
   inside itself for second derivatives — `model Fwd(M) :
   Smooth(Dual(M))` — cannot be said. Templates are parameterized by a
   model; models are not.
-- **`morphism` is shipped** (2026-09-13), and what is still missing is
+- **`transformation` is shipped** (2026-09-13), and what is still missing is
   narrower: a square over a model whose slots are folds is decided at
   SAMPLES, not proved, because equality modulo a model's defining
   equations is structural induction over an initial algebra — a
@@ -3143,8 +3146,33 @@ is a different piece of work.
   is written out. For a mode it could not run backwards anyway: type
   lines are parsed before theories and models, so a slot cannot
   mention a mode declared from a model of its own theory.
-- **Carrying a word across categories** is `morphism` now: a component
+- **Carrying a word across categories** is `transformation` now: a component
   between two models of one theory, with its squares decided. What it
   does not do is carry a TEMPLATE across — `use Len` would read a
   template through one model and land it in another, and that is a
   second elaboration nobody has asked for yet.
+
+## Amendment (2026-09-14): `morphism` → `transformation`
+
+*A rename, one spelling, no new machinery.*
+
+Two models of one theory are two functors out of the presented
+category; a map between them with one component per object and a
+commuting square per generator is a **natural transformation** between
+those functors, and the generated squares are its naturality squares.
+So the declaration is `transformation Len : ListMonoid ⇒ IntSum = len`,
+the REPL command is `:transformations`, and `examples/morphisms.braid`
+is `examples/transformations.braid`.
+
+`morphism` was correct only in the reading "a morphism in the category
+of models", which is underspecified — every arrow in every category is
+a morphism, and the word said nothing about which one this is.
+"Natural" is implied and therefore not written: there is no other kind
+of transformation here, and the checker enforces naturality. For an
+algebraic theory the same thing is a **homomorphism of models**; for a
+theory over the `Doctrine` it is also an **internal functor**. One
+declaration, three readings, one spelling.
+
+The old keyword is refused with the new one: *`morphism` is spelled
+`transformation` since 2026-09-14 … write `transformation Len :
+ListMonoid ⇒ IntSum = len`*, the way `instance` and `mode` are refused.

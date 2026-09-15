@@ -1,8 +1,11 @@
-# A morphism BETWEEN MODELS — the declaration that was missing.
+# A NATURAL TRANSFORMATION BETWEEN MODELS — the declaration that was
+# missing.
 #
-# A theory has models; the models have morphisms.  `morphism Len :
-# ListMonoid ⇒ IntSum = len` says that `len` is a homomorphism: for
-# every slot `s : Σ ⇒ Θ` of the theory, the square
+# A theory has models, and two models of one theory are two functors out
+# of the presented category; a map between them is a NATURAL
+# TRANSFORMATION.  `transformation Len : ListMonoid ⇒ IntSum = len` says
+# that `len` is a homomorphism: for every slot `s : Σ ⇒ Θ` of the
+# theory, the square
 #
 #     ListMonoid@s ; Len(Θ)  =  Len(Σ) ; IntSum@s
 #
@@ -34,7 +37,7 @@ model IntSum : Monoid(Int) =
 # The samples must correspond too — `sample` is a generator like any
 # other, and a homomorphism preserves it.  A seven-element list is what
 # `len` sends to IntSum's 7, and stating it that way is the point: the
-# evidence a model is audited with is part of what a morphism must
+# evidence a model is audited with is part of what a transformation must
 # respect.
 model ListMonoid : Monoid(List(Int)) =
     unit   = nil
@@ -43,7 +46,7 @@ model ListMonoid : Monoid(List(Int)) =
 
 def len = [(acc x -> acc ; _ 1 ; +)] 0 ... ; fold
 
-morphism Len : ListMonoid ⇒ IntSum = len
+transformation Len : ListMonoid ⇒ IntSum = len
 #   Len : List(a) ⇒ Int — the component is an ordinary word, so it is
 #   usable in base code under its own name.  It is FORWARD-DECLARED at
 #   `List(Int) ⇒ Int`, the type the two model heads wrote, so a def may
@@ -63,7 +66,7 @@ morphism Len : ListMonoid ⇒ IntSum = len
 
 # ---- the same declaration over a DOCTRINE --------------------------
 # When the two models are models of a theory that extends `Doctrine`,
-# they are internal categories, and a morphism between them is an
+# they are internal categories, and a transformation between them is an
 # INTERNAL FUNCTOR: the squares for `compose`, `embed` and `first` are
 # exactly functoriality — preserves composition, preserves the image of
 # the base, preserves the strength.
@@ -114,7 +117,7 @@ model Funcs : Arrow(Plain) =
 # discarding a sum's payload, so this one is `strip`.)
 def strip = (c -> c ; witnessN ; Plain)
 
-morphism Forget : Names ⇒ Funcs = strip
+transformation Forget : Names ⇒ Funcs = strip
 #   Forget : Named(a, b) ⇒ Plain(a, b)
 
 def namedSq = over Names ; sample sample ; compose

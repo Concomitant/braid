@@ -21,8 +21,8 @@ each feature is the way it is), `examples/` (everything running).
 
 REPL commands: `:t <prog>` type · `:t! <prog>` raw (no alias folding) ·
 `:doc <name>` doc comment · `:defs` whole prelude with types ·
-`:morphisms` every declared morphism, with the verdict on each of its
-squares · `:s` show stack · `:clear` reset stack · `:q` quit. Every REPL line runs
+`:transformations` every declared transformation, with the verdict on
+each of its squares · `:s` show stack · `:clear` reset stack · `:q` quit. Every REPL line runs
 against a **persistent typed stack**; a line whose input doesn't match
 the current stack is rejected with a message naming the stack.
 
@@ -1665,7 +1665,8 @@ scope, *`observe` leaves `Circuits`*, *`f` is a word of `Other`, so it
 builds a carrier rather than being a program `embed` could embed*, and
 the width refusals above.
 
-**`morphism Len : ListMonoid ⇒ IntSum = len`** *(2026-09-13, shipped)*.
+**`transformation Len : ListMonoid ⇒ IntSum = len`** *(2026-09-13,
+shipped; spelled `morphism` until 2026-09-14)*.
 Two models of **one** theory, and a base word between their carriers.
 The claim is that the word is a **homomorphism**: for every slot
 `s : Σ ⇒ Θ`, the square
@@ -1682,6 +1683,18 @@ for composites paste from the squares for generators. The arrow is `⇒`
 because that is the arrow of every written type in Braid; `->` is only
 its ASCII synonym there.
 
+**Why `transformation`** *(2026-09-14)*. Two models of one theory are
+two functors out of the presented category, and a map between them with
+one component per object and a commuting square per generator is a
+**natural transformation** between those functors — the generated
+squares are naturality squares. `morphism` was correct only as "a
+morphism in the category of models", which is underspecified. "Natural"
+is implied: there is no other kind here, and the checker enforces it.
+For an algebraic theory the same thing is a homomorphism of models; for
+a theory over the `Doctrine` it is also an internal functor. The old
+keyword is refused with a pointer to the new one, as `instance` and
+`mode` are.
+
 The declaration generates the squares and **decides** them, one of two
 ways:
 
@@ -1690,7 +1703,7 @@ ways:
   whose carrier is a hom-object pins its own `Fn⟨a ⇒ b⟩` to one wire
   per side, so an internal functor's squares (`compose`, `embed`,
   `first`, and the exits) are proved outright: see `Forget` in
-  `examples/morphisms.braid`.
+  `examples/transformations.braid`.
 - **Sampled**, at the theory's own evidence, when it is not: `sample`
   supplies the inputs, an exit observes a result that is a carrier (a
   carrier cannot be compared), `eq?` decides, and the check runs at
@@ -1715,7 +1728,7 @@ does — but an ordinary type may HOLD a quotation
 (`data Rev = Float Fn⟨Float ⇒ Grad⟩`), and `eq?` on a quotation is
 syntactic, so two extensionally equal continuations built by different
 code answer `false` and a square that commutes is reported as not
-commuting. `examples/autodiff.braid`'s `morphism Transpose : Fwd ⇒ Rev`
+commuting. `examples/autodiff.braid`'s `transformation Transpose : Fwd ⇒ Rev`
 is the declaration that was refused that way and is declared now. Two
 consequences, both worth knowing before declaring one:
 
@@ -1735,12 +1748,13 @@ square used to run one too — harmlessly, until the exit change gave
 `first` (whose output is the hom-object at a *pairing*, which no exit
 fits) a law that weighed two carriers. Proof outranks evidence.
 
-**`:morphisms`** lists every morphism in scope — own and imported —
+**`:transformations`** lists every transformation in scope — own and
+imported —
 with the verdict on each square, read off the module rather than
 decided again:
 
 ```text
-braid> :morphisms
+braid> :transformations
 Transpose : Fwd ⇒ Rev
   add      sampled (2 points)
   …
@@ -1752,7 +1766,8 @@ theory's evidence at the n inputs `sample` supplied (a square with no
 inputs reads just `sampled`). `:doc <name>` puts the same verdicts on
 one line under the component's type.
 
-The component is an ordinary **word** under the morphism's own name,
+The component is an ordinary **word** under the transformation's own
+name,
 forward-declared at the type the two model heads wrote
 (`List(Int) ⇒ Int`), so a def may use it wherever it sits — and then
 typed like any def, which may be more general (`Len : List(a) ⇒ Int`,
@@ -1762,16 +1777,16 @@ it wants a second elaboration of the template, and nothing has asked
 for it yet.
 
 **Evidence is a generator.** `sample` is a slot like any other, so a
-morphism must preserve it: `len` of `ListMonoid`'s sample must *be*
+transformation must preserve it: `len` of `ListMonoid`'s sample must *be*
 `IntSum`'s sample. That is why the example's list has seven elements.
 If that reads as strict, it is the same strictness that makes a model
 an audited model — what the theory declares is what the models owe.
 
 **When both models are models of a theory extending `Doctrine`** they
-are internal categories, and a morphism between them is an **internal
-functor**: the squares for `compose`, `embed` and `first` are exactly
-functoriality. `examples/morphisms.braid` has one — a function that
-carries its name, and the functor that forgets the name.
+are internal categories, and a transformation between them is an
+**internal functor**: the squares for `compose`, `embed` and `first` are
+exactly functoriality. `examples/transformations.braid` has one — a
+function that carries its name, and the functor that forgets the name.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
@@ -2268,9 +2283,10 @@ carries a tangent, `Rev` carries the transpose of the same linear map
 as a continuation — and one body per program, written `over Smooth`
 and read by all three. Each slot says what the derivative of **one**
 operation is; nothing composes derivatives by hand, because `;` does.
-`morphism Value : Fwd ⇒ Floats = value` is the sentence *AD computes
-the right value*, and all eight of its squares are **proved** by the
-normalizer rather than sampled; `morphism Transpose : Fwd ⇒ Rev` is
+`transformation Value : Fwd ⇒ Floats = value` is the sentence *AD
+computes the right value*, and all eight of its squares are **proved**
+by the normalizer rather than sampled; `transformation Transpose : Fwd ⇒
+Rev` is
 the sentence *forward and reverse are one linear map*, and its
 verdicts are mixed — three proved, five sampled through the exit
 *(2026-09-14)*.
@@ -2785,7 +2801,7 @@ holds for them too: final atom of their stage (§9).
   those it is.
 - **A sampled square compares carriers with `eq?`, and a carrier may
   hold a closure** *(2026-09-14)*. When a theory's parameter is a
-  **wire** (rather than a hom-object), the square a `morphism`
+  **wire** (rather than a hom-object), the square a `transformation`
   generates is sampled by comparing the two carrier values directly —
   the theory's exit is not applied, on the reasoning that `eq?` reaches
   an ordinary type. It does; but `eq?` on a quotation is **syntactic**,
@@ -2798,7 +2814,7 @@ holds for them too: final atom of their stage (§9).
   through the exits, and states the one-line fix (apply the exit for a
   wire parameter too) that is deliberately not made yet.
   *(Resolved 2026-09-14: the exit is applied whatever the parameter's
-  kind, `morphism Transpose : Fwd ⇒ Rev` is declared, and `:morphisms`
+  kind, `transformation Transpose : Fwd ⇒ Rev` is declared, and `:transformations`
   prints what each square was decided by — §8. A theory that declares
   no exit still compares carriers directly, and says so when one
   fails.)* Two riders came out of the same investigation and are worth
@@ -2931,8 +2947,8 @@ that ties every row of the table together, and the one to read after
 `theories.braid`. `examples/autodiff.braid` declares `theory
 Smooth(a)`, three `data` carriers, three models (evaluation, forward
 mode, reverse mode), three programs written `over Smooth` and read by
-all three, two `morphism`s — one with every square proved, one decided
-three ways proved and five at the samples — Newton's method
+all three, two `transformation`s — one with every square proved, one
+decided three ways proved and five at the samples — Newton's method
 under `use Recursive`, and a fourth model in which the adjoint is
 threaded through a `resource` instead of summed. It contains no
 `Code`, no `functor` and no chain rule: the chain rule is what a model

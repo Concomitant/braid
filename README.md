@@ -78,8 +78,8 @@ braid> :doc decide
 ```
 
 `:t` shows a type (`:t!` raw, un-folded); `:doc` and `:defs` browse
-the prelude; `:morphisms` lists every declared morphism with the
-verdict on each of its squares; every REPL line runs against a
+the prelude; `:transformations` lists every declared transformation
+with the verdict on each of its squares; every REPL line runs against a
 persistent typed stack. A
 bare `use Log` line opens an ambient scope over the rest of the
 session — the resource threads itself through every later line, and a
@@ -216,15 +216,15 @@ bare `use` leaves.
     stateful circuit and a program paired with its own `Code` — are
     audited against the same seven.
 
-    Two models of one theory have **morphisms**:
-    `morphism Len : ListMonoid ⇒ IntSum = len` says `len` is a
+    Two models of one theory have **transformations** between them:
+    `transformation Len : ListMonoid ⇒ IntSum = len` says `len` is a
     homomorphism, and the elaborator generates one naturality square
     per slot and *decides* it — proved by `sameCode` where the
     normalizer reaches, sampled at the theory's own `sample` slot where
     it does not, and refused, naming the slot, where it can do neither.
     When the two models are models of a theory that extends `Doctrine`,
     that is an **internal functor**, and the squares are functoriality
-    (`examples/morphisms.braid`).
+    (`examples/transformations.braid`).
 
     A body can be written **once over the theory**. Two header words
     say which side you are on: **`over X` declares** that this def is a
@@ -404,7 +404,7 @@ bare `use` leaves.
     linear map as a continuation (reverse mode) — so forward and reverse
     are two representations of one map rather than two algorithms, and
     fan-out needs no special case because continuations are linear.
-    `morphism Value : Fwd ⇒ Floats = value` says *AD computes the right
+    `transformation Value : Fwd ⇒ Floats = value` says *AD computes the right
     value*, and all eight of its squares are **proved**, not sampled.
     Newton's method comes along under `use Recursive`, and a fourth
     model threads the adjoint through a `resource` instead of summing
@@ -430,8 +430,8 @@ the logged version of a function, game rules as lifted moves),
 `over Doctrine` declaration that transports base programs into them),
 `reified` (the same doctrine over a carrier that is the program AND its
 Code — `getCode` and `evalAs` as one model's embedding and exit) and
-`morphisms` (a homomorphism between two models, its squares generated
-and decided — proved for an internal functor, sampled for a fold),
+`transformations` (a natural transformation between two models, its
+squares generated and decided — proved for an internal functor, sampled for a fold),
 `payroll` (a whole small program: a resource, a theory and a grade
 meeting in one pass over data),
 `parallel`, `matrices`, `gla` (bundles and the bialgebra),
@@ -458,7 +458,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1043-case test suite, a full
+(typechecker, interpreter, REPL), a 1044-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

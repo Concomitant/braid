@@ -20,17 +20,18 @@ runExample name = do
         Right _  -> Nothing
         Left err -> Just ("examples/" ++ name ++ ": " ++ err)
 
--- MORPHISM VERDICTS (2026-09-14).  What the checker decided about each
--- square is STORED on the module, so `:morphisms` reads it rather than
+-- TRANSFORMATION VERDICTS (2026-09-14).  What the checker decided about
+-- each square is STORED on the module, so `:transformations` reads it
+-- rather than
 -- deciding it again; these pin the stored verdicts for the two example
--- files that declare morphisms.  `proved` is `sameCode`, for every
+-- files that declare transformations.  `proved` is `sameCode`, for every
 -- input; `sampled (n points)` is the theory's own evidence.
--- (example file, morphism, the rendering `:morphisms` prints)
-morphVerdictTests :: [(String, String, String)]
-morphVerdictTests =
+-- (example file, transformation, the rendering `:transformations` prints)
+transformationVerdictTests :: [(String, String, String)]
+transformationVerdictTests =
     -- a hom-object carrier pins its own `Fn` to one wire per side, so
     -- an internal functor's squares normalize outright
-  [ ( "morphisms.braid", "Forget"
+  [ ( "transformations.braid", "Forget"
     , unlines' [ "Forget : Names \8658 Funcs"
                , "  embed    proved"
                , "  compose  proved"
@@ -39,7 +40,7 @@ morphVerdictTests =
                , "  sample   proved" ] )
     -- ...and `len` is a fold, which applies its handler: all three
     -- squares go to the samples
-  , ( "morphisms.braid", "Len"
+  , ( "transformations.braid", "Len"
     , unlines' [ "Len : ListMonoid \8658 IntSum"
                , "  unit    sampled"
                , "  op      sampled (2 points)"
@@ -72,18 +73,18 @@ morphVerdictTests =
   ]
   where unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 
-runMorphVerdicts :: (String, String, String) -> IO (Maybe String)
-runMorphVerdicts (file, name, expected) = do
+runTransformationVerdicts :: (String, String, String) -> IO (Maybe String)
+runTransformationVerdicts (file, name, expected) = do
   loaded <- loadSource ("examples/" ++ file)
   pure $ case loaded >>= checkModule of
     Left err -> Just (file ++ " (" ++ name ++ "): " ++ err)
     Right m  ->
-      case [ mi | mi <- modMorphs m, miName mi == name ] of
-        []       -> Just (file ++ ": no morphism " ++ name)
+      case [ mi | mi <- modTransformations m, tiName mi == name ] of
+        []       -> Just (file ++ ": no transformation " ++ name)
         (mi : _)
-          | renderMorph mi == expected -> Nothing
+          | renderTransformation mi == expected -> Nothing
           | otherwise -> Just (file ++ ": expected\n" ++ expected
-                                    ++ "\ngot\n" ++ renderMorph mi)
+                                    ++ "\ngot\n" ++ renderTransformation mi)
 
 -- IMPORTS (stage 4¾).  A file's declarations in another file's scope:
 -- textual inclusion, so a type, a resource, a theory, a model and a
@@ -1084,7 +1085,7 @@ modeMod = unlines
   , "    sample  = [dup ; +] ; Arr"
   ]
 
--- MORPHISMS (5d): two models of one theory, and a word between their
+-- TRANSFORMATIONS (5d): two models of one theory, and a word between their
 -- carriers.  `len` is opaque to the normalizer (it applies its handler,
 -- and that `ev` has an open arrow), so every square here is decided at
 -- the theory's samples \8212 which is why the samples correspond.
@@ -2167,19 +2168,19 @@ evalTests =
   , (ruleMod ++ optimizerTheory ++ "model OptIsOpt : Optimizer\n\
      \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
      ["audited"], "")
-    -- A MORPHISM accepted: the squares are checked at declaration time
+    -- A TRANSFORMATION accepted: the squares are checked at declaration time
     -- and the component is an ordinary word under its own name, usable
     -- in a def that was written before the declaration.
-  , (monoidMod ++ "morphism Len : ListMonoid ⇒ IntSum = len\n\
+  , (monoidMod ++ "transformation Len : ListMonoid ⇒ IntSum = len\n\
      \def three = 1 2 3 >> pack >> Len\nthree >> print",
      ["3"], "")
-    -- A MORPHISM OVER A CARRIER THAT HOLDS A FUNCTION (2026-09-14).
+    -- A TRANSFORMATION OVER A CARRIER THAT HOLDS A FUNCTION (2026-09-14).
     -- The `sample` square is not provable (the two models spell the
     -- same linear map differently) and is decided at the theory's
     -- evidence THROUGH THE EXIT.  Compared as carriers it would be
     -- `eq?` on a quotation, which is syntactic, and this declaration
     -- would be refused for a square that commutes.
-  , (closureMod ++ "morphism Scaled : Src ⇒ Dst = toK\n\
+  , (closureMod ++ "transformation Scaled : Src ⇒ Dst = toK\n\
      \def run = Scaled >> unK >> (v k -> k 5 >> ev)\n\
      \2 3 >> Two >> run >> print",
      ["15"], "")
@@ -2640,6 +2641,11 @@ moduleFailTests =
      "`mode` is gone: a model whose theory has a hom-object `k(_, _)` \
      \transports when it is USED, so the model IS the declaration — \
      \write `use Funcs` where you wrote `use K`")
+  , (monoidMod ++ "morphism Len : ListMonoid ⇒ IntSum = len\n1 >> print",
+     "`morphism` is spelled `transformation` since 2026-09-14: a map \
+     \between two models of a theory is a NATURAL TRANSFORMATION between \
+     \the functors they are — write `transformation Len : ListMonoid ⇒ \
+     \IntSum = len`.  MANUAL §8.")
     -- `Base` is the ambient presentation and is not written down
   , ("theory Base =\n    op : a \8658 a\n1 >> print",
      "`Base` is the ambient presentation and may not be declared")
@@ -2708,47 +2714,50 @@ moduleFailTests =
      \    only : k(a, b) ⇒ k(a, b)\n\
      \model TW : Bare(W) =\n    only = _\n1 ; print",
      "`over Doctrine` declares nothing")
-    -- MORPHISMS (5d).  A square that does not commute is named, and the
+    -- TRANSFORMATIONS (5d).  A square that does not commute is named, and the
     -- verdict comes from the samples because `len` is opaque to the
     -- normalizer: `lenUp` adds one, so the unit square breaks first.
   , (monoidMod ++ "def lenUp = (l -> l >> len >> _ 1 >> +)\n\
-     \morphism Bad : ListMonoid ⇒ IntSum = lenUp\n1 >> print",
-     "morphism Bad: the square for slot 'unit' does not commute at the \
+     \transformation Bad : ListMonoid ⇒ IntSum = lenUp\n1 >> print",
+     "transformation Bad: the square for slot 'unit' does not commute at \
+     \the \
      \theory's samples")
     -- ...and a component that is wrong in the VALUE is caught through
     -- the exit, on a carrier `eq?` could only have weighed by spelling
   , (closureMod ++ "def toKBad = unTwo >> (v f -> (v 1 >> +) \
      \[(d -> d f >> *)] >> K)\n\
-     \morphism Scaled : Src ⇒ Dst = toKBad\n1 >> print",
-     "morphism Scaled: the square for slot 'sample' does not commute at \
+     \transformation Scaled : Src ⇒ Dst = toKBad\n1 >> print",
+     "transformation Scaled: the square for slot 'sample' does not commute \
+     \at \
      \the theory's samples")
     -- ...and with no exit to observe a carrier with, the comparison IS
     -- `eq?` on the carrier, and the refusal names the slot that would
     -- have decided it honestly
-  , (closureModNoExit ++ "morphism Scaled : Src ⇒ Dst = toK\n1 >> print",
+  , (closureModNoExit ++ "transformation Scaled : Src ⇒ Dst = toK\n1 >> print",
      "declare an exit `observe` in the theory")
     -- ...and with NO evidence to sample with, the refusal names the slot
     -- and asks for the slot that would decide it
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\
      \model Sum : Mag(Int) =\n    op = +\n\
      \model Prod : Mag(Int) =\n    op = *\n\
-     \morphism Id : Sum ⇒ Prod = id\n1 >> print",
-     "morphism Id: the square for slot 'op' does not decide")
+     \transformation Id : Sum ⇒ Prod = id\n1 >> print",
+     "transformation Id: the square for slot 'op' does not decide")
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\
      \model Sum : Mag(Int) =\n    op = +\n\
      \model Prod : Mag(Int) =\n    op = *\n\
-     \morphism Id : Sum ⇒ Prod = id\n1 >> print",
+     \transformation Id : Sum ⇒ Prod = id\n1 >> print",
      "Add a `sample` slot to theory Mag")
     -- two models of ONE theory, or it is not a component
   , (monoidMod ++ "theory Other(a) =\n    z : • ⇒ a\n\
      \model Zed : Other(Int) =\n    z = 0\n\
-     \morphism Nope : ListMonoid ⇒ Zed = len\n1 >> print",
-     "ListMonoid models Monoid and Zed models Other: a morphism is a \
-     \component between two models of ONE theory")
+     \transformation Nope : ListMonoid ⇒ Zed = len\n1 >> print",
+     "ListMonoid models Monoid and Zed models Other: a transformation is \
+     \a component between two models of ONE theory")
     -- and the component's own type is the two carriers, read off the
     -- model heads
-  , (monoidMod ++ "morphism Nope : ListMonoid ⇒ IntSum = toStr\n1 >> print",
-     "morphism Nope: the square for slot 'unit' does not typecheck")
+  , (monoidMod ++ "transformation Nope : ListMonoid ⇒ IntSum = toStr\n\
+     \1 >> print",
+     "transformation Nope: the square for slot 'unit' does not typecheck")
     -- THE DOCTRINE'S LAWS RUN, for a model in another file.  This
     -- carrier is a function AND a counter, and its composition charges
     -- one per `;` — parametric enough to typecheck, and wrong, so the
@@ -2953,7 +2962,7 @@ main = do
   exFs <- mapM runExample exNames
   impFs  <- mapM runImport importTests
   impFFs <- mapM runImportFail importFailTests
-  mvFs   <- mapM runMorphVerdicts morphVerdictTests
+  mvFs   <- mapM runTransformationVerdicts transformationVerdictTests
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
         ++ map runFail failTests
@@ -2971,7 +2980,7 @@ main = do
             + length moduleTypeTests + length evalTests + length moduleFailTests
             + length unifTests + length pureEvalTests + length exNames
             + length importTests + length importFailTests
-            + length morphVerdictTests
+            + length transformationVerdictTests
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure
