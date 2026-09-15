@@ -287,7 +287,7 @@ elabIn st src = do
   term0 <- parseProgramIn (rsDatas st) src
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
-                       (rsTrans st) (rsKWords st) (rsBases st) Nothing False
+                       (rsTrans st) (rsKWords st) (rsBases st) [] False
                        -- a session declares no `table` of its own: one is
                        -- a file declaration, and `:import` brings in only
                        -- the two words it generates

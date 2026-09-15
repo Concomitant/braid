@@ -1647,7 +1647,34 @@ tokenize = go 1
                Nothing -> expNote rest ((TokInt (read digits) :) <$> go n rest)
       | otherwise =
           let (ident, rest) = span isIdentChar (c:cs)
-          in (TokIdent ident :) <$> go n rest
+          in case appliedSlot rest of
+               Just (tail', rest') -> (TokIdent (ident ++ tail') :) <$> go n rest'
+               Nothing             -> (TokIdent ident :) <$> go n rest
+
+    -- A SLOT OF AN APPLIED MODEL: `Fwd(Floats)@add` (2026-09-15).  A
+    -- model parameterized by a model is named by its APPLICATION — one
+    -- spelling for the header, the receipt and the transformation that
+    -- names it — so the def names it heads carry parentheses.  `@` is
+    -- the compiler's character and is refused wherever source is walked,
+    -- so `)@` cannot appear in a program anyone wrote: absorbing the
+    -- balanced group and the slot name into one identifier here is
+    -- unambiguous, and it is what lets a generated slot, law or square
+    -- be ordinary source like every other one.
+    appliedSlot ('(' : cs0) = walk (1 :: Int) "(" cs0
+      where
+        walk _ _   []       = Nothing
+        walk 0 acc ('@':r)  =
+          let (nm, r') = span isIdentChar r
+          in if null nm then Nothing
+             else Just (reverse acc ++ "@" ++ nm, r')
+        walk 0 _   _        = Nothing
+        walk d acc (ch : r)
+          | ch == '('                = walk (d + 1) (ch : acc) r
+          | ch == ')'                = walk (d - 1) (ch : acc) r
+          | isIdentChar ch           = walk d (ch : acc) r
+          | ch == ',' || ch == ' '   = walk d (ch : acc) r
+          | otherwise                = Nothing
+    appliedSlot _ = Nothing
 
     -- A FLOAT LITERAL is digits `.` digits (2026-09-14), lexed as one
     -- identifier so that it travels the whole pipeline — scheme, spine,
@@ -2185,12 +2212,33 @@ parseProgramToks ln0 toks =
       (body, rest') <- parseProgramToks ln (repush ++ TokNewline ln : bodyToks)
       Right (OpenAbs slots True body, rest')
 
-    -- a run of resource names, then the body (a stage break or `->`)
-    usePrefix ts = case span isUseTok ts of
-      (ns@(_ : _), r) -> Just ([ n | TokIdent n <- ns ], r)
+    -- A run of scope names, then the body (a stage break or `->`).  A
+    -- name may be an APPLICATION — `use Fwd(Floats)` applies a
+    -- parameterized model — and the applied form is the name: one
+    -- spelling, so the receipt, the transformation that names the model
+    -- and the header all read the same.
+    usePrefix ts = case useNames ts of
+      (ns@(_ : _), r) -> Just (ns, r)
       _               -> Nothing
-    isUseTok (TokIdent n) = n /= "_"
-    isUseTok _            = False
+    useNames (TokIdent n : rest)
+      | n /= "_" = case rest of
+          (TokLParen : r) | Just (as, r') <- useArgs r ->
+            let (ns, r'') = useNames r'
+            in (renderModelApp (ModelApp n as) : ns, r'')
+          _ -> let (ns, r') = useNames rest in (n : ns, r')
+    useNames ts = ([], ts)
+    useArgs ts = do
+      (a, r) <- useApp ts
+      case r of
+        (TokComma : r')  -> do (as, r'') <- useArgs r'
+                               pure (a : as, r'')
+        (TokRParen : r') -> Just ([a], r')
+        _                -> Nothing
+    useApp (TokIdent n : TokLParen : r) = do
+      (as, r') <- useArgs r
+      pure (ModelApp n as, r')
+    useApp (TokIdent n : r) | n /= "_" = Just (ModelApp n [], r)
+    useApp _                = Nothing
 
     -- the body of a header word: everything after the stage break.  One
     -- routine, because `use` and `over` take their body the same way and
@@ -2587,7 +2635,52 @@ data Instance = Instance
   , inTheory   :: String
   , inArgs     :: [InstArg]
   , inBindings :: [(String, String)]  -- slot, program source
+  , inParams   :: [ModelParam]
+      -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `model Fwd(R :
+      -- Smooth(a, g)) : Smooth(Dual(a), a)` is not one model but a
+      -- FAMILY — a functor Mod(Smooth) → Mod(Smooth) — and this list is
+      -- its parameters.  Empty for every ordinary model, which is what
+      -- makes the clause optional rather than a second kind of head.
+  , inObjMap   :: [(String, String)]
+      -- ...and the OBJECT MAP clause, the head's third (not built).  A
+      -- model is a presentation interpreted in a category: an object map
+      -- and an image for each generator.  Today's models are the
+      -- identity-object-map case and carry `[]` here; the field is on the
+      -- record so the clause can arrive without reshaping the head.
+  , inScope    :: [String]
+      -- The models whose slot names this model's BODIES are written in.
+      -- Ordinary model: `[]`, meaning its own (a slot body may call a
+      -- sibling slot).  A family instance: the argument model, because a
+      -- family's bodies are TEMPLATES over the parameter's theory.
   } deriving (Eq, Show)
+
+-- One parameter of a parameterized model: a name, the theory its
+-- argument must model, and BINDERS for that argument's own theory
+-- arguments — `R : Smooth(a, g)` names R's carrier `a` and R's exit
+-- type `g`, which the head then uses to write its own (`Smooth(Dual(a),
+-- a)`).  Substitution, not a type-level function: at `use Fwd(Floats)`
+-- the binders take Floats' arguments and the head is read off.
+data ModelParam = ModelParam
+  { mpName    :: String
+  , mpTheory  :: String
+  , mpBinders :: [TyParam]
+  } deriving (Eq, Show)
+
+-- A model APPLICATION as it is written: `Floats`, `Fwd(Floats)`,
+-- `Fwd(Fwd(Floats))`.  It is also the generated model's NAME — the one
+-- spelling, so a transformation can name it and a receipt can print it.
+data ModelApp = ModelApp String [ModelApp]
+  deriving (Eq, Show)
+
+renderModelApp :: ModelApp -> String
+renderModelApp (ModelApp n []) = n
+renderModelApp (ModelApp n as) =
+  n ++ "(" ++ intercalate ", " (map renderModelApp as) ++ ")"
+
+-- every application inside one, deepest first: `Fwd(Fwd(Floats))` needs
+-- `Fwd(Floats)` generated before it, and this is that order
+appClosure :: ModelApp -> [ModelApp]
+appClosure a@(ModelApp _ as) = concatMap appClosure as ++ [a]
 
 -- A model's argument, read at the KIND the theory's parameter
 -- declares.  A wire or `...` parameter takes a type expression; a
@@ -3027,9 +3120,9 @@ splitTopCommas = go 0 ""
 parseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
               -> [String] -> Either String Instance
 parseInstance aliases dataSigs theories header body = do
-  (nm, th, args) <- parseHead
+  (nm, ps, th, args) <- parseHead
   binds <- mapM parseBind (filter (not . blank) body)
-  pure (Instance nm th args binds)
+  pure (Instance nm th args binds ps [] [])
   where
     blank l = all isSpace (takeWhile (/= '#') l)
     -- An argument is a full type EXPRESSION, not a bare name: a
@@ -3038,30 +3131,105 @@ parseInstance aliases dataSigs theories header body = do
     -- the token stream read that as three separate arguments.  Split
     -- the source on top-level commas and hand each piece to the
     -- ordinary type parser, which already knows every type form.
-    parseHead =
-      case break (== ':') (takeWhile (/= '=') header) of
-        (lhs, ':' : rhs) | ["model", nm] <- words lhs ->
+    -- THE HEAD IS A SEQUENCE OF CLAUSES, and each after the name is
+    -- optional: a PARAMETER LIST (`(R : Smooth(a, g))` — this model is a
+    -- family), then `: Theory`, then the theory's ARGUMENTS.  The third
+    -- optional clause, an OBJECT MAP, is not built; when it arrives it
+    -- rides beside the arguments (`inObjMap`) and nothing here moves.
+    parseHead = do
+      let hdr = takeWhile (/= '=') header
+      after0 <- case stripWord "model" (dropWhile isSpace hdr) of
+        Just r  -> Right r
+        Nothing -> Left $ "Malformed model declaration: " ++ header
+      let (nm, after1) = span isIdentish (dropWhile isSpace after0)
+      (psrc, after2) <- case dropWhile isSpace after1 of
+        ('(' : r) -> first' Just <$> balanced r
+        r         -> Right (Nothing, r)
+      ps <- maybe (Right []) (mapM (modelParam nm) . splitTopCommas') psrc
+      case ps of
+        (_ : _ : _) -> Left $ "model " ++ nm ++ ": a parameterized model "
+                           ++ "takes ONE parameter — two would give one "
+                           ++ "slot name two meanings inside a body, since "
+                           ++ "a family's bodies are written in the "
+                           ++ "parameter's vocabulary"
+        _           -> Right ()
+      case dropWhile isSpace after2 of
+        (':' : rhs) | not (null nm) ->
           case break (== '(') (dropWhile isSpace rhs) of
             (th, "")        | [t] <- words th ->
-              (,,) nm t <$> args nm t []
+              (,,,) nm ps t <$> args nm ps t []
             (th, _ : inner) | [t] <- words th ->
-              (,,) nm t <$> args nm t (splitTopCommas inner)
+              (,,,) nm ps t <$> args nm ps t (splitTopCommas inner)
             _ -> Left $ "Malformed model head: " ++ header
         _ -> Left $ "Malformed model declaration: " ++ header
+
+    stripWord w s = case splitAt (length w) s of
+      (p, r@(c : _)) | p == w, isSpace c -> Just r
+      _                                  -> Nothing
+
+    -- the text up to the `)` that closes an already-opened `(`
+    balanced = go (0 :: Int) ""
+      where
+        go _ _   []       = Left $ "Malformed model head: " ++ header
+        go 0 acc (')':cs) = Right (reverse acc, cs)
+        go d acc (c  :cs)
+          | c == '('  = go (d + 1) (c : acc) cs
+          | c == ')'  = go (d - 1) (c : acc) cs
+          | otherwise = go d (c : acc) cs
+
+    -- like `splitTopCommas`, but over text that is already unwrapped
+    splitTopCommas' s = splitTopCommas (s ++ ")")
+
+    -- `R : Smooth(a, g)` — the parameter, its theory, and the names it
+    -- gives that theory's arguments so the head can write its own
+    modelParam nm src = case break (== ':') src of
+      (lhs, ':' : rhs) | [p] <- words lhs ->
+        case break (== '(') (dropWhile isSpace rhs) of
+          (t, "") | [tn] <- words t -> ModelParam p tn <$> binders nm p tn []
+          (t, _ : inner) | [tn] <- words t ->
+            ModelParam p tn <$> binders nm p tn (splitTopCommas inner)
+          _ -> Left (badParam nm src)
+      _ -> Left (badParam nm src)
+
+    badParam nm src = "model " ++ nm ++ ": a parameter is written `R : "
+                   ++ "Theory(a, b)` — the theory its argument must model, "
+                   ++ "and a name for each of that model's own arguments, "
+                   ++ "not: " ++ dropWhile isSpace src
+
+    -- the binder names are read AT THE THEORY'S KINDS, so `Dual(a)` in
+    -- the head parses with `a` as a wire and a constructor binder as a
+    -- constructor
+    binders nm p tn srcs = case [ thParams x | x <- theories, thName x == tn ] of
+      [] -> Left $ "model " ++ nm ++ ": parameter '" ++ p
+                ++ "' names an unknown theory: " ++ tn
+      (qs : _)
+        | length qs /= length srcs ->
+            Left $ "model " ++ nm ++ ": parameter '" ++ p ++ "' names theory "
+                ++ tn ++ ", which takes " ++ show (length qs)
+                ++ " argument(s)"
+        | otherwise -> sequence (zipWith bindOne qs srcs)
+      where
+        bindOne q src = case words (takeWhile (/= '#') src) of
+          [b] | all isIdentish b -> Right (case q of
+                                             PCon _ ar -> PCon b ar
+                                             _         -> PWire (TV b))
+          _ -> Left (badParam nm (p ++ " : " ++ tn))
+
+    first' f (x, r) = (f x, r)
     -- Arguments are read AT THE THEORY'S KINDS: a constructor parameter
     -- takes a bare name, everything else a type expression.  The theory
     -- is looked up leniently — an unknown one is reported by
     -- `instanceDefs`, and a count mismatch by the same message
     -- `checkInstance` uses.
-    args nm t srcs =
+    args nm mps t srcs =
       case [ thParams x | x <- theories, thName x == t ] of
         (ps : _)
           | length ps /= length srcs ->
               Left $ "model " ++ nm ++ ": theory " ++ t ++ " expects "
                   ++ show (length ps) ++ " argument(s)"
-          | otherwise -> sequence (zipWith (one nm t) (map Just ps) srcs)
-        [] -> mapM (one nm t Nothing) srcs
-    one nm t (Just q@(PCon _ ar)) src =
+          | otherwise -> sequence (zipWith (one nm mps t) (map Just ps) srcs)
+        [] -> mapM (one nm mps t Nothing) srcs
+    one nm _ t (Just q@(PCon _ ar)) src =
       case words (takeWhile (/= '#') src) of
         [c] | all isIdentish c -> do
           ps <- case lookup c dataSigs of
@@ -3085,8 +3253,12 @@ parseInstance aliases dataSigs theories header body = do
                  ++ pName q ++ "' as " ++ pKind q ++ ", so its argument "
                  ++ "must be a bare constructor name, not '"
                  ++ dropWhile isSpace src ++ "'"
-    one _ _ _ src = do
-      ty <- parseTyBody aliases dataSigs [] src
+    -- A FAMILY's argument is written over its parameter's binders
+    -- (`Smooth(Dual(a), a)` over `R : Smooth(a, g)`), so they are the
+    -- type parameters this piece is parsed with.  An ordinary model has
+    -- none and reads exactly as before.
+    one _ mps _ _ src = do
+      ty <- parseTyBody aliases dataSigs (concatMap mpBinders mps) src
       Right (IAStack (SCons ty SEnd))
     isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!" :: String)
     conHint "Fn" = " (`Fn` is built in and takes an arrow, not wires; "
@@ -3099,6 +3271,111 @@ parseInstance aliases dataSigs theories header body = do
       case break (== '=') l of
         (lhs, '=' : rhs) | [nm] <- words lhs -> Right (nm, rhs)
         _ -> Left $ "Malformed model binding: " ++ dropWhile isSpace l
+
+-- A MODEL PARAMETERIZED BY A MODEL, instantiated (2026-09-15).
+--
+-- `model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a)` is a FAMILY: a
+-- functor Mod(Smooth) → Mod(Smooth), not a model.  `use Fwd(Floats)`
+-- APPLIES it, and what that mints is an ordinary model named
+-- `Fwd(Floats)` — same record, same slot defs, same laws, so everything
+-- downstream (a transformation naming it, a receipt printing it, the
+-- laws running at module start) needs no case of its own.  Iteration is
+-- then free: `Fwd(Fwd(Floats))` is the family applied to a member.
+--
+-- The carrier is read by SUBSTITUTION and nothing else: the head's
+-- binders take the argument model's own theory arguments, and
+-- `Smooth(Dual(a), a)` is read off.  No type-level functions.
+familyInstances :: [Instance] -> [Instance] -> [ModelApp]
+                -> Either String [Instance]
+familyInstances fams concrete apps = reverse . snd <$> foldM one (concrete, []) wanted
+  where
+    wanted = nub (concatMap appClosure apps)
+    famNames = map inName fams
+    one (known, made) app
+      | any ((== renderModelApp app) . inName) known = Right (known, made)
+      | ModelApp f [] <- app, f `elem` famNames =
+          Left $ "`use " ++ f ++ "`: " ++ f ++ " is a model PARAMETERIZED "
+              ++ "by a model, so it is a family and not a model — apply it, "
+              ++ "`use " ++ f ++ "(<model of "
+              ++ head ([ mpTheory p | x <- fams, inName x == f
+                                    , p <- inParams x ] ++ ["its theory"])
+              ++ ">)`"
+      | ModelApp _ [] <- app = Right (known, made)   -- an ordinary name
+      | otherwise = do
+          i <- build known app
+          Right (i : known, i : made)
+
+    build known app@(ModelApp f as) = do
+      fam <- case [ x | x <- fams, inName x == f ] of
+        (x : _) -> Right x
+        [] -> Left $ "`use " ++ renderModelApp app ++ "`: " ++ f
+                  ++ " is not a parameterized model at this point — a model "
+                  ++ "is applied to another model only when its own head "
+                  ++ "declares a parameter (`model " ++ f
+                  ++ "(R : <Theory>) : …`)"
+      if length as == length (inParams fam) then Right () else
+        Left $ "model " ++ f ++ " takes " ++ show (length (inParams fam))
+            ++ " model argument(s), given " ++ show (length as)
+      argInsts <- sequence (zipWith (resolve f) (inParams fam) as)
+      (tm, sm, rm, cm) <- foldM bind (M.empty, M.empty, M.empty, M.empty)
+                            (concat (zipWith (\p i -> zip (mpBinders p) (inArgs i))
+                                             (inParams fam) argInsts))
+      let sub (IAStack st) = IAStack (substParamsS tm sm rm cm st)
+          sub (IACon c)    = IACon (M.findWithDefault c c cm)
+      pure (Instance (renderModelApp app) (inTheory fam)
+                     (map sub (inArgs fam)) (inBindings fam) []
+                     (inObjMap fam) (map inName argInsts))
+      where
+        resolve nm mp a =
+          let an = renderModelApp a in
+          case [ x | x <- known, inName x == an ] of
+            (x : _)
+              | inTheory x == mpTheory mp -> Right x
+              | otherwise -> Left $ "`use " ++ renderModelApp app
+                          ++ "`: the parameter '" ++ mpName mp ++ "' of model "
+                          ++ nm ++ " takes a model of " ++ mpTheory mp
+                          ++ ", and " ++ an ++ " models " ++ inTheory x
+            [] -> Left $ "`use " ++ renderModelApp app ++ "`: " ++ an
+                      ++ " is not a model declared at this point"
+        bind (tm, sm, rm, cm) (PWire tv, IAStack (SCons t SEnd)) =
+          Right (M.insert tv t tm, sm, rm, cm)
+        bind (tm, sm, rm, cm) (PRow rv, IAStack (SCons (TSum row) SEnd)) =
+          Right (tm, sm, M.insert rv row rm, cm)
+        bind (tm, sm, rm, cm) (PStack sv, IAStack st) =
+          Right (tm, M.insert sv st sm, rm, cm)
+        bind (tm, sm, rm, cm) (PCon n _, IACon c) =
+          Right (tm, sm, rm, M.insert n c cm)
+        bind _ (q, _) =
+          Left $ "model " ++ f ++ ": the binder '" ++ pName q
+              ++ "' and the argument model's own argument are not at one kind"
+
+-- Every model APPLICATION a piece of source writes.  Filtered by the
+-- family names, because `Dual(x, dx) -> …` is a destructuring binder and
+-- only a declared family's name can head an application.
+modelApps :: [String] -> String -> [ModelApp]
+modelApps fams src = case tokenize src of
+  Left _     -> []
+  Right toks -> go toks
+  where
+    go ts@(TokIdent f : TokLParen : _)
+      | f `elem` fams, Just (a, r) <- appTok ts = a : go r
+    -- a family's name ALONE is collected too, so that `use Fwd` is
+    -- refused as "apply it" rather than as an unknown scope name
+    go (TokIdent f : r) | f `elem` fams = ModelApp f [] : go r
+    go (_ : r) = go r
+    go []      = []
+    appTok (TokIdent n : TokLParen : r)
+      | n `elem` fams = do (as, r') <- appList r
+                           pure (ModelApp n as, r')
+    appTok (TokIdent n : r) = Just (ModelApp n [], r)
+    appTok _                = Nothing
+    appList ts = do
+      (a, r) <- appTok ts
+      case r of
+        (TokComma : r')  -> do (as, r'') <- appList r'
+                               pure (a : as, r'')
+        (TokRParen : r') -> Just ([a], r')
+        _                -> Nothing
 
 -- FIELD NAMES, and where they die (2026-09-14).
 --
@@ -4693,10 +4970,13 @@ data ElabCtx = ElabCtx
   , ecKWords :: [(String, String)] -- def name -> the model it is a word of
   , ecBases :: [BaseInstance]      -- partial models of the ambient
                                    -- presentation: word -> its image
-  , ecSelf  :: Maybe String        -- the model this def is a COMPONENT
-                                   -- of, if any: its own `use` resolves
+  , ecSelf  :: [String]           -- the models this def is a COMPONENT
+                                   -- of, if any: their `use` resolves
                                    -- slot names and mints nothing, because
-                                   -- a model does not apply itself
+                                   -- a model does not apply itself.  A
+                                   -- FAMILY instance's slot body names the
+                                   -- PARAMETER's slots, so the parameter is
+                                   -- on this list beside the instance.
   , ecGen   :: Bool                -- a def the COMPILER wrote (a
                                    -- transformation's squares), which may name
                                    -- a slot in the compiler's own
@@ -4787,7 +5067,7 @@ type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
 elabCtx0 env slots =
-  ElabCtx env M.empty slots [] [] [] [] [] [] Nothing False Nothing []
+  ElabCtx env M.empty slots [] [] [] [] [] [] [] False Nothing []
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -5083,7 +5363,7 @@ elabUseWith ctx t0 = do
       -- transport itself, or every slot body would be `arrP` of itself.
       let ms  = [ tp | tp <- ecTrans ctx, tpName tp `elem` ns
                      , isJust (tpCompose tp)
-                     , Just (tpName tp) /= ecSelf ctx ]
+                     , tpName tp `notElem` ecSelf ctx ]
           mns = map tpName ms
       case ms of
         (_ : _ : _) -> Left $ "`use " ++ unwords mns ++ "`: a header may "
@@ -5141,7 +5421,7 @@ elabUseWith ctx t0 = do
           -- — the `use I` wrapping a slot body resolves names, it does
           -- not apply the model to itself, and a slot's declared arrow
           -- carries no label.
-          mine  = [ n | n <- map fst is ++ map fst bs, Just n /= ecSelf ctx ]
+          mine  = [ n | n <- map fst is ++ map fst bs, n `notElem` ecSelf ctx ]
           -- `use Recursive` mints like every other scope: the knot it
           -- tied carries the label too, and a set unions to one.
           marks = nub ([ receiptName recLabel | length ns /= length ns0 ]
@@ -5433,8 +5713,18 @@ instanceDefs theories trans inst = do
   -- Term-level renaming does the work.  Renaming the source text
   -- instead would have to re-implement tokenization — `op)` is not the
   -- word `op` — and would get it subtly wrong.
+  -- ...and a FAMILY INSTANCE's slot bodies are wrapped in the
+  -- PARAMETER's scope instead (2026-09-15): `model Fwd(R : Smooth(a,
+  -- g))`'s bodies are templates over R's theory, so every slot name in
+  -- them is R's — `add` inside `add` included, which is what makes the
+  -- body unambiguous without a self-reference rule.  The LAWS still run
+  -- in the instance's own scope: they are the theory's, they are checked
+  -- AT EACH INSTANTIATION, and they must name this model's slots.
   let rename body = "use " ++ inName inst ++ " ; " ++ body
-      slots  = [ ( slotDefName (inName inst) n, rename body
+      body' body = case inScope inst of
+        []  -> rename body
+        sc  -> "use " ++ unwords sc ++ " ; " ++ body
+      slots  = [ ( slotDefName (inName inst) n, body' body
                  , Just ("slot '" ++ n ++ "' of " ++ inName inst) )
                | (n, body) <- inBindings inst ]
       -- a constructor parameter's WORDS: `p(_, _)` is a type in a
@@ -6195,6 +6485,10 @@ data Module = Module
   , modMain    :: Maybe (Term, Arrow)
   , modTheories  :: [Theory]
   , modInstances :: [Instance]
+  , modFamilies  :: [Instance]         -- models PARAMETERIZED by a model:
+                                       -- families, not models, so they are
+                                       -- kept apart from the members
+                                       -- `use F(M)` minted out of them
   , modFunctors  :: [(String, String)]  -- `functor Name = word`
   , modTemplates :: TemplateTable       -- defs over a theory, awaiting one
   , modTrans     :: [Transport]         -- models with a carrier
@@ -7351,6 +7645,8 @@ data ModuleBase = ModuleBase
   , mbFuncs   :: [(String, String)]   -- functor -> its word
   , mbTheories  :: [Theory]           -- theories a session `:import`ed
   , mbTemplates :: TemplateTable      -- templates it brought with them
+  , mbFamilies  :: [Instance]         -- parameterized models it brought
+  , mbGenerated :: [Instance]         -- ...and the members already minted
   , mbTrans     :: [Transport]        -- carrier models it brought
   , mbKWords    :: [(String, String)] -- and their K-words
   , mbBases     :: [BaseInstance]     -- and its models of `Base`
@@ -7358,7 +7654,7 @@ data ModuleBase = ModuleBase
 
 moduleBase :: Env -> RunDefs -> [String] -> [Alias] -> [DataDecl] -> ModuleBase
 moduleBase env run shadow aliases datas =
-  ModuleBase env run shadow aliases datas [] [] [] [] [] [] []
+  ModuleBase env run shadow aliases datas [] [] [] [] [] [] [] [] []
 
 checkModuleWith :: ModuleBase -> String -> Either String Module
 checkModuleWith = checkModuleWithAt []
@@ -7438,9 +7734,14 @@ checkModuleRaw base src = do
   -- `over D` in a theory head is a CLAIM, and it is checked here, once,
   -- whether or not anything models the theory
   mapM_ (\th -> () <$ checkExtends theories th) ownTheories
-  insts    <- sequence [ parseInstance allAliases sigs theories h b
+  declared <- sequence [ parseInstance allAliases sigs theories h b
                        | (h, b, _) <- declLines, take 5 h == "model"
                        , isNothing (baseInstanceName h) ]
+  -- A PARAMETERIZED model is not a model: it is a FAMILY, and the
+  -- members the module names are minted below, once each.
+  let ownFams = [ i | i <- declared, not (null (inParams i)) ]
+      fams    = ownFams ++ mbFamilies base
+      insts0  = [ i | i <- declared, null (inParams i) ] ++ mbGenerated base
   ownFuncs <- sequence [ parseFunctorLine h
                        | (h, _, _) <- declLines, take 7 h == "functor" ]
   ownTransformations <- sequence [ parseTransformationLine h
@@ -7453,7 +7754,21 @@ checkModuleRaw base src = do
   ownBases0 <- sequence [ parseBaseInstance h b
                         | (h, b, _) <- declLines, take 5 h == "model"
                         , isJust (baseInstanceName h) ]
-  let ownBases = ownBases0 ++ mbBases base
+  -- EVERY MEMBER OF A FAMILY THE MODULE ASKS FOR.  `use Fwd(Floats)` is
+  -- an application; the model it applies to is minted here, deepest
+  -- first, so `use Fwd(Fwd(Floats))` finds `Fwd(Floats)` already made.
+  -- The applications are read off the SOURCE — def bodies, main, model
+  -- bindings and the two model names a transformation declares — because
+  -- `use` is elaboration and a model must exist before it.
+  genInsts <- familyInstances fams insts0
+                ([ a | (_, b, _) <- defSrcs, a <- modelApps (map inName fams) b ]
+                 ++ modelApps (map inName fams) mainSrc
+                 ++ [ a | i <- insts0, (_, b) <- inBindings i
+                        , a <- modelApps (map inName fams) b ]
+                 ++ [ a | mo <- ownTransformations, n <- [tfFrom mo, tfTo mo]
+                        , a <- modelApps (map inName fams) n ])
+  let insts    = insts0 ++ genInsts
+      ownBases = ownBases0 ++ mbBases base
   -- A model whose theory has a hom-object is a CATEGORY model: its
   -- shape is read here, once, and `use` of it transports.  There is no
   -- `mode` line any more — the model is the declaration.
@@ -7516,7 +7831,7 @@ checkModuleRaw base src = do
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
     foldM (addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
-                  ownBases resNames (map inName insts) allDatas)
+                  ownBases resNames [ (inName i, inScope i) | i <- insts ] allDatas)
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
@@ -7547,14 +7862,14 @@ checkModuleRaw base src = do
       else do
         (term0, mainStart) <- parseProgramFrom mainLine allDatas mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
-                                      thNames trans kwords ownBases Nothing
+                                      thNames trans kwords ownBases []
                                       False Nothing tblTypes)
                              term0
         arr <- inferTermInAt mainStart env' term1
         pure (Just (term1, arr))
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
-                theories insts funcs tmpls ownTrans kwords ownBases
+                theories insts ownFams funcs tmpls ownTrans kwords ownBases
                 transformationInfos)
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
@@ -7622,7 +7937,7 @@ checkModuleRaw base src = do
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
     addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans bases
-           resources instNames datas
+           resources instScopes datas
            (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) =
       -- ATTRIBUTION, ONCE (2026-09-15).  Everything a def's own check
       -- can refuse — the parse, the destructuring rewrite, the `\`
@@ -7698,8 +8013,8 @@ checkModuleRaw base src = do
               -- I` to resolve slot names; that scope applies nothing and
               -- mints nothing (see `ecSelf`)
               self = case break (== '@') name of
-                (i, '@' : _) | i `elem` instNames -> Just i
-                _                                 -> Nothing
+                (i, '@' : _) | Just sc <- lookup i instScopes -> i : sc
+                _                                             -> []
           -- `over` MINTS NOTHING, ever.  A receipt is provenance — "this
           -- code went through the functor" — and a hand-built morphism
           -- is by definition not the functor's image; it may be a

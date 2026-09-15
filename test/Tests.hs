@@ -47,18 +47,22 @@ transformationVerdictTests =
                , "  op      sampled (2 points; ev of an open wire)"
                , "  sample  sampled (`pack` has no closed arity)" ] )
     -- forgetting the tangent: every square proved, which is the
-    -- strongest verdict the machinery has — `gradient` included, since
+    -- strongest verdict the machinery has — and the model is now
+    -- `Fwd(Floats)`, a MEMBER of the family `model Fwd(R : Smooth(a, g))`
+    -- minted by `use Fwd(Floats)`, which a transformation names exactly
+    -- as it names any other model (2026-09-15) — `gradient` included, since
     -- 2026-09-14: its result type is a theory PARAMETER, so `Value` has
     -- a second component (the zero map) and the square that says
     -- "forgetting a tangent zeroes it" normalizes outright
   , ( "autodiff.braid", "Value"
-    , unlines' [ "Value : Fwd \8658 Floats"
+    , unlines' [ "Value : Fwd(Floats) \8658 Floats"
                , "  add       proved"
                , "  mul       proved"
                , "  neg       proved"
                , "  lit       proved"
                , "  exp       proved"
                , "  sin       proved"
+               , "  cos       proved"
                , "  sample    proved"
                , "  observe   proved"
                , "  gradient  proved" ] )
@@ -70,13 +74,14 @@ transformationVerdictTests =
     -- to the arithmetic of the uninterpreted `fadd` and `fmul`, which is
     -- exactly what the theory's evidence is for
   , ( "autodiff.braid", "Transpose"
-    , unlines' [ "Transpose : Fwd \8658 Rev"
+    , unlines' [ "Transpose : Fwd(Floats) \8658 Rev"
                , "  add       sampled (2 points; differ in the free category)"
                , "  mul       sampled (2 points; differ in the free category)"
                , "  neg       sampled (1 point; differ in the free category)"
                , "  lit       proved"
                , "  exp       sampled (1 point; differ in the free category)"
                , "  sin       sampled (1 point; differ in the free category)"
+               , "  cos       sampled (1 point; differ in the free category)"
                , "  sample    proved"
                , "  observe   proved"
                  -- THE GRADIENT HALF, machine-checked at last: the two
