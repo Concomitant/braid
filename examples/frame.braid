@@ -253,11 +253,16 @@ def parseTrades =
     ; (numbered -> 1 numbered ; skip)       # line 1 is the header
     ; [keepRow?] ... ; filter
     ; [(e -> e ; unBox ; parseRow)] ... ; map
-    ; sequence
+    ; sequence ; (pass | pass)
+#   `(pass | pass)` CLOSES the row: injections are open, so `ok`/`miss`
+#   leave a residual, and a declared shape should say exactly two
+#   tracks.  Same closing on `loadTrades` below.
 
 def loadTrades =
     path ->
-    path ; readFile ; ((body -> body ; parseTrades) | (e -> e ; miss)) ; merge
+    path ; readFile ; ((body -> body ; parseTrades) | (e -> e ; miss)) ; merge \
+        ; (pass | pass)
+#   loadTrades : Str =IO Recursive> (List(Trade) | Str)
 
 # ---------------------------------------------------------------------
 # 5. The row programs, and the words that present them
