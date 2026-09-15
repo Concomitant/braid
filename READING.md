@@ -241,6 +241,29 @@ copies where they exist.
   of the closure-built backward pass, and in Braid's terms the tape
   is a resource (stage 7).
 
+## Probability as a Markov category (the probability flagship, 2026-09-15)
+
+- Fritz, [*A synthetic approach to Markov kernels, conditional
+  independence and theorems on sufficient
+  statistics*](https://arxiv.org/abs/1908.07021) (2020) — the
+  axiomatics `examples/prob.braid` is built to: a Markov category is a
+  monoidal category where every object is a comonoid (copy and
+  discard) and **copy is not natural**. Discard IS natural
+  (semicartesian/causality), and dropping that axiom gives the affine
+  categories where `condition` lives. The file draws both distinctions
+  structurally rather than by convention: the base proves copy natural,
+  the models decide it false, and the mass says which category you are
+  in.
+- Cho & Jacobs, [*Disintegration and Bayesian inversion via string
+  diagrams*](https://arxiv.org/abs/1709.00322) (2019) — Bayes' rule as
+  an operation on arrows: a kernel and a prior give an inverted
+  kernel, drawn as a diagram rather than written as a formula. It is
+  why §7 and §8 of the flagship read as `condition` then renormalize,
+  and why §13 says what a full `disintegrate` would cost here (a
+  kernel must answer for every point of its domain, so the inverse
+  needs a table keyed by an arbitrary outcome — an ordering the
+  language does not have).
+
 ## Verified rewriting (where the audited optimizer sits)
 
 - GHC rewrite `RULES` — user rules, trusted; the pole `sameCode`

@@ -2575,6 +2575,61 @@ no choice slot (`ArrowChoice`'s `left`). `keep` sidesteps it — the
 deciding is a column, which a functor may compute, and the dropping is
 frame level.
 
+**The third worked example is `examples/prob.braid`** *(2026-09-15)* —
+**probability as a Markov category**, and it is the one that shows what
+a model is *for*. A Markov category (Fritz; §16) is a monoidal category
+in which every wire can be copied and discarded and **copying is not
+natural**: copy after a coin flip gives two equal bits, two coin flips
+give two independent ones. Braid's base is cartesian, so `dup` there
+*is* natural — `examples/laws.braid` has the normalizer **prove**
+`dup ; f f = f ; dup` for an arbitrary word — and a model of the
+`Doctrine` whose hom-object is a **stochastic map** is the Markov
+category `use M` maps into. So the distinction is drawn structurally:
+
+```braid
+def twoEqualE = use Enum ; half ; flip ; dup        -- ONE flip, copied
+def twoIndepE = use Enum ; twoBiases ; bothFlipE    -- TWO flips
+```
+
+and the two `report`s differ — `{HH: ½, TT: ½}` against four cells of
+¼ — in **all three models**. Nothing in the file declares that they
+should; `dup` is transported by the functor, and the disagreement is
+what the model *is*.
+
+**A generator is an ENTRY at a kernel.** A hom-object `k(a, b)` names
+one object on each side and there is no `k(•, b)`, because `•` is not a
+wire. So a distribution is written as the kernel it is —
+`flip : • ⇒ k(Float, Bool)` — and the bias arrives on the wire the
+kernel consumes, produced by an ordinary base stage *inside* the
+transported scope (`half = (n -> 0.5)`, one wire in, one wire out, so
+the functor embeds it). Nothing special-cases a parameter. `report :
+k(Int, b) ⇒ d(b)` is the **exit**, and its result is a theory
+parameter — a *constructor* parameter this time, `d(_)`, since what a
+model hands back about a kernel is `Weighted(b)`, `Draws(b)` or
+`Reach(b)`. `Int` stands in for the monoidal unit the Doctrine has no
+name for, and `report` runs at 0.
+
+**Three models**: `Enum` (the finite distribution monad's Kleisli
+category — `compose` is bind with the weights multiplied, exact),
+`Sampler` (a seed threaded as a `resource`, a 48-bit LCG written in
+Braid, so every printed count is reproducible), `Nondet` (the support
+— a weight is a bit). The doctrine's seven arrow laws run for all
+three, at *stochastic* evidence, before the file prints.
+
+**And what it refuses.** `transformation Expect : Enum ⇒ anything` is
+not declarable and the reason is mathematics, not machinery:
+E[g(X)] ≠ g(E[X]), so expectation does not preserve composition.
+What it *is* a homomorphism of is the convex structure, and that is a
+second, one-carrier theory in the same file (`theory Convex(m)`, the
+fair mixture) with `transformation Expect : Mixtures ⇒ Means` checked
+at four squares. `Sampler ⇒ Enum` has no component at all — a sample
+is not a function of the distribution. `Support : Enum ⇒ Nondet` is
+mathematically a homomorphism and is *still* refused, at the `first`
+square, for a reason worth knowing: a component must be generic in the
+hom-object's arguments, so it can never **run** the carrier, and the
+two sides are then closures that only the normalizer could weigh. See
+§14.
+
 ### `Code`: reflection and splicing
 
 `reflect` turns a quotation into its **spine**: `Code = List(Stage)`,
@@ -3271,7 +3326,23 @@ corrected in place rather than dated one by one.
   fails. So does a result at a parameter the theory declares no exit
   FOR: with `Smooth(a, g)`, `observe : a ⇒ Float` is an exit for `a`
   and not for `g`, and a `Grad` is weighed directly — sound here,
-  because a `Grad` is two Floats and not a closure.)* Two riders came out of the same investigation and are worth
+  because a `Grad` is two Floats and not a closure.)*
+  *(Amended 2026-09-15: the refusal used to say the theory declares
+  **no** exit, which is false of a theory that declares one the slot's
+  result does not FIT. `examples/prob.braid` is that case —
+  `observe : k(Int, Int) ⇒ Int` is an exit, and `first` leaves the
+  hom-object at a **pairing**, which it does not reach — and a second
+  exit at the pairing cannot help, because the square *that* exit would
+  need is fed by the theory's first entry, whose object is `Int`. The
+  message now says `no exit whose input FITS this slot's result`. The
+  general shape, which is the standing limit: a transformation's
+  component is generic in the hom-object's arguments, so it can never
+  **run** the carrier; a square between two function-carrier models is
+  therefore decidable only when the normalizer proves it, which needs
+  the component to pass the witness through untouched —
+  `transformations.braid`'s `Forget : Names ⇒ Funcs` drops a `Str`
+  field and proves all five, and a component that *transforms* the
+  witness is out of reach.)* Two riders came out of the same investigation and are worth
   keeping:
   - **`sameCode` says `false`, not a refusal, for "spelled
     differently"** — two quotations that build the same function out of
@@ -3433,9 +3504,11 @@ models), `circuits.braid` (a stream transducer — a genuinely
 different category — as data plus a composition word plus
 `theory Arrow(k(_, _))`, the Arrow interface stated once over a
 constructor parameter and audited against two models),
-`autodiff.braid` (below) and `frame.braid` (a data frame as a second
+`autodiff.braid` (below), `frame.braid` (a data frame as a second
 model of the same doctrine — row programs lifted by `use Frame`, the
-`data` declaration's field words as the columns, §12).
+`data` declaration's field words as the columns, §12) and
+`prob.braid` (a third: probability as a **Markov category**, where the
+model is what makes copying stop being natural).
 
 **Differentiation is a model** *(2026-09-14)* — the worked example
 that ties every row of the table together, and the one to read after
@@ -3452,6 +3525,25 @@ layer does not reach — a model parameterized by a model (second
 derivatives) — and, since the sampled square over a closure-holding
 carrier was fixed *(2026-09-14, §14)*, what a sampled square costs:
 it establishes its claim at the theory's exit.
+
+**Probability is a model** *(2026-09-15)* — and it is the example that
+says what the `theory`/`model` row of the table *buys*, because the
+thing it buys is a distinction the language cannot otherwise draw.
+`examples/prob.braid` declares `theory Prob(k(_, _), d(_)) over
+Doctrine` — the doctrine's three structure slots, plus `flip`,
+`uniform` and `condition` as **entries** (`• ⇒ k(_, _)`: a
+distribution is a kernel, since there is no `k(•, b)`) and `report` as
+an **exit** whose result is a constructor parameter. Three models
+(exact enumeration, a threaded seed, the support), the doctrine's seven
+laws over each, and then the two Markov axioms stated as programs: copy
+is **not** natural, which is the law that must *fail* and is shown
+failing by running both sides; discard **is** natural, stated at the
+mass, which `condition` is exactly what breaks (an affine category, not
+a Markov one — and Bayes' rule is the renormalizing that puts the mass
+back). It also records what cannot be checked and why: a transformation
+between two function-carrier models of a doctrine is decidable only
+when the normalizer proves it, because a component is generic in the
+hom-object's arguments and so can never run the carrier (§14).
 
 **An effectful arrow is a resource + a macro + a theory**: the resource
 carries the state, the macro installs and discharges it, and the theory

@@ -462,7 +462,33 @@ bare `use` leaves.
     act. Everything that *runs* is Braid: the generated loader re-reads
     the file and puts a bad row on the miss track with its line number.
     (2026-09-15)
-19. **A refusal names the place and the rule.** Every error from a file
+19. **Probability is a model — and it is what makes copying stop being
+    natural.** A Markov category (Fritz) is a monoidal category where
+    every wire copies and discards and **copying is not natural**: copy
+    after a coin flip gives two equal bits, two coin flips give two
+    independent ones. Braid's base is cartesian, so `dup` there *is*
+    natural — `examples/laws.braid` has the normalizer **prove**
+    `dup ; f f = f ; dup` for an arbitrary word — and a model of the
+    `Doctrine` whose hom-object is a stochastic map is the category
+    `use M` maps into. So the distinction is drawn structurally:
+    ```braid
+    def twoEqualE = use Enum ; half ; flip ; dup        # ONE flip, copied
+    def twoIndepE = use Enum ; twoBiases ; bothFlipE    # TWO flips
+    ```
+    `{HH: ½, TT: ½}` against four cells of ¼, in all three models, with
+    nothing in the file declaring that they differ. A generator is an
+    **entry at a kernel** — there is no `k(•, b)` because `•` is not a
+    wire, so `flip : • ⇒ k(Float, Bool)` and the bias arrives on the
+    wire the kernel consumes, produced by an ordinary base stage inside
+    the scope. `report : k(Int, b) ⇒ d(b)` is the exit, and its result
+    is a **constructor** parameter the model fills. Three models — exact
+    enumeration, a threaded-seed sampler (a 48-bit LCG in Braid, so the
+    counts are reproducible), the support — the doctrine's seven laws
+    over each, Monty Hall and a noisy sensor with `condition` and
+    renormalizing, and a random walk under `use Recursive`.
+    `examples/prob.braid` (2026-09-15), with the frame library as its
+    first client: every distribution printed is a frame.
+20. **A refusal names the place and the rule.** Every error from a file
     reads `path:line`, and `, in def X` when it is inside one; a main
     program names the line of the **stage** that failed, and an imported
     file names its own path. Six shapes that cost real time — a row arm
@@ -505,6 +531,9 @@ one theory of arithmetic — no `Code`, no chain rule),
 lifted by `use Frame`, the columns being the `data` declaration's field
 words, and two CSVs loaded by one `table` line each — the second with a
 written schema),
+`prob` (the third flagship: probability as a Markov category — one
+theory over the Doctrine, three models, and copy-is-not-natural drawn
+structurally rather than asserted),
 `imports` (one file's declarations in another file's scope) — and finish with
 `registrar`, which uses most of the language in forty lines about
 grade school.
@@ -523,7 +552,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1116-case test suite, a full
+(typechecker, interpreter, REPL), a 1120-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

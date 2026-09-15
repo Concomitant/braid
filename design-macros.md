@@ -3569,3 +3569,231 @@ become one: the parsing, the sniff and the text generation are all
 writable in the language, and the only thing the Haskell has that Braid
 does not is the file read, which is what `=Dict IO>` is for. Recorded
 as the intended demolition rather than as a maybe.
+
+## Amendment (2026-09-15): probability is a model
+
+`examples/prob.braid` is the third flagship, and the one that says what
+the `theory`/`model` layer is *for*: it buys a distinction the language
+cannot otherwise draw, and it buys it structurally.
+
+### The Markov reading
+
+A **Markov category** (Fritz, *A synthetic approach to Markov kernels…*,
+2020; READING) is a symmetric monoidal category in which every object
+carries a commutative comonoid — every wire can be **copied** and
+**discarded** — subject to two axioms with opposite force:
+
+- **discard is natural.** `f ; discard = discard` for every `f`. This is
+  causality (semicartesian): a kernel has total mass 1, so throwing its
+  output away is the same as never having run it.
+- **copy is NOT natural.** `f ; copy ≠ copy ; (f ⊗ f)` in general. This
+  is the whole of probability. Copying a sample gives two *equal*
+  values; running the sampler twice gives two *independent* ones.
+
+Braid's base is cartesian, where copy *is* natural — and that is not an
+assumption here, it is a machine verdict: `examples/laws.braid` has
+`sameCode` **prove** `dup ; f f = f ; dup` for an arbitrary word, which
+is exactly the statement that the base category has no randomness in it.
+So a model of the `Doctrine` whose hom-object is a stochastic map is a
+Markov category, `use Enum` is the functor from the deterministic world
+into it, and the two programs
+
+```braid
+def twoEqualE = use Enum ; half ; flip ; dup        # ONE flip, copied
+def twoIndepE = use Enum ; twoBiases ; bothFlipE    # TWO flips
+```
+
+disagree because the model disagrees. Nothing in the file declares that
+they should; `dup` is transported by the functor, `bothFlipE` is the
+strength applied twice, and the disagreement *is* what the model is.
+That is the point of drawing it structurally rather than by a convention
+about what `flip` means: a reader who does not believe the thesis can
+run the file, and a model with a wrong `compose` makes the doctrine's
+laws fail before anything prints.
+
+### The shape a generator has to take, and why
+
+A hom-object is `k(a, b)`: **one object on each side**. There is no
+`k(•, Bool)`, because `•` is not a wire and a constructor parameter is
+applied to types. So a *distribution* — a morphism `I → B` in the
+Markov category — has no direct spelling, and the honest move is to
+write the **kernel** it is a family of:
+
+```braid
+flip      : • ⇒ k(Float, Bool)          # an ENTRY: a carrier out of nothing
+uniform   : • ⇒ k(Int, Int)
+condition : • ⇒ k(Pair(Bool, a), a)
+```
+
+The bias then arrives on the wire the kernel consumes, and it is
+produced by an **ordinary base stage inside the transported scope** —
+`half = (n -> 0.5)`, one wire in and one wire out, so the functor embeds
+it like any other stage. Nothing special-cases a parameter, and the
+alternative spellings are worse in ways worth recording: `flip : Float ⇒
+k(•, Bool)` does not typecheck (no `k(•, _)`), and a slot taking the
+Float *beside* a carrier would stop being an entry and so stop composing
+under `use`. The stand-in for the monoidal unit is `Int`, ignored: every
+program in the file starts with a stage that drops the incoming Int and
+produces what it actually wanted, and `report` runs kernels at 0.
+
+`report : k(Int, b) ⇒ d(b)` is the **exit**, and it is the 6b rule one
+kind up: an exit whose *result* varies by model is a theory parameter,
+and here the result is itself parameterized (`Weighted(b)`, `Draws(b)`,
+`Reach(b)`), so the parameter is a **constructor** parameter `d(_)`.
+That needed a one-line fix: `componentArrows` wrote two type arguments
+for every constructor parameter, on the standing assumption that one is
+always a hom-object, and refused any transformation over such a theory
+with `Weighted(a0, a1) ⇒ Reach(a0, a1)`. The arity is written in the
+declaration; it is read now.
+
+### Three models, and the one that is not shipped
+
+- **`Enum`** — `Kern(a, b) = Fn⟨a ⇒ Weighted(b)⟩`, the Kleisli category
+  of the finite distribution monad. `embed` is the point mass,
+  `compose` is bind with the weights multiplied, `first` is the
+  strength. Exact: every weight in the file is a double, and the dyadic
+  ones are exact doubles.
+- **`Sampler`** — `Samp(a, b) = Fn⟨Rng a ⇒ Rng b⟩`, a seed threaded as
+  a `resource` exactly as `metered.braid` threads Fuel. The generator is
+  a 48-bit LCG written in Braid, so the model is **deterministic** and
+  every count printed is the program's output rather than a report about
+  a run of it. `report` draws 200 samples, threading one seed through
+  all of them, and the frame library tallies them.
+- **`Nondet`** — `Poss(a, b) = Fn⟨a ⇒ Reach(b)⟩`, the support and
+  nothing else: the possibilistic Markov category, where a weight is a
+  bit and `compose` is `flatMap`. It earns its place by showing that
+  the copy/two-flips distinction survives with the numbers removed —
+  `{HH, TT}` against `{HH, HT, TH, TT}`.
+
+**`Density` is not shipped, and not because it is tedious.** A scoring
+semantics weighs an outcome it is *given*, so its `flip` would be
+`k(Pair(Float, Bool), Bool)` and not `k(Float, Bool)`. A slot has ONE
+type for every model, so a density model is a model of a **different
+theory** — and saying that is worth more than a third carrier that
+repeats `Sampler`'s resource threading with `Weight` in place of `Rng`.
+
+### What the transformations establish, and what they refuse
+
+**Expectation is not a functor of this category, and the reason is
+mathematics.** E[g(X)] ≠ g(E[X]) — the file prints E[X] = 1 and
+E[X²] = 5/3 for X uniform on {0,1,2} — so expectation does not preserve
+composition and `transformation Expect : Enum ⇒ anything` is not a thing
+to declare. What expectation *is* a homomorphism of is the **convex
+structure**, so the file declares a second, one-carrier theory for it:
+
+```braid
+theory Convex(m) = mix : m m ⇒ m ; sample : • ⇒ m ; other : • ⇒ m ; observe : m ⇒ Float
+transformation Expect : Mixtures ⇒ Means = meanW
+```
+
+`mix` is the fair midpoint ½x + ½y and the laws are the barycentric
+ones (idempotence, commutativity, mediality). All four squares are
+decided at the theory's evidence. Putting `Expect` where it *is* a
+homomorphism, and printing the counterexample where it is not, is the
+whole of what this file has to say about expectation.
+
+**`Sampler ⇒ Enum` has no component at all.** A sample is not a function
+of the distribution, and the type system says so before the mathematics
+does: a component must be generic in the hom-object's arguments, so it
+can never apply the sampler. Writing the obvious wrong one — the point
+mass at a draw from a fixed seed — typechecks and is refused at the
+samples, on `compose`, because a fresh seed per factor is not the same
+kernel as one seed threaded through the composite.
+
+**`Support : Enum ⇒ Nondet` is a homomorphism and is still refused**,
+and this is the pragmatics item. Forgetting the weights really is the
+support functor from the distribution monad to the nonempty powerset;
+every square but one is fine; the `first` square is not. Its result is
+`k(p(a, c), p(b, c))` — the hom-object at a **pairing** — and the
+doctrine's exit is `observe : k(Int, Int) ⇒ Int`, which does not fit it.
+A second exit at the pairing cannot help: the square *that* exit would
+itself need is fed by the theory's first entry, `sample : • ⇒ k(Int,
+Int)`, whose object is `Int` and not a pair, so it does not even
+typecheck. With no exit that fits, the two carriers are compared with
+`eq?` — and they are closures, where `eq?` is syntactic.
+
+The general statement, which is the standing limit and now sits in
+MANUAL §14: **a transformation's component is generic in the
+hom-object's arguments, so it can never RUN the carrier; a square
+between two function-carrier models is therefore decidable only when the
+normalizer proves it, which needs the component to pass the witness
+through untouched.** `examples/transformations.braid`'s `Forget : Names
+⇒ Funcs` drops a `Str` field and proves all five. A component that
+*transforms* the witness — which is what forgetting a weight is — is out
+of reach, at the pairing especially. Closing it wants either an exit
+family indexed by the slot's result shape, or a second kind of evidence
+slot (`sampleAt : • ⇒ k(p(Int, Int), p(Int, Int))`) that the square
+generator picks by fit rather than by declaration order.
+
+### What is NOT built
+
+**Continuous distributions.** Everything is finitely supported: `Enum`
+enumerates, `Nondet` lists. A Gaussian has no list, and the carrier
+would be a density against a base measure — which is the `Density`
+model above, a model of a different theory.
+
+**Inference beyond enumeration and forward sampling.** `condition` is
+rejection at weight 0 or 1 and `renorm` is Bayes' rule on the frame.
+There is no importance sampling, no MCMC, no variable elimination. Those
+are algorithms; this file is about what the category is.
+
+**Disintegration as an arrow.** Cho & Jacobs' Bayesian inversion takes a
+kernel `k(a, b)` and a prior and returns `k(b, a)`. In `Enum` the
+operation is writable — enumerate the joint, group by the `b`
+coordinate, renormalize inside each group — but the *arrow* is not: a
+kernel must answer for **every** `b`, so the inverse needs a table keyed
+by an arbitrary outcome type, and that needs an ordering or a hash,
+which the language does not have (`eq?` is structural, `lt?` is Int).
+The Monty Hall and sensor sections are disintegration at one point, done
+with `condition` and `renorm` — the operation, without the arrow.
+
+**No choice slot, again.** A row program that branches into two
+different *kernels* cannot be written inside a `use` scope: transporting
+a sum needs `ArrowChoice`'s `left` and the Doctrine has `first`. The
+file sidesteps it the way `frame.braid`'s `keep` does — the deciding is
+deterministic and rides the wire, the generator is composed
+unconditionally — which is why `coinSndE` flips even when the coin will
+be ignored, and why the Monty Hall tally has to SUM the two branches
+that agree. This is the second flagship in a row to hit it; it is the
+strongest case yet for a `left` slot in the Doctrine.
+
+### Pragmatics, recorded
+
+- **A program over the theory cannot be written once.** `over Prob`
+  makes a template, but a template's body elaborates to a `use@` marker
+  and `use Enum` is a *transport* scope, not a template instantiation —
+  so `def tmpl = over Prob ; half ; flip ; dup` followed by `use Enum ;
+  tmpl` is refused (`use@Enum takes no wire`). Every transported program
+  and every hand-built category word is therefore written once **per
+  model**: `bothFlipE`, `bothFlipS`, `bothFlipN` are three copies of one
+  text. `examples/autodiff.braid` writes `poly` once because `Smooth` is
+  not over the Doctrine. This is the largest single cost in the file and
+  the clearest thing to fix next.
+- **`over M` must be its own line.** `def f = over Enum ;` followed by a
+  newline loses the scope for every line after the first — the words
+  resolve as base primitives and the refusal is `Unknown primitive:
+  embed`, which names the symptom and not the cause. `def f =` /
+  `    over Enum` / … is the form that works.
+- **Width bookkeeping is visible.** After `dup` the scope is running two
+  wires, so the next stage must take two; after a k-word it is running
+  one, whose object is a `Pair`, so the next stage must take one and
+  `unPair` it. Two spellings of one decoder (`Bool Bool ⇒ Str` and
+  `Pair(Bool, Bool) ⇒ Str`) is what that costs, and the file pays it by
+  decoding outside the scope instead.
+- **The frame library as a client, which is what it was built for.**
+  `import "frame.braid"` brought `groupBy`, `sumF`, `keep`, `printFrame`
+  and `Pair` in, and the import rule did its job: the demo did not run,
+  the declarations did. Three frictions: (1) `Pair` had to come from
+  there rather than be declared locally, which is right but only
+  discoverable by hitting the clash; (2) `says` — three atoms —
+  clashed, and the refusal named both files at once, which is the rule
+  working exactly as designed and still the standing cost of having no
+  namespacing: a library's every private helper is in your scope; (3) a tally is
+  `groupBy` over two columns built by two `map`s over the same list,
+  which is four traversals for one grouping — `groupBy` wants a
+  key-function form beside the key-column one.
+- **A refusal that misreports its cause.** The `first`-square message
+  said *the theory declares no exit* about a theory declaring two. Fixed
+  the same day, tested, and worth noting as a class: a message that
+  names a **missing** thing must say missing-*for-what*, or it sends the
+  reader to add what is already there.

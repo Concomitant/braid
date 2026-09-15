@@ -87,6 +87,20 @@ transformationVerdictTests =
                  -- reaches) rather than through `observe`, which is an
                  -- exit for `a` and not for `g`.
                , "  gradient  sampled (1 point; differ in the free category)" ] )
+    -- EXPECTATION, as a homomorphism of the CONVEX structure
+    -- (2026-09-15).  It is not a functor of the Markov category —
+    -- E[g(X)] is not g(E[X]), and `examples/prob.braid` §12 prints the
+    -- counterexample — so the transformation it does admit is declared
+    -- at `theory Convex(m)`, one carrier, the fair mixture.  Every
+    -- square goes to the samples: `mix` and `observe` stop at the `ev`
+    -- a fold makes of its handler, and the two evidence slots at
+    -- `Box`, whose arity is open.
+  , ( "prob.braid", "Expect"
+    , unlines' [ "Expect : Mixtures \8658 Means"
+               , "  mix      sampled (2 points; ev of an open wire)"
+               , "  sample   sampled (`Box` has no closed arity)"
+               , "  other    sampled (`Box` has no closed arity)"
+               , "  observe  sampled (1 point; ev of an open wire)" ] )
   ]
   where unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 
@@ -1357,6 +1371,31 @@ sealedMod = unlines
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- A CONSTRUCTOR PARAMETER OF ARITY ONE (2026-09-15).  A theory
+    -- parameter `f(_)` is what an exit whose RESULT varies by model
+    -- wants when the result is itself parameterized — `report :
+    -- k(Int, b) ⇒ d(b)` in `examples/prob.braid`.  `componentArrows`
+    -- wrote TWO type arguments for every constructor parameter, on the
+    -- assumption that one is always a hom-object, so a transformation
+    -- over such a theory was refused with `Wrap(a0, a1) ⇒ Twice(a0,
+    -- a1)`.  The arity is written in the declaration; it is read now.
+  [ ("data Wrap(a) = a\ndata Twice(a) = a a\n\
+     \theory H(f(_)) =\n\
+     \    sample  : \8226 \8658 f(Int)\n\
+     \    bump    : f(Int) \8658 f(Int)\n\
+     \    observe : f(Int) \8658 Int\n\
+     \model One : H(Wrap) =\n\
+     \    sample  = 7 ; Wrap\n\
+     \    bump    = unWrap ; _ 1 ; + ; Wrap\n\
+     \    observe = unWrap\n\
+     \model Two : H(Twice) =\n\
+     \    sample  = 7 7 ; Twice\n\
+     \    bump    = unTwice ; (x y -> (x ; _ 1 ; +) (y ; _ 1 ; +)) ; Twice\n\
+     \    observe = unTwice ; _ drop\n\
+     \def widen = unWrap ; dup ; Twice\n\
+     \transformation W : One \8658 Two = widen\n\
+     \(7 ; Wrap) ; widen ; unTwice ; + ; print",
+     ["14"], "")
     -- THE PARAMETERIZED EXIT (2026-09-14).  An exit whose result varies
     -- by model is a THEORY PARAMETER the model instantiates: `grad : a
     -- ⇒ g` is one slot with one type, and `g` is `Float` for the plain
@@ -1365,7 +1404,7 @@ evalTests =
     -- is instantiated per model and reaches nothing else.  The
     -- transformation then needs ONE COMPONENT PER PARAMETER, because
     -- the two ends of `grad`'s square sit at different ones.
-  [ ("data Dual = Float Float\n\
+  , ("data Dual = Float Float\n\
      \def zt = (d -> 0.0)\n\
      \def dadd = Dual(a, da) Dual(b, db) -> (a b ; fadd) (da db ; fadd) ; Dual\n\
      \def val = Dual(v, t) -> v\n\
@@ -3137,6 +3176,15 @@ moduleFailTests =
     -- have decided it honestly
   , (closureModNoExit ++ "transformation Scaled : Src ⇒ Dst = toK\n1 >> print",
      "declare an exit `observe` in the theory")
+    -- ...and it says WHICH exit is missing.  Until 2026-09-15 it said
+    -- the theory declares no exit, full stop, which is false of a
+    -- theory that declares one the slot's result does not FIT —
+    -- `examples/prob.braid` is that case: `observe : k(Int, Int)` is an
+    -- exit, and `first` leaves the hom-object at a PAIRING, which it
+    -- does not reach.  A refusal that misreports its own cause sends
+    -- the reader to the wrong repair.
+  , (closureModNoExit ++ "transformation Scaled : Src ⇒ Dst = toK\n1 >> print",
+     "no exit whose input FITS this slot's result")
     -- ...and with NO evidence to sample with, the refusal names the slot
     -- and asks for the slot that would decide it
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\

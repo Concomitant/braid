@@ -178,13 +178,16 @@ resource Rng = Int
 data Draws(b)   = List(b)
 data Samp(a, b) = Fn⟨Rng a =Recursive> Rng b⟩
 
-## Numerical Recipes' LCG, modulo 2^31.  The whole source of randomness.
-def stepRng = unRng ; (s -> ((s 1103515245 ; *) 12345 ; +) 2147483648 ; mod)
+## A 48-bit linear congruential generator — the whole source of
+## randomness in this file, four atoms wide.  An Int in Braid is exact
+## at any width, so the modulus is written as the number it is.
+def stepRng = unRng ; (s -> ((s 25214903917 ; *) 11 ; +) 281474976710656 ; mod)
 def drawRaw = (r -> r ; stepRng ; dup ; Rng _)          # Rng ⇒ Rng Int
-## …read as a Float in [0, 1).  Reading the WHOLE word rather than
-## `mod`-ing it matters: an LCG's low bits have short periods, and
-## `u mod 2` is the worst bit there is.
-def unitOf  = (u -> (u ; toFloat) 2147483648.0 ; fdiv)
+## …read as a Float in [0, 1), from the TOP 32 bits.  Which bits are
+## taken is not a detail: an LCG's low bits have short periods (bit 0
+## alternates), so `u mod 2` is the worst coin there is and `u div
+## 2^16` is a good one.
+def unitOf  = (u -> ((u 65536 ; div) ; toFloat) 4294967296.0 ; fdiv)
 
 def runS    = (c r x -> c ; unSamp ; _ r x ; ev)
 def sEmbed  = (f -> [(r x -> r (f ; _ x ; ev))] ; Samp)
@@ -240,12 +243,13 @@ model Sampler : Prob(Samp, Draws) =
 # ---------------------------------------------------------------------
 # The possibilistic Markov category: a weight is a bit, so the
 # hom-object is a function into a plain list and `compose` is `flatMap`.
-# It is here because it is the model that says what a weight ADDS: the
-# seven doctrine laws run over it word for word, and the copy/two-flips
-# distinction below VANISHES in it — both programs have support {HH, HT,
-# TH, TT}… no: `twoEqual`'s support is {HH, TT}, and that is the
-# possibilistic shadow of the same fact.  A model with no numbers in it
-# still tells copying from sampling.
+# It is here because it is the model that says what a weight ADDS, by
+# taking them all away.  The seven doctrine laws run over it word for
+# word, and the copy/two-flips distinction SURVIVES: `twoEqual`'s
+# support is {HH, TT} and `twoIndep`'s is {HH, HT, TH, TT}, which is
+# the possibilistic shadow of the same fact.  A model with no numbers
+# in it still tells copying from sampling — what the numbers add is
+# HOW MUCH, not WHETHER.
 
 data Reach(b)   = List(b)
 data Poss(a, b) = Fn⟨a =Recursive> Reach(b)⟩
@@ -373,10 +377,399 @@ distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; printFrame
 "" ; print
 "== the same two programs, SAMPLED (200 draws, seed 20260915) ==" ; print
 countHead ([showBits] (twoEqualS ; sReport) ; tallyD) ; printFrame
+#   TT | 98    HH | 102 — two cells, and the other two are ABSENT, not
+#   small: a copied bit cannot disagree with itself at any seed
 "" ; print
 countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
+#   TH | 61   HT | 49   TT | 38   HH | 52 — four cells, 200 draws,
+#   50 expected in each.  The seed is fixed, so these ten numbers are
+#   the program's output and not a report about a run of it.
 
 "" ; print
 "== and possibilistically: the SUPPORT, weights forgotten ==" ; print
 (twoEqualN ; nReport ; unReach) ; [showBits] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
 (twoIndepN ; nReport ; unReach) ; [showBits] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
+
+# ---------------------------------------------------------------------
+# 7. MONTY HALL, under `Enum`, with `condition`
+# ---------------------------------------------------------------------
+# The car is uniform on three doors, the guess is door 0, and the host
+# opens a door that is neither.  When the car IS behind door 0 the host
+# has a free choice and flips for it; otherwise the door is forced.
+# That dependence is the whole problem, and writing it needs the coin
+# to land beside the car — which is `second (flip)`, the strength with
+# a swap around it.
+#
+# (Conditioning a UNIFORM host on "the host missed the car" is a
+# different problem — Monty *Fall* — and it answers 1/2.  The model has
+# to say what the host does; `condition` cannot repair a wrong one.)
+
+def coinSndE = over Enum ; (([half] ; embed) flip ; compose) ; secondE
+def coinSndS = over Sampler ; (([half] ; embed) flip ; compose) ; secondS
+#   coinSndE : • ⇒ Kern(Pair(c, Int), Pair(c, Bool)) — flip a fair coin
+#   ON TOP of whatever is riding below
+
+def three    = (n -> 3)
+def hostFrom =
+    p -> p ; unPair
+           ; (car c -> car ((car 0 ; equals) (c 1 2 ; select) (3 car ; -) ; select) ; Pair)
+
+def montyE =
+    use Enum
+    three
+    uniform
+    dup
+    coinSndE
+    hostFrom
+#   montyE : Int =Enum Recursive> Pair(Int, Int) — the JOINT of (car, host)
+
+def showCH =
+    p -> p ; unPair ; (car h -> (("car " (car ; toStr) ; cat) ", host " ; cat) (h ; toStr) ; cat)
+
+"" ; print
+"== Monty Hall: the joint distribution of (car, host) ==" ; print
+distHead ([showCH] (montyE ; eReport) ; tallyW) ; printFrame
+#   car 0, host 1 | 0.16666666666666666    1/3 · 1/2
+#   car 0, host 2 | 0.16666666666666666    1/3 · 1/2
+#   car 1, host 2 | 0.3333333333333333     1/3, the coin summed away
+#   car 2, host 1 | 0.3333333333333333     1/3, likewise
+#   — 1/3 is 0.3333333333333333 as a double and its half is exact,
+#     so the two 1/6 rows really are the same number
+
+## the evidence: the host opened door 1.  `condition` takes a Bool
+## beside the value it is keeping, so the stage before it PAIRS the
+## verdict with what survives.
+def keepHost1 = (p -> p ; unPair ; (car h -> (h 1 ; equals) car ; Pair))
+
+def montyPostE =
+    use Enum
+    three
+    uniform
+    dup
+    coinSndE
+    hostFrom
+    keepHost1
+    condition
+#   montyPostE : Int =Enum Recursive> Int — the car, on the branches
+#   where the host opened door 1, at their UNNORMALIZED weights
+
+## Bayes' rule, as a frame operation: divide every weight by the mass.
+def renorm =
+    w ->
+    w ; unWeighted
+      ; (es -> (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map ; sumF) \
+             ; (m -> es ; [(b -> b ; unBox ; (y p -> y (p m ; fdiv) ; Box))] ... ; map \
+                        ; Weighted))
+def showCar = (n -> "car " (n ; toStr) ; cat)
+
+"" ; print
+"== …given the host opened door 1 — the posterior over the car ==" ; print
+distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; printFrame
+#   car 0 | 0.3333333333333333    (1/6) / (1/2) — staying wins 1/3
+#   car 2 | 0.6666666666666666    (1/3) / (1/2) — SWITCHING WINS 2/3
+
+# ---------------------------------------------------------------------
+# 8. A NOISY SENSOR, under `Enum` — the same three lines, different
+#    numbers
+# ---------------------------------------------------------------------
+# Prior: rain with probability 1/4.  The sensor cries rain with
+# probability 7/8 when it rains and 1/8 when it does not.  Every number
+# is dyadic, so every weight below is an exact double.
+
+def quarter  = (n -> 0.25)
+def biasOf2  = (r x -> r (r 0.875 0.125 ; select))   # Bool Bool ⇒ Bool Float
+def flipSndE = over Enum ; flip ; secondE
+def keepAlarm = (p -> p ; unPair ; (r a -> a r ; Pair))
+def showRain = (b -> b "rain" "dry" ; select)
+
+def sensorE =
+    use Enum
+    quarter
+    flip
+    dup
+    biasOf2
+    flipSndE
+#   sensorE : Int =Enum Recursive> Pair(Bool, Bool) — (rain?, alarm?)
+
+def showRA =
+    p -> p ; unPair ; (r a -> ((r ; showRain) ", alarm " ; cat) (a "yes" "no" ; select) ; cat)
+
+def sensorPostE =
+    use Enum
+    quarter
+    flip
+    dup
+    biasOf2
+    flipSndE
+    keepAlarm
+    condition
+
+"" ; print
+"== a noisy sensor: the joint of (rain, alarm) ==" ; print
+distHead ([showRA] (sensorE ; eReport) ; tallyW) ; printFrame
+#   rain, alarm yes | 0.21875     1/4 · 7/8
+#   rain, alarm no  | 0.03125     1/4 · 1/8
+#   dry,  alarm yes | 0.09375     3/4 · 1/8
+#   dry,  alarm no  | 0.65625     3/4 · 7/8   — and they sum to 1.0
+
+"" ; print
+"== …given the alarm — the posterior over rain ==" ; print
+distHead ([showRain] (sensorPostE ; eReport ; renorm) ; tallyW) ; printFrame
+#   rain | 0.7      0.21875 / 0.3125 = 7/10, and 7/32 ÷ 5/16 is exact
+#   dry  | 0.3      0.09375 / 0.3125 = 3/10
+
+# ---------------------------------------------------------------------
+# 9. A MARKOV CHAIN, under `Sampler`, with `use Recursive`
+# ---------------------------------------------------------------------
+# A random walk on the integers: at each step flip a fair coin and move
+# one either way.  `walkN` builds the n-step kernel by COMPOSING the
+# one-step kernel n times — composition in the category, so the knot
+# never sees a sample, only an arrow.
+
+def idS    = over Sampler ; [_] ; embed
+def thenS  = over Sampler ; compose
+def moveBy = (p -> p ; unPair ; (x b -> b (x ; _ 1 ; +) (x 1 ; -) ; select))
+
+def stepS = use Sampler ; dup ; coinSndS ; moveBy
+#   stepS : Int =Sampler Recursive> Int
+
+def walkN =
+    use Recursive
+    n -> (n 0 ; equals) [idS] [(stepS ((n ; _ 1 ; -) ; walkN) ; thenS)] ... ; cond
+#   walkN : Int =Recursive> Samp(Int, Int) — a KERNEL built by
+#   recursion, and the recursion is over the number of steps, not over
+#   the randomness
+
+"" ; print
+"== a 10-step random walk, 200 draws (seed 20260915) ==" ; print
+countHead ([toStr] ((10 ; walkN) ; sReport) ; tallyD) ; printFrame
+#   -2 | 43   4 | 32   -4 | 19   2 | 33   0 | 52   10 | 1
+#    6 |  9  -6 |  9    8 |  2
+#   Ten steps from 0, so every endpoint is even and in [-10, 10], and
+#   the exact distribution is binomial: 200·C(10,5)/1024 = 39.1 at 0,
+#   200·C(10,4)/1024 = 41.0 at ±2, 20.5 at ±4, 8.2 at ±6, 2.0 at ±8,
+#   0.2 at ±10.  The 200 draws sum: 43+32+19+33+52+1+9+9+2 = 200.
+
+# ---------------------------------------------------------------------
+# 10. THE MARKOV LAWS, stated as programs
+# ---------------------------------------------------------------------
+# Two of them, and they pull in opposite directions.
+#
+# COPY IS NOT NATURAL.  This is the law that must FAIL, and the file
+# shows it failing by running both sides.  In the BASE it holds and the
+# normalizer PROVES it, for every word and every input; under the
+# functor the two sides are different distributions, and `eq?` on the
+# reports decides it false at every model.  That is the whole content
+# of "a Markov category is not cartesian": the same diagram, two
+# answers, and which answer you get is the functor.
+#
+# DISCARD IS NATURAL.  Every kernel has total mass 1 — `f ; discard =
+# discard` — which is Fritz's causality/semicartesian axiom.  There is
+# no `•` object to state it at, so it is stated at the mass, which is
+# the same claim read through `report`.  `condition` is what breaks it,
+# and the mass says so: a category with `condition` is AFFINE (mass ≤
+# 1), not Markov, and Bayes' rule is exactly the renormalizing that
+# puts the mass back.
+
+## `says` comes from the frame library too — a Bool, spelled
+def weightsOf = (w -> w ; unWeighted ; [(b -> b ; unBox ; (y p -> p))] ... ; map)
+def massOf   = (c -> c ; eReport ; weightsOf ; sumF)
+def sameDist = (u v -> (u ; eReport ; unWeighted) (v ; eReport ; unWeighted) ; eq? ; verdict)
+
+"" ; print
+"== copy is natural in the BASE — decided, for every word ==" ; print
+[dup ; toStr toStr] [toStr ; dup] ; sameCode ; says ; print      # true — PROVED
+[toStr ; dup] [dup ; toStr _] ; sameCode ; says ; print          # false — and it
+                                                                 # really discriminates
+"== …and NOT under the functor — decided at the distributions ==" ; print
+twoEqualE twoIndepE ; sameDist ; says ; print                    # false
+
+"" ; print
+"== discard is natural: every kernel has mass 1 ==" ; print
+twoEqualE ; massOf ; print                # 1.0
+twoIndepE ; massOf ; print                # 1.0
+montyE    ; massOf ; print                # 0.9999999999999999 — six
+                                          #   branches of 1/6, and 1/6 is
+                                          #   the double 1/3 halved; six of
+                                          #   them summed left to right land
+                                          #   one ulp under 1.  The claim is
+                                          #   exact, the arithmetic is not,
+                                          #   and saying which is which is
+                                          #   the whole of stating a law at
+                                          #   Float (cf. autodiff.braid §1)
+sensorE   ; massOf ; print                # 1.0 — every weight dyadic
+"== …until `condition`, which is what makes it AFFINE, not Markov ==" ; print
+montyPostE  ; massOf ; print              # 0.5     — 1/6 + 1/3
+sensorPostE ; massOf ; print              # 0.3125  — 7/32 + 3/32
+
+# ---------------------------------------------------------------------
+# 11. EXPECTATION IS A HOMOMORPHISM — but not of THIS category
+# ---------------------------------------------------------------------
+# `transformation Expect : Enum ⇒ <anything>` cannot be declared, and
+# the reason is not a gap in the checker: E[g(X)] ≠ g(E[X]), so
+# expectation does not preserve composition and is not a functor of the
+# Markov category at all.  §12 prints the counterexample.
+#
+# What expectation IS a homomorphism of is the CONVEX structure — the
+# fair-mixture operation — and that is an algebraic theory over one
+# carrier, so it is declared here and machine-checked.  `mix` is the
+# midpoint ½x + ½y; the laws are the barycentric ones (idempotence,
+# commutativity, mediality).
+
+theory Convex(m) =
+    mix     : m m ⇒ m
+    sample  : • ⇒ m
+    other   : • ⇒ m
+    observe : m ⇒ Float
+    law mixIdem = (sample ; dup ; mix ; observe) (sample ; observe) ; eq? ; verdict
+    law mixComm = (sample other ; mix ; observe) (other sample ; mix ; observe) ; eq? ; verdict
+    law medial  = ((sample other ; mix) (sample other ; mix) ; mix ; observe) ((sample sample ; mix) (other other ; mix) ; mix ; observe) ; eq? ; verdict
+
+## the model that keeps the whole distribution: mixing halves both
+## sides' weights and appends
+def halveW  = (w -> w ; unWeighted ; [(e -> e ; unBox ; (y p -> y (p 0.5 ; fmul) ; Box))] ... ; map)
+def mixW    = (u v -> (u ; halveW) (v ; halveW) ; append ; Weighted)
+def meanW   =
+    w ->
+    w ; unWeighted ; [(acc e -> e ; unBox ; (y p -> acc (y p ; fmul) ; fadd))] 0.0 ... ; fold
+def twoPts  = ((1.0 0.5 ; Box) (3.0 0.5 ; Box) ; pack) ; Weighted     # mean 2.0
+def onePt   = (4.0 1.0 ; Box) ; single ; Weighted                     # mean 4.0
+
+model Mixtures : Convex(Weighted(Float)) =
+    mix     = mixW
+    sample  = twoPts
+    other   = onePt
+    observe = meanW
+
+## …and the model that keeps only the mean
+def meanMix = (a b -> (a b ; fadd) 2.0 ; fdiv)
+
+model Means : Convex(Float) =
+    mix     = meanMix
+    sample  = 2.0
+    other   = 4.0
+    observe = id
+
+transformation Expect : Mixtures ⇒ Means = meanW
+#   ONE component, because `Convex` has one parameter.  The four
+#   squares say: the mean of a fair mixture is the mean of the means
+#   (`mix`), the evidence corresponds (`sample`, `other`), and the
+#   model's own observation IS the component (`observe`).  `:transformations`
+#   prints the verdicts.
+
+"" ; print
+"== expectation, as a homomorphism of the convex structure ==" ; print
+(twoPts onePt ; mixW ; Expect) ; print         # 3.0  — ½·2 + ½·4
+(twoPts ; Expect) (onePt ; Expect) ; meanMix ; print
+                                               # 3.0  — the same, the other way
+                                               #   round the square
+
+# ---------------------------------------------------------------------
+# 12. WHAT IS REFUSED, and what that establishes
+# ---------------------------------------------------------------------
+# EXPECTATION IS NOT A FUNCTOR.  A functor preserves composition, and
+# expectation does not: square the uniform on {0, 1, 2} and the mean
+# moves from 1 to 5/3, while squaring the mean leaves 1.
+
+def sqr    = (x -> x x ; *)
+def uni3   = use Enum ; three ; uniform
+def uni3sq = use Enum ; three ; uniform ; sqr
+
+"" ; print
+"== E[X] and E[X^2] for X uniform on {0, 1, 2} ==" ; print
+uni3   ; eReport ; eExpect ; print      # 1.0                 = (0+1+2)/3
+uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
+                                        #   5/3 is not a double; this is the
+                                        #   nearest one, and (1+4)·(1/3)
+                                        #   summed left to right is how it
+                                        #   got there.  1.0 squared is 1.0,
+                                        #   so E[X^2] ≠ (E[X])^2 and `Expect`
+                                        #   is not a functor of `Prob`.
+#
+# `transformation Draw : Sampler ⇒ Enum` HAS NO COMPONENT, and the
+# reason is mathematical rather than mechanical: a component is a word
+# `Samp(a, b) ⇒ Kern(a, b)` that is generic in `a` and `b`, so it can
+# never APPLY the sampler — and a sample is not a function of the
+# distribution anyway.  Writing the obvious wrong one (the point mass
+# at the draw taken from a fixed seed) type-checks and is then refused
+# at the samples, because a fresh seed per factor is not the same
+# kernel as one seed threaded through the composite:
+#
+#     transformation Draw : Sampler ⇒ Enum = asDirac, asDiracD
+#     error: transformation Draw: the square for slot 'compose' does not
+#     commute at the theory's samples — a transformation between models
+#     is a homomorphism, slot by slot.
+#
+# `transformation Support : Enum ⇒ Nondet` is the one that OUGHT to
+# work — forgetting the weights really is a homomorphism, it is the
+# support functor from the distribution monad to the nonempty powerset
+# — and it is refused for a reason worth writing down.  Every square
+# but one is fine; the `first` square is not:
+#
+#     error: transformation Support: the square for slot 'first' does not
+#     commute at the theory's samples — … The two carriers were compared
+#     with `eq?` directly, because the theory declares no exit whose
+#     input FITS this slot's result — an exit at `k(Int, Int)` does not
+#     reach the hom-object at a PAIRING, which is what `first` leaves.
+#
+# (That message named the wrong thing until 2026-09-15: it said the
+# theory declares NO exit, and this theory declares two.  A refusal
+# that misreports its own cause sends the reader to the wrong repair,
+# so it now says `no exit whose input FITS`.)
+#
+# A second exit at the pairing cannot help either, and this is the
+# sharp end of it: the square THAT exit would itself need is fed by the
+# theory's first entry — `sample : • ⇒ k(Int, Int)`, the doctrine's —
+# whose object is `Int` and not a pair, so the exit's own square does
+# not even typecheck.  The carriers are therefore compared directly,
+# and they are closures.
+#
+# The general statement, which is the pragmatics item this file buys:
+# a component must be generic in the hom-object's arguments, so it can
+# never RUN the carrier; a square between two function-carrier models is
+# therefore decidable only when the normalizer proves it, which needs
+# the component to pass the witness through untouched.
+# `examples/transformations.braid`'s `Forget : Names ⇒ Funcs` is exactly
+# that case (drop a `Str` field) and proves all five.  A component that
+# TRANSFORMS the witness — which is what forgetting a weight is — is out
+# of reach at the pairing.
+
+# ---------------------------------------------------------------------
+# 13. What is NOT built, plainly
+# ---------------------------------------------------------------------
+# CONTINUOUS DISTRIBUTIONS.  Everything here is finitely supported.
+# `Enum` enumerates and `Nondet` lists; a Gaussian has no list.  The
+# carrier would be a density against a base measure, which is the
+# `Density` model this file does not ship — and not because it is
+# tedious: scoring a density needs the OUTCOME as an input, so its
+# `flip` would be `k(Pair(Float, Bool), Bool)` and not `k(Float, Bool)`.
+# A slot has ONE type for every model, so a scoring semantics is a model
+# of a DIFFERENT theory, and saying that is more use than shipping a
+# third carrier that repeats `Sampler`'s threading with `Weight` in
+# place of `Rng`.
+#
+# INFERENCE.  There is exact enumeration and there is forward sampling.
+# There is no importance sampling, no MCMC, no variable elimination.
+# `condition` is rejection at weight 0/1 and `renorm` is Bayes' rule on
+# the frame; anything cleverer is an algorithm, and this file is about
+# what the CATEGORY is.
+#
+# DISINTEGRATION.  Cho & Jacobs' Bayesian inversion (READING) takes a
+# kernel `k(a, b)` and a distribution on `a` and returns a kernel
+# `k(b, a)` — the posterior as an arrow.  In `Enum` it is writable:
+# enumerate the joint, group by the `b` coordinate, renormalize inside
+# each group, and rebuild a kernel by lookup.  What stops it being a
+# screenful is the lookup: `k(b, a)` must answer for EVERY `b`, and a
+# table keyed by an arbitrary outcome type needs an ordering or a hash,
+# which the language does not have (`eq?` is structural, `lt?` is Int).
+# §7 and §8 are disintegration at one point, done with `condition` and
+# `renorm` instead — which is the operation, without the arrow.
+#
+# NO CHOICE SLOT.  A row program that branches into two different
+# KERNELS cannot be written inside a `use` scope: transporting a sum
+# needs ArrowChoice' `left`, and the Doctrine has `first` and not
+# `left`.  `hostFrom` and `biasOf2` sidestep it the way
+# `examples/frame.braid`'s `keep` does — the deciding is deterministic
+# and rides the wire, and the only randomness is a generator composed
+# unconditionally.  `coinSndE` flips even when the coin will be ignored,
+# which is why §7's tally has to SUM the two branches that agree.

@@ -10203,10 +10203,14 @@ runSquare m (n, t) = do
                    ++ "homomorphism, slot by slot"
                    ++ (if bare
                          then ".  The two carriers were compared with `eq?` "
-                               ++ "directly, since the theory declares no "
-                               ++ "exit: if the carrier holds a function, "
-                               ++ "`eq?` is syntactic \8212 declare an exit "
-                               ++ "`observe` in the theory"
+                               ++ "directly, because the theory declares no "
+                               ++ "exit whose input FITS this slot's result "
+                               ++ "\8212 an exit at `k(Int, Int)` does not "
+                               ++ "reach the hom-object at a PAIRING, which "
+                               ++ "is what `" ++ doctrineFirst ++ "` leaves. "
+                               ++ "If the carrier holds a function, `eq?` is "
+                               ++ "syntactic: declare an exit `observe` in "
+                               ++ "the theory at the shape this slot leaves"
                          else "")
 
 -- A scheme's runtime shape: how many wires it consumes, and whether it
