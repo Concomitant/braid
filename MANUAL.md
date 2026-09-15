@@ -1712,11 +1712,25 @@ ways:
 
 A square that neither proves nor samples is **refused**, naming the
 slot and the reason: *the square for slot 'op' does not decide —
-`sameCode` cannot prove it, and it cannot be sampled: the theory
-declares no `sample : • ⇒ a` to supply its inputs with. Add a `sample`
-slot to theory Mag, or state the square as a law of the theory.* A
-square that runs and comes out false names the slot too: *the square
-for slot 'unit' does not commute at the theory's samples*.
+`sameCode` cannot prove it (ev of an open wire), and it cannot be
+sampled: the theory declares no `sample : • ⇒ a` to supply its inputs
+with. Add a `sample` slot to theory Mag, or state the square as a law of
+the theory.* A square that runs and comes out false names the slot too:
+*the square for slot 'unit' does not commute at the theory's samples*.
+
+**`false` and a refusal are two answers, and both go to the evidence**
+*(2026-09-14)*. `sameCode` answering **false** means *different as
+programs of the free category*, which is a real answer about the free
+category and **not** an answer about the model: the model's words
+satisfy the theory's laws, and the normalizer has none of them.
+`Transpose`'s five sampled squares are exactly that case — the two sides
+are equal only up to the arithmetic of `fadd` and `fmul`, which are
+uninterpreted here. So a square the normalizer decided false is sampled,
+like a square it refused; a square it decided **false with no evidence
+behind it** is refused as WRONG, naming the slot: *the square for slot
+'pick' is FALSE — `sameCode` decides the two sides are different
+programs of the free category, and there is no evidence that could say
+otherwise*.
 
 **The exit is applied whatever the parameter's kind** *(2026-09-14)*.
 A sampled square compares two results, and when the result is the
@@ -1756,15 +1770,20 @@ decided again:
 ```text
 braid> :transformations
 Transpose : Fwd ⇒ Rev
-  add      sampled (2 points)
+  add      sampled (2 points; differ in the free category)
   …
   lit      proved
 ```
 
-`proved` is `sameCode`, for every input; `sampled (n points)` is the
-theory's evidence at the n inputs `sample` supplied (a square with no
-inputs reads just `sampled`). `:doc <name>` puts the same verdicts on
-one line under the component's type.
+`proved` is `sameCode`, for every input; `sampled (n points; why)` is
+the theory's evidence at the n inputs `sample` supplied, and `why` is
+what the normalizer said instead of *true* — either `differ in the free
+category` (it decided **false**, and the model's laws are what the free
+category lacks) or its refusal in a few words (`ev of an open wire`,
+``` `pack` has no closed arity ```, `case split under eta`, `nested past
+3 levels`). A square with no inputs and nothing to say reads just
+`sampled`. `:doc <name>` puts the same verdicts on one line under the
+component's type.
 
 The component is an ordinary **word** under the transformation's own
 name,
@@ -2559,7 +2578,14 @@ free one.
 
 Outside the fragment `sameCode` **errors** rather than answering,
 because "I cannot tell" is not "they differ". Every refusal names what
-stopped it.
+stopped it — **everywhere**, since 2026-09-14. Until that date one
+corner leaked: comparing two quotations whose captures are not pairwise
+equal (and the two eta comparisons beside it) wrapped the extensional
+answer in a fallback that turned a refusal into `false`, so that no
+verdict standing before the extensional route arrived would be
+withdrawn. That made `false` mean *could not decide* in that one place
+and *provably different* in every other, which is a verdict nothing
+downstream can trust. The fallback is gone; the refusal propagates.
 
 **What is decided, exactly** *(2026-09-13)*:
 
@@ -2826,6 +2852,23 @@ holds for them too: final atom of their stage (§9).
     *different morphism*; here it means *different spelling*. It is why
     a square over a closure-holding carrier goes to the samples rather
     than proving.
+    *(Resolved 2026-09-14: the wart was a wrapper called
+    `fallbackFalse`, which turned the refusal a quotation comparison
+    raised into `Right False` so that no verdict standing before the
+    extensional comparison arrived would be withdrawn. It is gone. **A
+    refusal stays a refusal**, in that corner as everywhere else, so
+    `false` now means one thing in the whole tree: different as programs
+    of the free category. `sameCode` and `sameCodeC` therefore error
+    where they used to answer `false` — over quotations whose captures
+    are not pairwise equal, and over the two eta comparisons beside it —
+    and the message names the case (§12.9). No example's printed output
+    changed: nothing was relying on the fallback. What the
+    transformation checker does with the two answers is in §8: both send
+    the square to the theory's evidence, because a `false` about the
+    FREE category is not a `false` about a model whose words satisfy the
+    theory's laws, and the verdict records which answer it was —
+    `sampled (2 points; differ in the free category)` against
+    `sampled (2 points; ev of an open wire)`.)*
   - **A slot whose input is not the parameter can never be sampled.**
     `lit : Float ⇒ a` takes a `Float`, and `sample : • ⇒ a` supplies
     only the carrier, so no evidence reaches that square: it must

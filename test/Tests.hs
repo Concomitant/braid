@@ -22,10 +22,10 @@ runExample name = do
 
 -- TRANSFORMATION VERDICTS (2026-09-14).  What the checker decided about
 -- each square is STORED on the module, so `:transformations` reads it
--- rather than
--- deciding it again; these pin the stored verdicts for the two example
--- files that declare transformations.  `proved` is `sameCode`, for every
--- input; `sampled (n points)` is the theory's own evidence.
+-- rather than deciding it again; these pin the stored verdicts for the
+-- two example files that declare transformations.  `proved` is
+-- `sameCode`, for every input; `sampled (n points; why)` is the theory's
+-- own evidence, and `why` is what the normalizer said instead of `true`.
 -- (example file, transformation, the rendering `:transformations` prints)
 transformationVerdictTests :: [(String, String, String)]
 transformationVerdictTests =
@@ -38,13 +38,14 @@ transformationVerdictTests =
                , "  first    proved"
                , "  observe  proved"
                , "  sample   proved" ] )
-    -- ...and `len` is a fold, which applies its handler: all three
-    -- squares go to the samples
+    -- ...and `len` is a fold, which applies its handler, so two squares
+    -- stop at `ev` of an open wire and the third at `pack`: all three go
+    -- to the samples, each carrying the reason it had to
   , ( "transformations.braid", "Len"
     , unlines' [ "Len : ListMonoid \8658 IntSum"
-               , "  unit    sampled"
-               , "  op      sampled (2 points)"
-               , "  sample  sampled" ] )
+               , "  unit    sampled (ev of an open wire)"
+               , "  op      sampled (2 points; ev of an open wire)"
+               , "  sample  sampled (`pack` has no closed arity)" ] )
     -- forgetting the tangent: every square proved, which is the
     -- strongest verdict the machinery has
   , ( "autodiff.braid", "Value"
@@ -59,15 +60,19 @@ transformationVerdictTests =
                , "  observe  proved" ] )
     -- and the transpose: `lit` must prove (its input is a `Float`, so
     -- no `sample` reaches it), the five operations are decided at the
-    -- samples THROUGH THE EXIT, since a `Rev` holds a closure
+    -- samples THROUGH THE EXIT, since a `Rev` holds a closure.  Their
+    -- reason is `sameCode` answering FALSE rather than refusing: the two
+    -- sides are different programs of the FREE category, equal only up
+    -- to the arithmetic of the uninterpreted `fadd` and `fmul`, which is
+    -- exactly what the theory's evidence is for
   , ( "autodiff.braid", "Transpose"
     , unlines' [ "Transpose : Fwd \8658 Rev"
-               , "  add      sampled (2 points)"
-               , "  mul      sampled (2 points)"
-               , "  neg      sampled (1 point)"
+               , "  add      sampled (2 points; differ in the free category)"
+               , "  mul      sampled (2 points; differ in the free category)"
+               , "  neg      sampled (1 point; differ in the free category)"
                , "  lit      proved"
-               , "  exp      sampled (1 point)"
-               , "  sin      sampled (1 point)"
+               , "  exp      sampled (1 point; differ in the free category)"
+               , "  sin      sampled (1 point; differ in the free category)"
                , "  sample   proved"
                , "  observe  proved" ] )
   ]
@@ -2741,12 +2746,23 @@ moduleFailTests =
      \model Sum : Mag(Int) =\n    op = +\n\
      \model Prod : Mag(Int) =\n    op = *\n\
      \transformation Id : Sum ⇒ Prod = id\n1 >> print",
-     "transformation Id: the square for slot 'op' does not decide")
+     "transformation Id: the square for slot 'op' is FALSE — `sameCode` \
+     \decides the two sides are different programs of the free category")
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\
      \model Sum : Mag(Int) =\n    op = +\n\
      \model Prod : Mag(Int) =\n    op = *\n\
      \transformation Id : Sum ⇒ Prod = id\n1 >> print",
      "Add a `sample` slot to theory Mag")
+    -- ...and a square decided FALSE on PURE WIRING, with no arithmetic
+    -- anywhere in it: `_ drop` against `drop _` is a different program
+    -- of the free category and there is nothing more to say (2026-09-14
+    -- — before `fallbackFalse` went, `false` and "could not decide"
+    -- were the same answer here).
+  , ("theory Pick(a) =\n    pick : a a ⇒ a\n\
+     \model Fst : Pick(Int) =\n    pick = _ drop\n\
+     \model Snd : Pick(Int) =\n    pick = drop _\n\
+     \transformation Keep : Fst ⇒ Snd = id\n1 >> print",
+     "transformation Keep: the square for slot 'pick' is FALSE")
     -- two models of ONE theory, or it is not a component
   , (monoidMod ++ "theory Other(a) =\n    z : • ⇒ a\n\
      \model Zed : Other(Int) =\n    z = 0\n\

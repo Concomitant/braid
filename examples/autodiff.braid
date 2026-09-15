@@ -314,7 +314,13 @@ transformation Transpose : Fwd ⇒ Rev = transpose
 # `neg`, `exp`, `sin` — are SAMPLED at the theory's evidence and
 # compared through the theory's exit, which is the VALUE; the gradient
 # half of the transpose is what §5 prints, against the analytic
-# derivative.  (Before the exit was applied here, a sampled square
+# derivative.  `:transformations` says WHY each of the five needed the
+# samples: `differ in the free category`.  `sameCode` does not refuse
+# them — it DECIDES them false, because the two sides are equal only up
+# to associativity and distributivity of `fadd` and `fmul`, and those
+# are uninterpreted words to the normalizer.  A `false` about the free
+# category is not a `false` about a ring, which is exactly what the
+# theory's evidence is for.  (Before the exit was applied here, a sampled square
 # compared two `Rev` carriers with `eq?` — syntactic on a closure — and
 # refused this declaration for squares that commute.)
 

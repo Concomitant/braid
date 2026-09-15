@@ -62,7 +62,12 @@ transformation Len : ListMonoid ⇒ IntSum = len
 # which has no closed arity.  All three are decided at the theory's
 # samples instead — which is exactly what the `sample` slot is for, and
 # why a theory without one gets a refusal naming the slot it could not
-# decide.
+# decide.  `:transformations` prints the reason beside the verdict:
+#
+#     Len : ListMonoid ⇒ IntSum
+#       unit    sampled (ev of an open wire)
+#       op      sampled (2 points; ev of an open wire)
+#       sample  sampled (`pack` has no closed arity)
 
 # ---- the same declaration over a DOCTRINE --------------------------
 # When the two models are models of a theory that extends `Doctrine`,

@@ -4691,11 +4691,14 @@ data SampledLaw = SampledLaw
   }
 
 -- What the checker decided about one square, kept so that
--- `:transformations`
--- READS the verdict rather than deciding it again.  `TVProved` is
--- `sameCode` — for every input; `TVSampled n` is the theory's own
--- evidence, at n sample points (a square with no inputs runs at none).
-data TransformationVerdict = TVProved | TVSampled Int
+-- `:transformations` READS the verdict rather than deciding it again.
+-- `TVProved` is `sameCode` — for every input; `TVSampled n why` is the
+-- theory's own evidence, at n sample points (a square with no inputs
+-- runs at none), and `why` is the normalizer's refusal in a few words —
+-- WHY the samples had to decide it (2026-09-14).  A square the
+-- normalizer decided FALSE is not sampled at all: the transformation is
+-- refused, naming the slot.
+data TransformationVerdict = TVProved | TVSampled Int String
   deriving (Eq, Show)
 
 -- A declared transformation and its verdicts, slot by slot, in the
@@ -4713,10 +4716,44 @@ data TransformationInfo = TransformationInfo
 -- one verdict, as `:transformations` and `:doc` print it.  A square with no
 -- inputs is run at no sample points and simply reads `sampled`.
 showVerdict :: TransformationVerdict -> String
-showVerdict TVProved      = "proved"
-showVerdict (TVSampled 0) = "sampled"
-showVerdict (TVSampled n) = "sampled (" ++ show n ++ " point"
-                              ++ (if n == 1 then "" else "s") ++ ")"
+showVerdict TVProved            = "proved"
+showVerdict (TVSampled n why)
+  | null parts = "sampled"
+  | otherwise  = "sampled (" ++ intercalate "; " parts ++ ")"
+  where
+    parts = [ show n ++ " point" ++ (if n == 1 then "" else "s")
+            | n > 0 ] ++ [ why | not (null why) ]
+
+-- WHY the theory's samples had to decide a square, in a few words, to
+-- sit beside `sampled`.  Every refusal names its own case (\167 12.9);
+-- this keeps the naming half and drops the explanation, which
+-- `sameCode` prints in full if it is asked directly.
+shortReason :: String -> String
+shortReason msg = phrase (clip (dropPre "outside the structural fragment: " msg))
+  where
+    dropPre p m  = fromMaybe m (stripPrefix p m)
+    -- the explanatory tail is parenthetical, an em dash, or a colon
+    clip m       = foldr shorter m [ h | sep <- [" (", " \8212 ", ": "]
+                                       , Just (h, _) <- [breakOnStr sep m] ]
+    shorter a b  = if length a < length b then a else b
+    phrase m
+      | pre "`ev` of a value"                       = "ev of an open wire"
+      | pre "a case split under an eta comparison"  = "case split under eta"
+      | pre "quotations nested past"                = unwords (drop 1 (words m))
+      | pre "the case tree grew past"               = "case tree past "
+                                                        ++ unwords (drop 4 (words m))
+      | pre "a binder abstraction elimination"      = "an open binder"
+      | pre "the normalizer ran out of steps"       = "out of steps"
+      | otherwise                                   = m
+      where pre p = p `isPrefixOf` m
+
+-- ...and what `sameCode` answering FALSE means for a square: the two
+-- sides are different morphisms of the FREE category on the model's
+-- words, which is not the same as different in the model — the model's
+-- words satisfy the theory's laws, and the normalizer has none of them.
+-- That is what the theory's own evidence is for.
+freeDiffer :: String
+freeDiffer = "differ in the free category"
 
 -- A declared transformation and what the checker decided about each of
 -- its squares, as `:transformations` prints it.  The verdicts are READ off the
@@ -4737,7 +4774,7 @@ transformationDocLine mi =
   where
     vs      = map snd (tiSquares mi)
     proved  = count (length [ () | TVProved <- vs ]) "proved"
-    sampled = count (length [ () | TVSampled _ <- vs ]) "sampled"
+    sampled = count (length [ () | TVSampled _ _ <- vs ]) "sampled"
     count 0 _    = ""
     count n what = show n ++ " " ++ what
 
@@ -4987,20 +5024,51 @@ checkTransformation env defs theories insts mo squares = do
     modelOf n = case [ i | i <- insts, inName i == n ] of
       (i : _) -> Right i
       []      -> Left $ here ++ n ++ " is not a model declared at this point"
+    -- `false` and a REFUSAL are two different answers, and since
+    -- 2026-09-14 they stay two (`fallbackFalse` used to make the second
+    -- into the first).  `false` is *different as free programs*, which
+    -- is a real answer about the free category and NOT an answer about
+    -- the model \8212 the model's words satisfy the theory's laws, and
+    -- the normalizer has none of them (`Transpose`'s squares are equal
+    -- only up to the arithmetic of `fadd` and `fmul`).  So either
+    -- answer sends the square to the theory's evidence, which is the
+    -- only thing that knows the model; the verdict records WHICH answer
+    -- it was, and a square with no evidence behind it is refused,
+    -- naming the slot and saying which.
     verdict sq = case (termOf (tsqLhs sq), termOf (tsqRhs sq)) of
       (Just tl, Just tr) ->
         case sameProgram env defs defs tl tr of
           -- proved, for every input
-          Right True -> Right (tsqSlot sq, TVProved)
-          -- decided at the samples
-          _ | isJust (tsqLaw sq) -> Right (tsqSlot sq, TVSampled (tsqPoints sq))
-          _ -> Left $ here ++ "the square for slot '" ++ tsqSlot sq
-                   ++ "' does not decide \8212 `sameCode` cannot prove it, and "
-                   ++ "it cannot be sampled: " ++ tsqWhy sq ++ ".  Add a "
-                   ++ "`sample` slot to theory " ++ inTheory (head
-                        [ i | i <- insts, inName i == tfFrom mo ])
-                   ++ ", or state the square as a law of the theory."
+          Right True  -> Right (tsqSlot sq, TVProved)
+          -- decided FALSE as free programs.  With evidence to run, the
+          -- evidence decides and the verdict says what the normalizer
+          -- said; with none, there is nothing left to hope for and the
+          -- square is refused as WRONG, naming the slot.
+          Right False
+            | isJust (tsqLaw sq) ->
+                Right (tsqSlot sq, TVSampled (tsqPoints sq) freeDiffer)
+            | otherwise -> undecided sq
+                   ("' is FALSE \8212 `sameCode` decides the two sides are "
+                     ++ "different programs of the free category, and there "
+                     ++ "is no evidence that could say otherwise")
+          -- the normalizer would not say: the samples decide it, and the
+          -- verdict records what stopped the proof
+          Left why
+            | isJust (tsqLaw sq) ->
+                Right (tsqSlot sq, TVSampled (tsqPoints sq) (shortReason why))
+            | otherwise -> undecided sq
+                   ("' does not decide \8212 `sameCode` cannot prove it ("
+                     ++ shortReason why ++ ")")
       _ -> Left (here ++ "internal: missing square def for " ++ tsqSlot sq)
+    -- a square with no verdict and no evidence, either way round: the
+    -- refusal names the slot, says which of the two it is, and points at
+    -- the evidence that would settle it
+    undecided sq said =
+      Left $ here ++ "the square for slot '" ++ tsqSlot sq ++ said
+          ++ ", and it cannot be sampled: " ++ tsqWhy sq ++ ".  Add a "
+          ++ "`sample` slot to theory " ++ inTheory (head
+               [ i | i <- insts, inName i == tfFrom mo ])
+          ++ ", or state the square as a law of the theory"
     termOf n = listToMaybe [ t | (dn, de) <- M.toList defs, dn == n
                                , let t = deBody de ]
 
@@ -7413,9 +7481,10 @@ eqSym depth ctx (a, b) = case (a, b) of
       -- morphism (`[capture 1 … ; +]` against `[capture 0 … ; + ; _ 1
       -- ; +]`).  So run each body on ITS OWN captures plus a shared
       -- fresh segment, which is what equality of functions means.  A
-      -- refusal there falls back to the syntactic answer this had
-      -- before, so no verdict that stood is withdrawn.
-      else fallbackFalse (sameQuo depth ctx c1 c2 b1 b2)
+      -- refusal there is a REFUSAL (2026-09-14): it used to fall back
+      -- to `false`, which made `false` mean "could not decide" in this
+      -- one corner and nothing could trust it.
+      else sameQuo depth ctx c1 c2 b1 b2
   -- ETA for the exponential.  A quotation against a FUNCTION THAT
   -- ARRIVED AS A WIRE: `f = [f ... ; ev]` holds in any closed
   -- category, so apply the quote to fresh wires and compare with the
@@ -7424,9 +7493,9 @@ eqSym depth ctx (a, b) = case (a, b) of
   -- says `embed [pass] ; f = f`, and the left side is a quotation
   -- while the right side is the wire itself.
   (SQuo c1 b1, u) | Just (si, so) <- evArity ctx u ->
-    fallbackFalse (etaEq depth ctx c1 b1 u si so)
+    etaEq depth ctx c1 b1 u si so
   (u, SQuo c2 b2) | Just (si, so) <- evArity ctx u ->
-    fallbackFalse (etaEq depth ctx c2 b2 u si so)
+    etaEq depth ctx c2 b2 u si so
   (SApp n1 as1 j1, SApp n2 as2 j2)
     | n1 == n2, j1 == j2, length as1 == length as2 ->
         allOk (eqSym depth ctx) (zip as1 as2)
@@ -7455,12 +7524,6 @@ sameQuo depth ctx c1 c2 b1 b2
           ctx' = ctx { ncRef = M.empty, ncTypes = M.union tys (ncTypes ctx) }
       in decideProgs (depth + 1) ctx'
            (NProg b1 defs (c1 ++ ws) fr) (NProg b2 defs (c2 ++ ws) fr)
-
--- a refusal is not a verdict, but where this already answered `false`
--- on syntax alone, keep answering it
-fallbackFalse :: Either String Bool -> Either String Bool
-fallbackFalse (Left _) = Right False
-fallbackFalse r        = r
 
 -- the widths `ev` of this value may be given: a closed arrow, read off
 -- the type the program wrote (through a single-wire nominal wrapper,
@@ -8752,7 +8815,7 @@ runLaw m (n, t) = do
 sampledSquare :: Module -> String -> String -> Bool
 sampledSquare m mo sl =
   or [ True | mi <- modTransformations m, tiName mi == mo
-            , (s, TVSampled _) <- tiSquares mi, s == sl ]
+            , (s, TVSampled _ _) <- tiSquares mi, s == sl ]
     || null [ () | mi <- modTransformations m, tiName mi == mo ]
 
 -- One generated square, run at the theory's samples.  A transformation whose

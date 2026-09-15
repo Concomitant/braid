@@ -3053,6 +3053,14 @@ morphism*. For two quotations that close over different captures it
 means *spelled differently* — the 2026-09-13 amendment's fallback
 ("a refusal there falls back to the old syntactic `false`") reached
 further than expected once carriers began holding closures.
+*(Closed 2026-09-14, stage 6a¾: `fallbackFalse` is deleted and the
+refusal propagates — see the amendment at the end of this file. The
+finding was right about the wart and wrong about this case: these
+squares are not refused at all, they are decided **false**, because the
+two sides differ up to the arithmetic of the uninterpreted `fadd` and
+`fmul`. `false` about the free category is not `false` about the model,
+so they still go to the samples, and `:transformations` now says which
+of the two answers sent them there.)*
 
 **The `Gradient` resource.** `Rev` SUMS: every node returns a gradient
 and `gadd` merges them coming back. The last section threads ONE
@@ -3115,11 +3123,14 @@ is a different piece of work.
   theory with no exit does is unchanged — it compares the carriers —
   but a failure now names the fix (*declare an exit `observe` in the
   theory*), and a square the normalizer PROVED is no longer sampled
-  besides. The `sameCode` half is **not** closed: it is still a
-  `false` where a refusal belongs, and it is what sends these squares
-  to the samples in the first place. What the machine checks about
-  `Transpose` is therefore what the exit can see — the value — and the
-  gradient half stays a printed check in §5 of the file.
+  besides. The `sameCode` half is **closed 2026-09-14 (stage 6a¾)**:
+  `fallbackFalse` is gone, so a refusal stays a refusal. It turned out
+  not to be what sends these squares to the samples — `sameCode`
+  *decides* them false, up to arithmetic — and both answers go to the
+  evidence, with the verdict recording which. What the machine checks
+  about `Transpose` is therefore still what the exit can see — the
+  value — and the gradient half stays a printed check in §5 of the
+  file.
 - **A model parameterized by a model** is not writable (2026-09-14): a
   `model` head names a declared data type, so nesting forward mode
   inside itself for second derivatives — `model Fwd(M) :
@@ -3176,3 +3187,55 @@ declaration, three readings, one spelling.
 The old keyword is refused with the new one: *`morphism` is spelled
 `transformation` since 2026-09-14 … write `transformation Len :
 ListMonoid ⇒ IntSum = len`*, the way `instance` and `mode` are refused.
+
+## Amendment (2026-09-14): a refusal stays a refusal
+
+*Stage 6a¾, part two. `fallbackFalse` is deleted.*
+
+`eqSym`'s quotation case wrapped its extensional comparison in
+`fallbackFalse`, a two-line function that turned `Left msg` into
+`Right False`. It was written so that no verdict standing before the
+extensional route arrived would be withdrawn by it, and the reasoning
+was local and wrong: in that one corner `false` meant *could not
+decide*, while everywhere else in the tree `false` means *provably
+different*. A verdict that means two things is a verdict nothing
+downstream can trust — and the transformation checker is downstream.
+
+The fix is a deletion. `sameCode` and `sameCodeC` now error over
+quotations whose captures are not pairwise equal, and over the two eta
+comparisons beside them, the way they already error everywhere else,
+and each refusal names its case. **No example's printed output changed**
+— nothing was relying on the fallback, including the `sameCode` laws in
+`optimizer`, `distributive`, `circuits`, `reified` and `into`.
+
+**What the transformation checker does with the two answers.** The
+interesting half. `false` is *different as programs of the FREE
+category*, which is a real statement about the free category and not a
+statement about the model: a model's words satisfy the theory's laws,
+and the normalizer has none of them. `Transpose`'s five sampled squares
+are exactly that — the two sides are equal only up to associativity and
+distributivity of `fadd` and `fmul`, which are uninterpreted. So the
+rule is not "false refuses":
+
+- **proved** — `sameCode` says true, for every input and every
+  interpretation.
+- **sampled**, whichever of *false* or *refused* the normalizer said,
+  because only the theory's evidence knows the model. The verdict
+  carries the reason next to the point count:
+  `sampled (2 points; differ in the free category)` against
+  `sampled (2 points; ev of an open wire)`. The refusal's own message
+  names its case (MANUAL §12.9); the verdict keeps the naming half.
+- **refused** when there is no evidence to fall back to, and the
+  refusal now says *which*: `is FALSE — \`sameCode\` decides the two
+  sides are different programs of the free category` where it used to
+  say only *does not decide*. `test/Tests.hs` pins a planted false
+  transformation on pure wiring (`_ drop` against `drop _`, no
+  arithmetic anywhere) to hold that message down.
+
+The prediction in the 6a½ record — that the `sameCode` half of the
+closure finding was "a `false` where a refusal belongs, and it is what
+sends these squares to the samples" — was half right. The wart was real
+and is gone; the squares were never refused, they were decided false,
+and the reason they need the samples is arithmetic rather than
+machinery. Measuring it was the point of carrying the reason on the
+verdict.
