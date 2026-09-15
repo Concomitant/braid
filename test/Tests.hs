@@ -2533,6 +2533,26 @@ moduleNoHintTests :: [(String, String)]
 moduleNoHintTests =
     -- a one-line source has one line, and naming it says nothing
   [ ("\"x\" 1 ; +", "line ")
+    -- a line that SAYS it is unfinished is continued, so the `(` below
+    -- it is not a new stage and the rule is not the problem
+  , ("def f =\n  1 ;\n  (a b -> a b ; +)\n1 ; f ; print",
+     "A new line is a new stage")
+    -- a group that IS the last atom of its stage keeps its width
+  , ("def f =\n  1 ; (a b -> a b ; +)\n1 ; f ; print",
+     "instantiated CLOSED")
+    -- no line of this row starts with `|`
+  , ("def f =\n  1\n  (a b -> a b ; +)\n1 ; f ; print",
+     "A row arm on its own line")
+    -- ...and nothing in it is a residual
+  , ("def f =\n  1\n  (a b -> a b ; +)\n1 ; f ; print",
+     "An open injection leaves a residual")
+    -- `use Recursive` is in the header, but the refusal is not an
+    -- occurs check and no row is in sight
+  , ("def r =\n  use Recursive\n  \"x\" ; +\n1 ; r ; print",
+     "wants `merge` after the row")
+    -- a row that fails without a knot in it
+  , ("def arms = (n ->\n    n 0 ; lt?\n    ((x -> 1)\n    | (x -> 2)) ; merge)\n1 ; arms ; print",
+     "wants `merge` after the row")
   ]
 
 moduleFailTests :: [(String, String)]
@@ -2544,6 +2564,42 @@ moduleFailTests =
      "line 3, in def f: Cannot unify types: Str vs Int")
   , ("1 ; print\n2 ; print\n\"x\" 1 ; +",
      "line 3: Cannot unify types: Str vs Int")
+    -- HINTS (2026-09-15).  Each names the RULE behind the refusal and
+    -- what to write instead, and each fires only on a syntactic shape
+    -- the checker can see in the source.  Its negative is in
+    -- `moduleNoHintTests`.
+    -- a new line is a new stage, and a `(` does not continue one
+  , ("def f =\n  1\n  (a b -> a b ; +)\n1 ; f ; print",
+     "A new line is a new stage, so this `(` does not continue the line \
+     \above: end that line with `\\` to carry the stage on, or write `;` \
+     \at either end to compose (MANUAL \167\&4).")
+    -- a row arm on its own line is a stage, so the arms compose
+  , ("def arms = (n ->\n    n 0 ; lt?\n    ((x -> 1)\n    | (x -> 2)) ; merge)\n1 ; arms ; print",
+     "A row arm on its own line is a new STAGE, so the arms compose at \
+     \`>>` instead of standing side by side")
+    -- a grouped atom that is not last in its stage is closed
+  , ("def h = 1 2 (a b -> a b ; +) 3 ; drop\n1 ; print",
+     "A grouped atom in non-final position is instantiated CLOSED, so \
+     \its width is fixed here: pin it with `id`, or move the group last \
+     \in its stage (MANUAL \167\&14).")
+    -- a recursive call inside a row, with no `merge` to close it
+  , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\n\
+     \def double = 2 _ >> *\n\
+     \def until100 =\n\
+     \  use Recursive\n\
+     \  lt100?\n\
+     \  double >> until100 | _\n\
+     \1 >> until100 >> print",
+     "A recursive call inside a row usually wants `merge` after the \
+     \row: the row leaves the alternatives open, and the knot cannot \
+     \close them (MANUAL \167\&14).")
+    -- an open injection leaves a residual, and a written type has none
+  , ("data Res = (Int | Str)\ndef mk = alt1\ndef use2 = 1 ; mk ; unRes\n1 ; print",
+     "An open injection leaves a residual (`\963`), and a written type \
+     \has none: close the row with `(pass | pass)` (MANUAL \167\&14).")
+    -- the sandbox already named the fix; what it lacked was the line
+  , ("data Quiet = (Fn\10216Str \8658 \8226\10217)\n[print] ; Quiet ; drop",
+     "line 2: Cannot unify effects")
   ] ++
     -- NAMED FIELDS refuse five things by name (2026-09-14).  A field
     -- name is a WORD, so it collides like one; fields name the

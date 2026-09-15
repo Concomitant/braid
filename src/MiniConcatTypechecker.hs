@@ -9,6 +9,7 @@ import qualified Data.Set as S
 import Data.Set (Set)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes, listToMaybe)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, isSuffixOf,
+                  isInfixOf,
                   stripPrefix, partition, dropWhileEnd, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
@@ -479,10 +480,150 @@ atLine (Just n) msg
 -- in which case a location says nothing and is dropped.  That is the
 -- REPL: a typed line is one line, and `line 1` is not news.
 locFor :: LineMap -> String -> (String -> String)
-locFor lm src
-  | not (null lm)           = resolveLoc lm
-  | length (lines src) <= 1 = stripLoc
-  | otherwise               = resolveLoc []
+locFor lm src msg =
+  case takeLocMark msg of
+    Nothing -> hinted Nothing msg
+    Just (n, bare) ->
+      let body = hinted (Just n) (stripLoc bare)
+      in if placed
+           then whereAt lm n
+                  ++ (if "in def " `isPrefixOf` body then ", " else ": ")
+                  ++ body
+           else body
+  where
+    srcLines = lines src
+    placed   = not (null lm) || length srcLines > 1
+    hinted n b = b ++ maybe "" ("  " ++) (hintFor srcLines n b)
+
+--------------------------------------------------------------------------------
+-- 8.1½ Hints: the rule, where a cheap syntactic check makes it likely
+--
+-- A refusal states what did not fit; a hint says which RULE is usually
+-- behind it, and what to write instead.  Each one fires only on a
+-- syntactic shape the checker can see in the source — never on the type
+-- error alone — and each says "usually"/"often" where it is a guess,
+-- because a confident wrong diagnosis costs more than none.  The six
+-- shapes are the ones three agents in a row lost time to (§14).
+--------------------------------------------------------------------------------
+
+hintFor :: [String] -> Maybe Int -> String -> Maybe String
+hintFor ls mn msg =
+  listToMaybe (catMaybes [rowArm, knotRow, residual, closedGroup, newStage])
+  where
+    at k | k >= 1, k <= length ls = Just (ls !! (k - 1))
+         | otherwise              = Nothing
+    here  = lineCode <$> (mn >>= at)
+    -- the nearest line above the failure with code on it
+    above = do
+      n <- mn
+      listToMaybe [ c | k <- [n - 1, n - 2 .. 1], Just l <- [at k]
+                      , let c = lineCode l, not (null c) ]
+    stacks = "Cannot unify stacks" `isInfixOf` msg
+
+    -- 1. A ROW ARM ON ITS OWN LINE.  `|` never absorbs a break, so the
+    -- arm below is a stage of its own and the arms end up composed.
+    rowArm = do
+      h <- here
+      if take 1 h == "|"
+        then Just "A row arm on its own line is a new STAGE, so the arms \
+                   \compose at `>>` instead of standing side by side: end \
+                   \each line of the row with `\\`, or put the row on one \
+                   \line (MANUAL \167\&4)."
+        else Nothing
+
+    -- 2. A RECURSIVE CALL INSIDE A ROW.  The knot shares open
+    -- metavariables with the row's alternatives, so the row must be
+    -- closed before it comes back.
+    knotRow = do
+      _ <- mn
+      nm <- defNameOf msg
+      let rowLike = case breakOn " in " (drop 1 (dropWhile (/= ':') msg)) of
+                      Just rhs -> " | " `isInfixOf` rhs
+                      Nothing  -> False
+      if "Occurs check failed on stack:" `isInfixOf` msg
+           && rowLike && underRecursive nm
+        then Just "A recursive call inside a row usually wants `merge` \
+                   \after the row: the row leaves the alternatives open, \
+                   \and the knot cannot close them (MANUAL \167\&14)."
+        else Nothing
+
+    -- 3. A RESIDUAL MEETING A WRITTEN TYPE.  An injection is open: it
+    -- says "at least this alternative", and a written type says exactly.
+    residual
+      | " | \963" `isInfixOf` msg =
+          Just "An open injection leaves a residual (`\963`), and a written \
+                \type has none: close the row with `(pass | pass)` \
+                \(MANUAL \167\&14)."
+      | otherwise = Nothing
+
+    -- 4. A GROUP THAT IS NOT LAST IN ITS STAGE.  Every non-final
+    -- operand of a tensor stage is instantiated CLOSED, so a group
+    -- whose width was meant to be polymorphic is pinned where it sits.
+    closedGroup = do
+      h <- here
+      if stacks && groupNotLast h
+        then Just "A grouped atom in non-final position is instantiated \
+                   \CLOSED, so its width is fixed here: pin it with `id`, \
+                   \or move the group last in its stage (MANUAL \167\&14)."
+        else Nothing
+
+    -- 5. A NEW LINE IS A NEW STAGE.  A `(`- or `[`-led line reads as a
+    -- continuation and is not one — unless the line above said it was
+    -- unfinished, or ended a binder head (whose body does start on the
+    -- next line).
+    newStage = do
+      h <- here
+      a <- above
+      if stacks && take 1 h `elem` ["(", "["]
+           && not (any (`isSuffixOf` a) (continuers ++ ["->", "|", ","]))
+        then Just "A new line is a new stage, so this `(` does not \
+                   \continue the line above: end that line with `\\` to \
+                   \carry the stage on, or write `;` at either end to \
+                   \compose (MANUAL \167\&4)."
+        else Nothing
+
+    -- `in def X: …` — the def a refusal is inside, if it says so
+    defNameOf m = do
+      rest <- stripPrefix "in def " m
+      case break (== ':') rest of
+        (nm, ':' : _) | not (null nm) -> Just nm
+        _                             -> Nothing
+
+    -- does that def's header open `use Recursive`?  Its lines run from
+    -- its `def` line down to the failure.
+    underRecursive nm = case mn of
+      Nothing -> False
+      Just n  ->
+        let starts = [ k | (k, l) <- zip [1 ..] ls, k <= n
+                         , case words (lineCode l) of
+                             ("def" : w : _) -> takeWhile (/= '=') w == nm
+                                                  || w == nm
+                             _               -> False ]
+        in case starts of
+             [] -> False
+             ks -> any (("use Recursive" `isInfixOf`) . lineCode)
+                       (take (n - last ks + 1) (drop (last ks - 1) ls))
+
+    groupNotLast h = go (0 :: Int) False h
+      where
+        -- after a group closes, anything but a stage break means the
+        -- group was not the final atom
+        go _ _ []       = False
+        go d _ ('(' : r) = go (d + 1) False r
+        go d _ ('[' : r) = go (d + 1) False r
+        go d _ (')' : r) = go (d - 1) (d == 1) r
+        go d _ (']' : r) = go (d - 1) (d == 1) r
+        go 0 True (c : r)
+          | isSpace c              = go 0 True r
+          | c `elem` (";|" :: String) = go 0 False r
+          | c == '>'               = go 0 False r
+          | otherwise              = True
+        go d closed (_ : r) = go d closed r
+
+    breakOn sep s
+      | Just r <- stripPrefix sep s = Just r
+      | (_ : cs) <- s               = breakOn sep cs
+      | otherwise                   = Nothing
 
 -- Drop every marker, rendering nothing.
 stripLoc :: String -> String
@@ -494,19 +635,20 @@ stripLoc s = case break (== '\SOH') s of
 
 resolveLoc :: LineMap -> String -> String
 resolveLoc lm msg =
-  case takeMark msg of
-    Nothing            -> msg
+  case takeLocMark msg of
+    Nothing        -> msg
     Just (n, rest) ->
-      let r = stripMarks rest
+      let r = stripLoc rest
       in whereAt lm n ++ (if "in def " `isPrefixOf` r then ", " else ": ") ++ r
-  where
-    takeMark s = case break (== '\SOH') s of
-      (pre, '\SOH' : more) -> case break (== '\SOH') more of
-        (ds, '\SOH' : post) | not (null ds), all isDigit ds ->
-          Just (read ds :: Int, pre ++ post)
-        _ -> Nothing
-      _ -> Nothing
-    stripMarks s = maybe s (stripMarks . snd) (takeMark s)
+
+-- The first marker in a message: its line, and the message without it.
+takeLocMark :: String -> Maybe (Int, String)
+takeLocMark s = case break (== '\SOH') s of
+  (pre, '\SOH' : more) -> case break (== '\SOH') more of
+    (ds, '\SOH' : post) | not (null ds), all isDigit ds ->
+      Just (read ds :: Int, pre ++ post)
+    _ -> Nothing
+  _ -> Nothing
 
 -- The n-th line of the assembled source, named where its author wrote it.
 whereAt :: LineMap -> Int -> String
@@ -1667,9 +1809,19 @@ lineDepth = go 0
 -- The line-based layers above the parser ask, so a stage may wrap
 -- inside an inline `def` body the way a bracket already may.
 lineContinues :: String -> Bool
-lineContinues l = any (`isSuffixOf` code) ["\\", ";", ">>", ">=>", ">?>", ">!>"]
+lineContinues l = any (`isSuffixOf` lineCode l) continuers
+
+-- What a line SAYS it has not finished with.  One list, because
+-- `lineContinues` and the hint that explains a silent stage boundary
+-- (§14) must agree about it.
+continuers :: [String]
+continuers = ["\\", ";", ">>", ">=>", ">?>", ">!>"]
+
+-- A line's code: the comment cut off the end, string literals kept
+-- whole, the blanks trimmed from both sides.
+lineCode :: String -> String
+lineCode = trimSpace . codeOf
   where
-    code    = reverse (dropWhile isSpace (reverse (codeOf l)))
     codeOf []       = []
     codeOf ('#':_)  = []
     codeOf ('"':cs) = '"' : strTail cs
