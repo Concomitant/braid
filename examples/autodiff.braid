@@ -97,7 +97,8 @@ model Floats : Smooth(Float) =
 data Dual = Float Float
 
 def dadd = Dual(a, da) Dual(b, db) -> (a b ; fadd) (da db ; fadd) ; Dual
-def dmul = Dual(a, da) Dual(b, db) -> (a b ; fmul) ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual
+def dmul = Dual(a, da) Dual(b, db) -> (a b ; fmul) \
+    ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual
 def dneg = Dual(a, da) -> (a ; fneg) (da ; fneg) ; Dual
 # a literal is constant, so its tangent is 0
 def dlit = (c -> c 0.0 ; Dual)
@@ -154,7 +155,8 @@ def k2 = (ka da kb db -> ka da ; ev ; (ga -> kb db ; ev ; (gb -> ga gb ; gadd)))
 def scaleK = (dx -> [(d -> (d dx ; fmul) ; gx)])
 
 def radd = Rev(a, ka) Rev(b, kb) -> (a b ; fadd) [(d -> ka d kb d ; k2)] ; Rev
-def rmul = Rev(a, ka) Rev(b, kb) -> (a b ; fmul) [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev
+def rmul = Rev(a, ka) Rev(b, kb) -> (a b ; fmul) \
+    [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev
 def rneg = Rev(a, ka) -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev
 # a literal depends on no input: its continuation is the ZERO linear
 # map, which is `scaleK` at 0.0 — the same map `[(d -> gzero)]` is, and
@@ -203,7 +205,9 @@ model Rev : Smooth(Rev) =
 # is.
 
 #   p(x) = x³ − 2x + 1
-def poly = over Smooth ; (x -> ((x x ; mul) x ; mul) ((2.0 ; lit) x ; mul ; neg) ; add ; (1.0 ; lit) ... ; add)
+def poly = over Smooth ;
+    (x -> ((x x ; mul) x ; mul) ((2.0 ; lit) x ; mul ; neg) ; add
+        ; (1.0 ; lit) ... ; add)
 #   w(x) = sin(2x²)
 def wave = over Smooth ; (x -> (2.0 ; lit) (x x ; mul) ; mul ; sin)
 #   f(x, y) = x·y + sin x
@@ -266,7 +270,9 @@ def newton =
     use Recursive
     x ->
     (x 1.0 ; Dual) ; polyD
-    (r -> r ; close? ; ((s t -> x) | (s t -> x (r ; step) ; fsub ; newton)) ; merge)
+    (r -> r ; close?
+       ; ((s t -> x) | (s t -> x (r ; step) ; fsub ; newton))
+       ; merge)
 #   newton : Float =Fwd Recursive> Float
 
 "-- a root of p, from x0 = 1.5 --" ; print
@@ -344,8 +350,10 @@ def emit = unGradient _ ; gadd ; Gradient          # Grad =Gradient> •
 def kx = [(gr d -> gr (d ; gx) ; emit)]
 def ky = [(gr d -> gr (d ; gy) ; emit)]
 
-def tadd = RevG(a, ka) RevG(b, kb) -> (a b ; fadd) [(gr d -> ka gr d ; ev ; (g2 -> kb g2 d ; ev))] ; RevG
-def tmul = RevG(a, ka) RevG(b, kb) -> (a b ; fmul) [(gr d -> ka gr (d b ; fmul) ; ev ; (g2 -> kb g2 (d a ; fmul) ; ev))] ; RevG
+def tadd = RevG(a, ka) RevG(b, kb) -> (a b ; fadd) \
+    [(gr d -> ka gr d ; ev ; (g2 -> kb g2 d ; ev))] ; RevG
+def tmul = RevG(a, ka) RevG(b, kb) -> (a b ; fmul) \
+    [(gr d -> ka gr (d b ; fmul) ; ev ; (g2 -> kb g2 (d a ; fmul) ; ev))] ; RevG
 def tneg = RevG(a, ka) -> (a ; fneg) [(gr d -> ka gr (d ; fneg) ; ev)] ; RevG
 def tlit = (c -> c [(gr d -> gr)] ; RevG)
 def texp = RevG(a, ka) -> (a ; fexp) ; (e -> e [(gr d -> ka gr (d e ; fmul) ; ev)] ; RevG)

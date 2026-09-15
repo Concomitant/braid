@@ -213,6 +213,22 @@ passTests =
     -- sequencing; increment needs the explicit remainder (1 >> + is ill-typed)
   , ("1 ... >> +",    "Int ⇒ Int")
   , ("1 2 >> +",      "• ⇒ Int")
+    -- LINES THAT WRAP (2026-09-14).  A newline is a strict `>>`, so
+    -- writing the `>>` too — at the end of a line or the start of the
+    -- next — is redundant rather than wrong; both used to be `Expected
+    -- a tensor stage, got: TokSeq`.  A `\` is the third form: it drops
+    -- the newline outright, so the tensor stage itself wraps.
+  , ("1 2 >>\n+",      "• ⇒ Int")
+  , ("1 2\n>> +",      "• ⇒ Int")
+  , ("1 2 ;\n+",       "• ⇒ Int")
+  , ("1 2\n; +",       "• ⇒ Int")
+  , ("1 \\\n2 >> +",    "• ⇒ Int")
+  , ("(1 \\\n2) >> +",  "• ⇒ Int")
+  , ("[1 \\\n2 >> +] >> ev", "• ⇒ Int")
+    -- the `|`-led row is untouched: a newline before `|` is still a
+    -- stage break, so a row whose arms are one per line still reads as
+    -- one row
+  , ("5 >> alt1 >> (dup >> * | ---)\n| ---\nmerge", "• ⇒ Int")
     -- strict tensor: `1 +` is (• ⇒ Int) ⊗ (Int Int ⇒ Int), NOT increment
   , ("1 +",           "Int Int ⇒ Int Int")
   , ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", "• =IO> •")
@@ -392,10 +408,10 @@ failTests =
   , ("list(1, 2)",   "Unclosed group")   -- the literal is GONE: bare ident + a comma in a group
   , ("dup ... drop",       "'...' must be the final atom")
   , ("1 >",           "Unexpected '>'")
-    -- a newline is a strict >>, so a trailing >> before one is >> >>:
-    -- the continuation-absorption rule was ditched for >> and | (it
-    -- survives only for >=>, >?>, >!>, which a newline can't express)
-  , ("1 2 >>\n+",     "Expected a tensor stage")
+    -- a DANGLING continuation, both ways round (2026-09-14): a `\` that
+    -- is not the last thing on its line, and one with no line after it
+  , ("1 \\ 2",         "must be the last thing on its line")
+  , ("1 2 \\\n",       "the next line must have something on it")
   , ("nonsense42x",   "Unknown primitive")
   , ("",              "Expected a tensor stage")
     -- sums

@@ -8,7 +8,8 @@ import Data.Map (Map)
 import qualified Data.Set as S
 import Data.Set (Set)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes, listToMaybe)
-import Data.List (nub, intercalate, elemIndex, isPrefixOf, stripPrefix, partition, (\\))
+import Data.List (nub, intercalate, elemIndex, isPrefixOf, isSuffixOf,
+                  stripPrefix, partition, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
                              MonadError, catchError)
@@ -1277,6 +1278,31 @@ tokenize = go
     go ('\r':'\n':cs) = (TokNewline :) <$> go cs
     go ('\n':cs)      = (TokNewline :) <$> go cs
     go ('#':cs)         = go (dropWhile (/= '\n') cs)  -- comment to EOL
+    -- A LINE THAT WRAPS (2026-09-14).  A newline is a strict `>>`, so a
+    -- tensor stage that will not fit on one line needs a way to say
+    -- "not yet": a `\` closing the line drops the newline, and the next
+    -- line continues the SAME stage.  It is the one continuation form —
+    -- a line that begins or ends with `;`/`>>` already continues by
+    -- composition (`normalizeToks`), and indentation cannot be made to
+    -- mean this without changing every multi-line def body, which is
+    -- indented deeper than its `def` line and relies on newline = `>>`.
+    -- `\` collides with nothing: it is unwritable in a program today,
+    -- and it is stage-final where `|`, `...` and `---` are not.
+    go ('\\':cs)
+      | Just rest <- afterLine cs =
+          case dropWhile (`elem` (" \t\r" :: String)) rest of
+            (c : _) | c /= '\n' && c /= '#' -> go rest
+            _ -> Left "A `\\` continues a tensor stage onto the next line, \
+                      \so the next line must have something on it"
+      | otherwise = Left "A `\\` continues a tensor stage onto the next \
+                         \line, so it must be the last thing on its line"
+      where
+        afterLine str = case dropWhile (`elem` (" \t\r" :: String)) str of
+          ('\n' : r) -> Just r
+          ('#' : r)  -> case dropWhile (/= '\n') r of
+                          ('\n' : r') -> Just r'
+                          _           -> Nothing
+          _          -> Nothing
     go ('"':cs)         = do
       (str, rest) <- lexStr cs
       (TokIdent ('"' : str) :) <$> go rest
@@ -1408,16 +1434,17 @@ normalizeToks = trim . collapse
     --
     --   * the railway operators (`>=>`, `>?>`, `>!>`) — composition a
     --     newline cannot itself express, so the operator wins;
+    --   * `>>` and `;`, on either side — a newline already IS `>>`, so
+    --     writing it too is redundant rather than wrong (2026-09-14);
     --   * a bracket delimiter, on its inner side: newlines just after
     --     `(`/`[` and just before `)`/`]`.  A bracket is an explicit
     --     scope, so a break against its edge is layout, not a stage
     --     boundary — that is what lets a wide atom wrap.
     --
     -- A newline BETWEEN stages inside a bracket is still `>>`: `(1 ⏎ 2)`
-    -- is `(1 >> 2)`, exactly as at top level.  `>>` and `|` never absorb
-    -- — a newline already *is* `>>`, and the row separator `|` must stay
-    -- put so aligned track-columns work (`f |` ⏎ `| g` is two rows, not
-    -- one collided `| |`).
+    -- is `(1 >> 2)`, exactly as at top level.  `|` never absorbs: the
+    -- row separator must stay put so aligned track-columns work (`f |`
+    -- ⏎ `| g` is two rows, not one collided `| |`).
     collapse [] = []
     collapse (TokNewline : ts) =
       case dropWhile (== TokNewline) ts of
@@ -1431,9 +1458,17 @@ normalizeToks = trim . collapse
     dropTrailing = reverse . dropWhile (== TokNewline) . reverse
 
     -- newlines FOLLOWING this token are absorbed
-    absorbsAfter t = railway t || t == TokLParen || t == TokLBrack
+    absorbsAfter t = railway t || seqTok t || t == TokLParen || t == TokLBrack
     -- newlines PRECEDING this token are absorbed
-    absorbsBefore t = railway t || t == TokRParen || t == TokRBrack
+    absorbsBefore t = railway t || seqTok t || t == TokRParen || t == TokRBrack
+
+    -- ...and `>>` / `;` on either side of the break (2026-09-14).  A
+    -- newline already IS `>>`, so a line that begins or ends with one
+    -- is saying the same thing twice — which is exactly why it should
+    -- be legal: a long pipeline reads better with the operator carried
+    -- onto the line it joins.  Both were ERRORS before this (`Expected
+    -- a tensor stage, got: TokSeq`), so no file changes meaning.
+    seqTok t = t == TokSeq || t == TokSeqPass
 
     railway t =
       t == TokKleisli || t == TokOrElse || t == TokOrClose
@@ -1458,6 +1493,26 @@ lineDepth = go 0
     skipStr ('"':cs)    = cs
     skipStr (_:cs)      = skipStr cs
     skipStr []          = []
+
+-- Does a source line SAY it is unfinished?  Three ways, all of them
+-- the ones `tokenize`/`normalizeToks` already honour: a trailing `\`
+-- (the stage itself wraps), a trailing `;`/`>>` (the composition is
+-- carried onto the next line), a trailing railway operator.  Comments
+-- and string literals are skipped, exactly as `lineDepth` skips them.
+-- The line-based layers above the parser ask, so a stage may wrap
+-- inside an inline `def` body the way a bracket already may.
+lineContinues :: String -> Bool
+lineContinues l = any (`isSuffixOf` code) ["\\", ";", ">>", ">=>", ">?>", ">!>"]
+  where
+    code    = reverse (dropWhile isSpace (reverse (codeOf l)))
+    codeOf []       = []
+    codeOf ('#':_)  = []
+    codeOf ('"':cs) = '"' : strTail cs
+    codeOf (c:cs)   = c : codeOf cs
+    strTail ('\\':d:cs) = '\\' : d : strTail cs
+    strTail ('"':cs)    = '"' : codeOf cs
+    strTail (c:cs)      = c : strTail cs
+    strTail []          = []
 
 --------------------------------------------------------------------------------
 -- 6.0½ Destructuring binders (2026-09-14)
@@ -5619,13 +5674,15 @@ splitDefs src = do
           let (b, r) = spanBlock (d + lineDepth ln) ls in (ln : b, r)
     spanBlock _ ls = ([], ls)
 
-    -- the lines AFTER `l` needed to close a bracket `l` left open
-    spanOpen l = walk (lineDepth l) []
+    -- the lines AFTER `l` needed to close a bracket `l` left open — or
+    -- to finish what `l` said it had not finished (`\`, `;`, `>>`)
+    spanOpen l = walk (lineDepth l) (lineContinues l) []
       where
-        walk d acc ls
-          | d <= 0    = (reverse acc, ls)
-        walk _ acc [] = (reverse acc, [])
-        walk d acc (x : xs) = walk (d + lineDepth x) (x : acc) xs
+        walk d cont acc ls
+          | d <= 0 && not cont = (reverse acc, ls)
+        walk _ _ acc [] = (reverse acc, [])
+        walk d _ acc (x : xs) =
+          walk (d + lineDepth x) (lineContinues x) (x : acc) xs
 
     docLine l =
       case dropWhile isSpace l of

@@ -274,6 +274,36 @@ subtract-2). `...` must be the final atom of its stage. Because `X ...`
 pushes X *underneath*, ending successive lines with `...` accumulates a
 pile bottom-up — the `decide` ladder exploits this (§11).
 
+**Lines that wrap** *(2026-09-14)*. A newline is a strict `>>`, which
+until today meant a stage had to fit on one line. Three spellings say
+"not yet". A line that **ends** with `;`/`>>` and a line that **begins**
+with one are both legal and both compose with their neighbour — the
+operator is redundant with the newline, which is exactly why writing it
+reads well when a pipeline is carried down the page (both were errors
+before, `Expected a tensor stage, got: TokSeq`, so no file changes
+meaning). And a line ending in `\` drops the newline outright, so the
+**tensor stage itself** wraps:
+
+```braid
+def dmul = Dual(a, da) Dual(b, db) -> (a b ; fmul) \
+    ((a db ; fmul) (da b ; fmul) ; fadd) ; Dual
+
+    (r -> r ; close?
+       ; ((s t -> x) | (s t -> x (r ; step) ; fsub ; newton))
+       ; merge)
+```
+
+`\` is the one continuation form because it is the only thing that is
+stage-final where `|`, `...` and `---` are not, it is unwritable in a
+program today, and indentation cannot be made to mean this: every
+multi-line def body is indented deeper than its `def` line and relies on
+newline = `>>`. Two refusals: a `\` that is not the last thing on its
+line, and a `\` with no line after it. A `;` carried onto the next line
+composes at `>>`, which binds **tighter** than `|` — so it continues the
+last *arm* of a row, and a `| ---` residual still has to end its own
+line. The rule is lexical: `\` and the redundant `;` are gone before the
+parser runs, and `|`-led continuation lines are untouched.
+
 **Placement rules** (one family, one logic — the open thing must come
 last so the runtime segment can be its witness):
 - an open-arity word must be the final atom of its stage (§13);
