@@ -643,6 +643,13 @@ moduleTypeTests =
   , ("cons",    "a0 List(a0) ⇒ List(a0)")
     -- stack-kinded parameters: zip without Pair
   , ("zip",     "List(a0) List(a1) =Recursive> List(Box(a0 a1))")
+    -- ...and its inverse, plus the indexed read (2026-09-14): the two
+    -- list words `examples/frame.braid` found missing
+  , ("unzip",   "List(Box(a0 a1)) =Recursive> List(a0) List(a1)")
+  , ("nth",     "Int List(a0) =Recursive> Maybe(a0)")
+    -- the two string prims the CSV loader needed
+  , ("split",   "Str Str ⇒ List(Str)")
+  , ("asFloat?", "Str ⇒ (Float | Str)")
   , ("mapN2",   "Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ⁰ ⇒ a2ⁿ⁰")
     -- STRENGTH as an ordinary word: run a program one wire deeper.
     -- Composing it once per context wire is exactly what threads a
@@ -1300,6 +1307,30 @@ evalTests =
      \(1.0 2.0 ; Dual) ; open ; print\n\
      \((1.0 2.0 ; Dual) 3 ; Wrap) ; deep ; print",
      ["-1.0", "-2.0", "7.0", "3.0", "6.0"], "")
+    -- `split` (2026-09-14): n+1 pieces for n occurrences, so the pieces
+    -- and the separators rebuild the original — empty pieces included —
+    -- and an empty separator cuts nothing.  `asFloat?` reads exactly
+    -- the SOURCE notation for a Float literal, which is what the
+    -- display prints, so `toStr ; asFloat?` is the identity.
+  , ("(\"a,b,,c\" \",\" ; split) ; len ; print\n\
+     \(\"a,b,,c\" \",\" ; split) ; printAll\n\
+     \(\"x\" \"\" ; split) ; printAll\n\
+     \(\"a--b\" \"--\" ; split) ; printAll",
+     ["4", "a", "b", "", "c", "x", "a", "b"], "")
+  , ("\"191.25\" ; asFloat? ; (print | print) ; merge\n\
+     \\"-2.5\" ; asFloat? ; (print | print) ; merge\n\
+     \\"1e-3\" ; asFloat? ; (print | print) ; merge\n\
+     \\"100\" ; asFloat? ; (print | print) ; merge\n\
+     \(0.1 0.2 ; fadd) ; toStr ; asFloat? ; (print | print) ; merge",
+     ["191.25", "-2.5", "1e-3", "100", "0.30000000000000004"], "")
+    -- `nth` and `unzip`, the two list words the frame found missing
+  , ("def l3 = 1 (2 (3 nil ; cons) ; cons) ; cons\n\
+     \0 l3 ; nth ; (print | \"none\" ; print) ; merge\n\
+     \2 l3 ; nth ; (print | \"none\" ; print) ; merge\n\
+     \5 l3 ; nth ; (print | \"none\" ; print) ; merge\n\
+     \((1 \"a\" ; Box) ((2 \"b\" ; Box) nil ; cons) ; cons) ; unzip \n\
+     \; (as bs -> as ; printAll ; bs ; printAll)",
+     ["1", "3", "none", "1", "2", "a", "b"], "")
     -- NAMED FIELDS (2026-09-14).  A single-alternative `data` may name
     -- its positions, and each name becomes a PROJECTION WORD generated
     -- beside `unTrade` and `foldTrade`.  The type stays positional, so

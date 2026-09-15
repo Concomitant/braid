@@ -4058,6 +4058,25 @@ primEnv =
            (arrPure (one TStr)
                   (one (TSum (RCons (one TInt)
                         (RCons (one TStr) RNil))))))
+         -- `asInt?`'s Float twin (2026-09-14), and it reads exactly the
+         -- SOURCE notation for a Float literal — optional `-`, digits,
+         -- point, digits.  That is also what the display prints, so
+         -- `toStr ; asFloat?` is the identity on every finite Float and
+         -- the reader and the printer are one convention rather than two.
+       , ("asFloat?",  Forall [] [] [] [] [] []
+           (arrPure (one TStr)
+                  (one (TSum (RCons (one TFloat)
+                        (RCons (one TStr) RNil))))))
+         -- `s sep ; split` — cut a Str at every occurrence of a
+         -- separator.  A machine fact about a machine string, like
+         -- `cat` and `asInt?`: n+1 pieces for n occurrences, so the
+         -- pieces and the separators reconstruct the original, empty
+         -- pieces included.  An empty separator cuts nothing (one
+         -- piece, the whole string) — the only total reading, since
+         -- "every occurrence of nothing" has no finite answer.
+       , ("split",     Forall [] [] [] [] [] []
+           (arrPure (SCons TStr (one TStr))
+                    (one (TData "List" [one TStr]))))
        , ("symStr",    Forall [] [] [] [] [] [] (arrPure (one TSym) (one TStr)))
        , ("unparse",   Forall [] [] [] [] [] []
            (arrPure (SCons codeStructTy SEnd) (one TStr)))
@@ -6023,6 +6042,18 @@ splitOnChar c str = case break (== c) str of
   (pre, _ : rest) -> pre : splitOnChar c rest
   (pre, [])       -> [pre]
 
+-- `split`'s engine: n+1 pieces for n occurrences of the separator, so
+-- the pieces and the separators rebuild the original exactly.  An empty
+-- separator cuts nothing.
+splitOnStr :: String -> String -> [String]
+splitOnStr [] src = [src]
+splitOnStr sep src = go "" src
+  where
+    go acc [] = [reverse acc]
+    go acc r@(c : cs)
+      | Just rest <- stripPrefix sep r = reverse acc : go "" rest
+      | otherwise                      = go (c : acc) cs
+
 -- The generated word: the table, then the engine.  A model of `Base`
 -- is ordinary user code from here on, which is what lets `lift2 [Opt]`
 -- apply it at RUNTIME with the program as its own fallback.
@@ -7124,8 +7155,16 @@ preludeSrc = unlines
   , "## take the first n elements; skip drops them instead"
   , "def take = use Recursive ; (n l -> n >> zero? >> (drop >> nil | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> take >> x ... >> cons)) >> merge)) >> merge)"
   , "def skip = use Recursive ; (n l -> n >> zero? >> ((z -> l) | (m -> l >> unList >> (nil | (x r -> (m 1 >> -) r >> skip)) >> merge)) >> merge)"
+  , "## the i-th element, counting from 0, or nothing: Int List(a) => (a | \8226)"
+  , "def nth = (i l -> i l >> skip >> unList >> (alt2 | (x r -> x >> alt1)) >> merge >> (pass | pass))"
   , "## zip two lists into flat two-wire elements: List(a) List(b) => List(a b)"
   , "def zip = use Recursive ; (l r -> l >> unList >> (nil | (x xs -> r >> unList >> (nil | (y ys -> xs ys >> zip >> (x y >> Box) ... >> cons)) >> merge)) >> merge)"
+  , "## the other half of the pair: split a list of two-wire elements"
+  , "## back into two lists.  `zip >> unzip` is the identity, and"
+  , "## `unzip >> zip` is too on lists of equal length -- which is the"
+  , "## strength of any category whose objects are columns"
+  , "##   unzip : List(Box(a b)) => List(a) List(b)"
+  , "def unzip = use Recursive ; (l -> l >> unList >> ((nil) (nil) | (x r -> r >> unzip >> (as bs -> x >> unBox >> (u v -> (u as >> cons) (v bs >> cons))))) >> merge)"
   , "## conjunction / disjunction over a Bool list"
   , "def all = [true] [and] ... >> foldList"
   , "def any = [false] [or] ... >> foldList"
@@ -8795,6 +8834,11 @@ runBuiltin _ _ "asInt?" [VStr t]        =
   case reads t :: [(Int, String)] of
     [(n, "")] -> Right ([VSum 0 [VInt n]], [])
     _         -> Right ([VSum 1 [VStr t]], [])
+runBuiltin _ _ "asFloat?" [VStr t]
+  | isFloatLiteral t = Right ([VSum 0 [VFloat (read t)]], [])
+  | otherwise        = Right ([VSum 1 [VStr t]], [])
+runBuiltin _ _ "split" [VStr src, VStr sep] =
+  Right ([encodeListV (map VStr (splitOnStr sep src))], [])
 -- #dist:K at runtime: the wire joins the bundle of any of the first K
 -- alternatives (deepest, so it heads the bundle), and a tag at or past
 -- K is the residual, which passes untouched — the wire is simply gone

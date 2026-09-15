@@ -3327,3 +3327,156 @@ What it buys, in one line of `:transformations`:
 forward mode's tangent and reverse mode's accumulated continuation are
 the same linear map read two ways. That was §9's first entry under
 *what is NOT built*; it is a square now.
+
+## Amendment (2026-09-14): the frame is a model
+
+`examples/frame.braid` is the second flagship, and it settles a
+question the first one only posed: **what is the right shape for a data
+frame in a language with one arrow?**
+
+The answer is that a frame library is not a library. It is a **model of
+the Doctrine**, and the user's code is a program on ONE ROW.
+
+    data Trade = (sym: Str, px: Float, qty: Int)
+    def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
+    #   notional : Trade =Frame Recursive> Float
+
+`List` appears nowhere in a row program. The hom-object is a **function
+between columns**, `Col(a, b) = Fn⟨List(a) ⇒ List(b)⟩` (with
+`=Recursive>` inside — see *Pragmatics* below); `embed` is
+`map`, `compose` is composition, and `first` is **unzip / map / zip**.
+The strength is, literally, *the other columns ride past* — which is
+what makes the two-wire stage `px qty` legal inside the scope, and it
+is the only reason a hom-object with one wire per side can carry a
+row of three scalars at all.
+
+**The laws come free, and they are the right laws.** A frame library
+usually promises "map is a functor" in its documentation. Here the
+promise is the Doctrine's seven arrow laws, and they are run by the
+audit before the file prints a line. `Frame` declares all five doctrine
+slots — the three structural ones plus `observe` and `sample` — so all
+seven run; a model whose `compose` is wrong stops the file with `law
+'leftId' fails for model Frame`. Nothing was added to the checker.
+
+### The index reading
+
+Conceptually a frame is **a map from an index to a row**: `Fn⟨I ⇒
+row⟩`, together with its key set. v1 represents it as `List(row)` with
+an **implicit positional index** `0 … n−1`, which is `Fin(n) ⇒ row`
+stored tabulated and flat — exactly what a `List` is here.
+
+The reading is worth keeping even though it is implicit, because it is
+what says *why the model is a functor*: `map` preserves the index
+pointwise, so a transported row program cannot move a row, cannot drop
+one, and cannot see its neighbours. Everything that does any of those —
+`keep`, `groupBy`, `sortBy`, `join`, the aggregations — is written
+**once**, at frame level, outside every scope. **A functor cannot drop
+rows**, and that sentence *is* the division of labour in the file. It
+is not a style rule; it is what the model is.
+
+Making the index explicit — a key set in the carrier, so `join` is a
+map union rather than a nested scan and two frames may share an index
+without being the same length — wants `Col(i, a, b)`, a
+three-parameter hom-object. The Doctrine declares `k(_, _)`. Parked.
+
+### Why column names are words, not types
+
+`data Trade = (sym: Str, px: Float, qty: Int)` generates `sym`, `px`
+and `qty` as **projection words** (MANUAL §5). They are ordinary
+definitions: they compose, they quote, they reflect, they go to `map`.
+Nothing in the type system knows a column is called `px` — two
+declarations with the same layout are the same type, and the header
+travels as **runtime data**, a `List(Str)` handed to the printer.
+
+The alternative — column names in the type, a record type with a row of
+labels — was considered and rejected, and for once the reason is not
+implementation cost:
+
+- Braid's products are the **stack**, and the stack is positional. A
+  labelled product would be a second product with a second theory of
+  subtyping, width and permutation, and every structural rule in the
+  language would grow a labelled case.
+- A field name that is a word is one that the rest of the language
+  already knows how to do everything with. `[px] rows ; column` needs
+  no projection syntax, no lens, no `.`; `px qty` is an ordinary tensor
+  stage; a projection `reflect`s because it *is* wiring (`unTrade` and
+  then the stage that keeps one wire).
+- Names as words collide like words, which is the honest behaviour:
+  **objects are added, never merged**. Two types cannot share a field
+  name. That is a cost, and it is the same cost `import` pays, for the
+  same reason.
+
+What is given up is the thing a typed data frame is usually sold on:
+the checker will not tell you that you selected a column the frame does
+not have. Here the field word simply does not exist, which is the same
+error one level down — an unknown word rather than an unknown column.
+For a CSV read at runtime (part 3's `table`) the declaration is
+generated from the header, so the two are the same check.
+
+### The sums-under-transport gap
+
+The one thing the Doctrine cannot carry is a **filter written as a row
+program**. `row ⇒ (row | •)` is a stage whose output is a SUM, and
+transporting it needs a slot the Doctrine does not declare: Hughes'
+`ArrowChoice`, whose generator is `left : k(a, b) ⇒ k((a | c), (b |
+c))` — the coproduct's strength, dual to the one `first` already
+carries. Without it, `use Frame ; qty ; _ 100 ; gte?` has nowhere to go:
+`first` whiskers a product and there is no `left` to whisker a sum.
+
+`keep` sidesteps it, and the sidestep is exact rather than a
+workaround: the **deciding** is a column (`Trade ⇒ Bool` — a functor may
+compute that), and the **dropping** is frame-level (a functor may not do
+that at all). So the mask splits the filter along precisely the line
+the index reading already drew. That the workaround lands on the same
+line as the theory is the evidence that the line is real.
+
+Adding `choice : k(a, b) ⇒ k((a | c), (b | c))` to the Doctrine is the
+obvious next move, and it is a real one: it would make `into`-shaped row
+code transportable, and every model would owe a binding. It is not
+free — `Circuits`, `Funcs`, `Reified` and `Sealed` would all have to
+answer for it, and a sealed category that declares no choice would then
+refuse a whole class of stage rather than a whole class of shape.
+Parked with the reason written down.
+
+### The column store, and the transformation waiting for it
+
+`Frame` stores the frame as **rows** and computes on **columns**. The
+other representation — the frame as a stack of columns, one wire per
+column, `Str^n Float^n Int^n` — is the one a real analytical engine
+uses, and in this language it would be a **second model of the same
+theory**. Then
+
+    transformation Columnar : RowStore ⇒ ColStore
+
+is an ordinary declaration, its squares generated and decided by the
+machinery `examples/transformations.braid` already has, and "the column
+store computes the same answers" stops being a comment.
+
+It waits on one thing, and it is the thing already parked under *not
+admitted: a stack-shaped embedding* (MANUAL §8): a hom-object whose
+arguments are whole **stacks** rather than wires. A column store's
+object is n columns; packing it with the pairing would defeat the
+representation, which is the entire point of having it. So this is the
+flagship that would justify the stack-shaped carrier, and it is now
+written down as such rather than as a maybe.
+
+### Pragmatics, recorded
+
+- `Col`'s inner arrow is `=Recursive>`, because `first` is written with
+  `zip` and `unzip` and the prelude's `zip` ties a knot. The walk is
+  structural and terminates; the label is conservative, not wrong. A
+  `zip` folded Church-style — the trick the prelude's own `fold`
+  comment describes — would drop it, and is worth doing the next time
+  the prelude is opened.
+- `unzip` and `nth` were simply missing from the list library and are
+  now in the prelude; `split : Str Str ⇒ List(Str)` and `asFloat? : Str
+  ⇒ (Float | Str)` are new implementation prims (58 → 60). There is no
+  `lines`: a newline is a separator like any other, and one spelling per
+  thing.
+- `count` is `len`. A frame *is* its rows, so the list word already is
+  the aggregation, and a second spelling would have been a second name
+  for one morphism. `column` is the one place the file does add a
+  second name — `[f] rows ; column` is `map` — and it earns it by being
+  written in the model's words (`embed` then run), so that the two
+  denoting the same function is `embed`'s defining equation rather than
+  a coincidence.

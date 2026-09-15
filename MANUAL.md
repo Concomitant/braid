@@ -2046,7 +2046,7 @@ one term with two spellings. Derived-but-primitive-looking words
 `lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
-**There are 58 primitives** *(2026-09-14)*. A word keeps its place here
+**There are 60 primitives** *(2026-09-14)*. A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), the open
@@ -2055,6 +2055,14 @@ coproduct (`into`), the exponent eliminators over `Aⁿ` — or if it
 io edges, reflection (`parse`/`unparse`/`reflect`/`evalAs`/`sameCode`/
 `sameCodeC`/`interpose`/`rewrite`), and the type-level `weaken`/`finInt`. Everything else is
 a prelude def with its derivation visible.
+
+**`asFloat?` and `split` are implementation prims** *(2026-09-14, 58 →
+60)*, and they are in the kernel on the same criterion `cat`, `toStr`
+and `asInt?` are: a `Str` is a machine string, and nothing in the
+language can take one apart. `split` is the general cutter, so there is
+no separate `lines` — one spelling per thing, and a newline is a
+separator like any other. They arrived with `examples/frame.braid`,
+which has to read a CSV.
 
 **The eleven Float words are implementation prims** *(2026-09-14, 47 →
 58)*, in the kernel for exactly the reason the Int arithmetic and the
@@ -2091,6 +2099,8 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | `cat` | `Str Str ⇒ Str` |
 | `toStr` | `a0 ⇒ Str` |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
+| `asFloat?` | `Str ⇒ (Float \| Str)` — reads exactly the SOURCE notation for a Float literal (optional `-`, digits, point, digits), which is also what the display prints, so `toStr ; asFloat?` is the identity on every finite Float *(2026-09-14)* |
+| `split` | `Str Str ⇒ List(Str)` — `s sep ; split`: n+1 pieces for n occurrences, so pieces and separators rebuild the original exactly, empty pieces included. An empty separator cuts nothing *(2026-09-14)* |
 | `symStr` | `Sym ⇒ Str` |
 | `print` | `a0 =IO> •` — io (§3) |
 | `true` / `false` | `• ⇒ Bool` |
@@ -2203,7 +2213,9 @@ fin1 10 20 30 >> at          # 20
 **Lists**: `nil` `cons` `uncons` `fold` (left fold) `foldList`
 (structural) `map` `filter` `reverse` `append` `concat` `single`
 `flatMap` `len` `sum` `product` `range` `downFrom` `take` `skip` `zip`
-(`List(a) List(b) ⇒ List(a b)`) `all` `any` `partitionSum` `sequence`
+(`List(a) List(b) ⇒ List(a b)`) `unzip` (its inverse, `List(Box(a b)) ⇒
+List(a) List(b)` — 2026-09-14) `nth` (`Int List(a) ⇒ Maybe(a)`,
+counting from 0 — 2026-09-14) `all` `any` `partitionSum` `sequence`
 (List over the sum monad) `printAll`.
 
 **Router algebra** (quoted predicates as values): `not` (track swap)
@@ -2440,6 +2452,53 @@ Rev` is
 the sentence *forward and reverse are one linear map*, and its
 verdicts are mixed — three proved, five sampled through the exit
 *(2026-09-14)*.
+
+**The second worked example is `examples/frame.braid`** *(2026-09-14)*
+— a **data frame**, and it is worth reading for the same reason: there
+is no loop over rows in it. You write a program on ONE ROW — a stack
+of scalars, ordinary Braid — and a model lifts it to the frame:
+
+```braid
+data Trade = (sym: Str, px: Float, qty: Int)
+def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
+#   notional : Trade =Frame Recursive> Float
+```
+
+`Frame` models the same `Doctrine` `Circuits` does. Its hom-object
+`Col(a, b)` is a **function between columns**, `embed` is `map`,
+`compose` is composition, and `first` is **unzip / map / zip** — the
+strength is literally *the other columns ride past*, which is what
+carries the two-wire stage `px qty`. So the model's laws are `map`'s
+functor laws, and the doctrine's seven run over them before the file
+prints anything.
+
+**The columns are the field words.** `sym`, `px` and `qty` are the
+projections the `data` declaration generated (§5) — ordinary
+definitions, so a column name composes, quotes and reflects like any
+other word. Nothing in the type system knows a column is called `px`;
+the header travels as runtime data, a `List(Str)` handed to the
+printer.
+
+**What stays at frame level, and why.** A functor cannot drop a row.
+`map` preserves the index pointwise, so a transported row program
+cannot move a row, drop one, or see its neighbours — which is exactly
+right, and exactly why `keep`, `groupBy`, `sortBy`, `join` and the
+aggregations are written **once**, on columns, outside any scope. The
+division of labour is not a convention; it is what the model is.
+
+**The index reading.** A frame *is* a map from an index to a row —
+`Fn⟨I ⇒ row⟩` with its key set — and the file represents it as
+`List(row)` with an implicit positional index `0 … n−1`, which is
+`Fin(n) ⇒ row` stored tabulated and flat (§13). The implicit index is
+what makes `map` index-preserving and `zip` meaningful; making it
+explicit would want a key type in the hom-object, and `k(_, _)` takes
+two.
+
+**The one thing the doctrine cannot carry** is a *filter written as a
+row program*: `row ⇒ (row | •)` transports a SUM, and the Doctrine has
+no choice slot (`ArrowChoice`'s `left`). `keep` sidesteps it — the
+deciding is a column, which a functor may compute, and the dropping is
+frame level.
 
 ### `Code`: reflection and splicing
 
@@ -3141,8 +3200,10 @@ flow that is all ordinary defs), `theories.braid` (theories and
 models), `circuits.braid` (a stream transducer — a genuinely
 different category — as data plus a composition word plus
 `theory Arrow(k(_, _))`, the Arrow interface stated once over a
-constructor parameter and audited against two models), and
-`autodiff.braid` (below).
+constructor parameter and audited against two models),
+`autodiff.braid` (below) and `frame.braid` (a data frame as a second
+model of the same doctrine — row programs lifted by `use Frame`, the
+`data` declaration's field words as the columns, §12).
 
 **Differentiation is a model** *(2026-09-14)* — the worked example
 that ties every row of the table together, and the one to read after

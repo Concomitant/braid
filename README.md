@@ -6,14 +6,15 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (**58 morphisms**, counted
+The design bet: keep the primitive set tiny (**60 morphisms**, counted
 2026-09-14) and prove it spans everything else **in the language
 itself**. A word keeps its place in the kernel only if it is a
 structure map of the doctrine — cartesian, coproduct, exponential — or
-if it touches the implementation (arithmetic, io, reflection) — which
-is why the eleven `Float` words of 2026-09-14 are prims and
+if it touches the implementation (arithmetic, strings, io, reflection)
+— which is why the eleven `Float` words of 2026-09-14 are prims and
 `fneg`/`fabs` are not: a double is a machine number, negation is `0.0`
-minus. The entire
+minus; and why `split` and `asFloat?` are prims and `lines` is not: a
+`Str` is a machine string, and a newline is a separator like any other. The entire
 standard library is derived user code: `id`, booleans, three of the four
 comparisons, iteration (`loop` and `fix` are both derived under the
 `use Recursive` marker), `while` and `until`, the list type and
@@ -416,6 +417,28 @@ bare `use` leaves.
     it. `Float` itself arrived for this (a base type beside `Int`,
     sharing no word with it), and the file says plainly what is not
     built: second derivatives want a model parameterized by a model.
+17. **A data frame is a model too — so you never write a loop over
+    rows.** You write a program on ONE ROW, a stack of scalars, and
+    `use Frame` lifts it to the whole frame. `Frame` models the same
+    `Doctrine` `Circuits` does: the hom-object is a **function between
+    columns**, `embed` is `map`, `compose` is composition, and `first`
+    is **unzip / map / zip** — the strength is *the other columns ride
+    past*, which is what carries a two-wire row stage.
+    ```text
+    data Trade = (sym: Str, px: Float, qty: Int)   # names generate sym, px, qty
+    def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
+    #   notional : Trade =Frame Recursive> Float
+    ```
+    The columns are the **field words** a `data` declaration generates
+    (2026-09-14) — ordinary definitions, so a column name composes,
+    quotes and reflects like any other word, and no column name is in
+    the type system. The model's laws are `map`'s functor laws, and the
+    doctrine's seven run them. A functor cannot drop a row, so `keep`,
+    `groupBy`, `sortBy`, `join` and the aggregations are written once,
+    on columns, outside the scope — that division of labour *is* the
+    model. `examples/frame.braid` loads a CSV, lifts a row program over
+    it, groups, sorts, joins and prints, and states a frame-level law
+    the doctrine does not: `keep` with an all-true mask is the identity.
 
 ## Examples
 
@@ -445,6 +468,9 @@ meeting in one pass over data),
 a resource metered by one checked interposition),
 `autodiff` (the flagship: automatic differentiation as three models of
 one theory of arithmetic — no `Code`, no chain rule),
+`frame` (a data frame as a model of the same doctrine: row programs
+lifted by `use Frame`, the columns being the `data` declaration's field
+words, a CSV loaded by hand),
 `imports` (one file's declarations in another file's scope) — and finish with
 `registrar`, which uses most of the language in forty lines about
 grade school.
@@ -463,7 +489,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1072-case test suite, a full
+(typechecker, interpreter, REPL), a 1080-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

@@ -1,0 +1,416 @@
+# A DATA FRAME, as a model of the Doctrine.
+#
+# The thesis: you should never write a loop over rows.  You write a
+# program on ONE ROW — a stack of scalars, ordinary Braid — and a MODEL
+# lifts it to the whole frame.  `List` appears nowhere in the row
+# programs below.  What does the lifting is `use Frame`, and `Frame` is
+# a model of the same `Doctrine` that `examples/circuits.braid` models:
+# hom-object a FUNCTION BETWEEN COLUMNS, `embed` = `map`, `compose` =
+# composition, `first` = unzip / map / zip.  The strength IS "the other
+# columns ride past", which is what makes a two-wire row stage legal.
+#
+# So the functor laws of `map` are not something this file promises.
+# They are the doctrine's seven arrow laws, and the audit runs them
+# before anything below prints.
+#
+# WHAT IS A FRAME, exactly.  A frame is a map from an INDEX to a row —
+# `Fn⟨I ⇒ row⟩` together with its key set.  This file represents it as
+# `List(row)` with an IMPLICIT POSITIONAL INDEX: row i is the i-th
+# element, the key set is `0 … n−1`, and `Fin(n) ⇒ row` stored
+# tabulated and flat is exactly what a list is here (MANUAL §5, §13).
+# The reading matters even though it is implicit, because it is what
+# says WHY the model is a functor: `map` preserves the index pointwise,
+# so a transported row program cannot move a row, cannot drop one, and
+# cannot see its neighbours.  Every operation that does any of those —
+# `keep`, `groupBy`, `sortBy`, `join`, the aggregations — is written
+# ONCE, at frame level, outside the scope.  A functor cannot drop rows;
+# that is the whole division of labour in this file.
+#
+# COLUMN NAMES ARE WORDS.  `data Trade = (sym: Str, px: Float, qty:
+# Int)` generates `sym`, `px` and `qty` as ordinary definitions
+# (2026-09-14, MANUAL §5).  Nothing in the type system knows a column
+# is called `px` — the header is runtime data, carried as a `List(Str)`
+# to the printer — and that is deliberate: a column name is a word, so
+# it composes, quotes and reflects like every other word.
+
+# ---------------------------------------------------------------------
+# 1. The carrier, the pairing, and the model
+# ---------------------------------------------------------------------
+# `Col(a, b)` is a function from the a-column to the b-column.  The
+# arrow inside is `=Recursive>` for one reason: `first` is written with
+# `zip` and `unzip`, and those are written with the knot (the prelude's
+# `zip` has been `=Recursive>` since it was written).  The walk is
+# structural and terminates, so the label is conservative rather than
+# wrong; a bounded `zip`, folded Church-style the way the prelude's
+# `fold` is, would drop it.  `examples/circuits.braid` carries the same
+# label for the same kind of reason.
+
+data Col(a, b) = Fn⟨List(a) =Recursive> List(b)⟩
+data Pair(a, b) = a b
+
+## run a column function on a frame — the base word, used outside every
+## `use Frame` scope
+def runCol = (c rows -> c ; unCol ; _ rows ; ev)
+
+## embed: a row word becomes a column word.  This IS `map`, and saying
+## so is the model's defining equation.
+def cembed = (f -> [(rows -> f rows ; map)] ; Col)
+
+## compose: run one column function, then the next
+def ccompose = (f g -> [(rows -> f rows ; runCol ; (mid -> g mid ; runCol))] ; Col)
+
+## the strength: THE OTHER COLUMNS RIDE PAST.  Unzip the pairing into
+## two columns, run f on the first, zip the answer back against the
+## second.  Nothing else in this file needs to know that a wide row
+## stage is possible; `first` is why it is.
+def cfirst =
+    f ->
+    [(rows ->
+        (rows ; [(p -> p ; unPair ; Box)] ... ; map ; unzip) \
+      ; (as cs -> ((f as ; runCol) cs ; zip) ; [(b -> b ; unBox ; Pair)] ... ; map))] ; Col
+
+## the audit's evidence: a fixed three-row frame, and a column function
+## observed by summing what it produces there
+def sample3   = 1 (2 (3 nil ; cons) ; cons) ; cons
+def cobserve  = (c -> (c sample3 ; runCol) ; sum)
+
+theory Columns(k(_, _)) over Doctrine =
+    embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
+    compose : k(a, b) k(b, c) =Recursive> k(a, c)
+    first   : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
+    observe : k(Int, Int) =Recursive> Int
+    sample  : • =Recursive> k(Int, Int)
+
+model Frame : Columns(Col) =
+    embed   = cembed
+    compose = ccompose
+    first   = cfirst
+    observe = cobserve
+    sample  = [dup ; +] ; cembed
+
+# All FIVE doctrine slots are declared, so all SEVEN of its laws run —
+# leftId, rightId, assoc, embedFunctor, firstFst, firstEmbed,
+# firstCompose — and they are exactly the functor laws of `map` read at
+# the hom-object.  They run before this file prints anything, and a
+# model whose `compose` is wrong stops the file with
+# `law 'leftId' fails for model Frame`.
+
+# ---------------------------------------------------------------------
+# 2. Transport, checked on Ints before a single trade is loaded
+# ---------------------------------------------------------------------
+# A one-wire stage embeds on its own; a wider one is packed with `Pair`
+# and whiskered by `first`.  `sq` is the two-wire case the strength
+# exists for.
+
+def sq     = use Frame ; dup ; *
+def poly   = use Frame ; dup ; _ dup ; _ _ (_ 1 ; +) ; _ * ; +
+def wiring = use Frame ; dup ; _ 1 ... ; _ + ; swap ; _ drop
+#   each of these is `Int =Frame Recursive> Int`
+
+def sqOut     = over Frame ; sq ; observe
+def polyOut   = over Frame ; poly ; observe
+def wiringOut = over Frame ; wiring ; observe
+
+"-- transport, at the audit's own three-row frame [1, 2, 3] --" ; print
+sqOut     ; print       # 14 — [1, 4, 9]      summed
+polyOut   ; print       # 26 — [3, 8, 15]     summed: x + x·(x+1)
+wiringOut ; print       # 9  — [2, 3, 4]      summed: dup, +1, swap, drop
+
+# ---------------------------------------------------------------------
+# 3. Frame-level words — everything a functor may NOT do
+# ---------------------------------------------------------------------
+# These take columns and give columns.  They are written once, here,
+# because each of them moves, drops or reorders rows, and the index
+# reading says a transported word cannot.
+
+## keep the rows a Bool column marks.  A MASK, not a predicate: the
+## filter a row program would want is `row ⇒ (row | •)`, and a sum
+## under transport needs a choice slot the Doctrine does not have
+## (design-macros.md, 2026-09-14).  The mask sidesteps it — the
+## deciding is a column, and the dropping is frame-level.
+def keep =
+    use Recursive
+    (mask rows -> mask ; unList ; (nil \
+      | (b bs -> rows ; unList ; (nil \
+          | (x xs -> (bs xs ; keep) ; (r -> b (x r ; cons) r ; select))) ; merge)) ; merge)
+
+## does a column contain this value?
+def elem = (x col -> col ; [(seen y -> seen (x y ; equals) ; or)] false ... ; fold)
+
+## the distinct values of a column, in first-appearance order
+def distinct =
+    col ->
+    col ; [(seen x -> (x seen ; elem) seen (x seen ; cons) ; select)] nil ... ; fold
+        ; reverse
+
+## the rows whose key equals k
+def rowsAt = (k keys rows -> (keys ; [(y -> k y ; equals)] ... ; map) rows ; keep)
+
+## a group is a key and the frame of rows under it — a COLUMN OF
+## FRAMES, which is what `groupBy` hands back
+data Group(k, a) = (key: k, part: List(a))
+
+def groupBy =
+    keys rows ->
+    (keys ; distinct) ; [(k -> k (k keys rows ; rowsAt) ; Group)] ... ; map
+
+## insertion sort over `Box(key row)` elements, by a quoted router on
+## keys — `[flt?]` for ascending Floats, `[lt?]` for Ints
+def keyOf = (e -> e ; unBox ; (k r -> k))
+def rowOf = (e -> e ; unBox ; (k r -> r))
+
+def insertPair =
+    use Recursive
+    (p e l -> l ; unList ; (e ; single \
+      | (y r -> ((e ; keyOf) (y ; keyOf) ; p ... ; ev ; verdict) \
+                  (e l ; cons) (y (p e r ; insertPair) ; cons) ; select)) ; merge)
+
+def sortPairs =
+    use Recursive
+    (p l -> l ; unList ; (nil | (x r -> p x (p r ; sortPairs) ; insertPair)) ; merge)
+
+## reorder a frame by a key column
+def sortBy = (p keys rows -> ((keys rows ; zip) ; p ... ; sortPairs) ; [rowOf] ... ; map)
+
+## inner join on a key: every left row beside every right row that
+## shares its key.  Rows with no partner are dropped, on both sides.
+def join =
+    keys rows others otherRows ->
+    ((keys rows ; zip)
+       ; [(e -> e ; unBox
+                  ; (k a -> (k others otherRows ; rowsAt)
+                              ; [(b -> a b ; Box)] ... ; map))] ... ; map)
+    ; concat
+
+## the aggregations — ordinary folds over a column.  `count` is the
+## prelude's `len`: a frame IS its rows, so the list word already is
+## the aggregation, and a second spelling would be a second name for
+## one thing.
+def sumF  = [fadd] 0.0 ... ; fold
+def meanF = (col -> (col ; sumF) (col ; len ; toFloat) ; fdiv)
+
+## ONE-OFFS, outside a scope: `[f] rows ; column` embeds a row word and
+## runs it.  It is written in the model's words on purpose — `column`
+## denotes the same function `map` does, and that it does is `embed`'s
+## defining equation rather than a coincidence.
+def column = over Frame ; (f rows -> (f ; embed) rows ; runCol)
+
+## join a column of strings with a separator, and print a frame under a
+## header the CALLER supplies.  The header is runtime data — a
+## `List(Str)` — because column names are words, not types.
+def joinWith =
+    sep col ->
+    col ; unList
+        ; ("" | (x r -> x (r ; [(acc y -> (acc sep ; cat) y ; cat)] "" ... ; fold) ; cat))
+        ; merge
+
+def printFrame =
+    header rows ->
+    (" | " header ; joinWith) ; print
+    ; rows ; [(r -> " | " r ; joinWith)] ... ; map ; printAll
+
+# ---------------------------------------------------------------------
+# 4. The loader — one CSV file, by hand
+# ---------------------------------------------------------------------
+# `loadTrades : Str =IO> (List(Trade) | Str)`.  A bad row goes to the
+# miss track carrying its LINE NUMBER, counted in the file (the header
+# is line 1), so the shape is the ordinary railway and the whole load
+# is `sequence` over the rows.  Part 3's `table` declaration will emit
+# exactly this text from the CSV's header; nothing here is clever.
+
+data Trade = (sym: Str, px: Float, qty: Int)
+#   sym : Trade ⇒ Str    px : Trade ⇒ Float    qty : Trade ⇒ Int
+#   — generated, ordinary words, and the columns of every row program below
+
+def badRow = (n -> "bad row on line " (n ; toStr) ; cat)
+
+## the i-th cell, or "" — which then fails to read, which is the same
+## answer with one fewer track
+def cellAt = (i cells -> i cells ; nth ; (pass | "") ; merge)
+
+def readTrade =
+    n s pxs qs ->
+    pxs ; asFloat? \
+        ; ((p -> qs ; asInt? ; ((q -> s p q ; Trade ; ok) | (e -> n ; badRow ; miss)) ; merge) \
+          | (e -> n ; badRow ; miss)) \
+        ; merge
+
+def parseRow =
+    n line ->
+    (line "," ; split)
+    ; (cells ->
+        (cells ; len) 3 ; equals \
+          [n (0 cells ; cellAt) (1 cells ; cellAt) (2 cells ; cellAt) ; readTrade] \
+          [n ; badRow ; miss] ... ; cond)
+
+## a blank line is not a row (a text file ends with a newline)
+def keepRow? = (e -> e ; unBox ; (n line -> (line "" ; equals) ; not) ; (e | e))
+
+def parseTrades =
+    src ->
+    (src "\n" ; split)
+    ; (ls -> (ls ; len ; range ; [(i -> i 1 ; +)] ... ; map) ls ; zip)
+    ; (numbered -> 1 numbered ; skip)       # line 1 is the header
+    ; [keepRow?] ... ; filter
+    ; [(e -> e ; unBox ; parseRow)] ... ; map
+    ; sequence
+
+def loadTrades =
+    path ->
+    path ; readFile ; ((body -> body ; parseTrades) | (e -> e ; miss)) ; merge
+
+# ---------------------------------------------------------------------
+# 5. The row programs, and the words that present them
+# ---------------------------------------------------------------------
+
+## THE ROW PROGRAM.  `px qty` is a two-wire stage — two column names
+## side by side — and the strength is what carries it.  No `List`, no
+## index, no loop, and nothing here knows there is more than one row.
+def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
+#   notional : Trade =Frame Recursive> Float
+
+## running one on a frame, outside the scope
+def notionalOf = (rows -> notional rows ; runCol)
+
+## the mask, as a row program run by `column`: a FILTER would want
+## `Trade ⇒ (Trade | •)`, and a sum has no slot in the Doctrine
+def big?     = (t -> (t ; qty) 100 ; gte? ; verdict)
+def bigOnes  = (rows -> ([big?] rows ; column) rows ; keep)
+
+## group by symbol, total the notional in each group
+data Total = (tsym: Str, tval: Float)
+def totalOf  = (g -> (g ; key) (g ; part ; sumF) ; Total)
+def totalsOf =
+    rows ->
+    (([sym] rows ; column) (rows ; notionalOf) ; groupBy) ; [totalOf] ... ; map
+
+## reorder by a key column — ascending, since `flt?` hits on less-than
+def sortedTotals = (ts -> [flt?] ([tval] ts ; column) ts ; sortBy)
+
+## a second, tiny frame to join against.  NFLX has no trade and TSLA no
+## sector, so an inner join drops one row from each side.
+def sectorSyms  = "AAPL" "MSFT" "GOOG" "NFLX" ; pack
+def sectorNames = "Hardware" "Software" "Ads" "Media" ; pack
+def withSector  = (ts -> ([tsym] ts ; column) ts sectorSyms sectorNames ; join)
+
+## cells — a row becomes the `List(Str)` the printer takes
+def tradeCells  = (t -> (t ; sym) (t ; px ; toStr) (t ; qty ; toStr) ; pack)
+def totalCells  = (t -> (t ; tsym) (t ; tval ; toStr) ; pack)
+def joinCells   = (e -> e ; unBox ; (t sec -> (t ; tsym) (t ; tval ; toStr) sec ; pack))
+def symNotional =
+    rows ->
+    (([sym] rows ; column) (rows ; notionalOf) ; zip)
+      ; [(e -> e ; unBox ; (s v -> s (v ; toStr) ; pack))] ... ; map
+
+# ---------------------------------------------------------------------
+# 6. A FRAME-LEVEL LAW — one that is not a functor law
+# ---------------------------------------------------------------------
+# The doctrine audits the model.  `keep` is not part of the model, so
+# nothing audits it; here is the law it owes, stated as a program.
+#
+#     keep with an all-true mask is the identity
+#
+# That is a real theorem about `keep` and it is decidable at any frame
+# by `eq?`, since a `Trade` is three scalars.  The other one worth
+# wanting — `groupBy` then concatenating the groups is a PERMUTATION of
+# the frame — is NOT statable this way: "is a permutation" needs a
+# canonical order on rows, which needs an ordering on rows, which this
+# language does not have (`eq?` is structural, `lt?` is Int).  What IS
+# statable is its shadow: grouping preserves the ROW COUNT, no row
+# lost, none duplicated.  Stating the shadow and saying what the full
+# claim would cost is the honest position.
+
+def allTrue     = (rows -> [(x -> true)] rows ; column)
+def keepIdentity = (rows -> ((rows ; allTrue) rows ; keep) rows ; eq? ; verdict)
+def groupSizes  = (gs -> [(g -> g ; part ; len)] gs ; column)
+def groupsCount =
+    rows -> ((([sym] rows ; column) rows ; groupBy) ; groupSizes ; sum) (rows ; len)
+              ; equals
+def says = (b -> b "true" "false" ; select)
+
+# ---------------------------------------------------------------------
+# 7. The demo
+# ---------------------------------------------------------------------
+
+"examples/data/trades.csv" ; loadTrades
+; (pass | (e -> e ; print ; nil)) ; merge
+; (trades ->
+
+    "" ; print
+    "-- the frame, as loaded --" ; print
+    ("sym" "px" "qty" ; pack) ([tradeCells] trades ; column) ; printFrame
+    ("rows: " (trades ; len ; toStr) ; cat) ; print
+    #   12 rows, four symbols, three of them repeated
+
+    "" ; print
+    "-- keep qty >= 100, and the notional of what is left --" ; print
+    (trades ; bigOnes)
+    ; (big ->
+        ("sym" "notional" ; pack) (big ; symNotional) ; printFrame
+        #   AAPL | 19050.0     = 190.5 * 100
+        #   AAPL | 38400.0     = 192.0 * 200
+        #   MSFT | 61800.0     = 412.0 * 150
+        #   MSFT | 40850.0     = 408.5 * 100
+        ("rows: " (big ; len ; toStr) ; cat) ; print          # 4
+        ("mean: " (big ; notionalOf ; meanF ; toStr) ; cat) ; print)
+        #   160100 / 4 = 40025.0, and every term is a dyadic rational,
+        #   so the sum and the quotient are both exact
+
+    "" ; print
+    "-- group by sym, sum the notional, then sort ascending --" ; print
+    (trades ; totalsOf)
+    ; (totals ->
+        ("sym" "notional" ; pack) ([totalCells] totals ; column) ; printFrame
+        #   AAPL | 82347.5     = 19050 + 38400 + 9437.5 + 15460
+        #   MSFT | 123150.0    = 20500 + 61800 + 40850
+        #   GOOG | 22466.25    = 10518.75 + 3487.5 + 8460
+        #   TSLA | 12450.0     = 2500 + 9950
+        "" ; print
+        ("sym" "notional" ; pack) ([totalCells] (totals ; sortedTotals) ; column)
+          ; printFrame
+        #   TSLA | 12450.0 , GOOG | 22466.25 , AAPL | 82347.5 , MSFT | 123150.0
+
+        "" ; print
+        "-- inner join with a sector frame --" ; print
+        ("sym" "notional" "sector" ; pack) \
+          ([joinCells] (totals ; withSector) ; column) ; printFrame)
+        #   AAPL | 82347.5 | Hardware
+        #   MSFT | 123150.0 | Software
+        #   GOOG | 22466.25 | Ads
+        #   — NFLX has no trade and TSLA no sector, so both are dropped
+
+    "" ; print
+    "-- the frame-level laws, run --" ; print
+    ("keep with an all-true mask is the identity: " \
+       (trades ; keepIdentity ; says) ; cat) ; print          # true
+    ("groupBy preserves the row count: " \
+       (trades ; groupsCount ; says) ; cat) ; print)          # true
+
+# ---------------------------------------------------------------------
+# 8. What is NOT built, plainly
+# ---------------------------------------------------------------------
+# THE INDEX IS IMPLICIT.  A frame here is `List(row)` and its keys are
+# `0 … n−1`.  The `Fn⟨I ⇒ row⟩` reading with an explicit key set would
+# make `join` a map union rather than a nested scan, and would let two
+# frames share an index without being the same length.  It needs a key
+# type in the carrier — `Col(i, a, b)` — and that is a three-parameter
+# hom-object, which the Doctrine's `k(_, _)` does not admit.
+#
+# NO COLUMN STORE.  `Col(a, b)` is a function between columns and the
+# frame is stored as rows.  The column-store representation — the
+# frame as a STACK of columns rather than a list of rows — would be a
+# second model of the same theory, and then `transformation Columnar :
+# RowStore ⇒ ColStore` is an ordinary declaration the checker decides.
+# It waits on a stack-shaped carrier (design-macros.md, "not admitted:
+# a stack-shaped embedding").
+#
+# NO FILTER INSIDE A SCOPE.  A row program that decides whether its row
+# survives is `row ⇒ (row | •)`, and transporting a SUM needs a choice
+# slot in the Doctrine — ArrowChoice' `left`.  `keep` sidesteps it: the
+# deciding is a column (a functor may compute a Bool), the dropping is
+# frame-level.
+#
+# THE HEADER IS RUNTIME DATA.  `printFrame` takes the names as a
+# `List(Str)` from the caller.  Part 3's `table` declaration will read
+# them off the CSV and emit both the `data` declaration and this
+# loader; nothing above needs to change for that.
