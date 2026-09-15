@@ -2906,6 +2906,134 @@ holds for them too: final atom of their stage (§9).
 
 ## 14. Sharp edges (things the checker will teach you)
 
+**Every refusal says where, and most say which rule** *(2026-09-15)*. A
+refusal from a file reads `path:line`, and `, in def X` when it is
+inside one; a main program names the line of the **stage** that failed,
+not the line main starts on; an imported file names **its own** path.
+
+```text
+examples/frame.braid:212, in def notional: Cannot unify stacks: • vs Str
+examples/frame.braid:376: Cannot unify stacks: • vs Str
+```
+
+Checked without a file — a REPL session, a string — the line is still
+the line of the text that was handed over (`line 3, in def f: …`);
+with only one line of it there is nothing to name and nothing is said.
+A stage carried onto the next line by `\`, `;` or `>>` reports the line
+it **started** on, which is the only honest answer for a stage that
+spans lines. Six shapes also carry a one-line **hint** naming the rule
+and the fix; each fires only on something the checker can see in the
+source, and says "usually" where it is a guess. They are marked ✦ below.
+
+This section is a **catalogue**: it is kept as reference, so entries are
+corrected in place rather than dated one by one.
+
+### The message classes
+
+- **`Cannot unify stacks: Γ vs Δ`** — two stages met and the wires did
+  not line up. The two sides are what was LEFT where the match ran out,
+  the left-hand stage's output first and the right-hand stage's input
+  second, so `• vs Int` reads "nothing left to give, one Int still
+  wanted". Count wires. Step over the ones this stage does not touch with `_`, pass
+  the rest along with `...`, or split the stage. ✦ If the failing line
+  begins with `(` or `[` and the line above did not say it was
+  unfinished, the hint says so: *a new line is a new stage, so this `(`
+  does not continue the line above* — end that line with `\`, or write
+  `;` at either end (§4). ✦ If the failing line holds a group that is
+  **not** the last atom of its stage, the hint says the group is
+  instantiated **closed**, so pin its width with `id` or move it last.
+- **`Cannot unify stacks (exponent base | exponent split | open tail
+  after exponent): …`** — the same failure inside a segment with an
+  exponent (`Intⁿ`). The width could not be split where the other side
+  needed it. Write the width you mean, or keep the two sides' exponents
+  on the same variable (§13).
+- **`Cannot unify types: A vs B`** — one wire, two types. The stack
+  lined up and a wire did not. ✦ If the failing line begins with `|`,
+  the hint says what it usually is: a row arm on its own line is a
+  **stage**, so the arms compose at `>>` instead of standing side by
+  side — carry each line of the row on with `\`, or put the row on one
+  line (§4).
+- **`Cannot unify types: Int vs Float. …`** — the same, with the
+  reason spelled out: Braid has no numeric tower and no overloading.
+  `+ - * div mod lt?` are Int words, `fadd fsub fmul fdiv flt?` are
+  Float words, and no word is shared. Cross with `toFloat` or `floor`,
+  written where you mean it (§9).
+- **`Cannot unify types: (A | σ) vs T`** ✦ — an **open injection** met
+  a written type. `alt1` says "at least this alternative"; a written
+  type says exactly these. Close the row with `(pass | pass)`, which is
+  the idiom for "and nothing more" (§5).
+- **`Cannot unify exponents: e vs f`** — two widths that must be equal
+  are not. A literal width and a variable one unify; two different
+  literals do not.
+- **`Cannot unify effects: L vs M (…)`** — the **sandbox**. Composition
+  joins grades, so a composite carries every label its parts do; a
+  **written** manifest is exact and absorbs nothing. The parenthesis
+  names the fix, and there are two of them: *write `=L>` on that arrow*
+  (you meant it) or *keep this code label-free* (you did not). Two
+  written manifests inside a `Fn⟨…⟩` are unified rather than ordered —
+  a `Fn` type is invariant in its arrow (§3).
+- **`Occurs check failed[ on stack | on exponent | on effect | on sum
+  row]: v in T`** — the only solution is an infinite type. ✦ Under
+  `use Recursive`, with the variable inside a sum, the hint says what it
+  almost always is: *a recursive call inside a row usually wants
+  `merge` after the row* — the row leaves the alternatives open and the
+  knot cannot close them.
+- **`'v' is universally quantified in the expected type but this code
+  requires it to be …`** — a **written** type promised to work for
+  every choice of `v` and the code pins it. Either the code is less
+  general than the signature claims, or the signature meant a concrete
+  type. (This is the rigid half of `subsumes`: a model slot against its
+  theory, a `model … : Base` binding, a witness against an `evalAs`.)
+- **`An open-arity atom must be the final atom of its tensor stage`** —
+  an open binder, a `...`, or a word whose arrow has an open tail, with
+  atoms to its right. Move it last, or give it a group of its own
+  (§4, §13).
+- **`Expected a tensor stage, got: T`** — the parser wanted an atom and
+  found punctuation. Usually a doubled operator (`; ;`), or a `|` where
+  a stage was due.
+- **`Unclosed group (expected ')')` / `Unclosed quotation (expected
+  ']')`** — a bracket that no line closes. A bracket may span lines;
+  the def body ends when the brackets balance.
+- **``A `\` continues a tensor stage onto the next line, so …``** —
+  two of them: a `\` that is not the last thing on its line, and a `\`
+  with no line after it (§4).
+- **``` `| ...` used to mean the residual; write `| ---` … ```** — `...`
+  continues **wires**, `---` continues **alternatives**. An old row is
+  one of the two and the compiler will not guess (§5).
+- **`Unknown primitive: n`** — a name nothing in scope defines, named
+  at the stage that writes it. A def is in scope from its own line
+  down, so a call above its definition is this message.
+- **``` `X` refers to itself: write `use Recursive` in its header ```**
+  — recursion is a **marker**. The same message with *(`recurse` named
+  the definition being written)* is the word `recurse` used outside any
+  `use Recursive` (§8).
+- **`Duplicate definition: n` / `Duplicate parameter: p` / `Duplicate
+  type declaration: T` / `Duplicate resource in `use`: R`** — objects
+  are added, never merged. Rename one.
+- **``` `X` leaves M; call it outside `use M` ```** — an **exit** inside
+  a transported scope. Not a type error: a scope error, by slot. Call
+  it outside, or write the def's header `over M`, which opens the same
+  vocabulary and transports nothing (§8).
+- **``` `use …` / `over …` ends its scope ```**, and **`… must be
+  followed by its body (a newline, ';' or '->')`** — a header word
+  takes the rest of the scope as its body, so there has to be a rest.
+- **``` `use`: a stage may contain at most one resource operation, and
+  it must be alone ```** — and **``` X threads Log, but this scope is
+  over Log Counter ```**. The elaborator brings one resource wire up,
+  acts, and puts it back; a subset at once would need a permutation it
+  will not guess. A word threading **exactly** the scope's resources,
+  in order, applies with no routing at all.
+- **``` n is the receipt of `use F`, not a word ```**, **``` `T@cellAt`
+  is the compiler's spelling of a table's insides ```**, **``` `I@op` is
+  the compiler's spelling of a slot ```** — three names source may not
+  write. A label is minted by a scope, never written by hand; a `table`
+  puts exactly `loadT` and `headerT` in scope; a slot is reached with
+  `use I`.
+- **`main requires a nonempty input stack: …`** — the main program is
+  run on nothing, so it may not ask for a wire.
+
+### Sharp edges
+
 - `1 >> 2` — the incoming wire is uncovered (constants don't thread;
   write `2 id` or `2 ...`).
 - Binder bodies are input-closed — a `(x -> …)` stage consumes exactly
@@ -2913,11 +3041,18 @@ holds for them too: final atom of their stage (§9).
 - Quotes are points (`• ⇒ Fn`): pushing one beside live wires needs
   `_` or `...` — the same frame discipline as every constant.
 - Row arms must fit on one line; arms must agree in type to `merge`.
+  `|` never absorbs a line break, so an arm written on its own line is
+  a **stage**, and the arms then compose at `>>` instead of standing
+  side by side. Carry the row on with `\` if it will not fit. A
+  unification failure on a `|`-led line says this. ✦
 - Ladder lanes are juxtapositions — a `;`/`>>` inside a lane needs a group.
 - `def name = x -> …` ends at the line — unless it leaves a bracket
-  open, in which case the lines that close it belong to the body. For
+  open, or says it is unfinished with a trailing `\`, `;` or `>>`, in
+  which case the lines that finish it belong to the body. For
   multi-line bodies generally, use the block form (`def name =` newline
-  `x ->`).
+  `x ->`). A line that begins with `(` after an ordinary line is a new
+  **stage**, not a continuation of it, and a stack failure there says
+  so. ✦
 - `f >> x y -> …` is not a cutting binder — that form is recognized at
   the start of a scope or after a newline. The naming form `-> x` has no
   such restriction; it ends whatever stage it follows.

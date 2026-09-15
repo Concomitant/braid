@@ -462,6 +462,16 @@ bare `use` leaves.
     act. Everything that *runs* is Braid: the generated loader re-reads
     the file and puts a bad row on the miss track with its line number.
     (2026-09-15)
+19. **A refusal names the place and the rule.** Every error from a file
+    reads `path:line`, and `, in def X` when it is inside one; a main
+    program names the line of the **stage** that failed, and an imported
+    file names its own path. Six shapes that cost real time — a row arm
+    on its own line, a `(`-led line that is a new stage and not a
+    continuation, a grouped atom that is not last in its stage, a
+    recursive call inside a row, an open injection's residual meeting a
+    written type, the effect sandbox — carry a one-line hint naming the
+    rule and what to write instead. MANUAL §14 is the catalogue, one
+    entry per message class. (2026-09-15)
 
 ## Examples
 
