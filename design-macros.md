@@ -3239,3 +3239,91 @@ and is gone; the squares were never refused, they were decided false,
 and the reason they need the samples is arithmetic rather than
 machinery. Measuring it was the point of carrying the reason on the
 verdict.
+
+## Amendment (2026-09-14): three things the first flagship asked for
+
+*Stage 6b. `examples/autodiff.braid` was written against the language as
+it stood; its report named three places where the file was shaped by the
+notation rather than by the mathematics. All three are now closed, and
+the first two are SYNTAX in the strict sense the house style means:
+they rewrite to existing words before anything downstream can see them.*
+
+**1. Destructuring binders.** Six slot bodies opened with the same
+ritual — `unDual _ ; _ _ unDual ; (a da b db -> …)` — because a `data`
+carrier's fields had no way into a binder head. Now they do:
+`(Dual(a, da) Dual(b, db) -> …)`, over any **single-alternative** `data`
+type, mixed freely with plain parameters and with the open `...` form,
+and one field may itself be a pattern.
+
+The rewrite is token-level and happens before the parse tree exists,
+producing *character for character* the source a hand wrote yesterday —
+the `un` stage for the j-th slot padded by one `_` per wire already
+un-constructed to its left and one per slot still whole to its right.
+So there is no destructuring binder anywhere downstream: no Term, no
+inference case, no runtime case, and `reflect` is free rather than
+extended (the test that pins this reflects both spellings and compares
+the unparsed code). Two refusals name their fix: a multi-alternative
+carrier (*use a row*) and an arity that is not the constructor's.
+
+**2. Lines that wrap.** A newline is a strict `>>`, so a stage that did
+not fit on one line could not be written at all, and a line beginning
+with `;` was `Expected a tensor stage, got: TokSeq` — which is why the
+flagship pulled `newton` and half a dozen square checks out into named
+one-line defs. Three spellings now say *not yet*: a line ending with
+`;`/`>>`, a line beginning with one (both redundant with the newline,
+which is exactly why they read well down a page), and a trailing `\`,
+which drops the newline outright so the tensor stage itself wraps.
+
+`\` is the one continuation form, and the reasoning is the interesting
+part: **indentation cannot be made to mean this**. Every multi-line def
+body in the language is indented deeper than its `def` line and relies
+on newline = `>>`; a rule that read deeper indentation as continuation
+would silently change the meaning of every one of them. `\` is
+stage-final where `|`, `...` and `---` are not, and it is unwritable in
+a program today, so no file can change meaning. The line-based layer
+above the parser learns the same rule, so an inline `def` may wrap the
+way one that leaves a bracket open already could.
+
+**3. The exit problem.** The real one. A theory's exit is a slot, so it
+has ONE type for every model; `Rev` had two things to hand back and the
+theory could only ask for one, so the gradient was read by a base word
+*outside* the theory and the gradient half of `Transpose` was not
+machine-checked at all. The answer is not a slot whose type varies with
+the model — that is not what a slot is. It is that **an exit whose
+result varies by model is a theory parameter**:
+
+    theory Smooth(a, g) = … ; gradient : a ⇒ g
+    model Floats : Smooth(Float, Float)
+    model Fwd    : Smooth(Dual, Float)
+    model Rev    : Smooth(Rev, Grad)
+
+That half needed no new machinery: multi-parameter theories, per-model
+instantiation and slot substitution were all already there, and a wire
+parameter used only in an exit's output types simply works.
+
+The consequence is where the work was. A component of `transformation
+T : M ⇒ N` was one word on *the* parameter, and `gradient : a ⇒ g` has
+its two ends at different parameters — one component cannot draw that
+square. So a natural transformation between models of an n-parameter
+theory is **n components, in the theory's order**:
+
+    transformation Transpose : Fwd ⇒ Rev = transpose, gx
+
+with each component checked at the arrow the two model heads wrote for
+*its* parameter, and the generated squares putting the right component
+at each position of the slot's stacks. A parameter whose type is the
+same in both models writes `id` — an ordinary word, no case in the
+checker. Sampling follows the parameters too: evidence for a wire comes
+from an entry of *that* parameter, and a result is observed by an exit
+of *that* parameter — `observe : a ⇒ Float` is not an exit for a `g`,
+and a `Grad` result is compared with `eq?` directly, which is sound
+because a `Grad` is two Floats and not a closure.
+
+What it buys, in one line of `:transformations`:
+
+    gradient  sampled (1 point; differ in the free category)
+
+`tangent ; gx` against `transpose ; backward` — the statement that
+forward mode's tangent and reverse mode's accumulated continuation are
+the same linear map read two ways. That was §9's first entry under
+*what is NOT built*; it is a square now.

@@ -404,8 +404,13 @@ bare `use` leaves.
     linear map as a continuation (reverse mode) — so forward and reverse
     are two representations of one map rather than two algorithms, and
     fan-out needs no special case because continuations are linear.
-    `transformation Value : Fwd ⇒ Floats = value` says *AD computes the right
-    value*, and all eight of its squares are **proved**, not sampled.
+    `transformation Value : Fwd ⇒ Floats = value, zeroTangent` says *AD
+    computes the right value*, and all nine of its squares are
+    **proved**, not sampled.  The theory's gradient exit is
+    `gradient : a ⇒ g` — an exit whose result varies by model is a
+    theory **parameter**, filled `Float` by `Fwd` and `Grad` by `Rev` —
+    so a transformation carries one component per parameter and
+    `Transpose`'s gradient square is decided like any other.
     Newton's method comes along under `use Recursive`, and a fourth
     model threads the adjoint through a `resource` instead of summing
     it. `Float` itself arrived for this (a base type beside `Int`,
@@ -458,7 +463,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1058-case test suite, a full
+(typechecker, interpreter, REPL), a 1060-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

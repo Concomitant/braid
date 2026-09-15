@@ -47,17 +47,21 @@ transformationVerdictTests =
                , "  op      sampled (2 points; ev of an open wire)"
                , "  sample  sampled (`pack` has no closed arity)" ] )
     -- forgetting the tangent: every square proved, which is the
-    -- strongest verdict the machinery has
+    -- strongest verdict the machinery has — `gradient` included, since
+    -- 2026-09-14: its result type is a theory PARAMETER, so `Value` has
+    -- a second component (the zero map) and the square that says
+    -- "forgetting a tangent zeroes it" normalizes outright
   , ( "autodiff.braid", "Value"
     , unlines' [ "Value : Fwd \8658 Floats"
-               , "  add      proved"
-               , "  mul      proved"
-               , "  neg      proved"
-               , "  lit      proved"
-               , "  exp      proved"
-               , "  sin      proved"
-               , "  sample   proved"
-               , "  observe  proved" ] )
+               , "  add       proved"
+               , "  mul       proved"
+               , "  neg       proved"
+               , "  lit       proved"
+               , "  exp       proved"
+               , "  sin       proved"
+               , "  sample    proved"
+               , "  observe   proved"
+               , "  gradient  proved" ] )
     -- and the transpose: `lit` must prove (its input is a `Float`, so
     -- no `sample` reaches it), the five operations are decided at the
     -- samples THROUGH THE EXIT, since a `Rev` holds a closure.  Their
@@ -67,14 +71,22 @@ transformationVerdictTests =
     -- exactly what the theory's evidence is for
   , ( "autodiff.braid", "Transpose"
     , unlines' [ "Transpose : Fwd \8658 Rev"
-               , "  add      sampled (2 points; differ in the free category)"
-               , "  mul      sampled (2 points; differ in the free category)"
-               , "  neg      sampled (1 point; differ in the free category)"
-               , "  lit      proved"
-               , "  exp      sampled (1 point; differ in the free category)"
-               , "  sin      sampled (1 point; differ in the free category)"
-               , "  sample   proved"
-               , "  observe  proved" ] )
+               , "  add       sampled (2 points; differ in the free category)"
+               , "  mul       sampled (2 points; differ in the free category)"
+               , "  neg       sampled (1 point; differ in the free category)"
+               , "  lit       proved"
+               , "  exp       sampled (1 point; differ in the free category)"
+               , "  sin       sampled (1 point; differ in the free category)"
+               , "  sample    proved"
+               , "  observe   proved"
+                 -- THE GRADIENT HALF, machine-checked at last: the two
+                 -- ends of `gradient : a \8658 g` sit at DIFFERENT
+                 -- theory parameters, so the square needs a component
+                 -- at each — `transpose` at `a`, `gx` at `g`.  It is
+                 -- compared at `Grad` directly (two Floats, which `eq?`
+                 -- reaches) rather than through `observe`, which is an
+                 -- exit for `a` and not for `g`.
+               , "  gradient  sampled (1 point; differ in the free category)" ] )
   ]
   where unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 
@@ -1231,12 +1243,50 @@ sealedMod = unlines
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- THE PARAMETERIZED EXIT (2026-09-14).  An exit whose result varies
+    -- by model is a THEORY PARAMETER the model instantiates: `grad : a
+    -- ⇒ g` is one slot with one type, and `g` is `Float` for the plain
+    -- model and `Float` for the dual one here (a `Grad` in
+    -- autodiff.braid).  A wire parameter used ONLY in an exit's output
+    -- is instantiated per model and reaches nothing else.  The
+    -- transformation then needs ONE COMPONENT PER PARAMETER, because
+    -- the two ends of `grad`'s square sit at different ones.
+  [ ("data Dual = Float Float\n\
+     \def zt = (d -> 0.0)\n\
+     \def dadd = Dual(a, da) Dual(b, db) -> (a b ; fadd) (da db ; fadd) ; Dual\n\
+     \def val = Dual(v, t) -> v\n\
+     \def tan = Dual(v, t) -> t\n\
+     \theory S(a, g) =\n\
+     \    lit : Float \8658 a\n\
+     \    add : a a \8658 a\n\
+     \    sample : \8226 \8658 a\n\
+     \    observe : a \8658 Float\n\
+     \    grad : a \8658 g\n\
+     \model F : S(Float, Float) =\n\
+     \    lit = id\n\
+     \    add = fadd\n\
+     \    sample = 1.5\n\
+     \    observe = id\n\
+     \    grad = zt\n\
+     \model D : S(Dual, Float) =\n\
+     \    lit = (c -> c 0.0 ; Dual)\n\
+     \    add = dadd\n\
+     \    sample = 1.5 1.0 ; Dual\n\
+     \    observe = val\n\
+     \    grad = tan\n\
+     \transformation V : D \8658 F = val, zt\n\
+     \def p = over S ; (x -> x (2.0 ; lit) ; add)\n\
+     \def pF = use F ; p\n\
+     \def pD = use D ; p\n\
+     \2.0 ; pF ; print\n\
+     \(2.0 1.0 ; Dual) ; pD ; tan ; print",
+     ["4.0", "1.0"], "")
     -- DESTRUCTURING BINDERS (2026-09-14).  A constructor pattern in a
     -- binder head is SYNTAX: it rewrites, before the parse tree exists,
     -- to the un-constructor stage a hand wrote until today.  All four
     -- forms — alone, mixed with a plain parameter, with the open `...`,
     -- and nested one deep.
-  [ ("data Dual = Float Float\ndata Wrap = Dual Int\n\
+  , ("data Dual = Float Float\ndata Wrap = Dual Int\n\
      \def dneg = Dual(a, da) -> (a ; fneg) (da ; fneg) ; Dual\n\
      \def mix = (Dual(a, da) x -> (a da ; fadd) x ; fadd)\n\
      \def open = (Dual(a, da) ... -> a da ; fadd)\n\
@@ -2312,10 +2362,39 @@ optimizerTheory =
 -- (module source, substring expected in the error)
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- ONE COMPONENT PER PARAMETER (2026-09-14): a natural
+    -- transformation between models of a two-parameter theory is two
+    -- components, and one is refused by name.
+  [ ("data Dual = Float Float\n\
+     \def zt = (d -> 0.0)\n\
+     \def dadd = Dual(a, da) Dual(b, db) -> (a b ; fadd) (da db ; fadd) ; Dual\n\
+     \def val = Dual(v, t) -> v\n\
+     \def tan = Dual(v, t) -> t\n\
+     \theory S(a, g) =\n\
+     \    lit : Float \8658 a\n\
+     \    add : a a \8658 a\n\
+     \    sample : \8226 \8658 a\n\
+     \    observe : a \8658 Float\n\
+     \    grad : a \8658 g\n\
+     \model F : S(Float, Float) =\n\
+     \    lit = id\n\
+     \    add = fadd\n\
+     \    sample = 1.5\n\
+     \    observe = id\n\
+     \    grad = zt\n\
+     \model D : S(Dual, Float) =\n\
+     \    lit = (c -> c 0.0 ; Dual)\n\
+     \    add = dadd\n\
+     \    sample = 1.5 1.0 ; Dual\n\
+     \    observe = val\n\
+     \    grad = tan\n\
+     \transformation V : D \8658 F = val\n\
+     \1 ; print",
+     "a natural transformation has ONE COMPONENT PER PARAMETER")
     -- A BINDER PATTERN refuses two things by name (2026-09-14): a
     -- multi-alternative carrier (it un-constructs ONE alternative) and
     -- an arity that is not the constructor's.
-  [ ("data Shape = (Int | Int Int)\ndef f = Shape(a) -> a\n1 ; print",
+  , ("data Shape = (Int | Int Int)\ndef f = Shape(a) -> a\n1 ; print",
      "`Shape` has 2 alternatives and a pattern un-constructs ONE")
   , ("data Dual = Float Float\ndef f = Dual(a, b, c) -> a\n1 ; print",
      "names 3 fields, but `Dual` has 2")

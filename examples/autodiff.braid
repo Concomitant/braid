@@ -29,20 +29,29 @@
 # 1. The theory: a commutative ring with exp and sin, over one carrier
 # ---------------------------------------------------------------------
 # `sample` is the evidence a parametric law runs on (a law cannot
-# invent a value of `a`).  `observe` is the EXIT: the one slot that
-# takes the carrier and hands back base, so a law can compare results.
-# Everything below is stated at `observe`, because two carriers cannot
-# be compared — `Rev`'s carrier holds a closure.
+# invent a value of `a`).  `observe` is an EXIT: a slot that takes the
+# carrier and hands back base, so a law can compare results.  Every law
+# below is stated at `observe`, because two carriers cannot be compared
+# — `Rev`'s carrier holds a closure.
+#
+# `gradient` is the OTHER exit, and the reason the theory has two
+# parameters.  An exit's result is what the model hands back, and for a
+# gradient that is not one type: `Fwd` hands back a tangent `Float`,
+# `Rev` a whole `Grad`.  A slot has ONE type for every model, so the
+# result type is a THEORY PARAMETER the model instantiates — `gradient
+# : a ⇒ g`, with `Smooth(Float, Float)`, `Smooth(Dual, Float)` and
+# `Smooth(Rev, Grad)`.  That is the general rule: an exit whose result
+# varies by model is a theory parameter (§7 shows what it buys —
+# `Transpose`'s gradient half becomes a square like any other).
 #
 # `Smooth` is NOT declared `over Doctrine`.  The doctrine's carrier is
 # a hom-object `k(a, b)` — a category of arrows — and this is an
 # algebraic theory over ONE carrier: a ring.  Elliott's functor is
 # between categories; a model of an algebraic theory is the same
 # statement one level down, on the free category its generators
-# present.  (§7 records what that choice costs: a wire parameter is
-# compared through this exit, and the exit is the value.)
+# present.
 
-theory Smooth(a) =
+theory Smooth(a, g) =
     add     : a a ⇒ a
     mul     : a a ⇒ a
     neg     : a ⇒ a
@@ -51,6 +60,7 @@ theory Smooth(a) =
     sin     : a ⇒ a
     sample  : • ⇒ a
     observe : a ⇒ Float
+    gradient : a ⇒ g
     # The ring laws, at the theory's own evidence.  They are exact at
     # these points — 1.5, 2.0 and 3.0 are dyadic rationals with small
     # mantissas, so every sum and product below is a double with no
@@ -72,7 +82,14 @@ theory Smooth(a) =
 # The carrier is `Float` itself, so `lit` and `observe` are both the
 # identity.  This is the model that says what the programs MEAN.
 
-model Floats : Smooth(Float) =
+# ...and its gradient is the ZERO MAP.  `Floats` carries no dependence
+# on anything: every carrier value it holds is a constant, and the
+# derivative of a constant is 0.  That is not a placeholder — it is what
+# makes `Value` below a homomorphism at `g` as well as at `a`:
+# forgetting a tangent zeroes it.
+def zeroTangent = (d -> 0.0)
+
+model Floats : Smooth(Float, Float) =
     add     = fadd
     mul     = fmul
     neg     = fneg
@@ -81,6 +98,7 @@ model Floats : Smooth(Float) =
     sin     = fsin
     sample  = 1.5
     observe = id
+    gradient = zeroTangent
 
 # ---------------------------------------------------------------------
 # 3. Forward mode — the value, paired with a tangent
@@ -109,7 +127,7 @@ def dsin = Dual(a, da) -> (a ; fsin) ((a ; fcos) da ; fmul) ; Dual
 def value   = Dual(v, t) -> v
 def tangent = Dual(v, t) -> t
 
-model Fwd : Smooth(Dual) =
+model Fwd : Smooth(Dual, Float) =
     add     = dadd
     mul     = dmul
     neg     = dneg
@@ -118,6 +136,7 @@ model Fwd : Smooth(Dual) =
     sin     = dsin
     sample  = 1.5 1.0 ; Dual
     observe = value
+    gradient = tangent
 
 # ---------------------------------------------------------------------
 # 4. Reverse mode — the value, paired with the TRANSPOSE of that map
@@ -166,18 +185,20 @@ def rexp = Rev(a, ka) -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Re
 def rsin = Rev(a, ka) -> (a ; fsin) [(d -> ka (d (a ; fcos) ; fmul) ; ev)] ; Rev
 def rvalue = Rev(v, k) -> v
 
-# THE EXIT PROBLEM, and how it is resolved here.
+# THE EXIT PROBLEM, and how it is resolved.
 #
-# A theory's exit is a SLOT, so it has ONE type for every model:
-# `observe : a ⇒ Float`.  `Rev` has two things to hand back — the value
-# and the gradient — and the theory cannot ask for the second, because
-# `Floats` and `Fwd` have no gradient to give.  A per-model exit is not
-# expressible: that would be a slot whose type varies with the model,
-# which is not what a slot is.
+# A theory's exit is a SLOT, so it has ONE type for every model.  `Rev`
+# has two things to hand back — the value and the gradient — and until
+# 2026-09-14 the theory could not ask for the second: `observe : a ⇒
+# Float` fits `Fwd`'s tangent and not `Rev`'s `Grad`, so the gradient
+# was read by an ordinary base word OUTSIDE the theory, and the
+# gradient half of `Transpose` was not machine-checked at all.
 #
-# So the theory's exit is the VALUE, matching `Fwd`, and the gradient
-# is read by an ordinary base word OUTSIDE the theory.  `backward` runs
-# the accumulated continuation at adjoint 1.0 — "the derivative of the
+# The answer is not a per-model slot type; it is that the exit's RESULT
+# is a theory parameter.  `gradient : a ⇒ g` is one slot with one type,
+# and `g` is filled per model — `Float` for `Fwd`, `Grad` for `Rev`.
+# `backward` is now that slot's binding for `Rev`: it runs the
+# accumulated continuation at adjoint 1.0 — "the derivative of the
 # output with respect to itself is 1" — and that is the whole of the
 # reverse sweep.
 def backward = Rev(v, k) -> k 1.0 ; ev
@@ -186,7 +207,7 @@ def backward = Rev(v, k) -> k 1.0 ; ev
 def seedX = (x -> x [gx] ; Rev)
 def seedY = (y -> y [gy] ; Rev)
 
-model Rev : Smooth(Rev) =
+model Rev : Smooth(Rev, Grad) =
     add     = radd
     mul     = rmul
     neg     = rneg
@@ -196,6 +217,7 @@ model Rev : Smooth(Rev) =
     # the transpose of `Fwd`'s own sample: value 1.5, tangent 1.0
     sample  = 1.5 (1.0 ; scaleK) ; Rev
     observe = rvalue
+    gradient = backward
 
 # ---------------------------------------------------------------------
 # 5. Programs, written ONCE, over the theory
@@ -299,8 +321,12 @@ def newton =
 # sampled.  A `Dual` is two Float wires with a roll around it, so
 # `unDual` partitions into one track and the whole square normalizes.
 
-transformation Value : Fwd ⇒ Floats = value
-#   Value : Dual ⇒ Float — the component is an ordinary word
+transformation Value : Fwd ⇒ Floats = value, zeroTangent
+#   ONE COMPONENT PER THEORY PARAMETER, in the theory's order: `value :
+#   Dual ⇒ Float` at `a`, `zeroTangent : Float ⇒ Float` at `g`.  Both
+#   are ordinary words.  The second is what the `gradient` square needs:
+#   its two ends live at different parameters (`gradient : a ⇒ g`), so
+#   one component cannot draw that square.
 
 # A TANGENT BECOMES THE LINEAR MAP THAT SCALES BY IT.  That is the
 # sentence "forward and reverse are two representations of the same
@@ -308,27 +334,34 @@ transformation Value : Fwd ⇒ Floats = value
 def transpose = Dual(x, dx) -> x (dx ; scaleK) ; Rev
 #   transpose : Dual ⇒ Rev
 
-transformation Transpose : Fwd ⇒ Rev = transpose
+transformation Transpose : Fwd ⇒ Rev = transpose, gx
+#   at `g`, Fwd's tangent `Float` becomes Rev's `Grad`, and the map is
+#   `gx` — the tangent was seeded at x, so the gradient it represents is
+#   the one with that partial in slot 1.  Nothing new is defined for it.
 
-# What its eight squares establish (`:transformations` in the REPL
+# What its NINE squares establish (`:transformations` in the REPL
 # prints the verdicts): `lit`, `sample` and `observe` are PROVED by the
 # normalizer, for every input — which is why `rlit` builds the ZERO
 # LINEAR MAP `(0.0 ; scaleK)` rather than `[(d -> gzero)]`: the two are
 # the same map and only the first is the same CODE, and `lit`'s input
 # is a `Float` rather than the carrier, so no `sample` reaches it and a
-# proof is the only verdict available.  The other five — `add`, `mul`,
-# `neg`, `exp`, `sin` — are SAMPLED at the theory's evidence and
-# compared through the theory's exit, which is the VALUE; the gradient
-# half of the transpose is what §5 prints, against the analytic
-# derivative.  `:transformations` says WHY each of the five needed the
-# samples: `differ in the free category`.  `sameCode` does not refuse
-# them — it DECIDES them false, because the two sides are equal only up
-# to associativity and distributivity of `fadd` and `fmul`, and those
-# are uninterpreted words to the normalizer.  A `false` about the free
+# proof is the only verdict available.  The other six — `add`, `mul`,
+# `neg`, `exp`, `sin` and `gradient` — are SAMPLED at the theory's
+# evidence.  `:transformations` says WHY each needed the samples:
+# `differ in the free category`.  `sameCode` does not refuse them — it
+# DECIDES them false, because the two sides are equal only up to
+# associativity and distributivity of `fadd` and `fmul`, and those are
+# uninterpreted words to the normalizer.  A `false` about the free
 # category is not a `false` about a ring, which is exactly what the
-# theory's evidence is for.  (Before the exit was applied here, a sampled square
-# compared two `Rev` carriers with `eq?` — syntactic on a closure — and
-# refused this declaration for squares that commute.)
+# theory's evidence is for.
+#
+# The `gradient` square is the one that was missing until 2026-09-14,
+# and it is the interesting half: `tangent ; gx` against `transpose ;
+# backward` says that Fwd's tangent and Rev's accumulated continuation
+# ARE the same linear map, read two ways.  It is compared at `Grad`
+# rather than through an exit — a `Grad` is two Floats and `eq?`
+# reaches them — where the five carrier squares go through `observe`,
+# since a `Rev` holds a closure and `eq?` on a closure is syntactic.
 
 # ---------------------------------------------------------------------
 # 8. The same functor with the adjoint THREADED
@@ -361,7 +394,7 @@ def tsin = RevG(a, ka) -> (a ; fsin) [(gr d -> ka gr (d (a ; fcos) ; fmul) ; ev)
 def tvalue = RevG(v, k) -> v
 def tseedX = (x -> x kx ; RevG)
 
-model RevThread : Smooth(RevG) =
+model RevThread : Smooth(RevG, Grad) =
     add     = tadd
     mul     = tmul
     neg     = tneg
@@ -370,6 +403,12 @@ model RevThread : Smooth(RevG) =
     sin     = tsin
     sample  = 1.5 kx ; RevG
     observe = tvalue
+    gradient = tgradient
+
+# the theory's `gradient` exit, for this model: thread a fresh
+# accumulator through the sweep and unroll it.  `g` is `Grad` here too,
+# and it is the same `Grad` the summing model hands back.
+def tgradient = RevG(v, k) -> k (gzero ; Gradient) 1.0 ; ev ; unGradient
 
 def polyT = use RevThread ; poly
 # run the reverse sweep at adjoint 1.0, threading the accumulator
@@ -416,12 +455,10 @@ def gradPoly =
 # the machinery (`Fin(n)`, `at`, bundles) and joining it to this is a
 # different piece of work.
 #
-# THE GRADIENT HALF OF THE TRANSPOSE IS NOT MACHINE-CHECKED — see §7.
-# `transformation Transpose` is declared and its eight squares are
-# decided, but the five sampled ones are compared through the theory's
-# exit, and the exit is the VALUE: a theory whose exit could also hand
-# back the gradient is the per-model exit that a slot is not.  §5's
-# printed gradients are the evidence for the other half.
+# (THE GRADIENT HALF OF THE TRANSPOSE used to be listed here as not
+# machine-checked.  It is checked since 2026-09-14: `gradient : a ⇒ g`
+# is a slot whose result type is a theory parameter, and its square is
+# decided like any other — §7.)
 #
 # `examples/transpose.braid` is the linear-algebra view of the same
 # operation: reversing a diagram and dualizing each generator

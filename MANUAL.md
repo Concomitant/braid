@@ -1849,6 +1849,56 @@ template through one model and landing in another) is **not** shipped:
 it wants a second elaboration of the template, and nothing has asked
 for it yet.
 
+**An exit whose result varies by model is a theory parameter**
+*(2026-09-14)*. An exit is a slot (`observe : a ⇒ Float`), so it has ONE
+type for every model — and a gradient does not: forward mode hands back
+a tangent `Float`, reverse mode a whole `Grad`. The answer is not a slot
+whose type varies with the model, which is not what a slot is; it is
+that the exit's **result type** is a parameter the model instantiates:
+
+```braid
+theory Smooth(a, g) =
+    …
+    observe  : a ⇒ Float      # the value: one type for every model
+    gradient : a ⇒ g          # the result varies, so `g` is a parameter
+
+model Floats : Smooth(Float, Float)
+model Fwd    : Smooth(Dual, Float)
+model Rev    : Smooth(Rev, Grad)
+```
+
+A wire parameter used only in an exit's output types reaches nothing
+else: it is instantiated per model and that is all.
+
+**One component per parameter** *(2026-09-14)*. A component of
+`transformation T : M ⇒ N` is a word on **one** of the theory's
+parameters, and `gradient : a ⇒ g` has its two ends at *different* ones
+— so a square like that cannot be drawn with a single component. A
+natural transformation between models of a theory with n parameters is
+n components, written in the theory's order:
+
+```braid
+transformation Value     : Fwd ⇒ Floats = value, zeroTangent
+transformation Transpose : Fwd ⇒ Rev    = transpose, gx
+```
+
+Each is checked at the arrow the two model heads wrote for *its*
+parameter (`value : Dual ⇒ Float` at `a`, `zeroTangent : Float ⇒ Float`
+at `g`), and the generated squares put the right component at each
+position of the slot's stacks. A parameter whose type is the same in
+both models writes `id` — an ordinary word, not a keyword. Giving the
+wrong number of them is *theory S has 2 parameters and a natural
+transformation has ONE COMPONENT PER PARAMETER, in order*. The
+transformation's own **word** is the component at the first parameter,
+which is the carrier.
+
+Sampling follows the parameters too: a slot's input takes its evidence
+from an entry of *that* parameter (`sample : • ⇒ a` feeds an `a`), and a
+result is observed by an exit of *that* parameter — `observe : a ⇒ Float`
+is not an exit for a `g`, so a `Grad` result is compared with `eq?`
+directly, which is sound because a `Grad` is two Floats and not a
+closure.
+
 **Evidence is a generator.** `sample` is a slot like any other, so a
 transformation must preserve it: `len` of `ListMonoid`'s sample must *be*
 `IntSum`'s sample. That is why the example's list has seven elements.
@@ -2356,7 +2406,7 @@ carries a tangent, `Rev` carries the transpose of the same linear map
 as a continuation — and one body per program, written `over Smooth`
 and read by all three. Each slot says what the derivative of **one**
 operation is; nothing composes derivatives by hand, because `;` does.
-`transformation Value : Fwd ⇒ Floats = value` is the sentence *AD
+`transformation Value : Fwd ⇒ Floats = value, zeroTangent` is the sentence *AD
 computes the right value*, and all eight of its squares are **proved**
 by the normalizer rather than sampled; `transformation Transpose : Fwd ⇒
 Rev` is
@@ -2907,7 +2957,10 @@ holds for them too: final atom of their stage (§9).
   kind, `transformation Transpose : Fwd ⇒ Rev` is declared, and `:transformations`
   prints what each square was decided by — §8. A theory that declares
   no exit still compares carriers directly, and says so when one
-  fails.)* Two riders came out of the same investigation and are worth
+  fails. So does a result at a parameter the theory declares no exit
+  FOR: with `Smooth(a, g)`, `observe : a ⇒ Float` is an exit for `a`
+  and not for `g`, and a `Grad` is weighed directly — sound here,
+  because a `Grad` is two Floats and not a closure.)* Two riders came out of the same investigation and are worth
   keeping:
   - **`sameCode` says `false`, not a refusal, for "spelled
     differently"** — two quotations that build the same function out of

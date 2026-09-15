@@ -4901,10 +4901,16 @@ instanceDefs theories trans inst = do
 -- between models is an arrow between two named things, so it is written with
 -- the arrow.
 data Transformation = Transformation
-  { tfName :: String
-  , tfFrom :: String
-  , tfTo   :: String
-  , tfWord :: String
+  { tfName  :: String
+  , tfFrom  :: String
+  , tfTo    :: String
+  , tfWords :: [String]
+      -- ONE COMPONENT PER THEORY PARAMETER (2026-09-14), in the order
+      -- the theory declares them.  A natural transformation between
+      -- models of `Smooth(a, g)` is a component at `a` AND a component
+      -- at `g` — `gradient : a \8658 g` has one at each end of its
+      -- square — and a parameter whose type is the same in both models
+      -- writes `id`, which is an ordinary word and needs no case.
   } deriving (Eq, Show)
 
 -- one slot's square: the two sides as generated defs, and the sampled
@@ -5050,18 +5056,24 @@ parseTransformationLine :: String -> Either String Transformation
 parseTransformationLine l =
   case break (== '=') (takeWhile (/= '#') l) of
     (lhs, '=' : rhs)
-      | [w] <- words rhs ->
+      | Just ws@(_ : _) <- componentList rhs ->
           case break (== ':') lhs of
             (hd, ':' : nms) | ["transformation", nm] <- words hd ->
               case words nms of
                 [a, arr, b] | arr `elem` ["\8658", "->", "\8594"] ->
-                  Right (Transformation nm a b w)
+                  Right (Transformation nm a b ws)
                 _ -> Left (malformed l)
             _ -> Left (malformed l)
     _ -> Left (malformed l)
   where
+    -- `= w` or `= w1, w2, …`: one word per theory parameter, in order
+    componentList = mapM one . splitTopCommas
+    one piece = case words piece of
+      [w] -> Just w
+      _   -> Nothing
     malformed t = "Malformed transformation declaration (want "
-               ++ "`transformation Name : ModelA \8658 ModelB = word`): "
+               ++ "`transformation Name : ModelA \8658 ModelB = word`, or "
+               ++ "one word per theory parameter in order, `= w1, w2`): "
                ++ dropWhile isSpace t
 
 -- Is this wire the theory's parameter \8212 the thing the component acts
@@ -5086,15 +5098,13 @@ transformationDefs theories insts mo = do
         ++ tfTo mo ++ " models " ++ inTheory b ++ ": a transformation is "
         ++ "a component between two models of ONE theory."
   th <- theoryOf theories (inTheory a)
-  param <- case thParams th of
-    [p] -> Right p
-    ps  -> Left $ here ++ "theory " ++ thName th ++ " has "
-               ++ show (length ps) ++ " parameters, and a transformation "
-               ++ "is a "
-               ++ "component at ONE of them.  Split the theory, or write "
-               ++ "the homomorphism by hand and state its squares as laws."
-  built <- mapM (square th param a b) (thSlots th)
-  let word  = ( tfName mo, tfWord mo
+  -- ONE COMPONENT PER PARAMETER, in the theory's order.  A theory with
+  -- a parameterized exit (`gradient : a \8658 g`) has a square whose two
+  -- ends live at different parameters, so a single component cannot
+  -- draw it.
+  ps <- components th
+  built <- mapM (square th ps a b) (thSlots th)
+  let word  = ( tfName mo, head (tfWords mo)
               , Just ("transformation " ++ tfName mo ++ " : " ++ tfFrom mo
                        ++ " \8658 " ++ tfTo mo ++ " \8212 the component, as "
                        ++ "an ordinary word") )
@@ -5114,26 +5124,43 @@ transformationDefs theories insts mo = do
       []      -> Left $ here ++ n ++ " is not a model declared at this point"
     joinSrc = intercalate " >> " . filter (not . null)
 
-    -- the component at a stack: on each wire that is the theory's
-    -- parameter, the word; on the rest, nothing.  `""` is the identity.
-    stageFor param sName st = case closedWires st of
+    -- the declaration's words, paired with the parameters they are
+    -- components at.  One each, in order, or the refusal says so.
+    components th
+      | length (tfWords mo) == length (thParams th) =
+          Right (zip (thParams th) (tfWords mo))
+      | otherwise = Left $ here ++ "theory " ++ thName th ++ " has "
+          ++ show (length (thParams th)) ++ " parameter"
+          ++ (if length (thParams th) == 1 then "" else "s")
+          ++ " and a natural transformation has ONE COMPONENT PER "
+          ++ "PARAMETER, in order (" ++ show (length (tfWords mo))
+          ++ " given).  A parameter whose type is the same in both "
+          ++ "models writes `id`."
+
+    -- the word this wire's parameter is a component at, if any
+    wordFor ps w = listToMaybe [ n | (q, n) <- ps, paramWire q w ]
+
+    -- the component at a stack: on each wire that is one of the
+    -- theory's parameters, that parameter's word; on the rest, nothing.
+    -- `""` is the identity.
+    stageFor ps sName st = case closedWires st of
       Nothing -> Left $ here ++ "slot '" ++ sName ++ "' has an open stack, "
                      ++ "and a component is applied wire by wire.  A theory "
                      ++ "with a `...` slot needs its homomorphism written by "
                      ++ "hand."
       Just ws
-        | not (any (paramWire param) ws) -> Right ""
-        | otherwise -> Right (unwords [ if paramWire param w
-                                          then tfWord mo else "_" | w <- ws ])
+        | all (isNothing . wordFor ps) ws -> Right ""
+        | otherwise -> Right (unwords [ fromMaybe "_" (wordFor ps w)
+                                      | w <- ws ])
 
-    square th param a b (sName, Arrow sIn sOut _) = do
-      kIn  <- stageFor param sName sIn
-      kOut <- stageFor param sName sOut
+    square th ps a b (sName, Arrow sIn sOut _) = do
+      kIn  <- stageFor ps sName sIn
+      kOut <- stageFor ps sName sOut
       let lhsS = joinSrc [slotDefName (inName a) sName, kOut]
           rhsS = joinSrc [kIn, slotDefName (inName b) sName]
           lhsN = transformationDefName nm "lhs" sName
           rhsN = transformationDefName nm "rhs" sName
-      (mlaw, why) <- pure (sampledLaw th param a b sName sIn sOut)
+      (mlaw, why) <- pure (sampledLaw th ps a b sName sIn sOut)
       pure ( TransformationSquare sName lhsN rhsN (fmap slName mlaw) why
                          (maybe 0 slPoints mlaw) (maybe False slExit mlaw)
            , lhsS, rhsS, fmap slSrc mlaw )
@@ -5143,7 +5170,7 @@ transformationDefs theories insts mo = do
     -- a carrier (comparing one directly is `eq?` on whatever it holds),
     -- and `eq?` decides.  `Nothing` carries the reason, which is what
     -- the refusal prints.
-    sampledLaw th param a b sName sIn sOut =
+    sampledLaw th ps a b sName sIn sOut =
       case (closedWires sIn, closedWires sOut) of
         (Just ins, Just [out])
           | Just atoms <- mapM sampleAtom ins ->
@@ -5156,26 +5183,32 @@ transformationDefs theories insts mo = do
                           (transformationDefName nm "square" sName)
                           ("(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
                             ++ "(forget >> true | forget >> false) >> merge")
-                          (length [ () | w <- ins, paramWire param w ])
+                          (length [ () | w <- ins
+                                         , isJust (wordFor ps w) ])
                           (not (null obs)))
                  , "" )
           | otherwise ->
               (Nothing, "the theory declares no `sample : \8226 \8658 "
-                          ++ pName param ++ "` to supply its inputs with")
+                          ++ intercalate "`/`\8226 \8658 "
+                               [ pName q | (q, _) <- ps ]
+                          ++ "` to supply its inputs with")
         (_, Just outs) | length outs /= 1 ->
           (Nothing, "it leaves " ++ show (length outs) ++ " wires, and a "
                       ++ "sampled square is compared with `eq?` at one")
         _ -> (Nothing, "its stacks are not closed")
       where
-        compAt st = either (const "") id (stageFor param sName st)
+        compAt st = either (const "") id (stageFor ps sName st)
         sampleAtom w
-          | paramWire param w = slotDefName (inName a) <$> sampleSlot
-          | TFn _ <- w        = Just "[pass]"
-          | otherwise         = Nothing
-        -- an ENTRY of the source model supplies a value of the carrier
-        sampleSlot = listToMaybe
-          [ n | (n, Arrow i o _) <- thSlots th, i == SEnd
-              , Just [w] <- [closedWires o], paramWire param w ]
+          | isJust (wordFor ps w) = slotDefName (inName a) <$> sampleSlot w
+          | TFn _ <- w            = Just "[pass]"
+          | otherwise             = Nothing
+        -- an ENTRY of the source model supplies a value of THIS wire's
+        -- parameter (`sample : \8226 \8658 a` feeds an `a`, and a second
+        -- parameter would want a second entry)
+        sampleSlot w = listToMaybe
+          [ n | (q, _) <- ps, paramWire q w
+              , (n, Arrow i o _) <- thSlots th, i == SEnd
+              , Just [w'] <- [closedWires o], paramWire q w' ]
         -- an EXIT of the TARGET model observes one \8212 whatever the
         -- parameter's kind.  A result that is not the carrier needs
         -- none; a carrier needs one whenever the theory declares one,
@@ -5187,17 +5220,22 @@ transformationDefs theories insts mo = do
         -- ordinary type holding a closure).  With no exit declared the
         -- carriers are compared directly, and a failure says so.
         observer out
-          | not (paramWire param out) = ""
+          | isNothing (wordFor ps out) = ""
           | otherwise = maybe "" (slotDefName (inName b)) (exitSlot out)
         -- ...and it must FIT: `observe : k(Int, Int) \8658 Int` observes
         -- the result of `compose`, whose output is `k(a, c)`, and not
         -- the result of `first`, whose output is the hom-object at a
         -- PAIRING.  Unification is the test, at fresh variables.
+        -- ...and an exit observes the carrier of the SAME parameter the
+        -- result sits at: with two parameters, `observe : a \8658 Float`
+        -- is not an exit for a `g`, and `fits` alone would say it was
+        -- (two type variables unify with each other).
         exitSlot out = listToMaybe
-          [ n | (n, Arrow i o _) <- thSlots th
-              , Just [w] <- [closedWires i], paramWire param w
+          [ n | (q, _) <- ps, paramWire q out
+              , (n, Arrow i o _) <- thSlots th
+              , Just [w] <- [closedWires i], paramWire q w
               , Just ws <- [closedWires o], length ws == 1
-              , not (any (paramWire param) ws)
+              , all (isNothing . wordFor ps) ws
               , fits out w ]
         fits out w =
           let Arrow i' _ _ = runInfer0 (instantiate
@@ -5212,25 +5250,42 @@ transformationDefs theories insts mo = do
 -- heads wrote it — so a transformation's word can be forward-declared
 -- at it,
 -- exactly as a theory slot is.
-componentArrow :: [Theory] -> [Instance] -> Transformation -> Either String Arrow
-componentArrow theories insts mo = do
+componentArrows :: [Theory] -> [Instance] -> Transformation
+                -> Either String [Arrow]
+componentArrows theories insts mo = do
   a  <- modelOf (tfFrom mo)
   b  <- modelOf (tfTo mo)
   th <- theoryOf theories (inTheory a)
-  case (thParams th, listToMaybe (inArgs a), listToMaybe (inArgs b)) of
-    ([PCon _ _], Just (IACon ca), Just (IACon cb)) ->
+  if length (inArgs a) == length (thParams th)
+       && length (inArgs b) == length (thParams th)
+    then Right ()
+    else Left $ here ++ "the two model heads do not fill theory "
+             ++ thName th ++ "'s parameters"
+  sequence (zipWith3 one (thParams th) (inArgs a) (inArgs b))
+  where
+    here = "transformation " ++ tfName mo ++ ": "
+    one (PCon _ _) (IACon ca) (IACon cb) =
       let x = SCons (TVarTy (TV "\945")) SEnd
           y = SCons (TVarTy (TV "\946")) SEnd
       in Right (arrPure (SCons (TData ca [x, y]) SEnd)
                         (SCons (TData cb [x, y]) SEnd))
-    ([PWire _], Just (IAStack sa), Just (IAStack sb)) -> Right (arrPure sa sb)
-    _ -> Left $ "transformation " ++ tfName mo ++ ": theory " ++ thName th
-             ++ "'s parameter and the models' arguments are not at one kind"
-  where
+    one (PWire _) (IAStack sa) (IAStack sb) = Right (arrPure sa sb)
+    one q _ _ = Left $ here ++ "theory parameter '" ++ pName q
+             ++ "' and the models' arguments are not at one kind"
     modelOf n = case [ i | i <- insts, inName i == n ] of
       (i : _) -> Right i
-      []      -> Left $ "transformation " ++ tfName mo ++ ": " ++ n
-                     ++ " is not a model declared at this point"
+      []      -> Left $ here ++ n ++ " is not a model declared at this point"
+
+-- ...and the FIRST of them, which is the transformation's own type: the
+-- declaration mints a word of its own name, and that word is the
+-- component at the theory's first parameter (the carrier).
+componentArrow :: [Theory] -> [Instance] -> Transformation -> Either String Arrow
+componentArrow theories insts mo = do
+  arrs <- componentArrows theories insts mo
+  case arrs of
+    (arr : _) -> Right arr
+    []        -> Left $ "transformation " ++ tfName mo ++ ": theory "
+                     ++ "declares no parameter for a component to sit at"
 
 -- The component's own type, and the verdict on every square.  Run after
 -- the module's defs are in: the squares are ordinary defs by then, so
@@ -5242,25 +5297,28 @@ checkTransformation env defs theories insts mo squares = do
   a  <- modelOf (tfFrom mo)
   b  <- modelOf (tfTo mo)
   th <- theoryOf theories (inTheory a)
-  case thParams th of
-    [_] -> do
-      wanted <- componentArrow theories insts mo
-      sc <- maybe (Left (here ++ "no word " ++ tfWord mo)) Right
-                  (M.lookup (tfWord mo) env)
-      case subsumes sc wanted of
-        Right () -> Right ()
-        Left e   -> Left $ here ++ "the component " ++ tfWord mo ++ " is "
-                        ++ show (normalizeArrow (runInfer0 (instantiate sc)))
-                        ++ " but a component from " ++ tfFrom mo ++ " to "
-                        ++ tfTo mo ++ " is " ++ show (normalizeArrow wanted)
-                        ++ " (" ++ e ++ ")"
-    _ -> Right ()   -- refused earlier, at `transformationDefs`
+  -- every component, at the parameter it sits at: the two model heads
+  -- wrote its type, so it is DECLARED in the sense that matters
+  wanteds <- componentArrows theories insts mo
+  sequence_ [ oneComponent q w wanted
+            | (q, w, wanted) <- zip3 (thParams th) (tfWords mo) wanteds ]
   vs <- mapM verdict squares
   pure (TransformationInfo (tfName mo) (tfFrom mo) (tfTo mo) vs
                   [ tsqSlot sq | sq <- squares
                               , isJust (tsqLaw sq), not (tsqExit sq) ])
   where
     here = "transformation " ++ tfName mo ++ ": "
+    oneComponent q w wanted = do
+      sc <- maybe (Left (here ++ "no word " ++ w)) Right (M.lookup w env)
+      case subsumes sc wanted of
+        Right () -> Right ()
+        Left e   -> Left $ here ++ "the component " ++ w ++ " at parameter '"
+                        ++ pName q ++ "' is "
+                        ++ show (normalizeArrow (runInfer0 (instantiate sc)))
+                        ++ " but a component from " ++ tfFrom mo ++ " to "
+                        ++ tfTo mo ++ " there is "
+                        ++ show (normalizeArrow wanted)
+                        ++ " (" ++ e ++ ")"
     modelOf n = case [ i | i <- insts, inName i == n ] of
       (i : _) -> Right i
       []      -> Left $ here ++ n ++ " is not a model declared at this point"
