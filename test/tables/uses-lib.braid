@@ -1,0 +1,6 @@
+import "lib.braid"
+
+"test/tables/good.csv" ; loadLib
+; (pass | (e -> e ; print ; nil)) ; merge
+; (rows -> (rows ; libSum ; toStr) ; print
+           (headerLib ; len ; toStr) ; print)

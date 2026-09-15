@@ -440,6 +440,29 @@ bare `use` leaves.
     it, groups, sorts, joins and prints, and states a frame-level law
     the doctrine does not: `keep` with an all-true mask is the identity.
 
+18. **A CSV's header is a presentation.** So it declares a type, and
+    the declaration is a line:
+    ```braid
+    table Trades = "examples/data/trades.csv"
+    #   data Trades  = (sym: Str, px: Float, qty: Int)
+    #   headerTrades : • ⇒ List(Str)
+    #   loadTrades   : Str =IO Recursive> (List(Trades) | Str)
+    ```
+    The **loader** — Haskell, at the same IO boundary `import` already
+    uses and nowhere else — resolves the path by the import rule, reads
+    the **whole file** at check time, and writes Braid text included
+    exactly as an imported file's declarations are. The column names
+    come off the header (spaces and dashes to `_`, first letter
+    lowercased); the column types come off the **data** — `Int` if every
+    cell is an Int literal, else `Float`, else `Str` — so nothing is
+    guessed about a row that was not looked at, and a blank cell is
+    refused by line and column. `table Sector(ticker: Str, sector: Str,
+    weight: Float) = "…"` writes the names and the types instead, in one
+    form, because renaming a column and giving it a type are the same
+    act. Everything that *runs* is Braid: the generated loader re-reads
+    the file and puts a bad row on the miss track with its line number.
+    (2026-09-15)
+
 ## Examples
 
 `examples/` is the guided tour: start with `fizzbuzz`, `validate`
@@ -470,7 +493,8 @@ a resource metered by one checked interposition),
 one theory of arithmetic — no `Code`, no chain rule),
 `frame` (a data frame as a model of the same doctrine: row programs
 lifted by `use Frame`, the columns being the `data` declaration's field
-words, a CSV loaded by hand),
+words, and two CSVs loaded by one `table` line each — the second with a
+written schema),
 `imports` (one file's declarations in another file's scope) — and finish with
 `registrar`, which uses most of the language in forty lines about
 grade school.
@@ -489,7 +513,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1080-case test suite, a full
+(typechecker, interpreter, REPL), a 1094-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —

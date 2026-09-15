@@ -26,7 +26,7 @@
 # ONCE, at frame level, outside the scope.  A functor cannot drop rows;
 # that is the whole division of labour in this file.
 #
-# COLUMN NAMES ARE WORDS.  `data Trade = (sym: Str, px: Float, qty:
+# COLUMN NAMES ARE WORDS.  `data Trades = (sym: Str, px: Float, qty:
 # Int)` generates `sym`, `px` and `qty` as ordinary definitions
 # (2026-09-14, MANUAL §5).  Nothing in the type system knows a column
 # is called `px` — the header is runtime data, carried as a `List(Str)`
@@ -210,59 +210,37 @@ def printFrame =
     ; rows ; [(r -> " | " r ; joinWith)] ... ; map ; printAll
 
 # ---------------------------------------------------------------------
-# 4. The loader — one CSV file, by hand
+# 4. The loader — one DECLARATION
 # ---------------------------------------------------------------------
-# `loadTrades : Str =IO> (List(Trade) | Str)`.  A bad row goes to the
-# miss track carrying its LINE NUMBER, counted in the file (the header
-# is line 1), so the shape is the ordinary railway and the whole load
-# is `sequence` over the rows.  Part 3's `table` declaration will emit
-# exactly this text from the CSV's header; nothing here is clever.
+# A CSV's header IS a presentation: it declares a data type.  So this
+# line is the whole loader (2026-09-15, MANUAL §8):
 
-data Trade = (sym: Str, px: Float, qty: Int)
-#   sym : Trade ⇒ Str    px : Trade ⇒ Float    qty : Trade ⇒ Int
-#   — generated, ordinary words, and the columns of every row program below
+table Trades = "examples/data/trades.csv"
 
-def badRow = (n -> "bad row on line " (n ; toStr) ; cat)
-
-## the i-th cell, or "" — which then fails to read, which is the same
-## answer with one fewer track
-def cellAt = (i cells -> i cells ; nth ; (pass | "") ; merge)
-
-def readTrade =
-    n s pxs qs ->
-    pxs ; asFloat? \
-        ; ((p -> qs ; asInt? ; ((q -> s p q ; Trade ; ok) | (e -> n ; badRow ; miss)) ; merge) \
-          | (e -> n ; badRow ; miss)) \
-        ; merge
-
-def parseRow =
-    n line ->
-    (line "," ; split)
-    ; (cells ->
-        (cells ; len) 3 ; equals \
-          [n (0 cells ; cellAt) (1 cells ; cellAt) (2 cells ; cellAt) ; readTrade] \
-          [n ; badRow ; miss] ... ; cond)
-
-## a blank line is not a row (a text file ends with a newline)
-def keepRow? = (e -> e ; unBox ; (n line -> (line "" ; equals) ; not) ; (e | e))
-
-def parseTrades =
-    src ->
-    (src "\n" ; split)
-    ; (ls -> (ls ; len ; range ; [(i -> i 1 ; +)] ... ; map) ls ; zip)
-    ; (numbered -> 1 numbered ; skip)       # line 1 is the header
-    ; [keepRow?] ... ; filter
-    ; [(e -> e ; unBox ; parseRow)] ... ; map
-    ; sequence ; (pass | pass)
-#   `(pass | pass)` CLOSES the row: injections are open, so `ok`/`miss`
-#   leave a residual, and a declared shape should say exactly two
-#   tracks.  Same closing on `loadTrades` below.
-
-def loadTrades =
-    path ->
-    path ; readFile ; ((body -> body ; parseTrades) | (e -> e ; miss)) ; merge \
-        ; (pass | pass)
-#   loadTrades : Str =IO Recursive> (List(Trade) | Str)
+# The LOADER — Haskell, at the same IO boundary `import` already uses —
+# resolves the path by the import rule, reads the WHOLE file at check
+# time, and writes Braid text that is included exactly as an imported
+# file's declarations are.  What it wrote here is what stood in this
+# section by hand until 2026-09-15:
+#
+#   data Trades = (sym: Str, px: Float, qty: Int)
+#     sym : Trades ⇒ Str   px : Trades ⇒ Float   qty : Trades ⇒ Int
+#     — the column types READ OFF THE DATA: `Int` if every cell is an
+#       Int literal, else `Float` if every cell is a Float or an Int
+#       literal, else `Str`.  The whole file is read, so nothing is
+#       guessed about a row that was not looked at.
+#   headerTrades : • ⇒ List(Str)
+#     — the header line verbatim, runtime data, for `printFrame`
+#   loadTrades : Str =IO Recursive> (List(Trades) | Str)
+#     — a bad row goes to the miss track carrying its LINE NUMBER,
+#       counted in the file (the header is line 1), so the shape is the
+#       ordinary railway and the whole load is `sequence` over the rows.
+#       Its helpers are named `Trades@…`, the compiler's spelling, which
+#       source may not write: a table puts exactly two words in scope.
+#
+# Nothing about `table` runs.  The generated text is the only thing that
+# does, and it re-reads the file — so a CSV that changed since the check
+# puts its first bad row on the miss track, by line number.
 
 # ---------------------------------------------------------------------
 # 5. The row programs, and the words that present them
@@ -272,13 +250,13 @@ def loadTrades =
 ## side by side — and the strength is what carries it.  No `List`, no
 ## index, no loop, and nothing here knows there is more than one row.
 def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
-#   notional : Trade =Frame Recursive> Float
+#   notional : Trades =Frame Recursive> Float
 
 ## running one on a frame, outside the scope
 def notionalOf = (rows -> notional rows ; runCol)
 
 ## the mask, as a row program run by `column`: a FILTER would want
-## `Trade ⇒ (Trade | •)`, and a sum has no slot in the Doctrine
+## `Trades ⇒ (Trades | •)`, and a sum has no slot in the Doctrine
 def big?     = (t -> (t ; qty) 100 ; gte? ; verdict)
 def bigOnes  = (rows -> ([big?] rows ; column) rows ; keep)
 
@@ -316,7 +294,7 @@ def symNotional =
 #     keep with an all-true mask is the identity
 #
 # That is a real theorem about `keep` and it is decidable at any frame
-# by `eq?`, since a `Trade` is three scalars.  The other one worth
+# by `eq?`, since a `Trades` row is three scalars.  The other one worth
 # wanting — `groupBy` then concatenating the groups is a PERMUTATION of
 # the frame — is NOT statable this way: "is a permutation" needs a
 # canonical order on rows, which needs an ordering on rows, which this
@@ -343,7 +321,7 @@ def says = (b -> b "true" "false" ; select)
 
     "" ; print
     "-- the frame, as loaded --" ; print
-    ("sym" "px" "qty" ; pack) ([tradeCells] trades ; column) ; printFrame
+    headerTrades ([tradeCells] trades ; column) ; printFrame
     ("rows: " (trades ; len ; toStr) ; cat) ; print
     #   12 rows, four symbols, three of them repeated
 
@@ -392,7 +370,41 @@ def says = (b -> b "true" "false" ; select)
        (trades ; groupsCount ; says) ; cat) ; print)          # true
 
 # ---------------------------------------------------------------------
-# 8. What is NOT built, plainly
+# 8. A second table, and the SCHEMA form
+# ---------------------------------------------------------------------
+# `examples/data/sectors.csv` has a header cell that is not a word —
+# `Ticker Name` — and a weight column whose cells all look like Ints.
+# Left to itself the declaration would read
+#
+#     data Sector = (ticker_Name: Str, sector: Str, weight: Int)
+#
+# by the sanitizing rule: each space, tab and `-` in a header cell
+# becomes `_`, and the first letter is lowercased.  Neither the name nor
+# the type is wanted, so the SCHEMA form writes both.  There is ONE such
+# form, not one for renaming and one for ascribing, because renaming a
+# column and giving it a type are the same act: naming it.
+
+table Sector(ticker: Str, sector: Str, weight: Float) = "examples/data/sectors.csv"
+
+def sectorCells = (r -> (r ; ticker) (r ; sector) (r ; weight ; toStr) ; pack)
+
+"" ; print
+"-- a second table, declared with a written schema --" ; print
+"examples/data/sectors.csv" ; loadSector
+; (pass | (e -> e ; print ; nil)) ; merge
+; (rows ->
+    headerSector ([sectorCells] rows ; column) ; printFrame
+    #   the header printed is the FILE's line, verbatim — `Ticker Name`
+    #   included.  The WORDS are `ticker`, `sector` and `weight`: the
+    #   header is a presentation, and the schema is what the program
+    #   calls it.
+    ("weights: " (([weight] rows ; column) ; sumF ; toStr) ; cat) ; print)
+    #   100.0, a Float, because the schema said Float.  The cells are
+    #   `40`, `35` and `25`, which sniff as Int; `fadd` would not take
+    #   them, and `sumF` is a Float fold.
+
+# ---------------------------------------------------------------------
+# 9. What is NOT built, plainly
 # ---------------------------------------------------------------------
 # THE INDEX IS IMPLICIT.  A frame here is `List(row)` and its keys are
 # `0 … n−1`.  The `Fn⟨I ⇒ row⟩` reading with an explicit key set would
@@ -416,6 +428,7 @@ def says = (b -> b "true" "false" ; select)
 # frame-level.
 #
 # THE HEADER IS RUNTIME DATA.  `printFrame` takes the names as a
-# `List(Str)` from the caller.  Part 3's `table` declaration will read
-# them off the CSV and emit both the `data` declaration and this
-# loader; nothing above needs to change for that.
+# `List(Str)` from the caller, and `headerTrades` is where they now come
+# from — the CSV's own header line, verbatim, read at check time and
+# emitted as a definition.  Nothing above the loader changed when the
+# hand-written one became a `table` line.

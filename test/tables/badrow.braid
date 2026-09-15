@@ -1,0 +1,7 @@
+# The generated loader RE-READS the file at runtime, so a CSV that
+# changed since the check puts its first bad row on the miss track,
+# carrying the line it is on.  Here the change is a different file.
+table Rows = "good.csv"
+
+"test/tables/bad.csv" ; loadRows
+; ((rows -> (rows ; len ; toStr) ; print) | (e -> e ; print)) ; merge

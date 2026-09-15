@@ -1,0 +1,12 @@
+# The SCHEMA form: positional renames and written types in one form.
+# `Full Name` would sanitize to `full_Name`, and `weight` would sniff as
+# Int; the schema says otherwise, and every cell must read at the type
+# it writes.
+table Over(name: Str, weight: Float) = "over.csv"
+
+"test/tables/over.csv" ; loadOver
+; (pass | (e -> e ; print ; nil)) ; merge
+; (rows ->
+    (rows ; [weight] ... ; map ; [fadd] 0.0 ... ; fold ; toStr) ; print
+    (rows ; [name] ... ; map ; [(acc s -> acc s ; cat)] "" ... ; fold) ; print
+    (headerOver ; unList ; ("" | (h r -> h)) ; merge) ; print)

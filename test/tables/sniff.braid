@@ -1,0 +1,12 @@
+# Column types are READ OFF THE DATA: `n` is every-cell-an-Int-literal,
+# so Int; `x` mixes `2` with `1.5`, so Float; `tag` is neither, so Str.
+# The three folds below only type if the sniff got all three right.
+table Sniff = "sniff.csv"
+
+"test/tables/sniff.csv" ; loadSniff
+; (pass | (e -> e ; print ; nil)) ; merge
+; (rows ->
+    (rows ; [n] ... ; map ; sum ; toStr) ; print
+    (rows ; [x] ... ; map ; [fadd] 0.0 ... ; fold ; toStr) ; print
+    (rows ; [tag] ... ; map ; [(acc s -> acc s ; cat)] "" ... ; fold) ; print
+    (headerSniff ; len ; toStr) ; print)

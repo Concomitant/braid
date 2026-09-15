@@ -1,0 +1,2 @@
+table Arity(one: Int, two: Float) = "sniff.csv"
+1 ; print

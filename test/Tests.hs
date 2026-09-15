@@ -136,6 +136,100 @@ importFailTests =
   , ("bad-syntax.braid", "Malformed import")
   ]
 
+-- TABLES (stage 6c part 3).  `table Trades = "x.csv"` is a declaration
+-- the LOADER resolves: the path by the import rule, the whole file read
+-- at check time, and Braid text spliced in under the line.  Fixtures
+-- live in test/tables/ and are loaded from disk, since the whole point
+-- is the file context.
+-- (path, expected print log, expected final stack rendering)
+tableTests :: [(String, [String], String)]
+tableTests =
+    -- the sniff: Int, then Float (a column mixing `2` with `1.5`), then
+    -- Str.  The three folds only type if all three are right.
+  [ ("sniff.braid",    ["0", "3.0", "abc", "3"], "")
+    -- the schema form: a positional rename and a written type, one form
+  , ("over.braid",     ["100.0", "annbob", "Full Name"], "")
+    -- the loader RE-READS at runtime, so a file that no longer matches
+    -- puts its first bad row on the miss track, by line number
+  , ("badrow.braid",   ["bad row on line 3"], "")
+    -- a table crosses a file boundary: the CSV resolves against the
+    -- IMPORTING file's directory, and the library's own main is dropped
+  , ("uses-lib.braid", ["1", "2"], "")
+  ]
+
+-- (path, expected error fragment)
+tableFailTests :: [(String, String)]
+tableFailTests =
+    -- a blank cell is refused, naming line and column: a column has ONE
+    -- type and a blank is not a value of it
+  [ ("blank.braid",   "line 2, column 2 `b`): the cell is blank")
+    -- a column name is a WORD, so it collides like one — and the fix
+    -- the message names is the schema form
+  , ("clash.braid",   "field name 'len' is already a word in scope")
+  , ("clash.braid",   "rename the column with the schema form")
+    -- a header that is not a word after sanitizing
+  , ("nonword.braid", "is not a word after sanitizing")
+    -- the schema is positional, so its arity must match the header's
+  , ("arity.braid",   "the schema writes 2 columns but the header has 3")
+    -- the path rule is the import's, and so is the error
+  , ("missing.braid", "table Gone: no such file: nope.csv")
+    -- the helpers are the compiler's spelling: source may not name one
+  , ("hidden.braid",  "is the compiler's spelling of a table's insides")
+  ]
+
+-- What `:import` sees: a table's declarations, generated, with the
+-- library's own main dropped.  (path, fragment, whether it must appear)
+tableImportTests :: [(String, String, Bool)]
+tableImportTests =
+  [ ("lib.braid", "def loadLib = ", True)
+  , ("lib.braid", "def headerLib = ", True)
+  , ("lib.braid", "99 ; print", False)
+  ]
+
+runTable :: (String, [String], String) -> IO (Maybe String)
+runTable (name, wantLog, wantStack) = do
+  loaded <- loadSource ("test/tables/" ++ name)
+  case loaded of
+    Left err  -> pure (Just (name ++ ": " ++ err))
+    Right src -> do
+      r <- runModule src
+      pure $ case r of
+        Left err -> Just (name ++ ": " ++ err)
+        Right (stack, logs)
+          | logs /= wantLog ->
+              Just (name ++ ": expected log " ++ show wantLog
+                         ++ ", got " ++ show logs)
+          | unwords (map show stack) /= wantStack ->
+              Just (name ++ ": expected stack " ++ show wantStack
+                         ++ ", got " ++ show (unwords (map show stack)))
+          | otherwise -> Nothing
+
+runTableFail :: (String, String) -> IO (Maybe String)
+runTableFail (name, frag) = do
+  loaded <- loadSource ("test/tables/" ++ name)
+  err <- case loaded of
+    Left e    -> pure (Just e)
+    Right src -> do
+      r <- runModule src
+      pure (either Just (const Nothing) r)
+  pure $ case err of
+    Nothing -> Just (name ++ ": expected failure containing " ++ show frag)
+    Just e
+      | frag `isInfixOf` e -> Nothing
+      | otherwise -> Just (name ++ ": expected " ++ show frag ++ ", got: " ++ e)
+
+runTableImport :: (String, String, Bool) -> IO (Maybe String)
+runTableImport (name, frag, want) = do
+  loaded <- loadDecls ("test/tables/" ++ name)
+  pure $ case loaded of
+    Left err -> Just (name ++ ": " ++ err)
+    Right src
+      | (frag `isInfixOf` src) == want -> Nothing
+      | want      -> Just (name ++ ": expected " ++ show frag ++ " in the \
+                                  \imported declarations")
+      | otherwise -> Just (name ++ ": " ++ show frag ++ " must not be \
+                                  \imported")
+
 runImport :: (String, [String], String) -> IO (Maybe String)
 runImport (name, wantLog, wantStack) = do
   loaded <- loadSource ("test/imports/" ++ name)
@@ -3182,6 +3276,9 @@ main = do
   exFs <- mapM runExample exNames
   impFs  <- mapM runImport importTests
   impFFs <- mapM runImportFail importFailTests
+  tbFs   <- mapM runTable tableTests
+  tbFFs  <- mapM runTableFail tableFailTests
+  tbIFs  <- mapM runTableImport tableImportTests
   mvFs   <- mapM runTransformationVerdicts transformationVerdictTests
   let failures = concatMap (maybe [] pure)
         (  map runPass passTests
@@ -3194,12 +3291,17 @@ main = do
         ++ exFs
         ++ impFs
         ++ impFFs
+        ++ tbFs
+        ++ tbFFs
+        ++ tbIFs
         ++ mvFs
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
             + length unifTests + length pureEvalTests + length exNames
             + length importTests + length importFailTests
+            + length tableTests + length tableFailTests
+            + length tableImportTests
             + length transformationVerdictTests
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"

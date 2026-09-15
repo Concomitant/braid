@@ -1,0 +1,8 @@
+# A library file whose declarations include a `table`: the loader runs
+# for an import exactly as it does for a root file, and the CSV
+# resolves against THIS file's directory.
+table Lib = "good.csv"
+
+def libSum = (rows -> rows ; [a] ... ; map ; sum)
+
+99 ; print

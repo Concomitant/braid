@@ -3480,3 +3480,92 @@ written down as such rather than as a maybe.
   written in the model's words (`embed` then run), so that the two
   denoting the same function is `embed`'s defining equation rather than
   a coincidence.
+
+## Amendment (2026-09-15): `table` — a CSV header is a presentation
+
+`examples/frame.braid` shipped on 2026-09-14 with a hand-written loader:
+a `data Trade` declaration whose fields repeated the CSV's header, six
+helper defs, and a comment promising that part 3 would emit exactly that
+text from the header. It does, and the declaration is one line:
+
+```braid
+table Trades = "examples/data/trades.csv"
+```
+
+**Why a new keyword and not `import`.** `import` already means one
+thing — the inclusion of one module's declarations into another — and it
+is a morphism of presentations: objects added, never merged. A table
+*also* includes declarations, so half of `table` is an import. The other
+half is not: it **generates a loader over DATA**, a program that reads
+the file again at runtime, which no import does, and it reads the file
+itself in order to write that program. Overloading `import` with "and
+also, if the file is a CSV, invent a type and a reader for it" would
+make one keyword mean two things and make the meaning depend on the
+extension. Daniel's line: *`import` already means inclusion of
+declarations; a table also generates a loader over data.* Two acts, two
+words.
+
+**What is Haskell and what is Braid.** The Haskell is exactly three
+things, all at check time: resolve the path and **read the whole file**;
+**sniff** the column types; **write Braid text**. That text is then
+spliced in under the `table` line and checked like any other source.
+Everything that *runs* is Braid — the generated `loadTrades` is
+ordinary derived code, the same text the hand-written loader was, and
+its helpers are ordinary defs. There is no elaboration-time IO anywhere
+else, and the boundary is the one `import` already stands at: the
+loader, before anything is checked. Invariant two — elaboration sees
+only parsed declarations — is untouched.
+
+**The sniffing rule, and why whole-file reading makes it honest.** A
+column is `Int` if every cell in it is an Int literal; else `Float` if
+every cell is a Float or an Int literal; else `Str`. That is a
+three-point lattice and the answer is the join over the column. The
+reason to state it as *every cell* rather than *the first row* or *a
+sample* is that the file is right there: the loader reads all of it, so
+the type it writes is a fact about the data rather than a guess that a
+later row can falsify. A sniffer that peeked would have to be defended;
+one that reads everything has nothing to defend. The same reading is why
+a **blank cell is refused**, naming line and column: a blank is not a
+value of `Int`, of `Float` or of `Str`, and the three honest answers —
+guess, widen to `Str`, or refuse — are a lie, a silent type change, and
+the truth.
+
+**The schema form is one form.**
+
+```braid
+table Sector(ticker: Str, sector: Str, weight: Float) = "sectors.csv"
+```
+
+It writes the names *and* the types, positionally. There is no separate
+rename form and no separate ascription form, because renaming a column
+and giving it a type are the same act — naming it — and two forms would
+be two spellings of one thing. It is also the fix every refusal names: a
+header that is not a word after sanitizing, a header that collides with
+a word in scope, two columns of one name. Under a schema every cell must
+read at the type written, checked at the same pass; the arity must match
+the header, because the form is positional.
+
+The **sanitizing rule** for the bare form, stated once: each space, tab
+and `-` in a header cell becomes `_`, and the first letter is
+lowercased. What is left must be a word — a letter, then letters, digits
+or `_`. `Ticker Name` becomes `ticker_Name`; `1st` becomes nothing
+usable and is refused.
+
+**The hidden half.** A table generates two public words, `loadTrades`
+and `headerTrades`, and six helpers named `Trades@…` — seven when a
+column is `Float`, since the reader that takes `40` as well as `40.0`
+is only written when something needs it — the compiler's
+spelling, refused in source by the same walk that keeps `I@slot` out of
+it. So a table's insides are reachable only through its two words, and
+the refusal names them.
+
+**At stage 8 the check-time half becomes a word.** The Haskell here is a
+`Str ⇒ Str` function that happens to do IO first: path to file contents
+to Braid text. That is a declaration word of type `Str =Dict IO> Code`
+in the sense stage 8 is building toward — a macro that may read the
+world, run by the loader at the boundary, its output ordinary source.
+When declaration words exist, `table` should stop being a keyword and
+become one: the parsing, the sniff and the text generation are all
+writable in the language, and the only thing the Haskell has that Braid
+does not is the file read, which is what `=Dict IO>` is for. Recorded
+as the intended demolition rather than as a maybe.

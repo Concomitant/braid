@@ -6589,14 +6589,14 @@ tableSource tb path body = do
     else Right ()
   mapM_ (\(i, cs) ->
            if length cs == width then Right ()
-           else Left (atLine i ("this row has " ++ show (length cs)
-                             ++ " cells, but the header has " ++ show width
+           else Left (atLine i ("this row has " ++ plural (length cs) "cell"
+                             ++ ", but the header has " ++ show width
                              ++ " — a table is rectangular"))) cells
   names <- case tbSchema tb of
     Just sc
       | length sc /= width ->
-          Left (bad ("the schema writes " ++ show (length sc)
-                  ++ " columns but the header has " ++ show width ++ ": "
+          Left (bad ("the schema writes " ++ plural (length sc) "column"
+                  ++ " but the header has " ++ show width ++ ": "
                   ++ intercalate ", " hcells))
       | otherwise -> Right (map fst sc)
     Nothing -> mapM sanitized (zip [1 :: Int ..] hcells)
@@ -6632,6 +6632,7 @@ tableSource tb path body = do
   pure (tableText (tbName tb) (zip names tys) hcells)
   where
     blank = all isSpace
+    plural k w = show k ++ " " ++ w ++ (if k == 1 then "" else "s")
     sniff cs
       | all isIntLiteral cs                               = "Int"
       | all (\c -> isFloatLiteral c || isIntLiteral c) cs = "Float"

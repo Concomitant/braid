@@ -1,0 +1,3 @@
+table Rows = "good.csv"
+def sneak = (i cells -> i cells ; Rows@cellAt)
+1 ; print
