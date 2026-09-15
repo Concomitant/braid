@@ -287,7 +287,10 @@ elabIn st src = do
   elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
                        (rsTrans st) (rsKWords st) (rsBases st) Nothing False
-                       Nothing)
+                       -- a session declares no `table` of its own: one is
+                       -- a file declaration, and `:import` brings in only
+                       -- the two words it generates
+                       Nothing [])
     (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -406,19 +409,24 @@ handleLine st line
 handleLine st line =
   case splitDefs line of
     Left err -> report err
-    Right ([(name, _, _)], [], [], [], rest)
+    Right ([(name, _, _)], [], [], [], [], rest)
       | all isSpace rest -> defLine name
-    Right ([], [(tyLine, _)], [], [], rest)
+    Right ([], [(tyLine, _)], [], [], [], rest)
       | all isSpace rest -> typeLine tyLine
-    Right ([], [], [], [], _) -> programLine
+    Right ([], [], [], [], [], _) -> programLine
     -- theory/model/functor are block declarations: they need a whole
     -- module
-    Right (_, _, (_ : _), _, _) ->
+    Right (_, _, (_ : _), _, _, _) ->
       report "theory, model and functor are file declarations — \
              \put them in a .braid file rather than a REPL line"
-    Right (_, _, _, (_ : _), _) ->
+    Right (_, _, _, (_ : _), _, _) ->
       report "import is a file declaration — `:import \"path.braid\"` brings \
              \one into a session"
+    -- a table reads a FILE at check time, so it needs a file to be
+    -- resolved against
+    Right (_, _, _, _, (_ : _), _) ->
+      report "table is a file declaration — put it in a .braid file and \
+             \`:import` that, so the CSV resolves against the file"
     Right _           -> report "one definition per line, please"
   where
     report err = putStrLn ("error: " ++ err) >> pure st

@@ -9,14 +9,15 @@ import qualified Data.Set as S
 import Data.Set (Set)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes, listToMaybe)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, isSuffixOf,
-                  stripPrefix, partition, (\\))
+                  stripPrefix, partition, dropWhileEnd, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
                              MonadError, catchError)
 import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
-import Data.Char (isAlphaNum, isDigit, isLower, isSpace, isUpper, toUpper)
+import Data.Char (isAlpha, isAlphaNum, isDigit, isLower, isSpace, isUpper,
+                  toLower, toUpper)
 import Data.Bifunctor (first)
 import Numeric (showFFloat)
 import System.Directory (doesFileExist, canonicalizePath)
@@ -4321,6 +4322,10 @@ data ElabCtx = ElabCtx
                                    -- the ONE name `use Recursive` puts
                                    -- back in scope.  Nothing at the top
                                    -- level, where there is no name to tie.
+  , ecTables :: [String]           -- the module's `table` row types, so
+                                   -- that `Trades@cellAt` is refused as
+                                   -- a TABLE's insides rather than as a
+                                   -- model's slot
   }
 
 -- `use Recursive` (2026-09-14): the MARKER that puts a def's own name
@@ -4396,7 +4401,8 @@ type SlotTable = [(String, (String, [String]))]
 type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
-elabCtx0 env slots = ElabCtx env M.empty slots [] [] [] [] [] [] Nothing False Nothing
+elabCtx0 env slots =
+  ElabCtx env M.empty slots [] [] [] [] [] [] Nothing False Nothing []
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -4780,6 +4786,12 @@ elabUseWith ctx t0 = do
           Left $ n ++ " is the receipt of `use " ++ f
               ++ "`, not a word: a label is minted by a scope, never "
               ++ "written by hand"
+      | not (isLitAtom n), '@' `elem` n, not (ecGen ctx)
+      , takeWhile (/= '@') n `elem` ecTables ctx =
+          Left $ "`" ++ n ++ "` is the compiler's spelling of a table's "
+              ++ "insides: a `table` generates `load" ++ takeWhile (/= '@') n
+              ++ "` and `header" ++ takeWhile (/= '@') n
+              ++ "`, and those are the only words it puts in scope"
       | not (isLitAtom n), '@' `elem` n, not (ecGen ctx) =
           Left $ "`" ++ n ++ "` is the compiler's spelling of a slot: "
               ++ "reach it with `use " ++ takeWhile (/= '@') n ++ "`"
@@ -5803,38 +5815,43 @@ data Module = Module
 -- to the next def or type line (consecutive doc lines join); doc text
 -- preceding a plain program line is dropped.
 -- Returns (defs, type/data/resource lines, BLOCK declarations, IMPORT
--- lines, main).  A block declaration is `theory`/`model`: a header
--- line plus the indented lines under it, kept raw for the declaration
--- parser.  Import lines come back RAW so the loader can strip exactly
--- the lines it consumed (see `stripLines`); every other keyword branch
--- is checked before the fall-through, so a line inside a block or a
--- continuation is never mistaken for one.
+-- lines, TABLE lines, main).  A block declaration is `theory`/`model`:
+-- a header line plus the indented lines under it, kept raw for the
+-- declaration parser.  Import and table lines come back RAW so the
+-- loader can act on exactly the lines it consumed (see `stripLines`
+-- and `spliceTables`); every other keyword branch is checked before
+-- the fall-through, so a line inside a block or a continuation is
+-- never mistaken for one.
 splitDefs :: String
           -> Either String ( [(String, String, Maybe String)]
                            , [(String, Maybe String)]
                            , [(String, [String], Maybe String)]
                            , [String]
+                           , [String]
                            , String )
 splitDefs src = do
-  (defs, tys, decls, imps, progLines) <- go Nothing (lines src)
-  pure (defs, tys, decls, imps, intercalate "\n" progLines)
+  (defs, tys, decls, imps, tbls, progLines) <- go Nothing (lines src)
+  pure (defs, tys, decls, imps, tbls, intercalate "\n" progLines)
   where
-    go _ [] = Right ([], [], [], [], [])
+    go _ [] = Right ([], [], [], [], [], [])
     go doc (l : rest)
       | Just d <- docLine l =
           go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
       | ("import" : _) <- words l = do
-          (ds, ts, bs, is, ps) <- go Nothing rest
-          pure (ds, ts, bs, l : is, ps)
+          (ds, ts, bs, is, tb, ps) <- go Nothing rest
+          pure (ds, ts, bs, l : is, tb, ps)
+      | ("table" : _) <- words l = do
+          (ds, ts, bs, is, tb, ps) <- go Nothing rest
+          pure (ds, ts, bs, is, l : tb, ps)
       | (kw : _) <- words l, kw `elem` ["type", "data", "resource"] = do
-          (ds, ts, bs, is, ps) <- go Nothing rest
-          pure (ds, (l, doc) : ts, bs, is, ps)
+          (ds, ts, bs, is, tb, ps) <- go Nothing rest
+          pure (ds, (l, doc) : ts, bs, is, tb, ps)
       -- `theory` / `model`: a header plus its indented block, raw
       -- `functor F = word`: a declaration line with no block, so it
       -- rides the block bucket with an empty body
       | (kw : _) <- words l, kw `elem` ["functor", "transformation"] = do
-          (ds, ts, bs, is, ps) <- go Nothing rest
-          pure (ds, ts, (l, [], doc) : bs, is, ps)
+          (ds, ts, bs, is, tb, ps) <- go Nothing rest
+          pure (ds, ts, (l, [], doc) : bs, is, tb, ps)
       -- `rules` was a keyword until 2026-09-13; it is a model now.
       | ("rules" : _) <- words l =
           Left $ "`rules` is gone: a rule set is a PARTIAL MODEL of the "
@@ -5871,8 +5888,8 @@ splitDefs src = do
           if null block && isNothing (baseInstanceName l)
             then Left $ "Empty " ++ kw ++ " body: " ++ l
             else do
-              (ds, ts, bs, is, ps) <- go Nothing rest'
-              pure (ds, ts, (l, block, doc) : bs, is, ps)
+              (ds, ts, bs, is, tb, ps) <- go Nothing rest'
+              pure (ds, ts, (l, block, doc) : bs, is, tb, ps)
       | ("def" : _) <- words l = do
           (name, body) <- parseDefLine l
           -- a `#` comment on the `=` line is not code: treat a
@@ -5886,21 +5903,21 @@ splitDefs src = do
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
-                  (ds, ts, bs, is, ps) <- go Nothing rest'
-                  pure ((name, intercalate "\n" block, doc) : ds, ts, bs, is, ps)
+                  (ds, ts, bs, is, tb, ps) <- go Nothing rest'
+                  pure ((name, intercalate "\n" block, doc) : ds, ts, bs, is, tb, ps)
             else do
               -- inline body: it may leave a bracket open, in which case
               -- the following lines belong to it, not to the module
               let (cont, rest') = spanOpen l rest
-              (ds, ts, bs, is, ps) <- go Nothing rest'
-              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, bs, is, ps)
+              (ds, ts, bs, is, tb, ps) <- go Nothing rest'
+              pure ((name, intercalate "\n" (body : cont), doc) : ds, ts, bs, is, tb, ps)
       | otherwise = do
           -- a program line may leave a bracket open; the lines that
           -- close it are part of it, so `def`/`type`/`##` inside an open
           -- bracket is code, not a declaration
           let (cont, rest') = spanOpen l rest
-          (ds, ts, bs, is, ps) <- go Nothing rest'
-          pure (ds, ts, bs, is, l : cont ++ ps)
+          (ds, ts, bs, is, tb, ps) <- go Nothing rest'
+          pure (ds, ts, bs, is, tb, l : cont ++ ps)
 
     indented ln = not (all isSpace ln) && isSpace (head ln)
 
@@ -6386,18 +6403,25 @@ isDocLine l = case dropWhile isSpace l of
   '#' : '#' : _ -> True
   _             -> False
 
--- `import "path.braid"` — the one declaration the loader handles.
-parseImportLine :: String -> Either String FilePath
-parseImportLine l =
-  case dropWhile isSpace (drop 6 (dropWhile isSpace l)) of
+-- The argument of a declaration that names a FILE: a quoted path, then
+-- nothing but a comment.  `import` and `table` both take one, so it is
+-- written once; the caller wraps the `why` in its own message.
+quotedArg :: String -> Either String FilePath
+quotedArg s =
+  case dropWhile isSpace s of
     '"' : rest ->
       case break (== '"') rest of
         (path, '"' : after)
           | all isSpace (takeWhile (/= '#') after) ->
-              if null path then Left (bad "the path is empty") else Right path
-          | otherwise -> Left (bad "there is text after the path")
-        _ -> Left (bad "the path is not closed")
-    _ -> Left (bad "the path must be a quoted string")
+              if null path then Left "the path is empty" else Right path
+          | otherwise -> Left "there is text after the path"
+        _ -> Left "the path is not closed"
+    _ -> Left "the path must be a quoted string"
+
+-- `import "path.braid"` — the one declaration the loader handles.
+parseImportLine :: String -> Either String FilePath
+parseImportLine l =
+  first bad (quotedArg (drop 6 (dropWhile isSpace l)))
   where
     bad why = "Malformed import (want `import \"path.braid\"`): "
            ++ trimLine l ++ " — " ++ why
@@ -6420,7 +6444,7 @@ stripLines = go []
 -- and its own import lines.  This is what an import includes.
 moduleDecls :: String -> Either String String
 moduleDecls src = do
-  (_, _, _, imps, mainSrc) <- splitDefs src
+  (_, _, _, imps, _, mainSrc) <- splitDefs src
   let kept = stripLines (stripLines (lines src) imps) (lines mainSrc)
   pure (unlines kept)
 
@@ -6428,8 +6452,277 @@ moduleDecls src = do
 -- program kept.
 moduleSansImports :: String -> Either String String
 moduleSansImports src = do
-  (_, _, _, imps, _) <- splitDefs src
+  (_, _, _, imps, _, _) <- splitDefs src
   pure (unlines (stripLines (lines src) imps))
+
+--------------------------------------------------------------------------------
+-- 10.4b Tables: a CSV header is a PRESENTATION
+--
+-- `table Trades = "examples/data/trades.csv"` is a declaration line, and
+-- the LOADER resolves it — at the same IO boundary `import` already
+-- uses, and nowhere else.  The path resolves exactly as an import's
+-- does, the WHOLE file is read at check time, and what comes back is
+-- BRAID TEXT spliced in under the declaration, included exactly as an
+-- imported file's declarations are:
+--
+--   data Trades = (sym: Str, px: Float, qty: Int)
+--   headerTrades : • ⇒ List(Str)
+--   loadTrades   : Str =IO Recursive> (List(Trades) | Str)
+--
+-- Nothing about the feature runs.  The generated text is the only thing
+-- that does, and it is the same text `examples/frame.braid` wrote by
+-- hand before 2026-09-15 — only the row reader and its arity vary with
+-- the header.
+--
+-- The helpers are named `Trades@…`, the compiler's spelling, which
+-- source may not write (the `'@' `elem` n` refusal in `elabUseWith`),
+-- so a table's insides are reachable only through its two words.
+--
+-- COLUMN TYPES ARE READ FROM THE DATA: `Int` if every cell is an Int
+-- literal, else `Float` if every cell is a Float or an Int literal,
+-- else `Str`.  The whole file is read, so nothing is guessed about a
+-- row that was not looked at; a blank cell is refused, naming line and
+-- column, because a column has ONE type and a blank is not a value of
+-- it.  The schema form `table Trades(sym: Str, price: Float, qty: Int)
+-- = "…"` writes the names and the types instead, and every cell must
+-- then read at the type that was written.
+--------------------------------------------------------------------------------
+
+-- A `table` declaration, as parsed off its line.
+data TableDecl = TableDecl
+  { tbName   :: String                     -- the row type, and the suffix
+                                           -- of `load…` and `header…`
+  , tbSchema :: Maybe [(String, String)]   -- the written names and types
+  , tbPath   :: FilePath
+  } deriving (Show, Eq)
+
+-- The three types a column may have.  A table is scalars; a column of
+-- anything else is a join, and a join is a program.
+tableTypes :: [String]
+tableTypes = ["Str", "Int", "Float"]
+
+-- Is this string an ordinary word — a letter, then letters, digits and
+-- `_`?  The words a table generates are plain identifiers, so that a
+-- column name composes, quotes and reflects like any other word.
+tableWord :: String -> Bool
+tableWord w = not (null w) && isAlpha (head w)
+           && all (\c -> isAlphaNum c || c == '_') w
+
+-- THE SANITIZING RULE, stated once: each space, tab or `-` in a header
+-- cell becomes `_`, and the first letter is lowercased.  Whatever that
+-- leaves must be a word; a header that is not one after sanitizing is
+-- an error naming the schema form, which writes the name by hand.
+sanitizeHeader :: String -> String
+sanitizeHeader h =
+  case map sub (dropWhile isSpace (dropWhileEnd isSpace h)) of
+    (c : cs) -> toLower c : cs
+    []       -> []
+  where
+    sub c | isSpace c || c == '-' = '_'
+          | otherwise             = c
+
+-- `table Name = "path.csv"`, or `table Name(a: Str, b: Float) = "path.csv"`.
+parseTableLine :: String -> Either String TableDecl
+parseTableLine l =
+  case stripPrefix "table" (dropWhile isSpace l) of
+    Just r0 | null r0 || isSpace (head r0) -> do
+      let (headTxt, eqRest) = break (== '=') (dropWhile isSpace r0)
+      after <- case eqRest of
+        '=' : p -> Right p
+        _       -> Left (bad "there is no `=`")
+      path       <- first bad (quotedArg after)
+      (nm, cols) <- parseHead (dropWhileEnd isSpace headTxt)
+      pure (TableDecl nm cols path)
+    _ -> Left (bad "the line does not begin with `table`")
+  where
+    bad why = "Malformed table (want `table Name = \"path.csv\"`, or "
+           ++ "`table Name(col: Type, …) = \"path.csv\"`): "
+           ++ dropWhile isSpace l ++ " — " ++ why
+    parseHead h = do
+      let (nm, rest) = span (\c -> not (isSpace c) && c /= '(') h
+      if null nm then Left (bad "the table has no name") else Right ()
+      if isUpper (head nm) && all (\c -> isAlphaNum c || c == '_') nm
+        then Right ()
+        else Left (bad ("`" ++ nm ++ "` is not a type name: a table "
+                     ++ "declares a row type, so its name begins with a "
+                     ++ "capital letter"))
+      case dropWhile isSpace rest of
+        ""          -> Right (nm, Nothing)
+        '(' : inner -> case break (== ')') inner of
+          (b, ')' : tl)
+            | all isSpace tl -> do
+                cols <- mapM col (splitOnStr "," b)
+                pure (nm, Just cols)
+          _ -> Left (bad "the schema is not closed")
+        _ -> Left (bad "there is text after the name")
+    col c = case break (== ':') c of
+      (f, ':' : t)
+        | [fw] <- words f, [tw] <- words t ->
+            if not (tableWord fw)
+              then Left (bad ("`" ++ fw ++ "` is not a word: a column "
+                           ++ "name is a letter, then letters, digits "
+                           ++ "or `_`"))
+            else if tw `elem` tableTypes
+              then Right (fw, tw)
+              else Left (bad ("a table column is Str, Int or Float, not "
+                           ++ tw))
+      _ -> Left (bad ("a schema column is `name: Type`, and this one is `"
+                   ++ dropWhile isSpace c ++ "`"))
+
+-- The Braid text a `table` line stands for.  `path` is the RESOLVED
+-- path (the error messages name it, since that is the file that was
+-- read); `body` is the whole file.
+tableSource :: TableDecl -> FilePath -> String -> Either String String
+tableSource tb path body = do
+  (hdr, rows) <- case map (dropWhileEnd (== '\r')) (lines body) of
+    []         -> Left (bad "the file is empty: a table's first line is \
+                            \its header")
+    (h : rest) -> Right (h, [ (i, ln) | (i, ln) <- zip [2 :: Int ..] rest
+                            , not (blank ln) ])
+  let hcells  = splitOnStr "," hdr
+      width   = length hcells
+      cells   = [ (i, splitOnStr "," ln) | (i, ln) <- rows ]
+      columns = [ [ cs !! j | (_, cs) <- cells ] | j <- [0 .. width - 1] ]
+  if null rows
+    then Left (bad "the file has a header and no rows: a column's type \
+                   \is read from the data, and there is none")
+    else Right ()
+  mapM_ (\(i, cs) ->
+           if length cs == width then Right ()
+           else Left (atLine i ("this row has " ++ show (length cs)
+                             ++ " cells, but the header has " ++ show width
+                             ++ " — a table is rectangular"))) cells
+  names <- case tbSchema tb of
+    Just sc
+      | length sc /= width ->
+          Left (bad ("the schema writes " ++ show (length sc)
+                  ++ " columns but the header has " ++ show width ++ ": "
+                  ++ intercalate ", " hcells))
+      | otherwise -> Right (map fst sc)
+    Nothing -> mapM sanitized (zip [1 :: Int ..] hcells)
+  case [ w | (w, k) <- zip names [0 :: Int ..], w `elem` take k names ] of
+    (w : _) -> Left (bad ("two columns are named `" ++ w ++ "`: a column "
+                       ++ "name is a WORD, and one word names one thing — "
+                       ++ schemaFix))
+    []      -> Right ()
+  mapM_ (\(i, cs) ->
+           case [ (j, nm) | (j, c, nm) <- zip3 [1 :: Int ..] cs names
+                          , blank c ] of
+             ((j, nm) : _) ->
+               Left (atCell i j nm "the cell is blank.  v1 refuses a blank \
+                                   \cell: a column has ONE type and a blank \
+                                   \is not a value of it — fill the cell in, \
+                                   \or delete the row")
+             [] -> Right ()) cells
+  tys <- case tbSchema tb of
+    Nothing -> Right (map sniff columns)
+    Just sc -> do
+      let written = zip names (map snd sc)
+      mapM_ (\(i, cs) ->
+               case [ (j, nm, t, c)
+                    | (j, c, (nm, t)) <- zip3 [1 :: Int ..] cs written
+                    , not (readsAt t c) ] of
+                 ((j, nm, t, c) : _) ->
+                   Left (atCell i j nm (show c ++ " does not read as " ++ t
+                                     ++ " — the schema writes `" ++ nm ++ ": "
+                                     ++ t ++ "`, so write the type the column "
+                                     ++ "has, or fix the cell"))
+                 [] -> Right ()) cells
+      Right (map snd sc)
+  pure (tableText (tbName tb) (zip names tys) hcells)
+  where
+    blank = all isSpace
+    sniff cs
+      | all isIntLiteral cs                               = "Int"
+      | all (\c -> isFloatLiteral c || isIntLiteral c) cs = "Float"
+      | otherwise                                         = "Str"
+    readsAt "Int"   c = isIntLiteral c
+    readsAt "Float" c = isFloatLiteral c || isIntLiteral c
+    readsAt _       _ = True
+    sanitized (j, h)
+      | blank h = Left (bad ("column " ++ show j ++ " of the header is "
+                          ++ "blank: a column's name is a word, so it must "
+                          ++ "be written — " ++ schemaFix))
+      | tableWord w = Right w
+      | otherwise = Left (bad ("column " ++ show j ++ "'s header " ++ show h
+                            ++ " is not a word after sanitizing (" ++ show w
+                            ++ "): a space, a tab and a `-` become `_` and "
+                            ++ "the first letter is lowercased, and what is "
+                            ++ "left must be a letter followed by letters, "
+                            ++ "digits or `_` — " ++ schemaFix))
+      where w = sanitizeHeader h
+    schemaFix = "name every column yourself with the schema form, `table "
+             ++ tbName tb ++ "(col: Type, …) = \"" ++ tbPath tb ++ "\"`"
+    bad why = "table " ++ tbName tb ++ " (" ++ path ++ "): " ++ why
+    atLine i why = "table " ++ tbName tb ++ " (" ++ path ++ " line "
+                ++ show i ++ "): " ++ why
+    atCell i j nm why = "table " ++ tbName tb ++ " (" ++ path ++ " line "
+                     ++ show i ++ ", column " ++ show j ++ " `" ++ nm
+                     ++ "`): " ++ why
+
+-- The text itself.  Every def but the two public words is named with
+-- the compiler's `@`, so no source can reach it; `load…` is the ONE
+-- generated word that names one of them, and `checkModuleWith` lets it
+-- (see `tableGenNames`).
+tableText :: String -> [(String, String)] -> [String] -> String
+tableText nm cols hcells = unlines $
+  [ "data " ++ nm ++ " = ("
+      ++ intercalate ", " [ f ++ ": " ++ t | (f, t) <- cols ] ++ ")"
+  , "## the CSV's header line, verbatim — runtime data, for a printer"
+  , "def header" ++ nm ++ " = " ++ unwords (map show hcells) ++ " ; pack"
+  , "def " ++ q "badRow" ++ " = (n -> \"bad row on line \" (n ; toStr) ; cat)"
+  , "def " ++ q "cellAt" ++ " = (i cells -> i cells ; nth ; (pass | \"\") ; merge)"
+  ]
+  ++ [ "def " ++ q "float" ++ " = (s -> s ; asFloat? ; ((f -> f ; ok) | (t -> t ; asInt? ; ((i -> i ; toFloat ; ok) | (e -> e ; miss)) ; merge)) ; merge ; (pass | pass))"
+     | "Float" `elem` map snd cols ]
+  ++
+  [ "def " ++ q "readRow" ++ " = (n " ++ unwords vars ++ " -> " ++ readBody ++ ")"
+  , "def " ++ q "parseRow" ++ " = (n line -> (line \",\" ; split) ; (cells -> "
+      ++ "(cells ; len) " ++ show width ++ " ; equals ["
+      ++ unwords ("n" : [ "(" ++ show j ++ " cells ; " ++ q "cellAt" ++ ")"
+                        | j <- [0 .. width - 1] ])
+      ++ " ; " ++ q "readRow" ++ "] [n ; " ++ q "badRow" ++ " ; miss] ... ; cond))"
+  , "def " ++ q "keepRow?" ++ " = (e -> e ; unBox ; (n line -> (line \"\" ; equals) ; not) ; (e | e))"
+  , "def " ++ q "parseRows" ++ " = (src -> (src \"\\n\" ; split) ; (ls -> (ls ; len ; range ; [(i -> i 1 ; +)] ... ; map) ls ; zip) ; (numbered -> 1 numbered ; skip) ; ["
+      ++ q "keepRow?" ++ "] ... ; filter ; [(e -> e ; unBox ; " ++ q "parseRow"
+      ++ ")] ... ; map ; sequence ; (pass | pass))"
+  , "## read " ++ nm ++ "'s CSV: the rows, or the first bad row's line"
+  , "def load" ++ nm ++ " = (path -> path ; readFile ; ((body -> body ; "
+      ++ q "parseRows" ++ ") | (e -> e ; miss)) ; merge ; (pass | pass))"
+  ]
+  where
+    q s     = nm ++ "@" ++ s
+    width   = length cols
+    vars    = [ "c" ++ show j | j <- [0 .. width - 1] ]
+    spec    = zip3 [0 :: Int ..] (map snd cols) vars
+    valOf (j, t, v) = if t == "Str" then v else "v" ++ show j
+    readBody = go spec
+    go [] = unwords (map valOf spec) ++ " ; " ++ nm ++ " ; ok"
+    go (s@(_, t, v) : rest)
+      | t == "Str" = go rest
+      | otherwise  =
+          v ++ " ; " ++ reader t ++ " ; ((" ++ valOf s ++ " -> " ++ go rest
+            ++ ") | (e -> n ; " ++ q "badRow" ++ " ; miss)) ; merge"
+    reader "Int" = "asInt?"
+    reader _     = q "float"
+
+-- Splice each table's generated text in UNDER its declaration line, so
+-- that the line stays where it was written and the text it stands for
+-- reads as part of the file.  The blocks come in file order, exactly
+-- the order `splitDefs` collected the lines in.
+spliceTables :: [(String, String)] -> [String] -> [String]
+spliceTables [] ls = ls
+spliceTables _  [] = []
+spliceTables bs@((raw, blk) : bs') (l : ls)
+  | l == raw  = l : lines blk ++ spliceTables bs' ls
+  | otherwise = l : spliceTables bs ls
+
+-- The public words a table generates.  `load…` is the only one whose
+-- body names a `@` helper, so it is the only one the `@` refusal must
+-- let through; source cannot claim the exemption, because a def of that
+-- name would collide with the generated one.
+tableGenNames :: TableDecl -> [String]
+tableGenNames tb = ["load" ++ tbName tb, "header" ++ tbName tb]
 
 -- Resolve a file's imports into one source text: depth-first, in file
 -- order, each file included exactly once (a diamond includes it once,
@@ -6474,10 +6767,15 @@ loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
               Right src -> loaded stack acc path isRoot canon src
 
     loaded stack acc path isRoot canon src =
-      case splitDefs src >>= \(defs, _, _, imps, _) ->
-             (,) defs <$> mapM parseImportLine imps of
+      case splitDefs src >>= \(defs, _, _, imps, tbls, _) ->
+             (,,,) defs tbls <$> mapM parseImportLine imps
+                             <*> mapM parseTableLine tbls of
         Left e -> pure (Left (inFile path e))
-        Right (defs, rels) -> do
+        Right (defs, tbls, rels, tables) -> do
+          -- a TABLE is resolved here too: the same IO boundary, the
+          -- same path rule, and the text it stands for is spliced in
+          -- under its own declaration line
+          blocks <- mapM (tableBlock (takeDirectory path)) tables
           kids <- mapM (resolve (takeDirectory path)) rels
           r <- foldM (child (canon : stack))
                      (Right acc { lSeen = canon : lSeen acc }) kids
@@ -6491,10 +6789,15 @@ loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
                 Left $ inFile path ("`" ++ n ++ "` is already defined in "
                                  ++ f)
               [] -> Right ()
-            own <- first (inFile path)
+            blks <- first (inFile path) (sequence blocks)
+            own  <- first (inFile path)
                      ((if isRoot then moduleSansImports else moduleDecls) src)
+            let own' = unlines (spliceTables (zip tbls blks) (lines own))
+                genDefs = [ (n, path)
+                          | tb <- tables, n <- tableGenNames tb ]
             pure acc' { lDefs = lDefs acc' ++ [ (n, path) | (n, _, _) <- defs ]
-                      , lText = lText acc' ++ own }
+                                           ++ genDefs
+                      , lText = lText acc' ++ own' }
 
     child _ acc@(Left _) _  = pure acc
     child _ (Right _) (Left e) = pure (Left e)
@@ -6505,16 +6808,37 @@ loadWith isRoot0 root = fmap (fmap lText) (load [] emptyLoad root isRoot0)
     -- Failing that, the current directory is tried, so a program read
     -- from a pipe (`braid -`, which has no directory of its own) can
     -- import too.  Found in neither: the error names both places.
-    resolve dir rel
-      | isAbsolute rel = pure (Right rel)
+    resolve dir rel = do
+      found <- findRel dir rel
+      pure $ case found of
+        Just p  -> Right p
+        Nothing -> Left ("import: no such file: " ++ rel ++ " (looked in "
+                      ++ dir </> rel ++ " and in the current directory)")
+
+    findRel dir rel
+      | isAbsolute rel = pure (Just rel)
       | otherwise = do
           there <- doesFileExist (dir </> rel)
-          if there then pure (Right (dir </> rel)) else do
+          if there then pure (Just (dir </> rel)) else do
             here <- doesFileExist rel
-            pure $ if here
-              then Right rel
-              else Left ("import: no such file: " ++ rel ++ " (looked in "
-                      ++ dir </> rel ++ " and in the current directory)")
+            pure (if here then Just rel else Nothing)
+
+    -- A table's file is resolved by the SAME rule an import's is, read
+    -- WHOLE (so nothing is guessed about a row that was not looked at),
+    -- and turned into Braid text.  This is all the IO the feature has.
+    tableBlock dir tb = do
+      found <- findRel dir (tbPath tb)
+      case found of
+        Nothing -> pure (Left ("table " ++ tbName tb ++ ": no such file: "
+                            ++ tbPath tb ++ " (looked in "
+                            ++ dir </> tbPath tb
+                            ++ " and in the current directory)"))
+        Just p -> do
+          r <- try (do { b <- readFile p; _ <- evaluate (length b); pure b })
+                 :: IO (Either IOException String)
+          pure $ case r of
+            Left _  -> Left ("table " ++ tbName tb ++ ": cannot read " ++ p)
+            Right b -> tableSource tb p b
 
     inFile path e = "in " ++ path ++ ": " ++ e
 
@@ -6602,7 +6926,7 @@ checkModuleWith base src = do
       shadow0  = mbShadow base
       aliases0 = mbAliases base
       datas0   = mbDatas base
-  (defSrcs, tyLines, declLines, importLines, mainSrc) <- splitDefs src
+  (defSrcs, tyLines, declLines, importLines, tableLines, mainSrc) <- splitDefs src
   -- the loader resolves imports into the source it hands over, so one
   -- reaching here means there was no file to resolve it against
   case importLines of
@@ -6610,8 +6934,24 @@ checkModuleWith base src = do
                    ++ "from a file, and this one was checked without a file "
                    ++ "context: " ++ dropWhile isSpace l
     []      -> Right ()
+  -- A `table` line STAYS where it was written and the text it stands
+  -- for is spliced in under it, so reaching here with no generated
+  -- loader means the loader never ran — there was no file to resolve
+  -- the CSV against.
+  tables <- mapM parseTableLine tableLines
+  case [ tb | tb <- tables
+            , ("load" ++ tbName tb) `notElem` [ n | (n, _, _) <- defSrcs ] ] of
+    (tb : _) -> Left $ "table: a table can only be declared when the module "
+                    ++ "is loaded from a file, and this one was checked "
+                    ++ "without a file context: table " ++ tbName tb
+    []       -> Right ()
+  let tblTypes = map tbName tables
+      -- `load…` is the one generated word whose body names a `@`
+      -- helper; source cannot claim the exemption, because a def of
+      -- that name would collide with the generated one
+      tblGen   = concatMap tableGenNames tables
   (env1, runTy, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
-    foldM addType (env0, run0, aliases0, datas0, [], [], M.empty) tyLines
+    foldM (addType tblTypes) (env0, run0, aliases0, datas0, [], [], M.empty) tyLines
   -- theory and model heads name types, and the type they name is
   -- routinely one of the prelude's (`Wrap(List(Int))`), so they are
   -- parsed against every alias and data type in scope — not just the
@@ -6715,8 +7055,8 @@ checkModuleWith base src = do
   -- model bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
-    foldM (addDef slotTable funcs thNames trans ownBases resNames
-                  (map inName insts) allDatas)
+    foldM (addDef (tblTypes, tblGen) slotTable funcs thNames trans ownBases
+                  resNames (map inName insts) allDatas)
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
@@ -6748,7 +7088,7 @@ checkModuleWith base src = do
         term0 <- parseProgramIn allDatas mainSrc
         term1 <- elabUseWith (ElabCtx env' runFinal slotTable funcs tmpls
                                       thNames trans kwords ownBases Nothing
-                                      False Nothing)
+                                      False Nothing tblTypes)
                              term0
         arr <- inferTermIn env' term1
         pure (Just (term1, arr))
@@ -6759,7 +7099,7 @@ checkModuleWith base src = do
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
-    addType (env, run, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
+    addType tblTypes (env, run, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
       decl <- parseTypeLine aliasesIn (map dataSig datasIn) line
       let n = either aName dName decl
       if any ((== n) . aName) ownAl || any ((== n) . dName) ownDt
@@ -6801,8 +7141,13 @@ checkModuleWith base src = do
               Left $ "Type " ++ n ++ ": field name '" ++ f
                   ++ "' is already a word in scope.  A field name becomes "
                   ++ "an ordinary definition of that name, and Braid adds "
-                  ++ "objects rather than merging them — rename " ++ n
-                  ++ "'s field, or rename the existing '" ++ f ++ "'."
+                  ++ "objects rather than merging them — "
+                  ++ (if n `elem` tblTypes
+                        then "rename the column with the schema form, `table "
+                          ++ n ++ "(col: Type, …) = \"…\"`, or rename the "
+                          ++ "existing '" ++ f ++ "'."
+                        else "rename " ++ n ++ "'s field, or rename the "
+                          ++ "existing '" ++ f ++ "'.")
             [] -> Right ()
           -- constructors/unrollers must be CALLABLE by a functor, so the
           -- data artifacts join the elaboration-time scope too
@@ -6816,7 +7161,8 @@ checkModuleWith base src = do
                , filter ((/= n) . aName) aliasesIn
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
-    addDef slotTable funcs thNames trans bases resources instNames datas
+    addDef (tblTypes, tblGen) slotTable funcs thNames trans bases resources
+           instNames datas
            (env, run, shadow, acc, docs, tmpls, kws) (name, bodySrc, doc) = do
       if name `elem` elimEmits && M.member name env
         then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
@@ -6892,7 +7238,9 @@ checkModuleWith base src = do
           term0' <- either (Left . inDef) Right
                       (elabUseWith (ElabCtx env1 run slotTable funcs tmpls
                                             thNames trans kws bases self
-                                            ('@' `elem` name) (Just name))
+                                            ('@' `elem` name
+                                               || name `elem` tblGen)
+                                            (Just name) tblTypes)
                                    termH)
           -- `over M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.
