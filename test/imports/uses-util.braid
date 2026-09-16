@@ -2,17 +2,15 @@ import "util.braid"
 
 def quadruple = double >> double
 
-def scored =
-    use Tally Loud Same
+def scored with Tally Loud Same =
     emit
     double
 
 ## the imported template, instantiated on this side of the boundary
-def loudTwice = use Loud >> emitTwice
+def loudTwice with Loud = emitTwice
 
 ## the imported rule set, applied on this side of the boundary
-def optimised =
-    use Opt
+def optimised with Opt =
     dupInt
     +
 
@@ -23,6 +21,6 @@ def optimised =
 
 ## the imported MODE, entered on this side of the boundary: the receipt
 ## is minted here, and `runP` is the exit, called outside the scope
-def inK  = use Funcs >> double >> double
-def outK = over Funcs >> inK >> _ 5 >> runP
+def inK  with Funcs = double >> double
+def outK in Funcs = inK >> _ 5 >> runP
 outK >> print

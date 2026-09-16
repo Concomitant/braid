@@ -13,7 +13,7 @@
 # type — and `model Opt : Base = …` is a PARTIAL model of it: the
 # generators it names get new images, and every generator it does not
 # name maps to itself.  It declares a word `Opt : Code ⇒ Code` for
-# runtime use, and `use Opt` renames and mints `=Opt>` on everything it
+# runtime use, and `with Opt` renames and mints `=Opt>` on everything it
 # rewrote — which is what makes an optimizer auditable rather than
 # merely convenient.
 
@@ -29,7 +29,7 @@ def double   = 2 _ >> *              # Int ⇒ Int
 # ---------------------------------------------------------------------
 # 2. The model.  Each binding is blessed at this line, not at its uses.
 # ---------------------------------------------------------------------
-model Opt : Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
+model Opt in Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
 
 # The refusals, each with its reason.  Uncomment one to see it:
 #
@@ -78,41 +78,38 @@ def proved = ("proved" | "NOT proved — see below") >> merge
 # ---------------------------------------------------------------------
 # 4. Applying the set, and the receipt.
 # ---------------------------------------------------------------------
-def poly =
-    use Opt
+def poly with Opt =
     dupSwap
     +
     dupInt
     *
 
-"-- use Opt --" >> print
+"-- with Opt --" >> print
 5 >> poly >> print                       # 100
 
 # A binding fires wherever an atom stands, quotations included.
-def mapped =
-    use Opt
+def mapped with Opt =
     [dupInt >> +] ... >> map
 
 (1 2 3 >> pack) >> mapped >> print        # list(2, 4, 6)
 
-# ... and inside a KNOT body.  `use Recursive` is innermost among a
+# ... and inside a KNOT body.  `with Recursive` is innermost among a
 # header's scopes, so `Opt` sees the closed spine the marker wrote, not
 # the name it put back in scope.
-def sumTo =
-    use Opt Recursive
+def sumTo with Opt Recursive =
     (a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> sumTo)) >> merge)
 
 0 5 >> sumTo >> print                     # 15
 
-# THE RECEIPT.  `use Opt` leaves `Opt` on the manifest of everything it
+# THE RECEIPT.  `with Opt` leaves `Opt` on the manifest of everything it
 # rewrote — `poly : Int =Opt> Int`, `sumTo : Int Int =Opt Recursive> Int` —
 # and a written type must carry it too, so an unlabelled witness refuses
 # optimized code exactly as a pure one refuses io.  That is the whole
 # difference between an optimizer you can audit and one you must trust.
-def optimized = [use Opt ; dupInt ; +]
+def optimized = [with Opt = dupInt ; +]
 
 "-- a witness that carries =Opt> runs the code --" >> print
-[use Opt ; dupInt ; +] (optimized >> getCode) (5) >> evalAs >> (print | print forget) >> merge
+[with Opt = dupInt ; +] (optimized >> getCode) (5) >> evalAs >> (print | print forget) >> merge
 "-- an unlabelled witness refuses it --" >> print
 [dup >> +] (optimized >> getCode) (5) >> evalAs >> (print | print forget) >> merge
 
@@ -166,16 +163,16 @@ theory Commuting
     sample : • ⇒ Code
     law interchange = (sample >> apF >> apG) (sample >> apG >> apF) >> sameCodeC
 
-model OptIsFunctor : Functor
+model OptIsFunctor in Functor
     ap      = Opt
     sample  = [dupSwap >> +] >> getCode
     sample2 = [copyDrop >> dupInt] >> getCode
 
-model OptIsOptimizer : Optimizer
+model OptIsOptimizer in Optimizer
     ap     = Opt
     sample = [copyDrop >> dupSwap >> + >> dupInt >> *] >> getCode
 
-model SpacedIsFunctor : Functor
+model SpacedIsFunctor in Functor
     ap      = spaced
     sample  = [dupSwap >> +] >> getCode
     sample2 = [copyDrop] >> getCode
@@ -185,13 +182,13 @@ model SpacedIsFunctor : Functor
 ## holds by construction and the law above cannot fail.  It is still
 ## written, and still runs, because "cannot fail by construction" is a
 ## claim about the construction, and a law is how a claim gets checked.
-model SpacedIsOptimizer : Optimizer
+model SpacedIsOptimizer in Optimizer
     ap     = spaced
     sample = [dupSwap >> +] >> getCode
 
 ## `spaced` and `Opt` commute: one renames atoms, the other adds
 ## identity stages, and neither looks at what the other did.
-model OptSpacedCommute : Commuting
+model OptSpacedCommute in Commuting
     apF    = Opt
     apG    = spaced
     sample = [copyDrop >> dupSwap >> + >> dupInt >> *] >> getCode
@@ -252,7 +249,7 @@ def fastFix = [[drop ... >> dup    >> +] ... >> fix ...]
 # wrote down.  The knot is a binder parameter, so abstraction
 # elimination turns it into a wire whose type is `Fn⟨Σf =Recursive> Θf⟩`,
 # and Σf is an open stack variable: no arity, and nothing to decide
-# with.  (A def written under `use Recursive` is held opaque for the
+# with.  (A def written under `with Recursive` is held opaque for the
 # same reason: inlining it could only trade a verdict for a refusal.)
 # `sameCodeC` says so by name rather than guessing:
 #

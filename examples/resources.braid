@@ -1,4 +1,4 @@
-# Resources: effects as wires, and `use` to stop threading them by hand.
+# Resources: effects as wires, and `with` to stop threading them by hand.
 #
 # The design bet (design-effects.md) is that the effect zoo decomposes
 # into structure Braid already has — state is a threaded wire, a log is
@@ -26,12 +26,11 @@ def scoreByHand =
     _ note ...
     swap ...                           # and put it back
 
-# ---- with `use`: the same program, none of the arithmetic ------------
-# `use` opens an ambient scope; the elaborator writes every `_` and
+# ---- with `with`: the same program, none of the arithmetic ------------
+# `with` opens an ambient scope; the elaborator writes every `_` and
 # `...` above from the resource signatures alone. It also ASSERTS the
 # claim — the incoming wires must really be a Log and a Counter.
-def score =
-    use Log Counter
+def score with Log Counter =
     dup ; *
     bump
     "scored "
@@ -49,7 +48,7 @@ unCounter _ ; print ...                # 2
 print                                  # 2401 — 7 squared, twice
 
 # ---- strength is an ordinary word ------------------------------------
-# What `use` does to a PURE stage is exactly `lift`: run a program one
+# What `with` does to a PURE stage is exactly `lift`: run a program one
 # wire deeper. It is the action of (A ⊗ −) on a morphism, and it needs
 # no compiler support — compose it once per context wire.
 (":" ; Log) 7
@@ -60,7 +59,7 @@ unLog _ ; print print                  # ":" untouched, 49
 # ---- discharging a resource: a handler is a wrapping macro -----------
 # An effectful arrow is a RESOURCE + a MACRO + a THEORY: the resource
 # carries the state, the macro installs and discharges it, the theory
-# says what the operations must satisfy. `use Log` is the entering half;
+# says what the operations must satisfy. `with Log` is the entering half;
 # this is the leaving half. It seeds a Log, applies the program, and
 # unrolls the wire — so the arrow LOSES `=Log>` across it, with no
 # language construct at all. (Plotkin–Pretnar: a handler is a model, and
@@ -70,8 +69,7 @@ unLog _ ; print print                  # ":" untouched, 49
 def collectLog = (f -> [f ("" ; Log) ... ; ev ; unLog ...])
 # collectLog : Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩
 
-def square =
-    use Log
+def square with Log =
     dup ; *
     "squared "
     note
@@ -91,21 +89,20 @@ theory Collector(e, a) =
     seed   : • ⇒ e
     unwrap : e ⇒ a
 
-model Logs : Collector(Log, Str) =
+model Logs in Collector(Log, Str) =
     seed   = "" ; Log
     unwrap = unLog
 
-model Counts : Collector(Counter, Int) =
+model Counts in Collector(Counter, Int) =
     seed   = 0 ; Counter
     unwrap = unCounter
 
-def collected = over Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])
+def collected in Collector = (f -> [f (seed) ... ; ev ; unwrap ...])
 
-def collectCount = use Counts ; collected
+def collectCount with Counts = collected
 # collectCount : Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩
 
-def tick =
-    use Counter
+def tick with Counter =
     dup ; *
     bump
 

@@ -12,17 +12,16 @@ def metered = ([burn ...] ; getCode) ... ; interpose
 functor Metered = metered
 
 # the header says it all: thread Fuel, then meter every stage
-def poly =
-    use Fuel Metered
+def poly with Fuel Metered =
     dup ; *
     dup ; +
     _ 1 ; +
 
 # Every stage of the ELABORATED program burns one unit: six stages of
-# arithmetic (each `;` is a cut) and the claim stage `use Fuel` writes
+# arithmetic (each `;` is a cut) and the claim stage `with Fuel` writes
 # first — see what the functor saw:
 "-- the metered wiring --" ; print
-[use Fuel ; dup ; * ; dup ; + ; _ 1 ; +] ; getCode ; metered ; unparse ; print
+[with Fuel = dup ; * ; dup ; + ; _ 1 ; +] ; getCode ; metered ; unparse ; print
 
 "-- seven stages, seven units of fuel --" ; print
 (10 ; Fuel) 5 ; poly ; _ print ; unFuel ; print          # 51, then 3
@@ -35,7 +34,7 @@ def poly =
 # is its own witness, so the result has the program's arrow whatever
 # the functor did.  A program that threads Fuel is metered …
 "-- lift2: metered where it types --" ; print
-([metered] [use Fuel ; dup ; *] ; lift2) (10 ; Fuel) 5 ; ev ; _ print ; unFuel ; print   # 25, then 7
+([metered] [with Fuel = dup ; *] ; lift2) (10 ; Fuel) 5 ; ev ; _ print ; unFuel ; print   # 25, then 7
 
 # … and one that does not thread Fuel is left alone: the metered code
 # needs a wire the program never had, the witness refuses it, and the

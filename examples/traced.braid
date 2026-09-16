@@ -19,8 +19,7 @@ def marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise
 
 functor Traced = marked
 
-def poly =
-    use Traced
+def poly with Traced =
     dup ; *
     dup ; +
     _ 1 ; +
@@ -30,8 +29,7 @@ def poly =
 
 # A binder body is wiring too, so it traces stage by stage — all of it,
 # including the routing of its parameter block.
-def clamp =
-    use Traced
+def clamp with Traced =
     (lo hi x -> lo x ; lt? ; (drop _ | _ drop) ; merge ; _ hi ; lt? ; (_ drop | drop _) ; merge)
 
 "-- a binder, elaborated and traced --" ; print
@@ -44,29 +42,28 @@ def tick = ["tick" ... ; print ...] ; getCode
 def ticked = tick ... ; interpose
 functor Ticked = ticked
 
-def twice =
-    use Ticked
+def twice with Ticked =
     dup ; +
 
 "-- interpose: one marker after every stage --" ; print
 21 ; twice ; print                     # tick, tick, 42
 
-# THE RECEIPT.  `use Traced` leaves `Traced` on the manifest of
+# THE RECEIPT.  `with Traced` leaves `Traced` on the manifest of
 # everything it elaborated: `poly : Int =Traced> Int`, and every caller
 # of `poly` inherits it by row unification.  The label is minted by the
-# scope and by nothing else — `use@Traced` written by hand is refused —
+# scope and by nothing else — `with@Traced` written by hand is refused —
 # so a manifest is evidence about how a word was built, not a claim its
 # author made.  Two ways to see it from inside a program:
-def quoted = [use Ticked ; dup ; +]
+def quoted = [with Ticked = dup ; +]
 
 "-- the receipt is a stage, so it reflects with the code --" ; print
-quoted ; getCode ; unparse ; print      # use@Ticked >> dup >> "tick" pass …
+quoted ; getCode ; unparse ; print      # with@Ticked >> dup >> "tick" pass …
 
 # and it is part of the type, so a witness must carry it too: an
 # unlabelled `Fn` refuses instrumented code exactly as a pure one
 # refuses io.
 "-- a witness that carries the label runs the code --" ; print
-[use Ticked ; dup ; +] (quoted ; getCode) (20) ; evalAs ; (print | print forget) ; merge
+[with Ticked = dup ; +] (quoted ; getCode) (20) ; evalAs ; (print | print forget) ; merge
 "-- an unlabelled witness refuses it --" ; print
 [dup ; +] (quoted ; getCode) (20) ; evalAs ; (print | print forget) ; merge
 

@@ -6,8 +6,7 @@ type Nat = (• | Nat)
 def z = alt1 >> Nat
 def s = alt2 >> Nat
 
-def fromInt =
-  use Recursive
+def fromInt with Recursive =
   zero? >> (drop >> z | _ 1 >> - >> fromInt >> s) >> merge
 ## toInt by points: zero maps to 0, successor to +1 on the result
 def toInt = [0] [1 ... >> +] ... >> foldNat

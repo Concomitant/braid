@@ -62,7 +62,7 @@ data ReplState = ReplState
   , rsUserDefs :: [String]   -- user def names, in definition order
   , rsStackTy  :: SType      -- type of the current stack (internal names)
   , rsStack    :: [Value]    -- the current stack, front wire first
-  , rsUse      :: [String]   -- ambient `use` scope: a session-wide body
+  , rsUse      :: [String]   -- ambient `with` scope: a session-wide body
   , rsSlots    :: SlotTable  -- model name -> its theory and slots
   , rsFuncs    :: [(String, String)]    -- functor name -> its word
   , rsTheories :: [Theory]   -- theories `:import` brought in
@@ -75,7 +75,7 @@ data ReplState = ReplState
   , rsTransformations :: [TransformationInfo]
                          -- transformations it imported, with their verdicts
     -- a session cannot DECLARE a theory, a model or a functor, but
-    -- `:import` can bring them in, and then `use` must know them
+    -- `:import` can bring them in, and then `with` must know them
   }
 
 initialState :: ReplState
@@ -116,7 +116,7 @@ loop st = do
             putStrLn (renderStack st)
             case rsUse st of
               [] -> pure ()
-              ns -> putStrLn ("ambient: use " ++ unwords ns)
+              ns -> putStrLn ("ambient: with " ++ unwords ns)
           loop st
         ":defs" -> do
           liftIO $ do
@@ -128,7 +128,7 @@ loop st = do
             mapM_ (\(n, (th, _)) ->
                      putStrLn ("def " ++ n ++ " : template over " ++ th))
                   (reverse (rsTmpls st))
-            -- a FAMILY is not a def and not a model: it is what `use
+            -- a FAMILY is not a def and not a model: it is what `with
             -- F(M)` applies, so `:defs` says how to apply it
             mapM_ (putStrLn . renderFamily) (reverse (rsFamilies st))
           loop st
@@ -286,23 +286,23 @@ renderStack st =
       let Arrow _ o _ = normalizeArrow (arrPure SEnd (rsStackTy st))
       in showStackA (dispOf st) o
 
--- A session's lines are ELABORATED before they are inferred: `use` is
+-- A session's lines are ELABORATED before they are inferred: `with` is
 -- written out between parse and infer, ambient scope included.  `:t`
 -- goes through exactly the same door as a program line — without it an
--- ambient `use Inst` did not resolve slot names for `:t` (`use IntSum`
+-- ambient `with Inst` did not resolve slot names for `:t` (`with IntSum`
 -- then `:t op` said "Unknown primitive: op"), and a template, whose
 -- whole existence is elaboration-time, could not be inspected at all.
 elabIn :: ReplState -> String -> Either String Term
 elabIn st src = do
   term0 <- parseProgramIn (rsDatas st) src
-  elabUseWith (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
+  elabHeaders (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
                        (rsTrans st) (rsKWords st) (rsBases st) [] False
                        -- a session declares no `table` of its own: one is
                        -- a file declaration, and `:import` brings in only
                        -- the two words it generates
                        Nothing [])
-    (case rsUse st of { [] -> term0 ; ns -> Use ns term0 })
+    (case rsUse st of { [] -> term0 ; ns -> With Transporting ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
 typeOfWith render st src =
@@ -385,34 +385,34 @@ importLine st arg =
 
 handleLine :: ReplState -> String -> IO ReplState
 handleLine st line
-  -- `use` at the top level.  In a file the body is the rest of the
-  -- block; in a session there is no rest yet, so a bare `use` line opens
-  -- a scope over every LATER line — the session is the body.  This is
+  -- `with` at the top level.  In a file it is a def's header clause; in
+  -- a session there is no def yet, so a bare `with` line opens a scope
+  -- over every LATER line — the session is the body.  This is
   -- selection, not sugar: it is what ML's `open` does.
-  | ("use" : names) <- words (trim line), all plainName names =
+  | ("with" : names) <- words (trim line), all plainName names =
       case names of
         [] -> do
           putStrLn "left the ambient scope"
           pure st { rsUse = [] }
         _ | (t : _) <- [ n | n <- names
                               , n `elem` map thName (rsTheories st) ] -> do
-              putStrLn $ "error: `use " ++ t ++ "` names a theory: `use` \
+              putStrLn $ "error: `with " ++ t ++ "` names a theory: `with` \
                          \applies a functor, and a theory is not one — a def \
-                         \whose own header is `over " ++ t ++ "` is a \
+                         \whose own header is `in " ++ t ++ "` is a \
                          \template over it"
               pure st
           | Just bad <- firstUnknown names -> do
-              putStrLn $ "error: `use`: " ++ bad ++ " is not a resource, \
+              putStrLn $ "error: `with`: " ++ bad ++ " is not a resource, \
                          \model or functor in scope (a session cannot \
                          \declare theories, models or functors — \
                          \`:import` a file that does)"
               pure st
           | otherwise -> do
-              putStrLn ("ambient: use " ++ unwords names
-                        ++ "   (:clear or a bare `use` to leave)")
+              putStrLn ("ambient: with " ++ unwords names
+                        ++ "   (:clear or a bare `with` to leave)")
               pure st { rsUse = names }
   where
-    -- ...and an APPLIED model is a name too: `use Fwd(Floats)` names
+    -- ...and an APPLIED model is a name too: `with Fwd(Floats)` names
     -- the member `Fwd(Floats)`, which an imported file already minted
     plainName n = not (null n)
                && all (\c -> isAlphaNum c || c `elem` ("_(), " :: String)) n
@@ -428,7 +428,7 @@ handleLine st line
 handleLine st line =
   case splitDefs line of
     Left err -> report err
-    Right ([(name, _, _)], [], [], [], [], rest)
+    Right ([(name, _, _, _)], [], [], [], [], rest)
       | all isSpace rest -> defLine name
     Right ([], [(tyLine, _)], [], [], [], rest)
       | all isSpace rest -> typeLine tyLine
@@ -508,8 +508,8 @@ handleLine st line =
             -- a template is not a def: it never enters the environment,
             -- so it comes back in the template table instead
             [] | Just (th, _) <- lookup name (modTemplates m) -> do
-                   putStrLn $ "template " ++ name ++ " over " ++ th
-                            ++ "   (`use <model>` to call it)"
+                   putStrLn $ "template " ++ name ++ " in " ++ th
+                            ++ "   (`with <model>` to call it)"
                    pure st { rsTmpls = modTemplates m
                            , rsDocs  = modDocs m `M.union` rsDocs st }
             [(n, sc, _)] -> do
@@ -520,7 +520,7 @@ handleLine st line =
                 , rsDocs     = modDocs m `M.union` rsDocs st
                 , rsUserDefs =
                     rsUserDefs st ++ [n | n `notElem` rsUserDefs st]
-                  -- a session def written under `use K` is a K-word from
+                  -- a session def written under `with K` is a K-word from
                   -- here on, exactly as it would be in a file
                 , rsKWords   = modKWords m
                 }

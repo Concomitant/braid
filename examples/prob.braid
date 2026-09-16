@@ -13,7 +13,7 @@
 # has the normalizer PROVE `dup ; f f = f ; dup` for an arbitrary word,
 # which is exactly the statement that the base has no randomness.  A
 # model of the Doctrine whose hom-object is a STOCHASTIC MAP is a Markov
-# category, and `use Enum` is the functor from the deterministic world
+# category, and `with Enum` is the functor from the deterministic world
 # into it.  The distinction is then drawn STRUCTURALLY, not by a
 # convention about what `flip` means:
 #
@@ -47,8 +47,8 @@ import "frame.braid"
 # ---------------------------------------------------------------------
 # 1. The theory: a Markov category, presented
 # ---------------------------------------------------------------------
-# `over Doctrine` is the declaration that `compose`, `embed` and `first`
-# are the prelude doctrine's, at its signatures — so `use M` of a model
+# `in Doctrine` is the declaration that `compose`, `embed` and `first`
+# are the prelude doctrine's, at its signatures — so `with M` of a model
 # transports base programs into the category M presents, and the
 # doctrine's seven arrow laws are inherited.
 #
@@ -84,7 +84,7 @@ import "frame.braid"
 # range and `Enum`'s `compose` walks a list, and a slot declares the
 # MOST a model may do.
 
-theory Prob(k(_, _), d(_)) over Doctrine =
+theory Prob(k(_, _), d(_)) in Doctrine =
     compose   : k(a, b) k(b, c) =Recursive> k(a, c)
     embed     : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     first     : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
@@ -153,7 +153,7 @@ def eObserve =
     (((c 3 ; atK ; Weighted ; eExpect) (c 4 ; atK ; Weighted ; eExpect) ; fadd) 1000.0 ; fmul)
       ; floor
 
-model Enum : Prob(Kern, Weighted) =
+model Enum in Prob(Kern, Weighted) =
     compose   = eCompose
     embed     = eEmbed
     first     = eFirst
@@ -227,7 +227,7 @@ def sReport =
     ((drawsWanted ; range) ; (c ; sInto) (theSeed nil ; Acc) ... ; fold)
       ; unAcc ; (s ys -> ys ; reverse ; Draws)
 
-model Sampler : Prob(Samp, Draws) =
+model Sampler in Prob(Samp, Draws) =
     compose   = sCompose
     embed     = sEmbed
     first     = sFirst
@@ -267,7 +267,7 @@ def nSample    = [(x -> (x ; _ 1 ; +) (x 2 ; *) ; pack ; Reach)] ; Poss
 def nObserve   = (c -> ((c 3 ; atP) ; sum) ((c 4 ; atP) ; sum) ; +)
 def nReport    = (c -> c ; unPoss ; _ 0 ; ev)
 
-model Nondet : Prob(Poss, Reach) =
+model Nondet in Prob(Poss, Reach) =
     compose   = nCompose
     embed     = nEmbed
     first     = nFirst
@@ -285,35 +285,31 @@ model Nondet : Prob(Poss, Reach) =
 # is `swap ; first ; swap`, and the swap is an ordinary base program
 # embedded — which is the whole construction of the monoidal product
 # `f ⊗ g` out of a strength, written once per model because a template
-# `over Prob` is not instantiable by `use Enum` (§12, pragmatics).
+# `in Prob` is not instantiable by `with Enum` (§12, pragmatics).
 
 def swapP = unPair ; swap ; Pair
 
-def secondE =
-    over Enum
+def secondE in Enum =
     (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
-def secondS =
-    over Sampler
+def secondS in Sampler =
     (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
 #   secondE : Kern(a, b) ⇒ Kern(Pair(c, a), Pair(c, b))
 
 ## two independent flips, as `flip ⊗ flip`: the strength twice, with a
 ## swap between.  This is the word the thesis turns on.
-def bothFlipE =
-    over Enum
+def bothFlipE in Enum =
     (flip ; first)
     _ ([swapP] ; embed) ; compose
     _ (flip ; first) ; compose
     _ ([swapP] ; embed) ; compose
-def bothFlipS =
-    over Sampler
+def bothFlipS in Sampler =
     (flip ; first)
     _ ([swapP] ; embed) ; compose
     _ (flip ; first) ; compose
     _ ([swapP] ; embed) ; compose
 #   bothFlipE : • ⇒ Kern(Pair(Float, Float), Pair(Bool, Bool)) — a word
-#   of the category built BY HAND, so `over` and not `use`, and it
-#   composes inside a `use Enum` scope like any transported stage.
+#   of the category built BY HAND, so `in` and not `with`, and it
+#   composes inside a `with Enum` scope like any transported stage.
 
 ## the biases, as ordinary base stages: one wire in, one wire out, so
 ## the functor embeds them and nothing knows they are parameters
@@ -324,22 +320,21 @@ def twoBiases = (n -> 0.5 0.5)
 # 6. COPY IS NOT NATURAL — the two programs, and the two distributions
 # ---------------------------------------------------------------------
 
-def twoEqualE = use Enum ; half ; flip ; dup
-def twoIndepE = use Enum ; twoBiases ; bothFlipE
+def twoEqualE with Enum = half ; flip ; dup
+def twoIndepE with Enum = twoBiases ; bothFlipE
 #   twoEqualE : Int =Enum Recursive> Pair(Bool, Bool)
 #   twoIndepE : Int =Enum Recursive> Pair(Bool, Bool) — the SAME type,
-#   and `use Enum` is the only reason either of them is a kernel at all.
+#   and `with Enum` is the only reason either of them is a kernel at all.
 
-def twoEqualS = use Sampler ; half ; flip ; dup
-def twoIndepS = use Sampler ; twoBiases ; bothFlipS
-def bothFlipN =
-    over Nondet
+def twoEqualS with Sampler = half ; flip ; dup
+def twoIndepS with Sampler = twoBiases ; bothFlipS
+def bothFlipN in Nondet =
     (flip ; first)
     _ ([swapP] ; embed) ; compose
     _ (flip ; first) ; compose
     _ ([swapP] ; embed) ; compose
-def twoEqualN = use Nondet ; half ; flip ; dup
-def twoIndepN = use Nondet ; twoBiases ; bothFlipN
+def twoEqualN with Nondet = half ; flip ; dup
+def twoIndepN with Nondet = twoBiases ; bothFlipN
 #   `bothFlipE` is ENUM's word, and the elaborator says so if it is
 #   written here: "bothFlipE is a word of Enum, so it builds a carrier
 #   rather than being a program the embedding could embed".  A category
@@ -363,13 +358,13 @@ def distHead  = "outcome" "weight" ; pack
 def countHead = "outcome" "draws" ; pack
 
 "" ; print
-"== one flip, copied — `use Enum ; half ; flip ; dup` ==" ; print
+"== one flip, copied — `with Enum = half ; flip ; dup` ==" ; print
 distHead ([showBits] (twoEqualE ; eReport) ; tallyW) ; printFrame
 #   HH | 0.5      the coin, and the same bit twice
 #   TT | 0.5
 
 "" ; print
-"== two flips — `use Enum ; twoBiases ; bothFlipE` ==" ; print
+"== two flips — `with Enum = twoBiases ; bothFlipE` ==" ; print
 distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; printFrame
 #   HH | 0.25     HT | 0.25     TH | 0.25     TT | 0.25
 #   — 1/2 · 1/2 four times, and every weight is exact
@@ -404,8 +399,8 @@ countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
 # different problem — Monty *Fall* — and it answers 1/2.  The model has
 # to say what the host does; `condition` cannot repair a wrong one.)
 
-def coinSndE = over Enum ; (([half] ; embed) flip ; compose) ; secondE
-def coinSndS = over Sampler ; (([half] ; embed) flip ; compose) ; secondS
+def coinSndE in Enum = (([half] ; embed) flip ; compose) ; secondE
+def coinSndS in Sampler = (([half] ; embed) flip ; compose) ; secondS
 #   coinSndE : • ⇒ Kern(Pair(c, Int), Pair(c, Bool)) — flip a fair coin
 #   ON TOP of whatever is riding below
 
@@ -414,8 +409,7 @@ def hostFrom =
     p -> p ; unPair
            ; (car c -> car ((car 0 ; equals) (c 1 2 ; select) (3 car ; -) ; select) ; Pair)
 
-def montyE =
-    use Enum
+def montyE with Enum =
     three
     uniform
     dup
@@ -441,8 +435,7 @@ distHead ([showCH] (montyE ; eReport) ; tallyW) ; printFrame
 ## verdict with what survives.
 def keepHost1 = (p -> p ; unPair ; (car h -> (h 1 ; equals) car ; Pair))
 
-def montyPostE =
-    use Enum
+def montyPostE with Enum =
     three
     uniform
     dup
@@ -478,12 +471,11 @@ distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; printFrame
 
 def quarter  = (n -> 0.25)
 def biasOf2  = (r x -> r (r 0.875 0.125 ; select))   # Bool Bool ⇒ Bool Float
-def flipSndE = over Enum ; flip ; secondE
+def flipSndE in Enum = flip ; secondE
 def keepAlarm = (p -> p ; unPair ; (r a -> a r ; Pair))
 def showRain = (b -> b "rain" "dry" ; select)
 
-def sensorE =
-    use Enum
+def sensorE with Enum =
     quarter
     flip
     dup
@@ -494,8 +486,7 @@ def sensorE =
 def showRA =
     p -> p ; unPair ; (r a -> ((r ; showRain) ", alarm " ; cat) (a "yes" "no" ; select) ; cat)
 
-def sensorPostE =
-    use Enum
+def sensorPostE with Enum =
     quarter
     flip
     dup
@@ -519,22 +510,21 @@ distHead ([showRain] (sensorPostE ; eReport ; renorm) ; tallyW) ; printFrame
 #   dry  | 0.3      0.09375 / 0.3125 = 3/10
 
 # ---------------------------------------------------------------------
-# 9. A MARKOV CHAIN, under `Sampler`, with `use Recursive`
+# 9. A MARKOV CHAIN, under `Sampler`, with `with Recursive`
 # ---------------------------------------------------------------------
 # A random walk on the integers: at each step flip a fair coin and move
 # one either way.  `walkN` builds the n-step kernel by COMPOSING the
 # one-step kernel n times — composition in the category, so the knot
 # never sees a sample, only an arrow.
 
-def idS    = over Sampler ; [_] ; embed
-def thenS  = over Sampler ; compose
+def idS in Sampler = [_] ; embed
+def thenS in Sampler = compose
 def moveBy = (p -> p ; unPair ; (x b -> b (x ; _ 1 ; +) (x 1 ; -) ; select))
 
-def stepS = use Sampler ; dup ; coinSndS ; moveBy
+def stepS with Sampler = dup ; coinSndS ; moveBy
 #   stepS : Int =Sampler Recursive> Int
 
-def walkN =
-    use Recursive
+def walkN with Recursive =
     n -> (n 0 ; equals) [idS] [(stepS ((n ; _ 1 ; -) ; walkN) ; thenS)] ... ; cond
 #   walkN : Int =Recursive> Samp(Int, Int) — a KERNEL built by
 #   recursion, and the recursion is over the number of steps, not over
@@ -635,7 +625,7 @@ def meanW   =
 def twoPts  = ((1.0 0.5 ; Box) (3.0 0.5 ; Box) ; pack) ; Weighted     # mean 2.0
 def onePt   = (4.0 1.0 ; Box) ; single ; Weighted                     # mean 4.0
 
-model Mixtures : Convex(Weighted(Float)) =
+model Mixtures in Convex(Weighted(Float)) =
     mix     = mixW
     sample  = twoPts
     other   = onePt
@@ -644,13 +634,13 @@ model Mixtures : Convex(Weighted(Float)) =
 ## …and the model that keeps only the mean
 def meanMix = (a b -> (a b ; fadd) 2.0 ; fdiv)
 
-model Means : Convex(Float) =
+model Means in Convex(Float) =
     mix     = meanMix
     sample  = 2.0
     other   = 4.0
     observe = id
 
-transformation Expect : Mixtures ⇒ Means = meanW
+transformation Expect in Mixtures ⇒ Means = meanW
 #   ONE component, because `Convex` has one parameter.  The four
 #   squares say: the mean of a fair mixture is the mean of the means
 #   (`mix`), the evidence corresponds (`sample`, `other`), and the
@@ -672,8 +662,8 @@ transformation Expect : Mixtures ⇒ Means = meanW
 # moves from 1 to 5/3, while squaring the mean leaves 1.
 
 def sqr    = (x -> x x ; *)
-def uni3   = use Enum ; three ; uniform
-def uni3sq = use Enum ; three ; uniform ; sqr
+def uni3 with Enum = three ; uniform
+def uni3sq with Enum = three ; uniform ; sqr
 
 "" ; print
 "== E[X] and E[X^2] for X uniform on {0, 1, 2} ==" ; print
@@ -766,7 +756,7 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 # `renorm` instead — which is the operation, without the arrow.
 #
 # NO CHOICE SLOT.  A row program that branches into two different
-# KERNELS cannot be written inside a `use` scope: transporting a sum
+# KERNELS cannot be written inside a `with` scope: transporting a sum
 # needs ArrowChoice' `left`, and the Doctrine has `first` and not
 # `left`.  `hostFrom` and `biasOf2` sidestep it the way
 # `examples/frame.braid`'s `keep` does — the deciding is deterministic

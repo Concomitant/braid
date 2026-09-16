@@ -1,4 +1,4 @@
-# Recursion is a MARKER. `use Recursive` in a definition's header puts
+# Recursion is a MARKER. `with Recursive` in a definition's header puts
 # the definition's OWN NAME in scope in its own body — nothing else. A
 # name that is not in scope stays not in scope, and the refusal says
 # which word to write.
@@ -6,7 +6,7 @@
 # It is not a special form. Elaboration rewrites the body to the closed
 # form the language already had — a binder with the knot deepest, every
 # self-call routed through it — before inference, and INNERMOST among a
-# header's scopes, so `use Traced Recursive` traces the closed spine.
+# header's scopes, so `with Traced Recursive` traces the closed spine.
 # Every elaborated def is therefore still a closed spine over its prefix
 # scope, which is what keeps `reflect`, the per-stage schemes and every
 # functor total.
@@ -27,8 +27,7 @@ def double = 2 _ >> *
 # binder at all reads exactly as it would if the word were someone
 # else's.
 #   until100 : Int =Recursive> Int
-def until100 =
-  use Recursive
+def until100 with Recursive =
   lt100?
   double >> until100 | _
   merge
@@ -36,15 +35,13 @@ def until100 =
 # WITH BINDERS: `sumTo` names its two wires and calls itself in the
 # middle of a stage, where any other word could stand.
 #   sumTo : Int Int =Recursive> Int
-def sumTo =
-  use Recursive
+def sumTo with Recursive =
   (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)
 
 # TWO CALLS, one of them inside a group — the knot is a wire like any
 # other, so it needs no special placement.
 #   fib : Int =Recursive> Int
-def fib =
-  use Recursive
+def fib with Recursive =
   lt2?
   _ | (n -> n >> decr >> fib >> _ (n 2 >> - >> fib) >> +)
   merge
@@ -56,9 +53,9 @@ def fib =
 # A parameter NAMED LIKE THE DEF shadows it, exactly as it shadows any
 # other word: `fac` below is the binder's wire, and nothing recurses.
 # The label is still there — a receipt says what the scope DID, and this
-# scope tied a knot; it is the written `use` that mints, always.
+# scope tied a knot; it is the written `with` that mints, always.
 #   fac : Int =Recursive> Int
-def fac = use Recursive ; (fac -> fac 1 >> +)
+def fac with Recursive = (fac -> fac 1 >> +)
 7 >> fac >> print
 
 # ---------------------------------------------------------------------

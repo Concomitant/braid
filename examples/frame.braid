@@ -3,7 +3,7 @@
 # The thesis: you should never write a loop over rows.  You write a
 # program on ONE ROW — a stack of scalars, ordinary Braid — and a MODEL
 # lifts it to the whole frame.  `List` appears nowhere in the row
-# programs below.  What does the lifting is `use Frame`, and `Frame` is
+# programs below.  What does the lifting is `with Frame`, and `Frame` is
 # a model of the same `Doctrine` that `examples/circuits.braid` models:
 # hom-object a FUNCTION BETWEEN COLUMNS, `embed` = `map`, `compose` =
 # composition, `first` = unzip / map / zip.  The strength IS "the other
@@ -49,7 +49,7 @@ data Col(a, b) = Fn⟨List(a) =Recursive> List(b)⟩
 data Pair(a, b) = a b
 
 ## run a column function on a frame — the base word, used outside every
-## `use Frame` scope
+## `with Frame` scope
 def runCol = (c rows -> c ; unCol ; _ rows ; ev)
 
 ## embed: a row word becomes a column word.  This IS `map`, and saying
@@ -74,14 +74,14 @@ def cfirst =
 def sample3   = 1 (2 (3 nil ; cons) ; cons) ; cons
 def cobserve  = (c -> (c sample3 ; runCol) ; sum)
 
-theory Columns(k(_, _)) over Doctrine =
+theory Columns(k(_, _)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     compose : k(a, b) k(b, c) =Recursive> k(a, c)
     first   : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
     observe : k(Int, Int) =Recursive> Int
     sample  : • =Recursive> k(Int, Int)
 
-model Frame : Columns(Col) =
+model Frame in Columns(Col) =
     embed   = cembed
     compose = ccompose
     first   = cfirst
@@ -102,14 +102,14 @@ model Frame : Columns(Col) =
 # and whiskered by `first`.  `sq` is the two-wire case the strength
 # exists for.
 
-def sq     = use Frame ; dup ; *
-def poly   = use Frame ; dup ; _ dup ; _ _ (_ 1 ; +) ; _ * ; +
-def wiring = use Frame ; dup ; _ 1 ... ; _ + ; swap ; _ drop
+def sq with Frame = dup ; *
+def poly with Frame = dup ; _ dup ; _ _ (_ 1 ; +) ; _ * ; +
+def wiring with Frame = dup ; _ 1 ... ; _ + ; swap ; _ drop
 #   each of these is `Int =Frame Recursive> Int`
 
-def sqOut     = over Frame ; sq ; observe
-def polyOut   = over Frame ; poly ; observe
-def wiringOut = over Frame ; wiring ; observe
+def sqOut in Frame = sq ; observe
+def polyOut in Frame = poly ; observe
+def wiringOut in Frame = wiring ; observe
 
 "-- transport, at the audit's own three-row frame [1, 2, 3] --" ; print
 sqOut     ; print       # 14 — [1, 4, 9]      summed
@@ -128,8 +128,7 @@ wiringOut ; print       # 9  — [2, 3, 4]      summed: dup, +1, swap, drop
 ## under transport needs a choice slot the Doctrine does not have
 ## (design-macros.md, 2026-09-14).  The mask sidesteps it — the
 ## deciding is a column, and the dropping is frame-level.
-def keep =
-    use Recursive
+def keep with Recursive =
     (mask rows -> mask ; unList ; (nil \
       | (b bs -> rows ; unList ; (nil \
           | (x xs -> (bs xs ; keep) ; (r -> b (x r ; cons) r ; select))) ; merge)) ; merge)
@@ -159,14 +158,12 @@ def groupBy =
 def keyOf = (e -> e ; unBox ; (k r -> k))
 def rowOf = (e -> e ; unBox ; (k r -> r))
 
-def insertPair =
-    use Recursive
+def insertPair with Recursive =
     (p e l -> l ; unList ; (e ; single \
       | (y r -> ((e ; keyOf) (y ; keyOf) ; p ... ; ev ; verdict) \
                   (e l ; cons) (y (p e r ; insertPair) ; cons) ; select)) ; merge)
 
-def sortPairs =
-    use Recursive
+def sortPairs with Recursive =
     (p l -> l ; unList ; (nil | (x r -> p x (p r ; sortPairs) ; insertPair)) ; merge)
 
 ## reorder a frame by a key column
@@ -193,7 +190,7 @@ def meanF = (col -> (col ; sumF) (col ; len ; toFloat) ; fdiv)
 ## runs it.  It is written in the model's words on purpose — `column`
 ## denotes the same function `map` does, and that it does is `embed`'s
 ## defining equation rather than a coincidence.
-def column = over Frame ; (f rows -> (f ; embed) rows ; runCol)
+def column in Frame = (f rows -> (f ; embed) rows ; runCol)
 
 ## join a column of strings with a separator, and print a frame under a
 ## header the CALLER supplies.  The header is runtime data — a
@@ -249,7 +246,7 @@ table Trades = "examples/data/trades.csv"
 ## THE ROW PROGRAM.  `px qty` is a two-wire stage — two column names
 ## side by side — and the strength is what carries it.  No `List`, no
 ## index, no loop, and nothing here knows there is more than one row.
-def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
+def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 #   notional : Trades =Frame Recursive> Float
 
 ## running one on a frame, outside the scope

@@ -32,7 +32,7 @@ transformationVerdictTests =
     -- a hom-object carrier pins its own `Fn` to one wire per side, so
     -- an internal functor's squares normalize outright
   [ ( "transformations.braid", "Forget"
-    , unlines' [ "Forget : Names \8658 Funcs"
+    , unlines' [ "Forget in Names \8658 Funcs"
                , "  embed    proved"
                , "  compose  proved"
                , "  first    proved"
@@ -42,20 +42,20 @@ transformationVerdictTests =
     -- stop at `ev` of an open wire and the third at `pack`: all three go
     -- to the samples, each carrying the reason it had to
   , ( "transformations.braid", "Len"
-    , unlines' [ "Len : ListMonoid \8658 IntSum"
+    , unlines' [ "Len in ListMonoid \8658 IntSum"
                , "  unit    sampled (ev of an open wire)"
                , "  op      sampled (2 points; ev of an open wire)"
                , "  sample  sampled (`pack` has no closed arity)" ] )
     -- forgetting the tangent: every square proved, which is the
     -- strongest verdict the machinery has — and the model is now
     -- `Fwd(Floats)`, a MEMBER of the family `model Fwd(R : Smooth(a, g))`
-    -- minted by `use Fwd(Floats)`, which a transformation names exactly
+    -- minted by `with Fwd(Floats)`, which a transformation names exactly
     -- as it names any other model (2026-09-15) — `gradient` included, since
     -- 2026-09-14: its result type is a theory PARAMETER, so `Value` has
     -- a second component (the zero map) and the square that says
     -- "forgetting a tangent zeroes it" normalizes outright
   , ( "autodiff.braid", "Value"
-    , unlines' [ "Value : Fwd(Floats) \8658 Floats"
+    , unlines' [ "Value in Fwd(Floats) \8658 Floats"
                , "  add       proved"
                , "  mul       proved"
                , "  neg       proved"
@@ -74,7 +74,7 @@ transformationVerdictTests =
     -- to the arithmetic of the uninterpreted `fadd` and `fmul`, which is
     -- exactly what the theory's evidence is for
   , ( "autodiff.braid", "Transpose"
-    , unlines' [ "Transpose : Fwd(Floats) \8658 Rev"
+    , unlines' [ "Transpose in Fwd(Floats) \8658 Rev"
                , "  add       sampled (2 points; differ in the free category)"
                , "  mul       sampled (2 points; differ in the free category)"
                , "  neg       sampled (1 point; differ in the free category)"
@@ -101,7 +101,7 @@ transformationVerdictTests =
     -- a fold makes of its handler, and the two evidence slots at
     -- `Box`, whose arity is open.
   , ( "prob.braid", "Expect"
-    , unlines' [ "Expect : Mixtures \8658 Means"
+    , unlines' [ "Expect in Mixtures \8658 Means"
                , "  mix      sampled (2 points; ev of an open wire)"
                , "  sample   sampled (`Box` has no closed arity)"
                , "  other    sampled (`Box` has no closed arity)"
@@ -134,7 +134,7 @@ importTests =
     -- defs, a resource, a model, a functor and a RULE SET, all
     -- imported; the imported file's own main does NOT run
     -- …and a TEMPLATE: declared over a theory in one file, instantiated
-    -- by a `use` in another
+    -- by a `with` in another
   [ ("uses-util.braid", ["28", "12", "81", "50", "0", "20"], "")
     -- a diamond includes the shared file once
   , ("diamond.braid",   ["7", "8", "10"], "")
@@ -597,20 +597,20 @@ famSrc =
 \    sample : \8226 \8658 a\n\
 \    observe : a \8658 Float\n\
 \    law addComm = (sample (2.0 ; lit) ; add ; observe) ((2.0 ; lit) sample ; add ; observe) ; eq? ; verdict\n\
-\model Floats : Ring(Float) =\n\
+\model Floats in Ring(Float) =\n\
 \    add = fadd\n\
 \    mul = fmul\n\
 \    lit = id\n\
 \    sample = 1.5\n\
 \    observe = id\n\
 \data Dual(a) = a a\n\
-\model Fwd(R : Ring(a)) : Ring(Dual(a)) =\n\
+\model Fwd(Ring(a)) in Ring(Dual(a)) =\n\
 \    add = Dual(x, dx) Dual(y, dy) -> (x y ; add) (dx dy ; add) ; Dual\n\
 \    mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual\n\
 \    lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)\n\
 \    sample = sample (1.0 ; lit) ; Dual\n\
 \    observe = Dual(v, t) -> v ; observe\n\
-\def cube = over Ring ; (x -> ((x x ; mul) x ; mul) (1.0 ; lit) ; add)\n\
+\def cube in Ring = (x -> ((x x ; mul) x ; mul) (1.0 ; lit) ; add)\n\
 \def tangent = Dual(v, t) -> t\n"
 
 -- ...and the same family with its `add` broken on the VALUE side.  A
@@ -629,16 +629,16 @@ badFamSrc = go famSrc
     pat = "(x y ; add)"
 
 -- What `:defs` and `:import` read off a module that declares a family:
--- the family itself (not a def, not a model — it is what `use F(M)`
--- applies), and every MEMBER the module's `use` headers asked for.
+-- the family itself (not a def, not a model — it is what `with F(M)`
+-- applies), and every MEMBER the module's `with` headers asked for.
 -- (source, the `:defs` lines, the model names in order)
 familyReportTests :: [(String, [String], [String])]
 familyReportTests =
-  [ ( famSrc ++ "def d = use Fwd(Floats) ; cube\n\
-      \def dd = use Fwd(Fwd(Floats)) ; cube\n\
+  [ ( famSrc ++ "def d with Fwd(Floats) = cube\n\
+      \def dd with Fwd(Fwd(Floats)) = cube\n\
       \\"ok\" ; print"
-    , [ "model Fwd(R : Ring) : Ring   (a FAMILY \8212 apply it: \
-        \`use Fwd(<model of Ring>)`)" ]
+    , [ "model Fwd(Ring) in Ring   (a FAMILY \8212 apply it: \
+        \`with Fwd(<model of Ring>)`)" ]
     , [ "Floats", "Fwd(Floats)", "Fwd(Fwd(Floats))" ] )
   ]
 
@@ -658,19 +658,19 @@ runFamilyReport (src, wantFams, wantModels) =
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
-    -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `use Fwd(Floats)`
+    -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `with Fwd(Floats)`
     -- APPLIES the family and mints a member; the receipt on the arrow is
     -- the APPLICATION, one label, because one model read the template.
-  , (famSrc ++ "def d = use Fwd(Floats) ; cube\nd",
+  , (famSrc ++ "def d with Fwd(Floats) = cube\nd",
      "Dual(Float) =Fwd(Floats)> Dual(Float)")
     -- ...and the family applies to a member of ITSELF, which is what
     -- "a functor Mod(T) → Mod(T)" buys: the carrier nests, the slot
     -- bodies are unchanged, and the receipt says which member read it
-  , (famSrc ++ "def dd = use Fwd(Fwd(Floats)) ; cube\ndd",
+  , (famSrc ++ "def dd with Fwd(Fwd(Floats)) = cube\ndd",
      "Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float))")
     -- the head is read by SUBSTITUTION and nothing else: `Ring(Dual(a))`
     -- at `a := Dual(Float)` is the carrier the slots are declared at
-  , (famSrc ++ "use Fwd(Fwd(Floats)) ; sample",
+  , (famSrc ++ "def s2 with Fwd(Fwd(Floats)) = sample\ns2",
      "• =Fwd(Fwd(Floats))> Dual(Dual(Float))")
     -- THE CLOSED STRUCTURE (stage 5a¾).  `ev` is the exponential's
     -- counit — the prim formerly spelled `apply` — and `curry` is the
@@ -690,14 +690,14 @@ moduleTypeTests =
   , ("data Cell(a) = (val: a, tag: Str)\nval", "Cell(a0) ⇒ a0")
   , ("rewrite",   "List(Sym) List(Sym) Code ⇒ Code")
     -- STAGE 5b: a rule set declares a WORD of its own name and a
-    -- FUNCTOR of that name.  `use Opt` mints `=Opt>` like any other
+    -- FUNCTOR of that name.  `with Opt` mints `=Opt>` like any other
     -- scope, and unions with `Recursive` when the body ties a knot.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\nOpt",
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt in Base = dupInt = dup\nOpt",
      "Code ⇒ Code")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
-     \def p =\n    use Opt\n    dupInt\n    +\np", "Int =Opt> Int")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
-     \def sumTo =\n    use Opt\n\
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt in Base = dupInt = dup\n\
+     \def p with Opt =\n    dupInt\n    +\np", "Int =Opt> Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt in Base = dupInt = dup\n\
+     \def sumTo with Opt =\n\
      \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
      \    fix ...\n    ev\nsumTo", "Int Int =Opt Recursive> Int")
   , ("undist2",  "(a0 ρ0 | a0 ρ1) ⇒ a0 (ρ0 | ρ1 | σ0)")
@@ -709,7 +709,7 @@ moduleTypeTests =
     -- elaboration (fuel-bounded); before this its `Recursive` escaped and the
     -- expansion read `Int =RecId> Int`.  The receipt now carries the
     -- word's own labels beside the functor's name.
-  , ("def idRec = [(self c -> c)] ... >> fix ... >> ev\nfunctor RecId = idRec\ndef twice =\n    use RecId\n    dup >> +\ntwice",
+  , ("def idRec = [(self c -> c)] ... >> fix ... >> ev\nfunctor RecId = idRec\ndef twice with RecId =\n    dup >> +\ntwice",
      "Int =RecId Recursive> Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
@@ -883,34 +883,34 @@ moduleTypeTests =
   , ("[dup >> *] 5 >> ev", "• ⇒ Int")
     -- reflect READS a program without running it: pure, any grade
   , ("reflect",   "Fn⟨ρ0 ⇒ ρ1⟩ ⇒ (Code | Str)")
-    -- STAGE 5e: RECURSION IS A MARKER.  `use Recursive` puts the def's
+    -- STAGE 5e: RECURSION IS A MARKER.  `with Recursive` puts the def's
     -- own name in scope in its own body; elaboration rewrites the body
     -- to the closed form before inference, so the def is still a closed
     -- spine and the label is the scope's receipt.
   , ("def decr = _ 1 >> -\n\
-     \def fac = use Recursive ; (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
+     \def fac with Recursive = (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
      \fac", "Int =Recursive> Int")
     -- point-free: the name is a word, so a body with no binder works
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\n\
      \def double = 2 _ >> *\n\
-     \def until100 = use Recursive ; lt100? >> (double >> until100 | _) >> merge\n\
+     \def until100 with Recursive = lt100? >> (double >> until100 | _) >> merge\n\
      \until100", "Int =Recursive> Int")
     -- a binder parameter of the def's own name SHADOWS it, as it
     -- shadows any word — and the receipt is still minted, because a
     -- receipt says what the SCOPE did, not what the body happened to
-  , ("def f = use Recursive ; (f -> f 1 >> +)\nf", "Int =Recursive> Int")
+  , ("def f with Recursive = (f -> f 1 >> +)\nf", "Int =Recursive> Int")
     -- a self-call inside a quotation is a CAPTURE, and abstraction
     -- elimination handles it: guarded corecursion, unchanged
   , ("data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)\n\
-     \def from = use Recursive ; (n -> n [n 1 >> + >> from] >> Stream)\n\
+     \def from with Recursive = (n -> n [n 1 >> + >> from] >> Stream)\n\
      \from", "Int =Recursive> Stream(Int)")
     -- the label is a SET: a marked def that also calls `loop` says it
     -- once
-  , ("def spin = use Recursive ; [done] ... >> loop\nspin", "ρ0 =Recursive> ρ0")
+  , ("def spin with Recursive = [done] ... >> loop\nspin", "ρ0 =Recursive> ρ0")
     -- the marker is INNERMOST, so a functor on the same header sees the
     -- closed spine rather than a name that is not in scope yet
   , ("def idF = (c -> c)\nfunctor Same = idF\n\
-     \def down = use Same Recursive ; (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
+     \def down with Same Recursive = (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
      \down", "Int =Recursive Same> Int")
     -- `fix` is DERIVED now (it left the prim set 2026-09-14): the body
     -- takes the knot DEEPEST and then its own arguments, and `fix`
@@ -939,7 +939,7 @@ moduleTypeTests =
      "• ⇒ •")
     -- three labels from three sources still UNION on one arrow: the
     -- join is the whole point, and the set displays sorted
-  , ("def tracer = (c -> c)\nfunctor Traced = tracer\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef report = use Traced ; fac ; toStr ; print\nreport",
+  , ("def tracer = (c -> c)\nfunctor Traced = tracer\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef report with Traced = fac ; toStr ; print\nreport",
      "Int =IO Recursive Traced> •")
     -- structural recursors mint NOTHING: they are bounded by the value
     -- they eat, so the whole derived library stays unlabelled
@@ -1048,67 +1048,67 @@ moduleTypeTests =
     -- the roll/unroll doors do not fold (no suffix on the input side)
   , ("resource Log = Str\nLog",   "Str ⇒ Log")
   , ("resource Log = Str\nunLog", "Log ⇒ Str")
-    -- STAGE 4: `use` opens an ambient scope and the elaborator writes
+    -- STAGE 4: `with` opens an ambient scope and the elaborator writes
     -- every `_`/`...` — the body below contains none.
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f = use Log Counter >> dup >> * >> bump\nf",
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f with Log Counter = dup >> * >> bump\nf",
      "Int ρ0 =Log Counter> Int ρ0")
-  , ("resource Log = Str\nresource Counter = Int\ndef note = unLog _ >> cat >> Log\ndef f = use Log Counter >> \"x\" >> note\nf",
+  , ("resource Log = Str\nresource Counter = Int\ndef note = unLog _ >> cat >> Log\ndef f with Log Counter = \"x\" >> note\nf",
      "ρ0 =Log Counter> ρ0")
-    -- `use` ASSERTS its claim: the wires must really be those resources,
+    -- `with` ASSERTS its claim: the wires must really be those resources,
     -- even when the body never touches one
-  , ("resource Log = Str\ndef f = use Log >> dup\nf",
+  , ("resource Log = Str\ndef f with Log = dup\nf",
      "a0 ρ0 =Log> a0 a0 ρ0")
-    -- `use` scopes COMPOSE.  A word threading exactly the scope's
+    -- `with` scopes COMPOSE.  A word threading exactly the scope's
     -- resources is already shaped like the stack, so it needs no
     -- routing and is callable from a scope over the same resources.
-    -- Without this, a multi-resource word could be WRITTEN with `use`
+    -- Without this, a multi-resource word could be WRITTEN with `with`
     -- and then never CALLED from one, which makes the scope a notation
     -- rather than an abstraction.
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step = use Log Counter >> toStr >> note >> bump\ndef twice = use Log Counter >> step >> step\ntwice",
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step with Log Counter = toStr >> note >> bump\ndef twice with Log Counter = step >> step\ntwice",
      "a0 a1 ρ0 =Log Counter> ρ0")
     -- ... and a resourceful step is exactly a fold's step function, so
     -- folding it over data is the ordinary `fold`
-  , ("resource Books = Str\ndef say = unBooks _ >> cat >> Books\ndef step = use Books >> toStr >> say\n[step]",
+  , ("resource Books = Str\ndef say = unBooks _ >> cat >> Books\ndef step with Books = toStr >> say\n[step]",
      "• ⇒ Fn⟨a0 ρ0 =Books> ρ0⟩")
     -- THEORIES (stage 3): named slots, models selected BY NAME with
-    -- `use`, resolution as a renaming at elaboration.  Generic code is
+    -- `with`, resolution as a renaming at elaboration.  Generic code is
     -- written once; only the scope differs.
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel IntSum : Monoid(Int) =\n    unit = 0\n    op   = +\ndef total = use IntSum ; [op] unit ... ; foldExp\ntotal",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel IntSum in Monoid(Int) =\n    unit = 0\n    op   = +\ndef total with IntSum = [op] unit ... ; foldExp\ntotal",
      "Intⁿ⁰ =IntSum> Int")
     -- a model's carrier is a full type EXPRESSION, not a bare name.
     -- Every structure worth having a theory of is parameterized, so
     -- scraping identifiers out of the head read `T(List(Int))` as two
     -- arguments and rejected it.
-  , ("theory Wrap(a) =\n    wrap : a ⇒ a\nmodel L : Wrap(List(Int)) =\n    wrap = id\ndef w = use L ; wrap\nw",
+  , ("theory Wrap(a) =\n    wrap : a ⇒ a\nmodel L in Wrap(List(Int)) =\n    wrap = id\ndef w with L = wrap\nw",
      "List(Int) =L> List(Int)")
-  , ("theory Wrap(a) =\n    wrap : a ⇒ a\nmodel F : Wrap(Fn⟨Int ⇒ Int⟩) =\n    wrap = id\ndef w = use F ; wrap\nw",
+  , ("theory Wrap(a) =\n    wrap : a ⇒ a\nmodel F in Wrap(Fn⟨Int ⇒ Int⟩) =\n    wrap = id\ndef w with F = wrap\nw",
      "Fn⟨Int ⇒ Int⟩ =F> Fn⟨Int ⇒ Int⟩")
     -- a slot body may call the module's OWN defs: a theory declaration
     -- is a signature, so slots are forward-declared and the two
     -- directions (def calls slot, slot calls def) both work
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\nmodel S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\ntotal",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\nmodel S in Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total with S = [op] unit ... ; foldExp\ntotal",
      "Intⁿ⁰ =S> Int")
     -- STAGE 5a, item 0: SLOT-LOCAL VARIABLES.  A slot may name variables
-    -- the theory does not declare, and is generalized over its own —
+    -- the theory does not declare, and is generalized in its own —
     -- `box : b ⇒ a` under `theory Wrap(a)` is `∀b. b ⇒ a`.  Nothing in
     -- the checker changed: `declaredSlots` already generalized the slot
     -- and `checkInstance` already compared bodies by subsumption.
-  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = toStr\ndef w = use W ; box\nw",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W in Wrap(Str) =\n    box = toStr\ndef w with W = box\nw",
      "a0 =W> Str")
     -- a `...` in a slot of a theory with no stack parameter is a
     -- slot-local STACK, so a theory can ask for `∀ρ. ρ ⇒ ρ`
-  , ("theory Endo =\n    around : ... ⇒ ...\nmodel E : Endo =\n    around = ...\ndef a2 = use E ; around\na2",
+  , ("theory Endo =\n    around : ... ⇒ ...\nmodel E in Endo =\n    around = ...\ndef a2 with E = around\na2",
      "ρ0 =E> ρ0")
     -- STAGE 5a, item 1: CONSTRUCTOR PARAMETERS.  `k` is written with its
     -- arity visible (`k(_, _)`), applied in the slots, and substituted
     -- away at the model — so what comes out is an ordinary type and
     -- inference never meets a constructor variable.
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) over Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t = over P ; compose\nt",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) in Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P in Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef t in P = compose\nt",
      "K(a0, a1) K(a1, a2) ⇒ K(a0, a2)")
     -- the substitution reaches inside an Fn type in a slot too
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) over Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar = over P ; embed\nar",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) in Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P in Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef ar in P = embed\nar",
      "Fn⟨a0 ⇒ a1⟩ ⇒ K(a0, a1)")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel StrCat : Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined = use StrCat ; [op] unit ... ; foldExp\njoined",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel StrCat in Monoid(Str) =\n    unit = \"\"\n    op   = cat\ndef joined with StrCat = [op] unit ... ; foldExp\njoined",
      "Strⁿ⁰ =StrCat> Str")
     -- the grade is inferred through defs, not read off a name
   , ("def shout = toStr >> print\nshout",          "a0 =IO> •")
@@ -1133,58 +1133,58 @@ moduleTypeTests =
     -- still sees whatever else was passing through
   , ("def tagged =\n    -> h m f\n    sumN\n    h ... >> +\ntagged",
      "Int Int Int Intⁿ⁰ ⇒ Int")
-    -- STAGE 4½: PROVENANCE.  `use F` mints F onto everything it
+    -- STAGE 4½: PROVENANCE.  `with F` mints F onto everything it
     -- elaborated, and the manifest carries it to every caller.
-  , (idF ++ "def p = use Same >> dup >> *\np",          "Int =Same> Int")
-  , (idF ++ "def p = use Same >> dup >> *\ndef q = p >> p\nq",
+  , (idF ++ "def p with Same = dup >> *\np",          "Int =Same> Int")
+  , (idF ++ "def p with Same = dup >> *\ndef q = p >> p\nq",
      "Int =Same> Int")
     -- labels are a SET: two functors union, io is one member among
     -- them, and a resource name joins them in the same manifest
   , (idF ++ "def idG = (c -> c)\nfunctor Twice = idG\n"
-         ++ "def p = use Same Twice >> dup >> *\np", "Int =Same Twice> Int")
-  , (idF ++ "def p = use Same >> dup >> * >> print\np", "Int =IO Same> •")
-  , (idF ++ "resource Fuel = Int\ndef p =\n    use Fuel Same\n    dup >> *\np",
+         ++ "def p with Same Twice = dup >> *\np", "Int =Same Twice> Int")
+  , (idF ++ "def p with Same = dup >> * >> print\np", "Int =IO Same> •")
+  , (idF ++ "resource Fuel = Int\ndef p with Fuel Same =\n    dup >> *\np",
      "Int ρ0 =Same Fuel> Int ρ0")
     -- a labelled word composes with an unlabelled one and with an io
     -- one: unification absorbs into the open tail, exactly as io always
     -- did.  Nothing about `=Same>` makes a word less composable.
-  , (idF ++ "def p = use Same >> dup >> *\ndef q = p >> toStr >> print\nq",
+  , (idF ++ "def p with Same = dup >> *\ndef q = p >> toStr >> print\nq",
      "Int =IO Same> •")
     -- two DIFFERENT labels meeting at a cut: neither tail is poorer, so
     -- the rows bridge through a shared residual
   , (idF ++ "def idG = (c -> c)\nfunctor Twice = idG\n"
-         ++ "def p = use Same >> dup >> *\ndef q = use Twice >> _ 1 >> +\n"
+         ++ "def p with Same = dup >> *\ndef q with Twice = _ 1 >> +\n"
          ++ "def both = p >> q\nboth", "Int =Same Twice> Int")
     -- a functor's own word is UNLABELLED — it is called at elaboration,
     -- not elaborated under anything
   , (idF ++ "idF", "a0 ⇒ a0")
     -- STAGE 5a½: `Recursive` joins that same set.  A receipt, io and
     -- recursion union in one manifest and display sorted.
-  , (idF ++ "def q = use Same >> [_ 100 >> less?] [2 _ >> *] ... >> while\nq",
+  , (idF ++ "def q with Same = [_ 100 >> less?] [2 _ >> *] ... >> while\nq",
      "Int =Recursive Same> Int")
-  , (idF ++ "def p = use Same >> [_ 100 >> less?] [2 _ >> *] ... >> while >> toStr >> print\np",
+  , (idF ++ "def p with Same = [_ 100 >> less?] [2 _ >> *] ... >> while >> toStr >> print\np",
      "Int =IO Recursive Same> •")
     -- TEMPLATES: one body, two instantiations, two PRINCIPAL types.
     -- Nothing is dispatched and nothing is passed; the expansion is
     -- re-inferred where it lands, so there is no rank-1 wall.
-  , (tmplMod ++ "use IntSum ; fold1", "Intⁿ⁰ =IntSum> Int")
-  , (tmplMod ++ "use StrCat ; fold1", "Strⁿ⁰ =StrCat> Str")
+  , (tmplMod ++ "def r with IntSum = fold1\nr", "Intⁿ⁰ =IntSum> Int")
+  , (tmplMod ++ "def r with StrCat = fold1\nr", "Strⁿ⁰ =StrCat> Str")
     -- a template calling a template: the instantiating scope
     -- instantiates the whole chain
-  , (tmplMod ++ "use IntSum ; quad", "Int =IntSum> Int")
-  , (tmplMod ++ "use StrCat ; quad", "Str =StrCat> Str")
+  , (tmplMod ++ "def r with IntSum = quad\nr", "Int =IntSum> Int")
+  , (tmplMod ++ "def r with StrCat = quad\nr", "Str =StrCat> Str")
     -- through a def, and nested scopes resolve innermost-first — and
     -- BOTH scopes are on the receipt, because both were entered
-  , (tmplMod ++ "def a = use IntSum ; twice\ndef b = use StrCat ; twice\n\
-     \def c = use IntSum ; use StrCat ; twice\nc", "Str =IntSum StrCat> Str")
+  , (tmplMod ++ "def a with IntSum = twice\ndef b with StrCat = twice\n\
+     \def inner with StrCat = twice\ndef c with IntSum = inner\nc", "Str =IntSum StrCat> Str")
     -- the handler: an effectful arrow is a resource + a macro + a
     -- theory, and this is the macro half.  `=Log>` is discharged.
   , (handlerMod ++ "collectLog", "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
     -- and generically: a template over a theory naming the two words a
     -- handler needs, at two different resources
-  , (collectorMod ++ "use Logs ; collected",
+  , (collectorMod ++ "def r with Logs = collected\nr",
      "Fn⟨ρ0 =Log> ρ1⟩ =Logs> Fn⟨ρ0 ⇒ Str ρ1⟩")
-  , (collectorMod ++ "use Counts ; collected",
+  , (collectorMod ++ "def r with Counts = collected\nr",
      "Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩")
     -- TRANSPORT (5c, 5c½).  THE DISPLAY FOLD: at the base a word of a
     -- category is `• ⇒ Arr(Int, Int)` carrying `Funcs`, and a carrier
@@ -1196,62 +1196,62 @@ moduleTypeTests =
     -- in the category, which is written under the marker.
   , (modeMod ++ "chain chain", "• =Funcs> Arr(Int, Int) Arr(Int, Int)")
     -- and under the marker it composes: a word of the category inside
-    -- `use Funcs` is left alone and the `;` around it is the composition
-  , (modeMod ++ "def two = use Funcs ; chain ; chain\ntwo", "Int =Funcs> Int")
+    -- `with Funcs` is left alone and the `;` around it is the composition
+  , (modeMod ++ "def two with Funcs = chain ; chain\ntwo", "Int =Funcs> Int")
     -- an ENTRY slot (`sample`: no carrier in, one carrier out) is
     -- already a stage of the category, so it is left alone too.  Its
     -- type said so in WRITING, which keeps this out of inference.
-  , (modeMod ++ "def s2 = use Funcs ; sample ; sample\ns2", "Int =Funcs> Int")
+  , (modeMod ++ "def s2 with Funcs = sample ; sample\ns2", "Int =Funcs> Int")
     -- the receipt is an ordinary label: it unions with io by the same
-    -- semilattice as everything else.  `over` mints nothing, so the
+    -- semilattice as everything else.  `in` mints nothing, so the
     -- only label here is the one `chain` already wore.
-  , (modeMod ++ "def obs = over Funcs ; chain ; observe\nobs ; print",
+  , (modeMod ++ "def obs in Funcs = chain ; observe\nobs ; print",
      "• =Funcs IO> •")
     -- a sealed category: same fold, and no exit to fold back through
   , (sealedMod ++ "guarded", "Int =Sealed> Int")
-    -- STAGE 5c½.  `over M` — a HAND-BUILT word of the category.  It
+    -- STAGE 5c½.  `in M` — a HAND-BUILT word of the category.  It
     -- applies nothing and so MINTS nothing: the def displays as the
     -- carrier it is, unfolded, because `=Funcs>` is provenance and this
     -- code did not go through the functor.  Membership is the carrier
     -- in the type plus the K-word table.
-  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over Funcs ; hand\nbyHand",
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand in Funcs = hand\nbyHand",
      "• ⇒ Arr(Int, Int)")
     -- and it composes under the marker like any other word of the
     -- category — THAT composite went through the functor, so it folds
-  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand = over Funcs ; hand\n\
-     \def mix = use Funcs ; byHand ; add1\nmix", "Int =Funcs> Int")
+  , (modeMod ++ "def hand = [dup ; +] ; Arr\ndef byHand in Funcs = hand\n\
+     \def mix with Funcs = byHand ; add1\nmix", "Int =Funcs> Int")
     -- a base def that merely PRODUCES a carrier is not a word of the
     -- category, and its type is the same as `byHand`'s: the difference
     -- is the written header, never an inferred type.
   , (modeMod ++ "def hand = [dup ; +] ; Arr\nhand", "• ⇒ Arr(Int, Int)")
     -- LEVEL THREE: with a strength declared, a wider stage transports
     -- by being packed with the pairing the strength names
-  , (wideMod ++ "def sq = use Wide ; dup ; *\nsq", "Int =Wide> Int")
+  , (wideMod ++ "def sq with Wide = dup ; *\nsq", "Int =Wide> Int")
     -- and a narrow stage is whiskered: `...` is what `first` becomes
-  , (wideMod ++ "def w = use Wide ; dup ; add1 ... ; *\nw", "Int =Wide> Int")
-    -- LEVEL ONE: composition alone.  `over` composes carriers built by
+  , (wideMod ++ "def w with Wide = dup ; add1 ... ; *\nw", "Int =Wide> Int")
+    -- LEVEL ONE: composition alone.  `in` composes carriers built by
     -- hand, and the def is a word of the category like any other.
-  , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; f f ; compose\ng",
+  , (halfMod ++ "def f in HW = [inc] ; H\ndef g in HW = f f ; compose\ng",
      "• ⇒ H(Int, Int)")
-    -- `over T` is the template header; the def's own type is the
-    -- instantiation's, and `over` leaves no receipt of its own here
-    -- either — the `use IntSum` is what minted
-  , (tmplMod ++ "use IntSum ; twice", "Int =IntSum> Int")
-    -- STAGE 5c½: EVERY `use` MINTS.  A model of `Base` leaves its
+    -- `in T` is the template header; the def's own type is the
+    -- instantiation's, and `in` leaves no receipt of its own here
+    -- either — the `with IntSum` is what minted
+  , (tmplMod ++ "def r with IntSum = twice\nr", "Int =IntSum> Int")
+    -- STAGE 5c½: EVERY `with` MINTS.  A model of `Base` leaves its
     -- name on everything it renamed, exactly as a functor does.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt : Base = dupInt = dup\n\
-     \def p = use Opt ; dupInt ; +\np", "Int =Opt> Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Opt in Base = dupInt = dup\n\
+     \def p with Opt = dupInt ; +\np", "Int =Opt> Int")
     -- it recurses into quotations, and the receipt rides out with them
   , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
-     \model Opt : Base = twice = double\n\
-     \def q = use Opt ; [twice] ... ; map\nq", "List(Int) =Opt> List(Int)")
+     \model Opt in Base = twice = double\n\
+     \def q with Opt = [twice] ... ; map\nq", "List(Int) =Opt> List(Int)")
     -- the generated word is an ordinary `Code ⇒ Code`, for `[Opt]`
   , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
-     \model Opt : Base = twice = double\nOpt", "Code ⇒ Code")
+     \model Opt in Base = twice = double\nOpt", "Code ⇒ Code")
   ]
 
--- TEMPLATES (stage 5a).  A def whose `use` names a THEORY is a body
--- waiting for a model; a def whose `use` names a MODEL expands
+-- TEMPLATES (stage 5a).  A def whose `with` names a THEORY is a body
+-- waiting for a model; a def whose `with` names a MODEL expands
 -- it there, renames it there, and RE-INFERS it there — so every
 -- instantiation has its own principal type.
 tmplMod :: String
@@ -1259,15 +1259,15 @@ tmplMod =
   "theory Monoid(a) =\n\
   \    unit : • ⇒ a\n\
   \    op   : a a ⇒ a\n\
-  \model IntSum : Monoid(Int) =\n\
+  \model IntSum in Monoid(Int) =\n\
   \    unit = 0\n\
   \    op   = +\n\
-  \model StrCat : Monoid(Str) =\n\
+  \model StrCat in Monoid(Str) =\n\
   \    unit = \"\"\n\
   \    op   = cat\n\
-  \def fold1 = over Monoid ; [op] unit ... ; foldExp\n\
-  \def twice = over Monoid ; dup ; op\n\
-  \def quad  = over Monoid ; twice ; twice\n"
+  \def fold1 in Monoid = [op] unit ... ; foldExp\n\
+  \def twice in Monoid = dup ; op\n\
+  \def quad  in Monoid = twice ; twice\n"
 
 -- the handler of stage 5a item 3: seed the resource, run the program,
 -- unroll the wire — the arrow loses `=Log>` across it
@@ -1286,22 +1286,22 @@ collectorMod =
   \theory Collector(e, a) =\n\
   \    seed   : • ⇒ e\n\
   \    unwrap : e ⇒ a\n\
-  \model Logs : Collector(Log, Str) =\n\
+  \model Logs in Collector(Log, Str) =\n\
   \    seed   = \"\" ; Log\n\
   \    unwrap = unLog\n\
-  \model Counts : Collector(Counter, Int) =\n\
+  \model Counts in Collector(Counter, Int) =\n\
   \    seed   = 0 ; Counter\n\
   \    unwrap = unCounter\n\
-  \def collected = over Collector ; (f -> [f (seed) ... ; ev ; unwrap ...])\n"
+  \def collected in Collector = (f -> [f (seed) ... ; ev ; unwrap ...])\n"
 
--- a trivial functor: the identity on Code.  Enough to ask what `use`
+-- a trivial functor: the identity on Code.  Enough to ask what `with`
 -- leaves behind, without a rewrite getting in the way.
 idF :: String
 idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 
 -- TRANSPORT (5c, reshaped in 5c\189).  A model whose theory has a
 -- hom-object `k(_, _)` and slots at the composition and embedding
--- SHAPES is a label with a CARRIER: `use Funcs` sends every stage to
+-- SHAPES is a label with a CARRIER: `with Funcs` sends every stage to
 -- this model's embedding and every `;` to its composition.  No `mode`
 -- line, and no slot NAME is read — `embed`/`compose` are this fixture's
 -- taste.  `Arrow` here declares NO strength, which is what pins the
@@ -1311,24 +1311,24 @@ idF = "def idF = (c -> c)\nfunctor Same = idF\n"
 modeMod :: String
 modeMod = unlines
   [ "data Arr(a, b) = Fn⟨a ⇒ b⟩"
-  , "theory Arrow(k(_, _)) over Doctrine ="
+  , "theory Arrow(k(_, _)) in Doctrine ="
   , "    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
   , "    compose   : k(a, b) k(b, c) ⇒ k(a, c)"
   , "    observe : k(Int, Int) ⇒ Int"
   , "    sample  : • ⇒ k(Int, Int)"
   , "def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)"
   , "def runA  = (f x -> f ; unArr ; _ x ; ev)"
-  , "model Funcs : Arrow(Arr) ="
+  , "model Funcs in Arrow(Arr) ="
   , "    embed    = Arr"
   , "    compose   = thenA"
   , "    observe = (f -> f 7 ; runA)"
   , "    sample  = [dup ; +] ; Arr"
   , "def add1 = _ 1 ; +"
   , "def dbl  = 2 _ ; *"
-  , "def chain = use Funcs ; add1 ; dbl"
+  , "def chain with Funcs = add1 ; dbl"
     -- a SECOND category over the same carrier, for the two-in-a-header
     -- and word-of-another-category refusals
-  , "model Funcs2 : Arrow(Arr) ="
+  , "model Funcs2 in Arrow(Arr) ="
   , "    embed    = Arr"
   , "    compose   = thenA"
   , "    observe = (f -> f 7 ; runA)"
@@ -1345,11 +1345,11 @@ monoidMod = unlines
   , "    unit   : \8226 \8658 a"
   , "    op     : a a \8658 a"
   , "    sample : \8226 \8658 a"
-  , "model IntSum : Monoid(Int) ="
+  , "model IntSum in Monoid(Int) ="
   , "    unit   = 0"
   , "    op     = +"
   , "    sample = 7"
-  , "model ListMonoid : Monoid(List(Int)) ="
+  , "model ListMonoid in Monoid(List(Int)) ="
   , "    unit   = nil"
   , "    op     = append"
   , "    sample = 1 2 3 4 5 6 7 >> pack"
@@ -1370,11 +1370,11 @@ closureMod = unlines
   , "    bump    : a \8658 a"
   , "    sample  : \8226 \8658 a"
   , "    observe : a \8658 Int"
-  , "model Src : Scale(Two) ="
+  , "model Src in Scale(Two) ="
   , "    bump    = unTwo >> (v f -> (v 1 >> +) f >> Two)"
   , "    sample  = 2 3 >> Two"
   , "    observe = unTwo >> (v f -> v)"
-  , "model Dst : Scale(K) ="
+  , "model Dst in Scale(K) ="
   , "    bump    = unK >> (v k -> (v 1 >> +) k >> K)"
   , "    sample  = 2 [(d -> 3 d >> *)] >> K"
   , "    observe = unK >> (v k -> v)"
@@ -1388,8 +1388,8 @@ closureModNoExit =
   unlines [ l | l <- lines closureMod, not ("observe" `isInfixOf` l) ]
 
 -- SHAPE NO LONGER DETECTS (2026-09-13).  The same two arrows, declared
--- at the same signatures, WITHOUT `over Doctrine`: not a category, so
--- `use Plain` is the renaming it has always been and the spine comes
+-- at the same signatures, WITHOUT `in Doctrine`: not a category, so
+-- `with Plain` is the renaming it has always been and the spine comes
 -- out untouched.  Membership is declared or it is not there.
 plainMod :: String
 plainMod = unlines
@@ -1398,22 +1398,22 @@ plainMod = unlines
   , "    embed   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
   , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
   , "def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)"
-  , "model Plain : Shaped(Arr) ="
+  , "model Plain in Shaped(Arr) ="
   , "    embed   = Arr"
   , "    compose = thenA"
   , "def add1 = _ 1 ; +"
   , "def dbl  = 2 _ ; *"
   ]
 
--- LEVEL ONE: composition and nothing else.  `over HW` composes carriers
--- built by hand; `use HW` has no embedding to transport a stage with.
+-- LEVEL ONE: composition and nothing else.  `in HW` composes carriers
+-- built by hand; `with HW` has no embedding to transport a stage with.
 halfMod :: String
 halfMod = unlines
   [ "data H(a, b) = Fn\10216a \8658 b\10217"
-  , "theory Half(k(_, _)) over Doctrine ="
+  , "theory Half(k(_, _)) in Doctrine ="
   , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
   , "def thenH = (f g -> [(x -> f ; unH ; _ x ; ev ; (y -> g ; unH ; _ y ; ev))] ; H)"
-  , "model HW : Half(H) ="
+  , "model HW in Half(H) ="
   , "    compose = thenH"
   , "def inc = _ 1 ; +"
   , "def dbl = 2 _ ; *"
@@ -1426,7 +1426,7 @@ wideMod :: String
 wideMod = unlines
   [ "data W(a, b) = Fn\10216a \8658 b\10217"
   , "data P(a, b) = a b"
-  , "theory Wider(k(_, _)) over Doctrine ="
+  , "theory Wider(k(_, _)) in Doctrine ="
   , "    embed   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
   , "    compose  : k(a, b) k(b, c) \8658 k(a, c)"
   , "    first : k(a, b) \8658 k(P(a, c), P(b, c))"
@@ -1434,7 +1434,7 @@ wideMod = unlines
   , "def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)"
   , "def firstW = (f -> [(q -> q ; unP ; (x d -> f ; unW ; _ x ; ev ; (y -> y d ; P)))] ; W)"
   , "def runWi = (f x -> f ; unW ; _ x ; ev)"
-  , "model Wide : Wider(W) ="
+  , "model Wide in Wider(W) ="
   , "    embed   = W"
   , "    compose  = thenW"
   , "    first = firstW"
@@ -1447,15 +1447,15 @@ wideMod = unlines
 sealedMod :: String
 sealedMod = unlines
   [ "data Cap(a, b) = Fn⟨a ⇒ b⟩"
-  , "theory Vault(k(_, _)) over Doctrine ="
+  , "theory Vault(k(_, _)) in Doctrine ="
   , "    embed  : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
   , "    compose : k(a, b) k(b, c) ⇒ k(a, c)"
   , "def capThen = (f g -> [(x -> f ; unCap ; _ x ; ev ; (y -> g ; unCap ; _ y ; ev))] ; Cap)"
-  , "model Sealed : Vault(Cap) ="
+  , "model Sealed in Vault(Cap) ="
   , "    embed  = Cap"
   , "    compose = capThen"
   , "def inc = _ 1 ; +"
-  , "def guarded = use Sealed ; inc ; inc"
+  , "def guarded with Sealed = inc ; inc"
   ]
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
@@ -1467,12 +1467,12 @@ evalTests =
     -- self-reference rule.  The zero tangent is `0.0 ; lit` and not a
     -- `zero` slot: the theory already names its zero, and `addUnit`
     -- already pins it.
-  [ (famSrc ++ "def l = use Fwd(Floats) ; lit\n3.0 ; l ; unDual ; print ... ; print",
+  [ (famSrc ++ "def l with Fwd(Floats) = lit\n3.0 ; l ; unDual ; print ... ; print",
      ["3.0", "0.0"], "")
     -- SECOND DERIVATIVES, by applying the family to a member of itself.
     -- cube(x) = x\179 + 1, so cube''(2) = 6*2 = 12, and the file that
     -- wrote `cube` knows nothing about any of it.
-  , (famSrc ++ "def dd = use Fwd(Fwd(Floats)) ; cube\n\
+  , (famSrc ++ "def dd with Fwd(Fwd(Floats)) = cube\n\
       \((2.0 1.0 ; Dual) (1.0 0.0 ; Dual) ; Dual) ; dd ; tangent ; tangent ; print",
      ["12.0"], "")
     -- A CONSTRUCTOR PARAMETER OF ARITY ONE (2026-09-15).  A theory
@@ -1488,20 +1488,20 @@ evalTests =
      \    sample  : \8226 \8658 f(Int)\n\
      \    bump    : f(Int) \8658 f(Int)\n\
      \    observe : f(Int) \8658 Int\n\
-     \model One : H(Wrap) =\n\
+     \model One in H(Wrap) =\n\
      \    sample  = 7 ; Wrap\n\
      \    bump    = unWrap ; _ 1 ; + ; Wrap\n\
      \    observe = unWrap\n\
-     \model Two : H(Twice) =\n\
+     \model Two in H(Twice) =\n\
      \    sample  = 7 7 ; Twice\n\
      \    bump    = unTwice ; (x y -> (x ; _ 1 ; +) (y ; _ 1 ; +)) ; Twice\n\
      \    observe = unTwice ; _ drop\n\
      \def widen = unWrap ; dup ; Twice\n\
-     \transformation W : One \8658 Two = widen\n\
+     \transformation W in One \8658 Two = widen\n\
      \(7 ; Wrap) ; widen ; unTwice ; + ; print",
      ["14"], "")
     -- THE PARAMETERIZED EXIT (2026-09-14).  An exit whose result varies
-    -- by model is a THEORY PARAMETER the model instantiates: `grad : a
+    -- by model is a THEORY PARAMETER the model instantiates in `grad : a
     -- ⇒ g` is one slot with one type, and `g` is `Float` for the plain
     -- model and `Float` for the dual one here (a `Grad` in
     -- autodiff.braid).  A wire parameter used ONLY in an exit's output
@@ -1519,22 +1519,22 @@ evalTests =
      \    sample : \8226 \8658 a\n\
      \    observe : a \8658 Float\n\
      \    grad : a \8658 g\n\
-     \model F : S(Float, Float) =\n\
+     \model F in S(Float, Float) =\n\
      \    lit = id\n\
      \    add = fadd\n\
      \    sample = 1.5\n\
      \    observe = id\n\
      \    grad = zt\n\
-     \model D : S(Dual, Float) =\n\
+     \model D in S(Dual, Float) =\n\
      \    lit = (c -> c 0.0 ; Dual)\n\
      \    add = dadd\n\
      \    sample = 1.5 1.0 ; Dual\n\
      \    observe = val\n\
      \    grad = tan\n\
-     \transformation V : D \8658 F = val, zt\n\
-     \def p = over S ; (x -> x (2.0 ; lit) ; add)\n\
-     \def pF = use F ; p\n\
-     \def pD = use D ; p\n\
+     \transformation V in D \8658 F = val, zt\n\
+     \def p in S = (x -> x (2.0 ; lit) ; add)\n\
+     \def pF with F = p\n\
+     \def pD with D = p\n\
      \2.0 ; pF ; print\n\
      \(2.0 1.0 ; Dual) ; pD ; tan ; print",
      ["4.0", "1.0"], "")
@@ -1612,7 +1612,7 @@ evalTests =
      \([unDual ; (a da -> da a ; Dual)] ; getCode ; unparse) \
      \; eq? ; verdict ; print",
      ["alt1()"], "")
-    -- FUNCTORS (stage 3): `use` grows a third kind of name.  A functor
+    -- FUNCTORS (stage 3): `with` grows a third kind of name.  A functor
     -- is any pure `Code ⇒ Code` word; the scope's body is reified, the
     -- word RUNS at elaboration, and the result is spliced back and
     -- re-inferred.  Here `Traced` weaves a trace after every stage.
@@ -1637,28 +1637,28 @@ evalTests =
     -- and the literal round-trips through unparse/parse by its name
   , ("[2.5 ... ; fmul] ; reflect ; ((c -> c ; unparse ; print) | print) ; forget\n[2.5 ... ; fmul] ; reflect ; ((c -> [2.5 ... ; fmul] c 3.0 ; evalAs ; print) | print) ; forget",
      ["2.5 pass >> fmul", "alt1(7.5)"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\ndef weave   = (f h -> [(s -> (s >> pack) h >> append)] f >> flatMap)\ndef tracer  = (f -> f ([trace] >> getCode) >> weave)\nfunctor Traced = tracer\ndef process =\n    use Traced\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\ndef weave   = (f h -> [(s -> (s >> pack) h >> append)] f >> flatMap)\ndef tracer  = (f -> f ([trace] >> getCode) >> weave)\nfunctor Traced = tracer\ndef process with Traced =\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
      ["7", "49", "2", "98", "98"], "")
     -- an identity functor changes nothing
-  , ("def idF = (c -> c)\nfunctor Same = idF\ndef p = use Same ; 1 ... >> +\n3 >> p >> print",
+  , ("def idF = (c -> c)\nfunctor Same = idF\ndef p with Same = 1 ... >> +\n3 >> p >> print",
      ["4"], "")
     -- three kinds of name in ONE header: model renames, resource
     -- routes, functor rewrites — in that order
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud : Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run =\n    use Log Loud Same\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud in Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run with Log Loud Same =\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
      ["25"], "")
     -- STAGE 4: the checked interposition.  A marker reads no wire —
     -- `ρ =IO> ρ` — so `interpose` admits it at every cut
-  , ("def tick = [\"tick\" ... >> print ...] >> getCode\ndef ticked = tick ... >> interpose\nfunctor Ticked = ticked\ndef twice = use Ticked >> dup >> +\n21 >> twice >> print",
+  , ("def tick = [\"tick\" ... >> print ...] >> getCode\ndef ticked = tick ... >> interpose\nfunctor Ticked = ticked\ndef twice with Ticked = dup >> +\n21 >> twice >> print",
      ["tick", "tick", "42"], "")
     -- a resource endomorphism `Fuel ρ ⇒ Fuel ρ` is admitted too, and
     -- meters every stage of the ROUTED program (the claim stage
-    -- `use Fuel` writes, then six cuts of arithmetic)
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef poly =\n    use Fuel Metered\n    dup >> *\n    dup >> +\n    _ 1 >> +\n(10 >> Fuel) 5 >> poly >> _ print >> unFuel >> print",
+    -- `with Fuel` writes, then six cuts of arithmetic)
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef poly with Fuel Metered =\n    dup >> *\n    dup >> +\n    _ 1 >> +\n(10 >> Fuel) 5 >> poly >> _ print >> unFuel >> print",
      ["51", "3"], "")
     -- the marker tracer of examples/traced.braid: the stage's text is
     -- the marker's content, so it lifts everywhere a wire-reading
     -- trace could not
-  , ("def orNil = ((c -> c) | drop >> nil) >> merge\ndef markStage = (s -> \"\\\"after \" (s >> pack >> unparse) >> cat >> _ \"\\\" ... >> print ...\" >> cat >> parse >> orNil)\ndef marked = [(s -> (s >> pack) (s >> markStage) >> append)] ... >> stagewise\nfunctor Traced = marked\ndef poly = use Traced >> dup >> * >> _ 1 >> +\n5 >> poly >> print",
+  , ("def orNil = ((c -> c) | drop >> nil) >> merge\ndef markStage = (s -> \"\\\"after \" (s >> pack >> unparse) >> cat >> _ \"\\\" ... >> print ...\" >> cat >> parse >> orNil)\ndef marked = [(s -> (s >> pack) (s >> markStage) >> append)] ... >> stagewise\nfunctor Traced = marked\ndef poly with Traced = dup >> * >> _ 1 >> +\n5 >> poly >> print",
      ["after dup", "after *", "after _ 1", "after +", "26"], "")
     -- by-generators functors: stagewise and atomwise are flatMaps on
     -- the spine
@@ -1669,7 +1669,7 @@ evalTests =
     -- lift2: a Code ⇒ Code functor lifted to Fn ⇒ Fn at runtime, the
     -- program its own witness — metered where the result types, and
     -- the original where it does not
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [use Fuel >> dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [with Fuel = dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
      ["25", "7"], "")
   , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [dup >> *] >> lift2) 5 >> ev >> print",
      ["25"], "")
@@ -1817,7 +1817,7 @@ evalTests =
     -- forward reference across the model boundary, at RUNTIME: the
     -- module's own defs are mutually visible, so a slot body calling a
     -- def written after it resolves
-  [ ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\nmodel S : Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total = use S ; [op] unit ... ; foldExp\n1 2 3 >> total >> print",
+  [ ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\ndef myAdd = +\nmodel S in Monoid(Int) =\n    unit = 0\n    op   = myAdd\ndef total with S = [op] unit ... ; foldExp\n1 2 3 >> total >> print",
      ["6"], "")
   ] ++
   [ ("1 2 >> (1 ... >> +) (2 _ >> *) >> + >> print", ["6"],  "")   -- succ, double
@@ -1857,15 +1857,15 @@ evalTests =
     -- deepest wire first — the order they are written in
   , ("1 2 3 >> print print print",        ["1","2","3"], "")
     -- laws RUN at module start; a passing model is transparent
-  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel Good : M(Int) =\n    unit = 0\n    op = +\n    sample = 7\ndef t = use Good ; [op] unit ... ; foldExp\n1 2 3 >> t >> print", ["6"], "")
+  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel Good in M(Int) =\n    unit = 0\n    op = +\n    sample = 7\ndef t with Good = [op] unit ... ; foldExp\n1 2 3 >> t >> print", ["6"], "")
     -- STAGE 5a: a LAW that uses a slot-local variable.  `box : b ⇒ a`
     -- is polymorphic in b, so the law may call it at Int while the
     -- theory's own parameter is Str — which is the point of the
     -- variable being local to the slot rather than to the theory.
-  , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel W : Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w = use W ; box\n5 >> w >> print",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\n    sample : • ⇒ a\n    law boxOne = (1 ; box) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel W in Wrap(Str) =\n    box = toStr\n    sample = \"1\"\ndef w with W = box\n5 >> w >> print",
      ["5"], "")
     -- STAGE 5a: a theory over a type CONSTRUCTOR, composed and run
-  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) over Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P : Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 = over P ; [_ 1 ; +] ... ; embed ... ; _ [_ 2 ; *] ; _ embed ; compose ; unK ; _ 5 ; ev\nrun2 >> print",
+  , ("data K(a, b) = Fn⟨a ⇒ b⟩\ntheory Arrow(k(_, _)) in Doctrine =\n    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n    compose : k(a, b) k(b, c) ⇒ k(a, c)\nmodel P in Arrow(K) =\n    embed  = K\n    compose = (f g -> [(x -> f ; unK ; _ x ; ev ; (y -> g ; unK ; _ y ; ev))] ; K)\ndef run2 in P = [_ 1 ; +] ... ; embed ... ; _ [_ 2 ; *] ; _ embed ; compose ; unK ; _ 5 ; ev\nrun2 >> print",
      ["12"], "")
   , ("10 20 30 >> indicesN",              [],  "0 10 1 20 2 30")
   , ("fin0 10 20 30 >> at >> print",      ["10"], "")   -- 0 = DEEPEST
@@ -1892,19 +1892,19 @@ evalTests =
     -- elaborated body is a closed spine, so `reflect` is total on it
     -- and the label rides through the witness
   , ("def decr = _ 1 >> -\n\
-     \def fac = use Recursive ; (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
+     \def fac with Recursive = (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
      \[fac] ([fac] >> getCode) (5) >> evalAs >> (print | print forget) >> merge",
      ["120"], "")
   , ("def decr = _ 1 >> -\n\
-     \def fac = use Recursive ; (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
+     \def fac with Recursive = (n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> fac) >> *)) >> merge)\n\
      \[dup >> *] ([fac] >> getCode) (5) >> evalAs >> (print | print forget) >> merge",
      ["Cannot unify effects: Recursive vs pure (the expected type fixes the grade; this code must stay pure)"], "")
-    -- a FUNCTOR on the same header sees the closed spine: `use Ticked
+    -- a FUNCTOR on the same header sees the closed spine: `with Ticked
     -- Recursive` traces every stage of the knot, on every re-entry
   , ("def tick = [\"tick\" ... >> print ...] >> getCode\n\
      \def ticked = tick ... >> interpose\n\
      \functor Ticked = ticked\n\
-     \def down = use Ticked Recursive ; (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
+     \def down with Ticked Recursive = (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
      \2 >> down >> print",
      ["tick", "tick", "tick", "0"], "")
     -- OPEN recursion still works: `fix` takes a body someone else
@@ -1930,7 +1930,7 @@ evalTests =
     -- pure: the derived word runs the knot's `ev`, and the scope it is
     -- written under mints unconditionally.  Everything INSIDE the
     -- arrow — the body's grade, the knot's — is unchanged.
-  , ("theory Derived =\n    fixD       : Fn⟨Fn⟨a =Recursive> b⟩ a ⇒ b⟩ =Recursive> Fn⟨a =Recursive> b⟩\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Recursive> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Recursive> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Recursive> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\nmodel D : Derived =\n    fixD       = fix\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
+  , ("theory Derived =\n    fixD       : Fn⟨Fn⟨a =Recursive> b⟩ a ⇒ b⟩ =Recursive> Fn⟨a =Recursive> b⟩\n    loopD      : Fn⟨a ⇒ (a | b)⟩ a =Recursive> b\n    whileD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ a⟩ a =Recursive> c\n    untilD     : Fn⟨a ⇒ (b | c)⟩ Fn⟨c ⇒ a⟩ a =Recursive> b\n    case2D     : Fn⟨a ⇒ b⟩ Fn⟨c ⇒ b⟩ (a | c) ⇒ b\n    curryD     : Fn⟨a b ⇒ c⟩ ⇒ Fn⟨a ⇒ Fn⟨b ⇒ c⟩⟩\n    captureD   : a Fn⟨a b ⇒ c⟩ ⇒ Fn⟨b ⇒ c⟩\n    liftD      : Fn⟨a ⇒ b⟩ ⇒ Fn⟨c a ⇒ c b⟩\n    boxD       : Fn⟨a ⇒ b⟩ Code ⇒ Fn⟨a ⇒ (b | Str a)⟩\n    lift2D     : Fn⟨Code ⇒ Code⟩ Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩\n    mapD       : Fn⟨a ⇒ b⟩ List(a) ⇒ List(b)\n    foldD      : Fn⟨a b ⇒ a⟩ a List(b) ⇒ a\n    filterD    : Fn⟨a ⇒ (b | c)⟩ List(a) ⇒ List(b)\n    flatMapD   : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    condD      : Bool Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ a ⇒ b\n    stagewiseD : Fn⟨a ⇒ List(b)⟩ List(a) ⇒ List(b)\n    getCodeD   : Fn⟨a ⇒ b⟩ ⇒ Code\n    negateD    : Fn⟨a ⇒ (b | c)⟩ ⇒ Fn⟨a ⇒ (c | b)⟩\n    otherwiseD : (a | b) Fn⟨b ⇒ a⟩ ⇒ a\n    ifRouteD   : a Fn⟨a ⇒ (b | c)⟩ Fn⟨b ⇒ d⟩ ⇒ (d | c)\n\nmodel D in Derived =\n    fixD       = fix\n    loopD      = loop\n    whileD     = while\n    untilD     = until\n    case2D     = case2\n    curryD     = curry\n    captureD   = capture\n    liftD      = lift\n    boxD       = box\n    lift2D     = lift2\n    mapD       = map\n    foldD      = fold\n    filterD    = filter\n    flatMapD   = flatMap\n    condD      = cond\n    stagewiseD = stagewise\n    getCodeD   = getCode\n    negateD    = negate\n    otherwiseD = otherwise\n    ifRouteD   = ifRoute\n\n\"ok\" >> print", ["ok"], "")
     -- …and the consequence, run: a WRITTEN pure `Fn⟨Int ⇒ (Int|Int)⟩`
     -- in a data field reaches `loop`, which no derived word could take
     -- while composition unified grades.
@@ -2258,12 +2258,12 @@ evalTests =
      ["_ dup pass >> _ _ unShape >> dup pass >> _ swap pass >> _ _ (#dist:3 >> (_ drop >> dup pass >> drop pass | _ drop drop >> dup pass >> drop pass | _ drop drop drop >> dup pass >> drop pass)) >> drop drop pass"], "")
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndata Shape = (Int | Int Int | Int Int Int)\ndef pick = [(x s -> s >> unShape >> (drop >> x | drop drop >> x 100 >> + | drop drop drop >> x 200 >> +) >> mergeShape)]\ndef c = (pick) >> getCode\n9 (7 >> alt1 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge\n9 (7 8 >> alt2 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge\n9 (7 8 1 >> alt3 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge",
      ["9", "109", "209"], "")
-    -- `use F` over the `fix` IDIOM: the 5a½ demo that was refused
-  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef fac =\n    use Traced\n    [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...\n    fix ...\n    ev\n4 >> fac >> print",
+    -- `with F` over the `fix` IDIOM: the 5a½ demo that was refused
+  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef fac with Traced =\n    [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...\n    fix ...\n    ev\n4 >> fac >> print",
      ["after [_ dup pass >> _ _ zero? >> dup pass >> _ swap pass >> _ _ (dist2 >> (_ _ 1 >> _ drop pass >> drop pass | _ dup pass >> _ dup pass >> _ _ swap pass >> dup pass >> _ swap pass >> _ _ swap pass >> _ _ _ (_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ ev >> _ drop pass >> drop pass) >> _ _ * >> _ drop pass >> drop pass)) >> _ _ merge >> drop drop pass] pass",
       "after fix pass", "after ev", "24"], "")
     -- and over a capturing QUOTE, where the emitted word is `capture`
-  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef adder =\n    use Traced\n    (n -> [n ... >> +])\n7 >> adder >> _ 5 >> ev >> print",
+  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef adder with Traced =\n    (n -> [n ... >> +])\n7 >> adder >> _ 5 >> ev >> print",
      ["after dup pass", "after _ (_ [dup pass >> _ + >> drop pass] >> capture)", "after drop pass", "12"], "")
     -- dist2/undist2 are inverse at sample points
   , ("7 (5 >> alt1) >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
@@ -2473,63 +2473,63 @@ evalTests =
     -- was minted onto, and code that carries a label needs a witness
     -- that carries it too — the sandbox reads provenance exactly as it
     -- reads io
-  , (idF ++ "def q = [use Same >> dup >> *]\nq >> getCode >> unparse >> print",
-     ["use@Same >> dup >> *"], "")
-  , (idF ++ "def q = [use Same >> dup >> *]\n[use Same >> dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
+  , (idF ++ "def q = [with Same = dup >> *]\nq >> getCode >> unparse >> print",
+     ["with@Same >> dup >> *"], "")
+  , (idF ++ "def q = [with Same = dup >> *]\n[with Same = dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
      ["36"], "")
-  , (idF ++ "def q = [use Same >> dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
+  , (idF ++ "def q = [with Same = dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
      ["Cannot unify effects: Same vs pure (the expected type fixes the grade; this code must stay pure)"], "")
 
     -- TEMPLATES run: one body, two models, two answers
-  , (tmplMod ++ "def total  = use IntSum ; fold1\n\
-     \def joined = use StrCat ; fold1\n\
+  , (tmplMod ++ "def total  with IntSum = fold1\n\
+     \def joined with StrCat = fold1\n\
      \1 2 3 4 ; total ; print\n\
      \\"a\" \"b\" \"c\" ; joined ; print", ["10", "abc"], "")
     -- a template calling a template, at both models
-  , (tmplMod ++ "def a = use IntSum ; quad\ndef b = use StrCat ; quad\n\
+  , (tmplMod ++ "def a with IntSum = quad\ndef b with StrCat = quad\n\
      \5 ; a ; print\n\"z\" ; b ; print", ["20", "zzzz"], "")
     -- a template is expanded where it LANDS: a resource scope between
     -- the model and the call routes the expanded body too
   , (tmplMod ++ "resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
-     \def p =\n    use IntSum\n    use Log\n    twice\n    \"done\"\n    note\n\
+     \def p with IntSum Log =\n    twice\n    \"done\"\n    note\n\
      \(\"\" ; Log) 3 ; p ; unLog _ ; print ... ; print", ["done", "6"], "")
     -- the handler discharges the resource and the program runs
-  , (handlerMod ++ "def square =\n    use Log\n    dup ; *\n    \"squared \"\n    note\n\
+  , (handlerMod ++ "def square with Log =\n    dup ; *\n    \"squared \"\n    note\n\
      \[square] ; collectLog ; _ 7 ; ev\nprint print",
      ["squared ", "49"], "")
     -- the generic handler, at the resource its model names
   , (collectorMod ++ "def bump = unCounter ; 1 ... ; + ; Counter\n\
-     \def tick =\n    use Counter\n    dup ; *\n    bump\n\
-     \def collectCount = use Counts ; collected\n\
+     \def tick with Counter =\n    dup ; *\n    bump\n\
+     \def collectCount with Counts = collected\n\
      \[tick] ; collectCount ; _ 7 ; ev\nprint print", ["1", "49"], "")
 
-    -- STAGE 5b: RULE SETS.  `model Opt : Base = p = q` declares a word
-    -- `Opt : Code ⇒ Code` and a functor of the same name; `use Opt`
+    -- STAGE 5b: RULE SETS.  `model Opt in Base = p = q` declares a word
+    -- `Opt : Code ⇒ Code` and a functor of the same name; `with Opt`
     -- applies it atomwise and mints `=Opt>`.  The rule itself is
     -- blessed ONCE, at the declaration, by `subsumes` — unification
     -- blesses a call, subsumption blesses a rule.
-  , (ruleMod ++ "def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
+  , (ruleMod ++ "def p with Opt =\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
     -- the inline and the block form declare the same set
   , ("def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
-     \model Opt : Base\n    dupInt = dup\n    twice = double\n\
-     \def p =\n    use Opt\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
+     \model Opt in Base\n    dupInt = dup\n    twice = double\n\
+     \def p with Opt =\n    dupInt\n    +\n5 >> p >> print", ["10"], "")
     -- a rule fires inside a QUOTATION: the engine recurses into quotes,
     -- rows (residual flag carried) and groups
-  , (ruleMod ++ "def mapped =\n    use Opt\n    [dupInt >> +] ... >> map\n\
+  , (ruleMod ++ "def mapped with Opt =\n    [dupInt >> +] ... >> map\n\
      \(1 2 3 >> pack) >> mapped >> print", ["list(2, 4, 6)"], "")
     -- ... and therefore into a `fix` body, where the recursion lives
-  , (ruleMod ++ "def sumTo =\n    use Opt\n\
+  , (ruleMod ++ "def sumTo with Opt =\n\
      \    [(self a n -> n >> dupInt >> drop _ >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> _ 1 >> -) >> self ... >> ev)) >> merge)] ...\n\
      \    fix ...\n    ev\n0 5 >> sumTo >> print", ["15"], "")
     -- a row, and a RESIDUAL row, both rewrite
   , (ruleMod ++ "data Case(---) = (Int | ---)\n\
-     \def bump = use Opt ; unCase ; (dupInt ; + | ---) ; Case\n\
+     \def bump with Opt = unCase ; (dupInt ; + | ---) ; Case\n\
      \(3 >> alt1 >> Case) >> bump >> unCase >> (pass | forget >> 0) >> merge >> print",
      ["6"], "")
     -- a PURE replacement under an IO pattern passes: ∅ is the bottom of
     -- the grade semilattice, so subeffecting comes free with `subsumes`
-  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel G : Base = noisy = quiet\n\
-     \def prog =\n    use G\n    noisy\n\"ran\" >> print\n5 >> prog", ["ran"], "")
+  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel G in Base = noisy = quiet\n\
+     \def prog with G =\n    noisy\n\"ran\" >> print\n5 >> prog", ["ran"], "")
     -- `lift2` applies the same word at RUNTIME, with the program as its
     -- own witness and its own fallback
   , (ruleMod ++ "[Opt] [dupInt >> +] >> lift2 >> _ 5 >> ev >> print", ["10"], "")
@@ -2567,13 +2567,13 @@ evalTests =
      ["yes", "yes", "no"], "")
     -- the laws as a THEORY, audited at module start: a model that
     -- fails one stops the module before main runs
-  , (ruleMod ++ optimizerTheory ++ "model OptIsOpt : Optimizer\n\
+  , (ruleMod ++ optimizerTheory ++ "model OptIsOpt in Optimizer\n\
      \    ap     = Opt\n    sample = [twice >> dupInt >> +] >> getCode\n\"audited\" >> print",
      ["audited"], "")
     -- A TRANSFORMATION accepted: the squares are checked at declaration time
     -- and the component is an ordinary word under its own name, usable
     -- in a def that was written before the declaration.
-  , (monoidMod ++ "transformation Len : ListMonoid ⇒ IntSum = len\n\
+  , (monoidMod ++ "transformation Len in ListMonoid ⇒ IntSum = len\n\
      \def three = 1 2 3 >> pack >> Len\nthree >> print",
      ["3"], "")
     -- A TRANSFORMATION OVER A CARRIER THAT HOLDS A FUNCTION (2026-09-14).
@@ -2582,22 +2582,22 @@ evalTests =
     -- evidence THROUGH THE EXIT.  Compared as carriers it would be
     -- `eq?` on a quotation, which is syntactic, and this declaration
     -- would be refused for a square that commutes.
-  , (closureMod ++ "transformation Scaled : Src ⇒ Dst = toK\n\
+  , (closureMod ++ "transformation Scaled in Src ⇒ Dst = toK\n\
      \def run = Scaled >> unK >> (v k -> k 5 >> ev)\n\
      \2 3 >> Two >> run >> print",
      ["15"], "")
-    -- the same theory with no `over Doctrine` is not a category: the
+    -- the same theory with no `in Doctrine` is not a category: the
     -- spine is left alone, and only the receipt is minted
-  , (plainMod ++ "[use Plain ; add1 ; dbl] ; getCode ; unparse ; print",
-     ["use@Plain >> add1 >> dbl"], "")
-    -- TRANSPORT (5c, reshaped 5c½).  The scope runs: `use Funcs ; add1
+  , (plainMod ++ "[with Plain = add1 ; dbl] ; getCode ; unparse ; print",
+     ["with@Plain >> add1 >> dbl"], "")
+    -- TRANSPORT (5c, reshaped 5c½).  The scope runs: `with Funcs ; add1
     -- ; dbl` is `compose (embed [add1]) (embed [dbl])`, and the EXIT is
-    -- called under `over`, which transports nothing.
-  , (modeMod ++ "def obs = over Funcs ; chain ; observe\nobs ; print",
+    -- called under `in`, which transports nothing.
+  , (modeMod ++ "def obs in Funcs = chain ; observe\nobs ; print",
      ["16"], "")
     -- what the scope EMITS, read back off the elaborated spine
-  , (modeMod ++ "[use Funcs ; add1 ; dbl] ; getCode ; unparse ; print",
-     ["use@Funcs >> [add1] >> Funcs@embed >> _ [dbl] >> _ Funcs@embed >> Funcs@compose"], "")
+  , (modeMod ++ "[with Funcs = add1 ; dbl] ; getCode ; unparse ; print",
+     ["with@Funcs >> [add1] >> Funcs@embed >> _ [dbl] >> _ Funcs@embed >> Funcs@compose"], "")
     -- a transporting model declares a WORD of its own name as well, so
     -- the same functor is a value: `[Funcs]` is a quote and the code it
     -- returns splices and runs.  It seeds with an identity carrier
@@ -2614,43 +2614,43 @@ evalTests =
     -- side, so a wide stage is PACKED with the pairing the strength
     -- names — read off `first`'s declared type, nothing built in — and
     -- a narrow one is whiskered with `first` once per wire above it.
-  , (wideMod ++ "def sq = use Wide ; dup ; *\n\
-     \def run = over Wide ; sq ; _ 5 ; runW\nrun ; print", ["25"], "")
-  , (wideMod ++ "[use Wide ; dup ; *] ; getCode ; unparse ; print",
-     ["use@Wide >> [dup >> P] >> Wide@embed >> _ [unP >> *] >> _ Wide@embed \
+  , (wideMod ++ "def sq with Wide = dup ; *\n\
+     \def run in Wide = sq ; _ 5 ; runW\nrun ; print", ["25"], "")
+  , (wideMod ++ "[with Wide = dup ; *] ; getCode ; unparse ; print",
+     ["with@Wide >> [dup >> P] >> Wide@embed >> _ [unP >> *] >> _ Wide@embed \
       \>> Wide@compose"], "")
     -- a three-wire stage, and a stage that acts on a wire that is not
     -- the deepest
-  , (wideMod ++ "def poly = use Wide ; dup ; _ dup ; _ _ add1 ; _ * ; +\n\
-     \def run = over Wide ; poly ; _ 5 ; runW\nrun ; print", ["35"], "")
+  , (wideMod ++ "def poly with Wide = dup ; _ dup ; _ _ add1 ; _ * ; +\n\
+     \def run in Wide = poly ; _ 5 ; runW\nrun ; print", ["35"], "")
     -- `...` is what the strength becomes: `add1 ...` acts on the deepest
     -- wire and the one above it rides along, which is `first`
-  , (wideMod ++ "[use Wide ; dup ; add1 ... ; *] ; getCode ; unparse ; print",
-     ["use@Wide >> [dup >> P] >> Wide@embed >> _ [add1 pass] >> _ Wide@embed \
+  , (wideMod ++ "[with Wide = dup ; add1 ... ; *] ; getCode ; unparse ; print",
+     ["with@Wide >> [dup >> P] >> Wide@embed >> _ [add1 pass] >> _ Wide@embed \
       \>> _ Wide@first >> Wide@compose >> _ [unP >> *] >> _ Wide@embed \
       \>> Wide@compose"], "")
-  , (wideMod ++ "def w = use Wide ; dup ; add1 ... ; *\n\
-     \def run = over Wide ; w ; _ 5 ; runW\nrun ; print", ["30"], "")
+  , (wideMod ++ "def w with Wide = dup ; add1 ... ; *\n\
+     \def run in Wide = w ; _ 5 ; runW\nrun ; print", ["30"], "")
     -- LEVEL ONE, composition alone: carriers built by hand compose, and
     -- the composite is a word of the category with no label on it
-  , (halfMod ++ "def f = over HW ; [inc] ; H\ndef g = over HW ; [dbl] ; H\n\
-     \def fg = over HW ; f g ; compose\nfg ; unH ; _ 5 ; ev ; print", ["12"], "")
-    -- OVER/USE COHERENCE: the transport writes out what `over` writes
+  , (halfMod ++ "def f in HW = [inc] ; H\ndef g in HW = [dbl] ; H\n\
+     \def fg in HW = f g ; compose\nfg ; unH ; _ 5 ; ev ; print", ["12"], "")
+    -- OVER/USE COHERENCE: the transport writes out what `in` writes
     -- by hand, so the two denote the same morphism
-  , (wideMod ++ "def byHand = over Wide ; [add1] ; embed ; _ [dbl] ; _ embed ; compose\n\
-     \def byUse = use Wide ; add1 ; dbl\n\
-     \def h5 = over Wide ; byHand ; _ 5 ; runW\n\
-     \def u5 = over Wide ; byUse ; _ 5 ; runW\n\
+  , (wideMod ++ "def byHand in Wide = [add1] ; embed ; _ [dbl] ; _ embed ; compose\n\
+     \def byUse with Wide = add1 ; dbl\n\
+     \def h5 in Wide = byHand ; _ 5 ; runW\n\
+     \def u5 in Wide = byUse ; _ 5 ; runW\n\
      \h5 u5 ; eq? ; (forget ; \"same\" | forget ; \"differ\") ; merge ; print",
      ["same"], "")
-  , (sealedMod ++ "def g2 = use Sealed ; guarded ; inc\n\
+  , (sealedMod ++ "def g2 with Sealed = guarded ; inc\n\
      \g2 ; unCap ; _ 5 ; ev ; print", ["8"], "")
     -- A RECEIPT IS `pass` WITH A LABEL, so the normalizer erases it as
     -- it erases `pass`.  Without this no law could be stated about a
-    -- program written under any `use` scope: `use@F` has no closed
+    -- program written under any `with` scope: `with@F` has no closed
     -- arity, and `sameCode` refused the whole comparison.
   , (idF ++ "def v = (\"proved\" | \"not proved\") ; merge\n\
-     \[use Same ; dup ; _ dup] [dup ; dup _] ; sameCode ; v ; print",
+     \[with Same = dup ; _ dup] [dup ; dup _] ; sameCode ; v ; print",
      ["proved"], "")
   ]
 
@@ -2658,7 +2658,7 @@ evalTests =
 ruleMod :: String
 ruleMod =
   "def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
-  \model Opt : Base = dupInt = dup, twice = double\n"
+  \model Opt in Base = dupInt = dup, twice = double\n"
 
 optimizerTheory :: String
 optimizerTheory =
@@ -2689,9 +2689,9 @@ moduleNoHintTests =
     -- ...and nothing in it is a residual
   , ("def f =\n  1\n  (a b -> a b ; +)\n1 ; f ; print",
      "An open injection leaves a residual")
-    -- `use Recursive` is in the header, but the refusal is not an
+    -- `with Recursive` is in the header, but the refusal is not an
     -- occurs check and no row is in sight
-  , ("def r =\n  use Recursive\n  \"x\" ; +\n1 ; r ; print",
+  , ("def r with Recursive =\n  \"x\" ; +\n1 ; r ; print",
      "wants `merge` after the row")
     -- a row that fails without a knot in it
   , ("def arms = (n ->\n    n 0 ; lt?\n    ((x -> 1)\n    | (x -> 2)) ; merge)\n1 ; arms ; print",
@@ -2707,20 +2707,20 @@ moduleFailTests =
     -- refused with the spelling that is right: a family is not a model,
     -- a model is not a family, the argument must be a model in scope,
     -- and it must model the theory the parameter declares.
-  [ (famSrc ++ "def d = use Fwd ; cube\nd ; drop",
-     "`use Fwd`: Fwd is a model PARAMETERIZED by a model")
-  , (famSrc ++ "def d = use Floats(Fwd) ; cube\nd ; drop",
+  [ (famSrc ++ "def d with Fwd = cube\nd ; drop",
+     "`with Fwd`: Fwd is a model PARAMETERIZED by a model")
+  , (famSrc ++ "def d with Floats(Fwd) = cube\nd ; drop",
      "Floats is not a parameterized model at this point")
-  , (famSrc ++ "def d = use Fwd(Nope) ; cube\nd ; drop",
-     "`use Fwd(Nope)`: Nope is not a model declared at this point")
+  , (famSrc ++ "def d with Fwd(Nope) = cube\nd ; drop",
+     "`with Fwd(Nope)`: Nope is not a model declared at this point")
   , (famSrc ++ "theory Mon(a) =\n    op : a a \8658 a\n\
-      \model Ints : Mon(Int) =\n    op = +\n\
-      \def d = use Fwd(Ints) ; cube\nd ; drop",
-     "the parameter 'R' of model Fwd takes a model of Ring, and Ints models Mon")
+      \model Ints in Mon(Int) =\n    op = +\n\
+      \def d with Fwd(Ints) = cube\nd ; drop",
+     "the parameter of model Fwd takes a model of Ring, and Ints models Mon")
     -- ...and a FALSE family, refused where it is first applied
-  , (badFamSrc ++ "def d = use Fwd(Floats) ; cube\nd ; drop",
+  , (badFamSrc ++ "def d with Fwd(Floats) = cube\nd ; drop",
      "law 'addComm' fails for model Fwd(Floats)")
-  , (badFamSrc ++ "def d = use Fwd(Floats) ; cube\nd ; drop",
+  , (badFamSrc ++ "def d with Fwd(Floats) = cube\nd ; drop",
      "laws are checked AT EACH INSTANTIATION")
   , ("def f =\n    1 2 ; +\n    \"x\" ; +\n1 ; print",
      "line 3, in def f: Cannot unify types: Str vs Int")
@@ -2747,8 +2747,7 @@ moduleFailTests =
     -- a recursive call inside a row, with no `merge` to close it
   , ("def lt100? = _ 100 >> lt? >> (_ drop | _ drop)\n\
      \def double = 2 _ >> *\n\
-     \def until100 =\n\
-     \  use Recursive\n\
+     \def until100 with Recursive =\n\
      \  lt100?\n\
      \  double >> until100 | _\n\
      \1 >> until100 >> print",
@@ -2809,19 +2808,19 @@ moduleFailTests =
      \    sample : \8226 \8658 a\n\
      \    observe : a \8658 Float\n\
      \    grad : a \8658 g\n\
-     \model F : S(Float, Float) =\n\
+     \model F in S(Float, Float) =\n\
      \    lit = id\n\
      \    add = fadd\n\
      \    sample = 1.5\n\
      \    observe = id\n\
      \    grad = zt\n\
-     \model D : S(Dual, Float) =\n\
+     \model D in S(Dual, Float) =\n\
      \    lit = (c -> c 0.0 ; Dual)\n\
      \    add = dadd\n\
      \    sample = 1.5 1.0 ; Dual\n\
      \    observe = val\n\
      \    grad = tan\n\
-     \transformation V : D \8658 F = val\n\
+     \transformation V in D \8658 F = val\n\
      \1 ; print",
      "a natural transformation has ONE COMPONENT PER PARAMETER")
     -- A BINDER PATTERN refuses two things by name (2026-09-14): a
@@ -2844,7 +2843,7 @@ moduleFailTests =
   , ("def dist2 = dup\n1 >> print",
      "`dist2` cannot be shadowed: abstraction elimination EMITS it")
     -- a FALSE law rejects the module when it starts running
-  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel BadUnit : M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
+  , ("theory M(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n    sample : • ⇒ a\n    law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge\nmodel BadUnit in M(Int) =\n    unit = 1\n    op = +\n    sample = 7\n1 >> print",
      "law 'leftUnit' fails for model BadUnit")
     -- the evalCode arity gap: spliced code produces 2 wires but the
     -- context typed the hit track as 0 (Δ is existential, chosen by the
@@ -2859,7 +2858,7 @@ moduleFailTests =
     -- included: an io body under a pure-declared slot used to pass the
     -- stack-only check, and `functor F = <that slot>` then carried IO
     -- into elaboration, breaking the phase invariant.
-  , ("theory Rewriter =\n    rw : Code ⇒ Code\n\nmodel Loud : Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud = use Loud ; rw\n1",
+  , ("theory Rewriter =\n    rw : Code ⇒ Code\n\nmodel Loud in Rewriter =\n    rw = _ \"x\" ; _ print\n\ndef loud with Loud = rw\n1",
      "Cannot unify effects: IO vs pure")
     -- a witness is not optional: `evalAs` without one is an arity error
     -- (there is no longer any way to splice without stating the type)
@@ -2874,27 +2873,27 @@ moduleFailTests =
     -- composition is exact: a word threading a resource the scope does
     -- not have (or in another order) is still a routing error, with the
     -- mismatch named on both sides
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step = use Log Counter >> toStr >> note >> bump\ndef bad = use Counter Log >> step\n1",
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step with Log Counter = toStr >> note >> bump\ndef bad with Counter Log = step\n1",
      "threads Log Counter, but this scope is over Counter Log")
     -- a functor's word must be a pure `Code ⇒ Code`, checked at the
     -- first use (declarations are hoisted, so that is where the prefix
     -- scope is what it will be at run time)
-  , ("def w = dup >> *\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+  , ("def w = dup >> *\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
      "must be Code ⇒ Code")
-  , ("def w = (c -> c >> unparse >> print >> c)\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+  , ("def w = (c -> c >> unparse >> print >> c)\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
      "must be pure")
-  , ("functor F = nosuch\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+  , ("functor F = nosuch\ndef p with F = 1 ... >> +\n3 >> p >> print",
      "not defined at this point")
     -- purity is not totality: the budget is what stands between a
     -- looping functor and a hung compiler
-  , ("def w = [(self c -> c >> self ... >> ev)] ... >> fix ... >> ev\nfunctor F = w\ndef p = use F ; 1 ... >> +\n3 >> p >> print",
+  , ("def w = [(self c -> c >> self ... >> ev)] ... >> fix ... >> ev\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
      "step budget exhausted")
   , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
      "Duplicate functor declaration")
     -- STAGE 4½: a label is minted by a scope or not at all.  The
     -- receipt is a word in the environment (it has to be — it is the
     -- arrow that carries the label), so the source is checked for it.
-  , (idF ++ "def forged = use@Same >> dup >> *\n5 >> forged >> print",
+  , (idF ++ "def forged = with@Same >> dup >> *\n5 >> forged >> print",
      "not a word: a label is minted by a scope, never written by hand")
     -- STAGE 4¾: an import names a FILE, and a file read is the loader's
     -- IO — so a module checked from a string has nothing to resolve it
@@ -2906,16 +2905,16 @@ moduleFailTests =
     -- the stage's actual type, before inserting it anywhere.  Checked
     -- by SUBSUMPTION: `Int ρ ⇒ Int ρ` is a model of `ρ ⇒ ρ` but
     -- not as general as it, and fails at any empty cut.
-  , ("def peek = [dup ... >> print ...] >> getCode\ndef peeked = peek ... >> interpose\nfunctor Peeked = peeked\ndef bad = use Peeked >> dup >> +\n3 >> bad >> print",
+  , ("def peek = [dup ... >> print ...] >> getCode\ndef peeked = peek ... >> interpose\nfunctor Peeked = peeked\ndef bad with Peeked = dup >> +\n3 >> bad >> print",
      "interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a wire")
-  , ("def inc = [1 ... >> + ...] >> getCode\ndef inced = inc ... >> interpose\nfunctor Inced = inced\ndef bad = use Inced >> dup >> +\n3 >> bad >> print",
+  , ("def inc = [1 ... >> + ...] >> getCode\ndef inced = inc ... >> interpose\nfunctor Inced = inced\ndef bad with Inced = dup >> +\n3 >> bad >> print",
      "is Int ρ0 ⇒ Int ρ0, which reads a wire")
-  , ("def w = [0 ...] >> getCode\ndef wd = w ... >> interpose\nfunctor W = wd\ndef bad = use W >> dup >> +\n3 >> bad >> print",
+  , ("def w = [0 ...] >> getCode\ndef wd = w ... >> interpose\nfunctor W = wd\ndef bad with W = dup >> +\n3 >> bad >> print",
      "`0 pass` is ρ0 ⇒ Int ρ0, not an endomorphism")
     -- a resource stage passes the check, and then the scope must
     -- actually thread the resource: this is the re-inference of the
     -- expansion, and the error is an ordinary one
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef bad = use Metered >> dup >> +\n3 >> bad >> print",
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef bad with Metered = dup >> +\n3 >> bad >> print",
      "Cannot unify types: Int vs Fuel")
     -- outside the fragment `sameCode` REPORTS, rather than guessing:
     -- "I cannot tell" is not "they differ".  Since 2026-09-13 the
@@ -2978,48 +2977,53 @@ moduleFailTests =
   , ("resource Log = Str\nfoldLog",   "Unknown primitive: foldLog")
     -- a model is AUDITED: its slots must match the theory's
     -- signatures, read at the model's own argument
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Bad : Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Bad in Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
      "slot 'unit' is • ⇒ Str but theory Monoid declares • ⇒ Int")
     -- STAGE 5a, item 0: a slot-local variable is UNIVERSALLY quantified,
     -- so a model body that is too specific for it is refused, and
     -- the refusal names the slot
-  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W in Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
      "slot 'box' is Int ⇒ Str but theory Wrap declares a0 ⇒ Str")
-  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W : Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
+  , ("theory Wrap(a) =\n    box : b ⇒ a\nmodel W in Wrap(Str) =\n    box = _ 1 ; + ; toStr\n1",
      "must stay parametric in it")
     -- STAGE 5a, item 1: the four ways a constructor parameter goes wrong
   , ("theory Arrow(k(_, _)) =\n    compose : k ⇒ k\n1",
      "Type parameter k is a type constructor of arity 2: it is not a wire, write it applied — k(_, _)")
   , ("theory Arrow(k(_, _)) =\n    compose : k(a) ⇒ k(a)\n1",
      "Type constructor parameter 'k' takes 2 argument(s), but was given 1")
-  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(Nope) =\n    compose = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad in Arrow(Nope) =\n    compose = _\n1",
      "declares 'k' as a type constructor of arity 2, so its argument names a declared data type; 'Nope' is not one")
-  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(One) =\n    compose = _\n1",
+  , ("data One(a) = a\ntheory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad in Arrow(One) =\n    compose = _\n1",
      "declares 'k' with arity 2, but One takes 1 argument(s)")
     -- `Fn` is built in and takes an arrow, not wires: the refusal says
     -- so, and names the one-line wrapper that works
-  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel F : Arrow(Fn) =\n    compose = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel F in Arrow(Fn) =\n    compose = _\n1",
      "`Fn` is built in and takes an arrow, not wires")
     -- a constructor argument is a NAME, not a type expression
-  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(List(Int)) =\n    compose = _\n1",
+  , ("theory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad in Arrow(List(Int)) =\n    compose = _\n1",
      "must be a bare constructor name")
     -- and every parameter of the named constructor must be a wire, or
     -- the substitution would not be sound
-  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad : Arrow(T) =\n    compose = _\n1",
+  , ("data T(a, ...) = a (...)\ntheory Arrow(k(_, _)) =\n    compose : k(a, b) ⇒ k(a, b)\nmodel Bad in Arrow(T) =\n    compose = _\n1",
      "every parameter of a constructor argument must be a wire")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Partial : Monoid(Int) =\n    unit = 0\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Partial in Monoid(Int) =\n    unit = 0\n1",
      "no binding for 'op'")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Extra : Monoid(Int) =\n    unit = 0\n    op   = +\n    huh  = 1\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Extra in Monoid(Int) =\n    unit = 0\n    op   = +\n    huh  = 1\n1",
      "'huh' is not an operation of theory Monoid")
-  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel I : NoSuch(Int) =\n    unit = 0\n    op = +\n1",
+  , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel I in NoSuch(Int) =\n    unit = 0\n    op = +\n1",
      "Unknown theory: NoSuch")
     -- a law must be a program that can run on nothing and answer yes
-  , ("theory T(a) =\n    f : a ⇒ a\n    law silly = 5\nmodel I : T(Int) =\n    f = id\n1",
+  , ("theory T(a) =\n    f : a ⇒ a\n    law silly = 5\nmodel I in T(Int) =\n    f = id\n1",
      "must be a program with type `• ⇒ Bool`")
     -- one resource operation per stage; the elaborator says so
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f = use Log Counter >> \"x\" >> note bump\n1",
+  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f with Log Counter = \"x\" >> note bump\n1",
      "at most one resource operation")
-  , ("resource Log = Str\ndef f = use Log\n1", "ends its scope")
+    -- a clause with no body: `with` applies to something, and there is
+    -- nothing here for it to apply to
+  , ("resource Log = Str\ndef f with Log =\n1", "Empty definition body")
+    -- ...and a clause written as a STAGE is refused where it stands
+  , ("resource Log = Str\ndef f = use Log ; dup\n1",
+     "`use` is gone since 2026-09-16")
   , ("resource resource = Int\n1",    "Malformed type declaration")
     -- a declared pure Fn type refuses an io quotation: the declaration
     -- is not decoration
@@ -3033,11 +3037,11 @@ moduleFailTests =
     -- a NESTED written Fn keeps its grade through the `k := <data>`
     -- substitution: substituting theory parameters used to rebuild every
     -- nested Fn pure, which silently dropped the declared manifest
-  , ("theory Emb(k(_, _)) =\n    embed : Fn⟨a =Recursive> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A : Emb(Arr) =\n    embed = Arr\n\ndef go = use A ; embed\n[dup >> *] >> go >> drop",
+  , ("theory Emb(k(_, _)) =\n    embed : Fn⟨a =Recursive> b⟩ ⇒ k(a, b)\n\ndata Arr(a, b) = Fn⟨a ⇒ b⟩\n\nmodel A in Emb(Arr) =\n    embed = Arr\n\ndef go with A = embed\n[dup >> *] >> go >> drop",
      "slot 'embed' is Fn⟨a0 ⇒ a1⟩ ⇒ Arr(a0, a1) but theory Emb declares Fn⟨a0 =Recursive> a1⟩ ⇒ Arr(a0, a1)")
     -- a theory slot declared pure refuses a `fix`-built body — the same
     -- rule that already refused an io body under a pure slot
-  , ("theory Stepper =\n    step : Int ⇒ Int\n\nmodel Fixed : Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go = use Fixed ; step\n5 >> go >> drop",
+  , ("theory Stepper =\n    step : Int ⇒ Int\n\nmodel Fixed in Stepper =\n    step = [(self n -> n >> zero? >> ((z -> 0) | (m -> m 1 >> - >> self ... >> ev)) >> merge)] ... >> fix ... >> ev\n\ndef go with Fixed = step\n5 >> go >> drop",
      "slot 'step' is Int =Recursive> Int but theory Stepper declares Int ⇒ Int (Cannot unify effects: Recursive vs pure")
     -- the bound must agree with the bundle's actual width
   , ("fin0 >> 1 2 >> at",             "Cannot unify")
@@ -3057,18 +3061,18 @@ moduleFailTests =
      "`f` refers to itself (`recurse` named the definition being written)")
     -- and the refusal names the way out: the marker, by name
   , ("def f = 1 ... >> + >> f\n1",
-     "write `use Recursive` in its header (MANUAL §8)")
+     "write `with Recursive` in its header (MANUAL §8)")
     -- STAGE 5e: the marker is a def's HEADER.  The name it puts back in
     -- scope is the DEF's, so a scope opened part-way down the body
     -- would quietly name only that part — refused where it is written.
   , ("def f = 1 ... >> + >> (use Recursive ; drop)\n1",
-     "is a def's header")
-  , ("use Recursive ; 1", "there is no def here")
+     "`use` is gone since 2026-09-16")
+  , ("use Recursive ; 1", "`use` is gone since 2026-09-16")
     -- and the receipt is still unwritable by hand
-  , ("def f = use@Recursive ; 1\n1", "is the receipt of `use Recursive`")
+  , ("def f = with@Recursive ; 1\n1", "is the receipt of `with Recursive`")
     -- one spelling per thing: the marker owns the name, so a functor
     -- (or model, or theory) of that name is a collision, not a shadow
-  , ("def idF = (c -> c)\nfunctor Recursive = idF\ndef f = use Recursive ; (n -> n)\n1",
+  , ("def idF = (c -> c)\nfunctor Recursive = idF\ndef f with Recursive = (n -> n)\n1",
      "is the built-in recursion marker")
     -- a non-final open-arity atom must report the placement rule, not
     -- panic in appendStack (regression: was a Haskell error).  Until
@@ -3090,31 +3094,31 @@ moduleFailTests =
     -- a model of the WRONG theory in scope is the same error:
     -- selection is by theory and nothing is searched for
   , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
-     \model IntPt : Pointed(Int) =\n    pt = 9\n\
-     \def bad = use IntPt ; fold1\n1 2 ; bad ; print",
+     \model IntPt in Pointed(Int) =\n    pt = 9\n\
+     \def bad with IntPt = fold1\n1 2 ; bad ; print",
      "fold1 needs a model of Monoid in scope")
-    -- `over` declares what the def IS, so it may only be its own header
+    -- `in` declares what the def IS, so it may only be its own header
   , (tmplMod ++ "def f =\n    1\n    over Monoid\n    op\n1 ; f ; print",
-     "`over Monoid` may only be a def's own header")
-    -- and `use` no longer takes a theory at all: it applies a functor,
+     "`over` is gone since 2026-09-16")
+    -- and `with` no longer takes a theory at all: it applies a functor,
     -- and a theory is not one
-  , (tmplMod ++ "def f = use Monoid ; op\n1 ; print",
-     "`use Monoid` names a theory: `use` applies a functor, and a theory \
-     \is not one — write `over Monoid` to make this def a template")
-    -- one model is waited for, so exactly one name is `over`ed
+  , (tmplMod ++ "def f with Monoid = op\n1 ; print",
+     "`with Monoid` names a theory: `with` applies a functor, and a theory \
+     \is not one — write `in Monoid` to make this def a template")
+    -- one model is waited for, so exactly one name is `in`ed
   , (tmplMod ++ "theory Pointed(a) =\n    pt : • ⇒ a\n\
-     \def f = over Monoid Pointed ; op\n1 ; print",
-     "an `over` header names exactly one theory")
+     \def f in Monoid Pointed = op\n1 ; print",
+     "a def is ONE thing, so `in` names exactly one theory")
     -- expansion is inlining, so a template cannot recurse
-  , (tmplMod ++ "def loopy = over Monoid ; dup ; op ; loopy\n\
-     \def go = use IntSum ; loopy\n1 ; go ; print",
+  , (tmplMod ++ "def loopy in Monoid = dup ; op ; loopy\n\
+     \def go with IntSum = loopy\n1 ; go ; print",
      "template loopy calls itself")
     -- `@` IS THE COMPILER'S (stage 5a item 2a).  A slot's generated
     -- name is refused in source exactly as a functor's receipt is, and
     -- the message names the scope that reaches it.
   , (tmplMod ++ "def q = IntSum@op\n1 2 ; q ; print",
      "`IntSum@op` is the compiler's spelling of a slot: reach it with \
-     \`use IntSum`")
+     \`with IntSum`")
   , (tmplMod ++ "1 2 ; IntSum@op ; print",
      "is the compiler's spelling of a slot")
     -- a template shares the def namespace
@@ -3123,103 +3127,103 @@ moduleFailTests =
     -- stands iff scheme(q) >= arrow(p).  That is rank-2, so no `Fn` type
     -- holds it and no call site checks it: it is checked ONCE, here, by
     -- the routine `checkInstance` and `runAs` already share.
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Bad : Base = dup = dupInt\n1 >> print",
-     "model Bad : Base: `dup = dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
-  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Bad : Base = dup = dupInt\n1 >> print",
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Bad in Base = dup = dupInt\n1 >> print",
+     "model Bad in Base: `dup = dupInt` is refused: dup is used at a0 \8658 a0 a0 but dupInt is Int \8658 Int Int")
+  , ("def dupInt = dup >> _ _ 0 >> _ +\nmodel Bad in Base = dup = dupInt\n1 >> print",
      "A binding may only GENERALIZE")
     -- the parametricity case: `two = dup` would RUN on an Int and
     -- narrows `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else
-  , ("def two = drop 1 1\nmodel Bad : Base = two = dup\n1 >> print",
-     "model Bad : Base: `two = dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
-  , ("def two = drop 1 1\nmodel Bad : Base = two = dup\n1 >> print",
+  , ("def two = drop 1 1\nmodel Bad in Base = two = dup\n1 >> print",
+     "model Bad in Base: `two = dup` is refused: two is used at a0 \8658 Int Int but dup is a0 \8658 a0 a0")
+  , ("def two = drop 1 1\nmodel Bad in Base = two = dup\n1 >> print",
      "must stay parametric in it")
     -- GRADES ride along by the semilattice order: an io image under a
     -- pure generator is refused (the other direction passes)
-  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel Bad : Base = quiet = noisy\n1 >> print",
-     "model Bad : Base: `quiet = noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
-  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel Bad : Base = quiet = noisy\n1 >> print",
+  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel Bad in Base = quiet = noisy\n1 >> print",
+     "model Bad in Base: `quiet = noisy` is refused: quiet is used at a0 \8658 \8226 but noisy is a0 =IO> \8226")
+  , ("def noisy = toStr >> print\ndef quiet = drop\nmodel Bad in Base = quiet = noisy\n1 >> print",
      "the expected type fixes the grade; this code must stay pure")
-    -- a slot is not a word outside `use`, so it is neither side of a
+    -- a slot is not a word outside `with`, so it is neither side of a
     -- binding; nor is a theory, nor a template (which has no type until
     -- a model supplies one)
-  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
-     \model Bad : Base = op = +\n1 >> print",
-     "op is a slot of theory Mon, and a slot is not a word outside `use`")
-  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
-     \model Bad : Base = Plus@op = +\n1 >> print",
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus in Mon(Int) =\n    op = +\n\
+     \model Bad in Base = op = +\n1 >> print",
+     "op is a slot of theory Mon, and a slot is not a word outside `with`")
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus in Mon(Int) =\n    op = +\n\
+     \model Bad in Base = Plus@op = +\n1 >> print",
      "is the compiler's spelling of a slot")
-  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
-     \model Bad : Base = Mon = +\n1 >> print",
-     "model Bad : Base: Mon is a theory, not a word")
-  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus : Mon(Int) =\n    op = +\n\
-     \def twice = over Mon ; op\nmodel Bad : Base = twice = +\n1 >> print",
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus in Mon(Int) =\n    op = +\n\
+     \model Bad in Base = Mon = +\n1 >> print",
+     "model Bad in Base: Mon is a theory, not a word")
+  , ("theory Mon(a) =\n    op : a a \8658 a\nmodel Plus in Mon(Int) =\n    op = +\n\
+     \def twice in Mon = op\nmodel Bad in Base = twice = +\n1 >> print",
      "twice is a template over theory Mon")
-  , ("model Bad : Base = nowhere = dup\n1 >> print",
-     "model Bad : Base: nowhere is not defined at this point")
+  , ("model Bad in Base = nowhere = dup\n1 >> print",
+     "model Bad in Base: nowhere is not defined at this point")
     -- the shape of a binding: v1 sends one WORD to one word
-  , ("model Bad : Base = dup dup = dup\n1 >> print",
+  , ("model Bad in Base = dup dup = dup\n1 >> print",
      "a v1 binding sends one WORD to one word")
-  , ("model Bad : Base = dup\n1 >> print",
+  , ("model Bad in Base = dup\n1 >> print",
      "is missing `=` (a binding reads `p = q`)")
-  , ("model Bad : Base\n1 >> print", "model Bad : Base: no bindings")
-  , ("model Bad : Base = dup = swap, dup = drop\n1 >> print",
+  , ("model Bad in Base =\n1 >> print", "model Bad in Base: no bindings")
+  , ("model Bad in Base = dup = swap, dup = drop\n1 >> print",
      "two bindings give `dup` an image")
-    -- STAGE 5c½: `over` names a theory or a model with a carrier, and
+    -- STAGE 5c½: `in` names a theory or a model with a carrier, and
     -- nothing else.  Each other kind is refused by kind, with the word
     -- to write.
   , (modeMod ++ "def idF = (c -> c)\nfunctor Same = idF\n\
-     \def bad = over Same ; add1\n1 ; print",
-     "`over Same` names a functor, and a functor is applied to a body, \
-     \not inhabited by one.  Write `use Same`.")
-  , (modeMod ++ "resource Log = Str\ndef bad = over Log ; add1\n1 ; print",
-     "`over Log` names a resource, and a resource is threaded through a \
-     \body.  Write `use Log`.")
-  , (modeMod ++ "def bad = over Nope ; add1\n1 ; print",
-     "`over Nope` names nothing declared at this point")
-  , ("def dupInt = dup\nmodel Opt : Base = dupInt = dup\n\
-     \def bad = over Opt ; dupInt\n1 ; print",
-     "`over Opt` names a model of Base — a rewriting of the ambient \
-     \presentation, which is applied, not inhabited.  Write `use Opt`.")
-    -- `over` of a model with NO carrier: there is nothing to build
-  , ("theory Ring(a) =\n    add : a a ⇒ a\nmodel Ints : Ring(Int) =\n\
-     \    add = +\ndef bad = over Ints ; 1\n1 ; print",
-     "`over Ints` names a model of Ring in the base: it has no carrier \
-     \to build — write `use Ints`, or `over Ring` for a template.")
+     \def bad in Same = add1\n1 ; print",
+     "`in Same` names a functor, and a functor is applied to a body, \
+     \not inhabited by one.  Write `with Same`.")
+  , (modeMod ++ "resource Log = Str\ndef bad in Log = add1\n1 ; print",
+     "`in Log` names a resource, and a resource is threaded through a \
+     \body.  Write `with Log`.")
+  , (modeMod ++ "def bad in Nope = add1\n1 ; print",
+     "`in Nope` names nothing declared at this point")
+  , ("def dupInt = dup\nmodel Opt in Base = dupInt = dup\n\
+     \def bad in Opt = dupInt\n1 ; print",
+     "`in Opt` names a model of Base — a rewriting of the ambient \
+     \presentation, which is applied, not inhabited.  Write `with Opt`.")
+    -- `in` of a model with NO carrier: there is nothing to build
+  , ("theory Ring(a) =\n    add : a a ⇒ a\nmodel Ints in Ring(Int) =\n\
+     \    add = +\ndef bad in Ints = 1\n1 ; print",
+     "`in Ints` names a model of Ring in the base: it has no carrier \
+     \to build — write `with Ints`, or `in Ring` for a template.")
     -- the K-word ascription is a WRITTEN expectation, checked against
     -- the arrow: one carrier out of nothing, or it is refused
-  , (modeMod ++ "def bad = over Funcs ; add1\n1 ; print",
-     "`over Funcs`: bad neither builds one of Funcs's carriers — \
+  , (modeMod ++ "def bad in Funcs = add1\n1 ; print",
+     "`in Funcs`: bad neither builds one of Funcs's carriers — \
      \`• ⇒ Arr(a, b)`, which is what a morphism of the category is — \
      \nor uses any of Funcs's words, so the header did nothing: bad is \
      \Int ⇒ Int")
-  , (modeMod ++ "def bad = over Funcs ; 5\n1 ; print",
-     "drop the header and let `use Funcs` transport the def.")
+  , (modeMod ++ "def bad in Funcs = 5\n1 ; print",
+     "drop the header and let `with Funcs` transport the def.")
     -- the keywords that are gone, and where they went
   , ("rules Bad = dup => dup\n1 >> print",
      "`rules` is gone: a rule set is a PARTIAL MODEL of the ambient \
-     \presentation, so it is written `model Name : Base = p = q")
-  , ("instance Bad : Base = dup = dup\n1 >> print",
+     \presentation, so it is written `model Name in Base = p = q")
+  , ("instance Bad in Base = dup = dup\n1 >> print",
      "`instance` is spelled `model` since 2026-09-13: write \
-     \`model Bad : Base = dup = dup`.  MANUAL §8.")
+     \`model Bad in Base = dup = dup`.  MANUAL §8.")
   , (modeMod ++ "mode K = Funcs\n1 ; print",
      "`mode` is gone: a model whose theory has a hom-object `k(_, _)` \
-     \transports when it is USED, so the model IS the declaration — \
-     \write `use Funcs` where you wrote `use K`")
-  , (monoidMod ++ "morphism Len : ListMonoid ⇒ IntSum = len\n1 >> print",
+     \transports when it is APPLIED, so the model IS the declaration — \
+     \write `with Funcs` where you wrote `mode K`")
+  , (monoidMod ++ "morphism Len in ListMonoid ⇒ IntSum = len\n1 >> print",
      "`morphism` is spelled `transformation` since 2026-09-14: a map \
      \between two models of a theory is a NATURAL TRANSFORMATION between \
-     \the functors they are — write `transformation Len : ListMonoid ⇒ \
+     \the functors they are — write `transformation Len in ListMonoid ⇒ \
      \IntSum = len`.  MANUAL §8.")
     -- `Base` is the ambient presentation and is not written down
   , ("theory Base =\n    op : a \8658 a\n1 >> print",
      "`Base` is the ambient presentation and may not be declared")
     -- a model of `Base` shares one namespace with functors
-  , ("def idF = (c -> c)\nfunctor Opt = idF\nmodel Opt : Base = dup = dup\n1 >> print",
+  , ("def idF = (c -> c)\nfunctor Opt = idF\nmodel Opt in Base = dup = dup\n1 >> print",
      "Duplicate model declaration: Opt")
     -- `sameCodeC` reports outside the fragment exactly as `sameCode`
     -- does — they are one procedure — and a `fix` body that applies its
     -- self wire is where the boundary now falls
-  , ("def dupSwap = dup >> swap\nmodel Opt : Base = dupSwap = dup\n\
+  , ("def dupSwap = dup >> swap\nmodel Opt in Base = dupSwap = dup\n\
      \def slow = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) \
      \>> (dupSwap >> + >> self ... >> ev | _) >> merge] ... >> fix ... >> ev]\n\
      \(slow >> getCode >> Opt) (slow >> getCode) >> sameCodeC >> drop >> 1 >> print",
@@ -3230,59 +3234,59 @@ moduleFailTests =
   , ("def doubled = [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise\n\
      \theory Optimizer\n    ap     : Code \8658 Code\n    sample : \8226 \8658 Code\n\
      \    law idempotent = (sample >> ap >> ap) (sample >> ap) >> sameCodeC\n\
-     \model Dbl : Optimizer\n    ap     = doubled\n    sample = [dup >> swap] >> getCode\n1 >> print",
+     \model Dbl in Optimizer\n    ap     = doubled\n    sample = [dup >> swap] >> getCode\n1 >> print",
      "law 'idempotent' fails for model Dbl")
     -- EXITS ARE THE ONLY WAY OUT, and they are out: a slot that takes
     -- the carrier and returns base is refused inside the transporting
     -- scope.  That is what makes the K-word table exact without
-    -- inference — every word written under `use M` produces a carrier.
-  , (modeMod ++ "def bad = use Funcs ; add1 ; observe\nbad ; drop",
-     "`observe` leaves Funcs; call it outside `use Funcs`")
-    -- THE LEVELS, each pinned.  Composition alone: `over M ; f g ;
+    -- inference — every word written under `with M` produces a carrier.
+  , (modeMod ++ "def bad with Funcs = add1 ; observe\nbad ; drop",
+     "`observe` leaves Funcs; call it outside `with Funcs`")
+    -- THE LEVELS, each pinned.  Composition alone: `in M ; f g ;
     -- <compose>` is fine (see evalTests), but there is no embedding, so
-    -- `use M` has nothing to transport a base stage WITH.
-  , (halfMod ++ "def bad = use HW ; inc ; inc\nbad ; drop",
-     "`use HW`: theory Half takes Doctrine's `compose` and not its \
-     \`embed` (`Fn⟨a ⇒ b⟩ ⇒ k(a, b)`): `use HW` cannot transport a base \
-     \stage; `over HW` and compose by hand.")
+    -- `with M` has nothing to transport a base stage WITH.
+  , (halfMod ++ "def bad with HW = inc ; inc\nbad ; drop",
+     "`with HW`: theory Half takes Doctrine's `compose` and not its \
+     \`embed` (`Fn⟨a ⇒ b⟩ ⇒ k(a, b)`): `with HW` cannot transport a base \
+     \stage; `in HW` and compose by hand.")
     -- + embedding: single-wire stages transport, and a WIDER stage is
     -- refused naming the strength that would carry it
-  , (modeMod ++ "def bad = use Funcs ; dup ; *\nbad ; drop",
-     "`use Funcs`: dup is not one wire in and one wire out, and theory \
+  , (modeMod ++ "def bad with Funcs = dup ; *\nbad ; drop",
+     "`with Funcs`: dup is not one wire in and one wire out, and theory \
      \Arrow's hom-object Arr(a, b) names ONE object on each side.  A wider \
      \stage transports through `first` — Doctrine's strength, `k(a, b) \8658 \
      \k(p(a, c), p(b, c))`, whose pairing the elaborator packs with — and \
      \theory Arrow does not declare it.")
     -- and a stage that does not cover the stack it is handed
-  , (wideMod ++ "def bad = use Wide ; dup ; add1 ; *\nbad ; drop",
-     "`use Wide`: add1 takes 1 wire, but the scope is running 2 wires \
+  , (wideMod ++ "def bad with Wide = dup ; add1 ; *\nbad ; drop",
+     "`with Wide`: add1 takes 1 wire, but the scope is running 2 wires \
      \wide.")
     -- a stage that takes no wire has no object to be the source of
-  , (wideMod ++ "def bad = use Wide ; 5 ; dbl\nbad ; drop",
-     "`use Wide`: 5 takes no wire, and W(a, b) has an object on each side")
-    -- THE CLAIM IS CHECKED.  `over Doctrine` says a slot of that name
+  , (wideMod ++ "def bad with Wide = 5 ; dbl\nbad ; drop",
+     "`with Wide`: 5 takes no wire, and W(a, b) has an object on each side")
+    -- THE CLAIM IS CHECKED.  `in Doctrine` says a slot of that name
     -- IS the doctrine's, so a slot of that name at another signature is
     -- refused, naming both arrows.  (This replaces the "two slots at
     -- one shape" refusal: names are read now, so two slots cannot
     -- collide at one meaning.)
   , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
-     \theory Bent(k(_, _)) over Doctrine =\n\
+     \theory Bent(k(_, _)) in Doctrine =\n\
      \    compose : k(a, b) k(b, c) ⇒ k(a, b)\n\
      \def thenW = (f g -> [(x -> f ; unW ; _ x ; ev ; (y -> g ; unW ; _ y ; ev))] ; W)\n\
-     \model TW : Bent(W) =\n    compose = (f g -> f g ; drop)\n1 ; print",
+     \model TW in Bent(W) =\n    compose = (f g -> f g ; drop)\n1 ; print",
      "theory Bent: slot 'compose' is k(a0, a1) k(a1, a2) ⇒ k(a0, a1), but \
      \Doctrine declares it k(a0, a1) k(a1, a2) ⇒ k(a0, a2)")
-    -- and `over Doctrine` that takes none of its operations did nothing
+    -- and `in Doctrine` that takes none of its operations did nothing
   , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
-     \theory Bare(k(_, _)) over Doctrine =\n\
+     \theory Bare(k(_, _)) in Doctrine =\n\
      \    only : k(a, b) ⇒ k(a, b)\n\
-     \model TW : Bare(W) =\n    only = _\n1 ; print",
-     "`over Doctrine` declares nothing")
+     \model TW in Bare(W) =\n    only = _\n1 ; print",
+     "`in Doctrine` declares nothing")
     -- TRANSFORMATIONS (5d).  A square that does not commute is named, and the
     -- verdict comes from the samples because `len` is opaque to the
     -- normalizer: `lenUp` adds one, so the unit square breaks first.
   , (monoidMod ++ "def lenUp = (l -> l >> len >> _ 1 >> +)\n\
-     \transformation Bad : ListMonoid ⇒ IntSum = lenUp\n1 >> print",
+     \transformation Bad in ListMonoid ⇒ IntSum = lenUp\n1 >> print",
      "transformation Bad: the square for slot 'unit' does not commute at \
      \the \
      \theory's samples")
@@ -3290,14 +3294,14 @@ moduleFailTests =
     -- the exit, on a carrier `eq?` could only have weighed by spelling
   , (closureMod ++ "def toKBad = unTwo >> (v f -> (v 1 >> +) \
      \[(d -> d f >> *)] >> K)\n\
-     \transformation Scaled : Src ⇒ Dst = toKBad\n1 >> print",
+     \transformation Scaled in Src ⇒ Dst = toKBad\n1 >> print",
      "transformation Scaled: the square for slot 'sample' does not commute \
      \at \
      \the theory's samples")
     -- ...and with no exit to observe a carrier with, the comparison IS
     -- `eq?` on the carrier, and the refusal names the slot that would
     -- have decided it honestly
-  , (closureModNoExit ++ "transformation Scaled : Src ⇒ Dst = toK\n1 >> print",
+  , (closureModNoExit ++ "transformation Scaled in Src ⇒ Dst = toK\n1 >> print",
      "declare an exit `observe` in the theory")
     -- ...and it says WHICH exit is missing.  Until 2026-09-15 it said
     -- the theory declares no exit, full stop, which is false of a
@@ -3306,20 +3310,20 @@ moduleFailTests =
     -- exit, and `first` leaves the hom-object at a PAIRING, which it
     -- does not reach.  A refusal that misreports its own cause sends
     -- the reader to the wrong repair.
-  , (closureModNoExit ++ "transformation Scaled : Src ⇒ Dst = toK\n1 >> print",
+  , (closureModNoExit ++ "transformation Scaled in Src ⇒ Dst = toK\n1 >> print",
      "no exit whose input FITS this slot's result")
     -- ...and with NO evidence to sample with, the refusal names the slot
     -- and asks for the slot that would decide it
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\
-     \model Sum : Mag(Int) =\n    op = +\n\
-     \model Prod : Mag(Int) =\n    op = *\n\
-     \transformation Id : Sum ⇒ Prod = id\n1 >> print",
+     \model Sum in Mag(Int) =\n    op = +\n\
+     \model Prod in Mag(Int) =\n    op = *\n\
+     \transformation Id in Sum ⇒ Prod = id\n1 >> print",
      "transformation Id: the square for slot 'op' is FALSE — `sameCode` \
      \decides the two sides are different programs of the free category")
   , ("theory Mag(a) =\n    op : a a ⇒ a\n\
-     \model Sum : Mag(Int) =\n    op = +\n\
-     \model Prod : Mag(Int) =\n    op = *\n\
-     \transformation Id : Sum ⇒ Prod = id\n1 >> print",
+     \model Sum in Mag(Int) =\n    op = +\n\
+     \model Prod in Mag(Int) =\n    op = *\n\
+     \transformation Id in Sum ⇒ Prod = id\n1 >> print",
      "Add a `sample` slot to theory Mag")
     -- ...and a square decided FALSE on PURE WIRING, with no arithmetic
     -- anywhere in it: `_ drop` against `drop _` is a different program
@@ -3327,19 +3331,19 @@ moduleFailTests =
     -- — before `fallbackFalse` went, `false` and "could not decide"
     -- were the same answer here).
   , ("theory Pick(a) =\n    pick : a a ⇒ a\n\
-     \model Fst : Pick(Int) =\n    pick = _ drop\n\
-     \model Snd : Pick(Int) =\n    pick = drop _\n\
-     \transformation Keep : Fst ⇒ Snd = id\n1 >> print",
+     \model Fst in Pick(Int) =\n    pick = _ drop\n\
+     \model Snd in Pick(Int) =\n    pick = drop _\n\
+     \transformation Keep in Fst ⇒ Snd = id\n1 >> print",
      "transformation Keep: the square for slot 'pick' is FALSE")
     -- two models of ONE theory, or it is not a component
   , (monoidMod ++ "theory Other(a) =\n    z : • ⇒ a\n\
-     \model Zed : Other(Int) =\n    z = 0\n\
-     \transformation Nope : ListMonoid ⇒ Zed = len\n1 >> print",
+     \model Zed in Other(Int) =\n    z = 0\n\
+     \transformation Nope in ListMonoid ⇒ Zed = len\n1 >> print",
      "ListMonoid models Monoid and Zed models Other: a transformation is \
      \a component between two models of ONE theory")
     -- and the component's own type is the two carriers, read off the
     -- model heads
-  , (monoidMod ++ "transformation Nope : ListMonoid ⇒ IntSum = toStr\n\
+  , (monoidMod ++ "transformation Nope in ListMonoid ⇒ IntSum = toStr\n\
      \1 >> print",
      "transformation Nope: the square for slot 'unit' does not typecheck")
     -- THE DOCTRINE'S LAWS RUN, for a model in another file.  This
@@ -3350,12 +3354,12 @@ moduleFailTests =
     -- universally quantified, so a composition in the wrong order or a
     -- `first` that swaps the pair is refused by the SIGNATURE.)
   , ("data Ctr(a, b) = Fn⟨a ⇒ b⟩ Int\n\
-     \theory Counting(k(_, _)) over Doctrine =\n\
+     \theory Counting(k(_, _)) in Doctrine =\n\
      \    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n\
      \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n\
      \    observe : k(Int, Int) ⇒ Int\n\
      \    sample  : • ⇒ k(Int, Int)\n\
-     \model Counted : Counting(Ctr) =\n\
+     \model Counted in Counting(Ctr) =\n\
      \    embed   = (f -> f 0 ; Ctr)\n\
      \    compose = (c d -> c ; unCtr ; (f m -> d ; unCtr ; (g n -> [(x -> f ; _ x ; ev ; (y -> g ; _ y ; ev))] (m n ; + ; _ 1 ; +) ; Ctr)))\n\
      \    observe = (c -> c ; unCtr ; drop _)\n\
@@ -3364,22 +3368,22 @@ moduleFailTests =
     -- extension is one level deep: a doctrine of a doctrine wants a
     -- pushout nobody has asked for
   , ("data W(a, b) = Fn⟨a ⇒ b⟩\n\
-     \theory Mid(k(_, _)) over Doctrine =\n\
+     \theory Mid(k(_, _)) in Doctrine =\n\
      \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n\
-     \theory Top(k(_, _)) over Mid =\n\
+     \theory Top(k(_, _)) in Mid =\n\
      \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n1 ; print",
      "extends a theory that itself extends Doctrine, and extension is \
      \one level deep")
     -- one category per header: the second would embed the first's
     -- carriers as if they were programs
-  , (modeMod ++ "def bad = use Funcs Funcs2 ; add1\nbad ; drop",
-     "a header may name at most one category")
+  , (modeMod ++ "def bad with Funcs Funcs2 = add1\nbad ; drop",
+     "a clause may name at most one category")
     -- THE FLAGSHIP QUESTION (plan item 4c): a word of one category
     -- inside ANOTHER's scope.  It does NOT type — an embedding embeds a
     -- program and a carrier is not one — and inference would say
     -- `• vs a16`, so the elaborator says it instead.
-  , (modeMod ++ "def other = use Funcs2 ; add1\n\
-     \def bad = use Funcs ; chain ; other\nbad ; drop",
+  , (modeMod ++ "def other with Funcs2 = add1\n\
+     \def bad with Funcs = chain ; other\nbad ; drop",
      "other is a word of Funcs2, so it builds a carrier rather than \
      \being a program embed could embed")
   ]
@@ -3527,7 +3531,7 @@ runPureE :: (String, Int, String, Either String String) -> Maybe String
 runPureE (nm, fuel, src, expected) =
   let got = do
         t0 <- parseProgram src
-        t1 <- elabUseWith (elabCtx0 (modEnv preludeModule) []) t0
+        t1 <- elabHeaders (elabCtx0 (modEnv preludeModule) []) t0
         (out, _) <- runPureEvalWith fuel
                       (evalTerm (modEnv preludeModule)
                                 (moduleRunDefs preludeModule) emptyVarEnv t1 [])

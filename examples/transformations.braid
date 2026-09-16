@@ -29,7 +29,7 @@ theory Monoid(a) =
     law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
     law assoc = (sample sample sample ; op _ ; op) (sample sample sample ; _ op ; op) ; eq? ; (forget ; true | forget ; false) ; merge
 
-model IntSum : Monoid(Int) =
+model IntSum in Monoid(Int) =
     unit   = 0
     op     = +
     sample = 7
@@ -39,14 +39,14 @@ model IntSum : Monoid(Int) =
 # `len` sends to IntSum's 7, and stating it that way is the point: the
 # evidence a model is audited with is part of what a transformation must
 # respect.
-model ListMonoid : Monoid(List(Int)) =
+model ListMonoid in Monoid(List(Int)) =
     unit   = nil
     op     = append
     sample = 1 2 3 4 5 6 7 ; pack
 
 def len = [(acc x -> acc ; _ 1 ; +)] 0 ... ; fold
 
-transformation Len : ListMonoid ⇒ IntSum = len
+transformation Len in ListMonoid ⇒ IntSum = len
 #   Len : List(a) ⇒ Int — the component is an ordinary word, so it is
 #   usable in base code under its own name.  It is FORWARD-DECLARED at
 #   `List(Int) ⇒ Int`, the type the two model heads wrote, so a def may
@@ -83,7 +83,7 @@ data Named(a, b) = Fn⟨a ⇒ b⟩ Str
 data Plain(a, b) = Fn⟨a ⇒ b⟩
 data Pair(a, b)  = a b
 
-theory Arrow(k(_, _)) over Doctrine =
+theory Arrow(k(_, _)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     first   : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
@@ -98,7 +98,7 @@ def witnessN = (c -> c ; unNamed ; _ drop)
 def runN     = (c x -> c ; witnessN ; _ x ; ev)
 def observeN = (c -> (c 3 ; runN) (c 4 ; runN) ; +)
 
-model Names : Arrow(Named) =
+model Names in Arrow(Named) =
     embed   = embedN
     compose = composeN
     first   = firstN
@@ -111,7 +111,7 @@ def composeP = (f g -> [(x -> f ; unPlain ; _ x ; ev ; (y -> g ; unPlain ; _ y ;
 def firstP   = (f -> [(p -> p ; unPair ; (x d -> f ; unPlain ; _ x ; ev ; (y -> y d ; Pair)))] ; Plain)
 def observeP = (f -> (f 3 ; runP) (f 4 ; runP) ; +)
 
-model Funcs : Arrow(Plain) =
+model Funcs in Arrow(Plain) =
     embed   = Plain
     compose = composeP
     first   = firstP
@@ -122,10 +122,10 @@ model Funcs : Arrow(Plain) =
 # discarding a sum's payload, so this one is `strip`.)
 def strip = (c -> c ; witnessN ; Plain)
 
-transformation Forget : Names ⇒ Funcs = strip
+transformation Forget in Names ⇒ Funcs = strip
 #   Forget : Named(a, b) ⇒ Plain(a, b)
 
-def namedSq = over Names ; sample sample ; compose
+def namedSq in Names = sample sample ; compose
 namedSq ; unNamed ; drop _ ; print             # doubledouble — the name
 namedSq ; Forget ; observeP ; print            # 28 — 3·4 + 4·4
 

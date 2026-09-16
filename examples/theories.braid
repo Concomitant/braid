@@ -1,7 +1,7 @@
 # Theories: named slots, models, and laws you actually run.
 #
 # Not typeclasses. Nothing is inferred and nothing is dispatched: an
-# model is chosen BY NAME with `use`, and the choice is a renaming at
+# model is chosen BY NAME with `with`, and the choice is a renaming at
 # elaboration — resolution once per scope, never a dictionary per call.
 # That is the trade design-effects.md records: you give up inferring
 # WHICH model, and get back annotation-freeness, coherence in a
@@ -23,37 +23,37 @@ theory Monoid(a) =
     law assoc = (sample sample sample ; op _ ; op) (sample sample sample ; _ op ; op) ; eq? ; (forget ; true | forget ; false) ; merge
 
 # ---- three models of one theory --------------------------------------
-model IntSum : Monoid(Int) =
+model IntSum in Monoid(Int) =
     unit   = 0
     op     = +
     sample = 7
 
-model IntProd : Monoid(Int) =
+model IntProd in Monoid(Int) =
     unit   = 1
     op     = *
     sample = 7
 
-model StrCat : Monoid(Str) =
+model StrCat in Monoid(Str) =
     unit   = ""
     op     = cat
     sample = "x"
 
 # ---- generic code, written once --------------------------------------
-# A def whose header is `over THEORY` is a TEMPLATE: it is a morphism of
+# A def whose header is `in THEORY` is a TEMPLATE: it is a morphism of
 # the theory, its body waits for a model, and it is not a def at all
-# until one arrives. A def whose `use` names a MODEL supplies one —
+# until one arrives. A def whose `with` names a MODEL supplies one —
 # the body is expanded there, renamed by that model, and re-inferred
-# there.  `over` declares; `use` applies.
-def fold1 = over Monoid ; [op] unit ... ; foldExp
+# there.  `in` declares; `with` applies.
+def fold1 in Monoid = [op] unit ... ; foldExp
 
 # so each instantiation has its OWN principal type — `total` is
 # `Intⁿ⁰ =IntSum> Int` and `joined` is `Strⁿ⁰ =StrCat> Str` — with no
 # dictionary passed and no rank-1 wall met.  The label is the scope's
-# RECEIPT: every `use` mints, so the arrow records which model read the
-# template.  `over Monoid` mints nothing — it applied nothing.
-def total  = use IntSum  ; fold1
-def prod   = use IntProd ; fold1
-def joined = use StrCat  ; fold1
+# RECEIPT: every `with` mints, so the arrow records which model read the
+# template.  `in Monoid` mints nothing — it applied nothing.
+def total with IntSum = fold1
+def prod with IntProd = fold1
+def joined with StrCat = fold1
 
 1 2 3 4     ; total  ; print      # 10
 1 2 3 4     ; prod   ; print      # 24
@@ -68,7 +68,7 @@ def joined = use StrCat  ; fold1
 #
 # `fold1` outside every Monoid scope is an elaboration error that names
 # the theory, not a missing word:
-#   fold1 needs a model of Monoid in scope (`use <model>` before
+#   fold1 needs a model of Monoid in scope (`with <model>` before
 #   calling it)
 # and `IntSum@op` — the compiler's own spelling of a slot — is refused
-# in source: a slot is reached with `use IntSum`, or not at all.
+# in source: a slot is reached with `with IntSum`, or not at all.

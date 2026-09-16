@@ -48,12 +48,12 @@ theory Distributive(a) =
     # --- coherence with the codiagonal --------------------------------
     # distributing and then merging is merging with P passing beneath.
     law distMerge = [_ pick >> dist2 >> merge] [_ pick >> _ merge] >> sameCode
-model IntD : Distributive(Int) =
+model IntD in Distributive(Int) =
     p      = _ 1 >> +
     f      = _ 10 >> *
     g      = _ 100 >> *
     pick   = router
-model StrD : Distributive(Str) =
+model StrD in Distributive(Str) =
     p      = _ "!" >> cat
     f      = _ "-f" >> cat
     g      = _ "-g" >> cat

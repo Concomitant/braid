@@ -34,7 +34,7 @@ data Circuit(a, b) = Fn⟨a =Recursive> b Circuit(a, b)⟩
 data Pair(a, b) = a b
 
 # The step function is `=Recursive>`: every circuit below is written
-# under `use Recursive`, and a written arrow means its manifest
+# under `with Recursive`, and a written arrow means its manifest
 # (MANUAL §14). The slots say so
 # too — a slot declares the MOST a model may do, and the pure model
 # below passes under a `=Recursive>` slot by absorption.
@@ -53,17 +53,17 @@ data Pair(a, b) = a b
 data Arr(a, b) = Fn⟨a ⇒ b⟩
 
 # ---- the theory ------------------------------------------------------
-# `over Doctrine` is the whole of it (2026-09-13). `Doctrine` is the
+# `in Doctrine` is the whole of it (2026-09-13). `Doctrine` is the
 # prelude's theory of arrows — `compose`, `embed`, `first`, and the
-# seven arrow laws — and a theory that says `over Doctrine` DECLARES
+# seven arrow laws — and a theory that says `in Doctrine` DECLARES
 # that its slots of those names are the doctrine's. The elaborator
 # checks the claim against the written signatures and then knows,
-# without reading a shape or guessing, that `use Circuits` transports.
+# without reading a shape or guessing, that `with Circuits` transports.
 #
 # Before this the three slots were DETECTED by matching arrow shapes,
 # and the names were this file's taste. Detection answered "does this
 # theory happen to look like a category"; the declaration answers "does
-# it claim to be one", which is the question `over` was invented for.
+# it claim to be one", which is the question `in` was invented for.
 #
 # `first` is still the slot that made constructor parameters necessary:
 # its type mentions `k` at three different pairs of wires, and it names
@@ -75,7 +75,7 @@ data Arr(a, b) = Fn⟨a ⇒ b⟩
 # only OBSERVED; the doctrine asks for the observation, which is what
 # keeps its laws honest about being finite tests of an infinite object.
 # A theory that declares neither gets no laws — see `Vault` below.
-theory Arrow(k(_, _)) over Doctrine =
+theory Arrow(k(_, _)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     compose : k(a, b) k(b, c) =Recursive> k(a, c)
     first   : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
@@ -88,21 +88,21 @@ theory Arrow(k(_, _)) over Doctrine =
 def stepC = (c x -> c ; unCircuit ; _ x ; ev)
 
 # the identity circuit, `arr`, `>>>`, and `first`
-def idC    = use Recursive ; [(x -> x (idC))] ; Circuit
-def arrC   = use Recursive ; (g -> [(x -> g x ; ev ; (y -> y (g ; arrC)))] ; Circuit)
-def compC  = use Recursive ; (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
-def firstC = use Recursive ; (f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; firstC))))] ; Circuit)
+def idC with Recursive = [(x -> x (idC))] ; Circuit
+def arrC with Recursive = (g -> [(x -> g x ; ev ; (y -> y (g ; arrC)))] ; Circuit)
+def compC with Recursive = (f g -> [(x -> f x ; stepC ; (y f2 -> g y ; stepC ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
+def firstC with Recursive = (f -> [(p -> p ; unPair ; (x d -> f x ; stepC ; (y f2 -> (y d ; Pair) (f2 ; firstC))))] ; Circuit)
 
 # A circuit that CANNOT be a pure function: its output depends on every
 # input it has already seen. This is the whole reason Arrows exist.
-def sumFrom = use Recursive ; (n -> [(x -> n x ; + ; dup ; _ (sumFrom))] ; Circuit)
-def scale   = use Recursive ; (n -> [(x -> (n x ; *) (n ; scale))] ; Circuit)
+def sumFrom with Recursive = (n -> [(x -> n x ; + ; dup ; _ (sumFrom))] ; Circuit)
+def scale with Recursive = (n -> [(x -> (n x ; *) (n ; scale))] ; Circuit)
 
 # feed 3 then 4, and report both outputs summed — two steps, because one
 # step cannot tell a stateful circuit from a stateless one
 def probe = (c -> c 3 ; stepC ; (y c2 -> c2 4 ; stepC ; (z c3 -> (y z ; +) (c3 ; drop))))
 
-model Circuits : Arrow(Circuit) =
+model Circuits in Arrow(Circuit) =
     embed   = arrC
     compose = compC
     first   = firstC
@@ -118,7 +118,7 @@ def firstA   = (f -> [(p -> p ; unPair ; (x d -> f ; unArr ; _ x ; ev ; (y -> y 
 def runA     = (f x -> f ; unArr ; _ x ; ev)
 def observeA = (f -> (f 3 ; runA) (f 4 ; runA) ; +)
 
-model Funcs : Arrow(Arr) =
+model Funcs in Arrow(Arr) =
     embed   = arrA
     compose = thenA
     first   = firstA
@@ -126,11 +126,11 @@ model Funcs : Arrow(Arr) =
     sample  = [dup ; +] ; Arr
 
 # ---- generic code, written once --------------------------------------
-# The body is the same twice; only the model differs.  `over` puts the
+# The body is the same twice; only the model differs.  `in` puts the
 # model's slot words in scope and APPLIES NOTHING — resolution once per
 # scope, never a dictionary per call.
-def twiceC = over Circuits ; sample sample ; compose ; observe
-def twiceA = over Funcs    ; sample sample ; compose ; observe
+def twiceC in Circuits = sample sample ; compose ; observe
+def twiceA in Funcs = sample sample ; compose ; observe
 
 twiceC ; print              # 13  — a running sum fed into a running sum:
                             #       3 ⇒ 3 ⇒ 3, then 4 ⇒ 7 ⇒ 10
@@ -143,17 +143,17 @@ _ 4  ; stepC ; (y c -> (y ; print) c)      # 14
 _ 10 ; stepC ; (y c -> (y ; print) c)      # 34
 drop
 
-# ---- composition, OWNED: `use` a model that has a carrier -------------
-# `over Circuits` is a VOCABULARY: it puts this model's `embed`, `compose`
-# and `first` in scope and leaves the plumbing to you.  `use Circuits`
+# ---- composition, OWNED: `with` a model that has a carrier -------------
+# `in Circuits` is a VOCABULARY: it puts this model's `embed`, `compose`
+# and `first` in scope and leaves the plumbing to you.  `with Circuits`
 # goes one step further and takes over `;`.
 #
-# The theory above DECLARES that: `over Doctrine`, plus the three slots
+# The theory above DECLARES that: `in Doctrine`, plus the three slots
 # at the doctrine's signatures — `compose` is `k(a,b) k(b,c) ⇒ k(a,c)`,
 # `embed` is `Fn⟨a ⇒ b⟩ ⇒ k(a,b)`, `first` is `k(a,b) ⇒ k(Pair(a,c),
 # Pair(b,c))` — and that is the whole test.  The names are the
 # doctrine's, which is why they are these names and not others: one
-# spelling per thing.  `use Circuits` is then the functor out of the free
+# spelling per thing.  `with Circuits` is then the functor out of the free
 # category that sends every stage to the embedding of that stage and
 # every `;` to the composition.  It is a LABEL WITH A CARRIER: it mints
 # the receipt `Circuits` exactly as any functor scope does, and the
@@ -165,30 +165,30 @@ drop
 def add1 = _ 1 ; +
 def dbl  = 2 _ ; *
 
-# The same pipeline twice.  `hand` is what `use` writes out for you;
+# The same pipeline twice.  `hand` is what `with` writes out for you;
 # `easy` is what you write.
-def hand = over Circuits ; [add1] ... ; embed ... ; _ [dbl] ; _ embed ; compose
-def easy = use Circuits ; add1 ; dbl
+def hand in Circuits = [add1] ... ; embed ... ; _ [dbl] ; _ embed ; compose
+def easy with Circuits = add1 ; dbl
 #   easy : Int =Circuits Recursive> Int
 
 # ENTERING is a marker, LEAVING is a model.  `observe` takes the carrier
 # and returns base — an EXIT, read off its declared arrow — so it is
-# refused inside `use Circuits` ("`observe` leaves Circuits") and called
-# under `over Circuits`, where nothing is transported.  That rule is
-# what makes the K-word table exact: every word written under `use` or
-# `over` produces a carrier unless it deliberately exits, so the
+# refused inside `with Circuits` ("`observe` leaves Circuits") and called
+# under `in Circuits`, where nothing is transported.  That rule is
+# what makes the K-word table exact: every word written under `with` or
+# `in` produces a carrier unless it deliberately exits, so the
 # elaborator never has to ask inference which is which.
-def handOut = over Circuits ; hand ; observe
-def easyOut = over Circuits ; easy ; observe
+def handOut in Circuits = hand ; observe
+def easyOut in Circuits = easy ; observe
 
 handOut ; print             # 18 — (3+1)·2 + (4+1)·2
 easyOut ; print             # 18 — the same pipeline, transported
 
 # A transported word is an ordinary word, so it composes in the category
-# with any other: inside `use Circuits`, `easy` is left alone and the
+# with any other: inside `with Circuits`, `easy` is left alone and the
 # `;` around it is `compose`.
-def twice2    = use Circuits ; easy ; easy
-def twice2Out = over Circuits ; twice2 ; observe
+def twice2 with Circuits = easy ; easy
+def twice2Out in Circuits = twice2 ; observe
 twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 
 # OUTSIDE the scope, two of them side by side are two circuits side by
@@ -197,7 +197,7 @@ twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 # wants exactly ONE carrier, so it does not fire and you can see the
 # two.  Composition is written under the marker.
 def pair    = easy easy
-def pairOut = over Circuits ; pair ; compose ; observe
+def pairOut in Circuits = pair ; compose ; observe
 pairOut ; print             # 40 — the same composite, spelled by hand
 
 # ---- wider stages: the STRENGTH is the padding ------------------------
@@ -210,63 +210,63 @@ pairOut ; print             # 40 — the same composite, spelled by hand
 # in place of `_`.
 #
 # So `dup ; *` transports, and squares:
-def sq = use Circuits ; dup ; *
+def sq with Circuits = dup ; *
 #   sq : Int =Circuits Recursive> Int
-def sqOut = over Circuits ; sq ; observe
+def sqOut in Circuits = sq ; observe
 sqOut ; print               # 25 — 3² + 4²
 
 # three wires, and a stage on a wire that is not the deepest
-def poly = use Circuits ; dup ; _ dup ; _ _ add1 ; _ * ; +
+def poly with Circuits = dup ; _ dup ; _ _ add1 ; _ * ; +
 #   poly : Int =Circuits Recursive> Int — x + x·(x+1)
-def polyOut = over Circuits ; poly ; observe
+def polyOut in Circuits = poly ; observe
 polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 
-# ---- a carrier built BY HAND: `over Circuits` -------------------------
+# ---- a carrier built BY HAND: `in Circuits` -------------------------
 # `sumFrom` is the whole reason the Arrow exists — a stateful circuit
 # that is not `embed` of anything.  Before 5c½ a def like `0 ; sumFrom`
 # was STRANDED: it produces a `Circuit(Int, Int)` at the base, but the
 # elaborator would not treat it as a word of the category, because doing
 # so would mean reading an INFERRED type to decide what a word is.
 #
-# `over Circuits` is the written declaration that closes it.  It applies
+# `in Circuits` is the written declaration that closes it.  It applies
 # nothing — no embedding, no composition, no transport — it says "this
 # def is a morphism of the category Circuits presents", and the
 # elaborator CHECKS the claim against the def's arrow: a word of a
 # category builds one carrier out of nothing.  The claim is written, the
 # check is mechanical, and the def joins the K-word table beside the
-# ones `use Circuits` transported.
-def sum0 = over Circuits ; 0 ; sumFrom
+# ones `with Circuits` transported.
+def sum0 in Circuits = 0 ; sumFrom
 #   sum0 : • =Recursive> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
 #
 # That is the honest reading and it is worth the sentence.  A receipt is
 # PROVENANCE: `=Circuits>` says the code went through the functor.  `sum0`
 # did not — it is a circuit no base program denotes, which is the whole
 # reason Arrows exist — so claiming the label would claim membership in
-# the functor's IMAGE, which is a strictly stronger thing.  `over` mints
-# nothing, because `over` applies nothing; only a `use` mints, and every
-# `use` does.  Membership is carried by the carrier in the type and the
+# the functor's IMAGE, which is a strictly stronger thing.  `in` mints
+# nothing, because `in` applies nothing; only a `with` mints, and every
+# `with` does.  Membership is carried by the carrier in the type and the
 # entry in the K-word table.
 #
 # Under the marker it composes like any other word of the category, and
 # THAT composite went through the functor, so it folds:
-def running    = use Circuits ; sum0 ; dbl
+def running with Circuits = sum0 ; dbl
 #   running : Int =Circuits Recursive> Int
-def runningOut = over Circuits ; running ; observe
+def runningOut in Circuits = running ; observe
 runningOut ; print          # 20 — 3 ⇒ 3 ⇒ 6, then 4 ⇒ 7 ⇒ 14
 
 # ---- over/use coherence, as a law -------------------------------------
-# `use` writes out what `over` writes by hand, so the two must denote
+# `with` writes out what `in` writes by hand, so the two must denote
 # the same morphism.  Here is the statement at a stateful pair, where
 # the claim has teeth: `sum0` and `scale3` are both built by hand.
-def scale3 = over Circuits ; 3 ; scale
+def scale3 in Circuits = 3 ; scale
 
-def byHand = over Circuits ; sum0 scale3 ; compose
-def byUse  = use Circuits ; sum0 ; scale3
+def byHand in Circuits = sum0 scale3 ; compose
+def byUse with Circuits = sum0 ; scale3
 #   byHand : • =Recursive> Circuit(Int, Int)   — no label: nothing was applied
 #   byUse  : Int =Circuits Recursive> Int      — transported, so it folds
 
-def handObs = over Circuits ; byHand ; observe
-def useObs  = over Circuits ; byUse  ; observe
+def handObs in Circuits = byHand ; observe
+def useObs in Circuits = byUse  ; observe
 handObs ; print             # 30 — 3 ⇒ 3 ⇒ 9, then 4 ⇒ 7 ⇒ 21
 useObs  ; print             # 30 — the same circuit, said two ways
 
@@ -285,24 +285,24 @@ useObs  ; print             # 30 — the same circuit, said two ways
 # abstract-type sealing falling out of the same rule.
 data Capsule(a, b) = Fn⟨a ⇒ b⟩
 
-theory Vault(k(_, _)) over Doctrine =
+theory Vault(k(_, _)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
 
 def capThen = (f g -> [(x -> f ; unCapsule ; _ x ; ev ; (y -> g ; unCapsule ; _ y ; ev))] ; Capsule)
 
-model Sealed : Vault(Capsule) =
+model Sealed in Vault(Capsule) =
     embed   = Capsule
     compose = capThen
 
-def guarded  = use Sealed ; add1 ; dbl
-def guarded2 = use Sealed ; guarded ; add1
+def guarded with Sealed = add1 ; dbl
+def guarded2 with Sealed = guarded ; add1
 #   guarded2 : Int =Sealed> Int — and the only consumer of a Sealed
 #   word, inside the category's vocabulary, is another Sealed word.
 #
 # `Vault` takes the doctrine's `compose` and `embed` and NOT its
-# `first`, so every stage of a `use Sealed` scope must be one wire in
-# and one wire out: `use Sealed ; dup ; *` is refused, naming the slot
+# `first`, so every stage of a `with Sealed` scope must be one wire in
+# and one wire out: `with Sealed ; dup ; *` is refused, naming the slot
 # that would have carried it.  That is the level table, read straight
 # off what the theory declared.
 #
@@ -322,7 +322,7 @@ guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 # ---- what the laws can and cannot decide ------------------------------
 # The seven category axioms — leftId, rightId, assoc, embedFunctor,
 # firstFst, firstEmbed, firstCompose — are the PRELUDE's, inherited by
-# `over Doctrine` and run for `Circuits` and for `Funcs`.  This file
+# `in Doctrine` and run for `Circuits` and for `Funcs`.  This file
 # used to write five of them out; the doctrine writes them once.
 #
 # They run through `observe` at sample points — and since 2026-09-13

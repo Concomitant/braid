@@ -15,7 +15,7 @@
 # tangent (forward mode), `Rev` carries the TRANSPOSE of the same
 # linear map as a continuation (reverse mode).  `Fwd` is not one model
 # but a FAMILY: `model Fwd(R : Smooth(a, g))` is a functor
-# Mod(Smooth) → Mod(Smooth), so `use Fwd(Fwd(Floats))` differentiates
+# Mod(Smooth) → Mod(Smooth), so `with Fwd(Fwd(Floats))` differentiates
 # TWICE and §6 prints second derivatives.  Forward and reverse are
 # not two algorithms here; they are two REPRESENTATIONS of one linear
 # map, and `transformation Transpose : Fwd ⇒ Rev` is the sentence that
@@ -58,7 +58,7 @@
 # generator its own differentiation needed, which is the honest reading
 # of "closed under D".
 #
-# `Smooth` is NOT declared `over Doctrine`.  The doctrine's carrier is
+# `Smooth` is NOT declared `in Doctrine`.  The doctrine's carrier is
 # a hom-object `k(a, b)` — a category of arrows — and this is an
 # algebraic theory over ONE carrier: a ring.  Elliott's functor is
 # between categories; a model of an algebraic theory is the same
@@ -104,7 +104,7 @@ theory Smooth(a, g) =
 # forgetting a tangent zeroes it.
 def zeroTangent = (d -> 0.0)
 
-model Floats : Smooth(Float, Float) =
+model Floats in Smooth(Float, Float) =
     add     = fadd
     mul     = fmul
     neg     = fneg
@@ -129,7 +129,7 @@ model Floats : Smooth(Float, Float) =
 # `model Fwd(R : Smooth(a, g))` is A MODEL PARAMETERIZED BY A MODEL, and
 # it is not one model: it is a FAMILY, a functor Mod(Smooth) →
 # Mod(Smooth) (Kiselyov's interpreter transformers; ML's higher-order
-# functors; the ring construction R ↦ R[ε]/ε²).  `use Fwd(Floats)`
+# functors; the ring construction R ↦ R[ε]/ε²).  `with Fwd(Floats)`
 # applies it and mints the member — an ordinary model named
 # `Fwd(Floats)`, with ordinary slots and the theory's laws run at its
 # own evidence.
@@ -161,7 +161,7 @@ model Floats : Smooth(Float, Float) =
 
 data Dual(a) = a a
 
-model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a) =
+model Fwd(Smooth(a, g)) in Smooth(Dual(a), a) =
     add = Dual(x, dx) Dual(y, dy) -> (x y ; add) (dx dy ; add) ; Dual
     mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual
     neg = Dual(x, dx) -> (x ; neg) (dx ; neg) ; Dual
@@ -251,7 +251,7 @@ def backward = Rev(v, k) -> k 1.0 ; ev
 def seedX = (x -> x [gx] ; Rev)
 def seedY = (y -> y [gy] ; Rev)
 
-model Rev : Smooth(Rev, Grad) =
+model Rev in Smooth(Rev, Grad) =
     add     = radd
     mul     = rmul
     neg     = rneg
@@ -267,28 +267,28 @@ model Rev : Smooth(Rev, Grad) =
 # ---------------------------------------------------------------------
 # 5. Programs, written ONCE, over the theory
 # ---------------------------------------------------------------------
-# `over Smooth` makes each of these a TEMPLATE: a morphism of the
+# `in Smooth` makes each of these a TEMPLATE: a morphism of the
 # theory, waiting for a model.  Nothing here knows what a derivative
 # is.
 
 #   p(x) = x³ − 2x + 1
-def poly = over Smooth ;
+def poly in Smooth =
     (x -> ((x x ; mul) x ; mul) ((2.0 ; lit) x ; mul ; neg) ; add
         ; (1.0 ; lit) ... ; add)
 #   w(x) = sin(2x²)
-def wave = over Smooth ; (x -> (2.0 ; lit) (x x ; mul) ; mul ; sin)
+def wave in Smooth = (x -> (2.0 ; lit) (x x ; mul) ; mul ; sin)
 #   f(x, y) = x·y + sin x
-def fxy  = over Smooth ; (x y -> (x y ; mul) (x ; sin) ; add)
+def fxy in Smooth = (x y -> (x y ; mul) (x ; sin) ; add)
 
-def polyF = use Floats ; poly
-def polyD = use Fwd(Floats) ; poly
-def polyR = use Rev    ; poly
-def waveF = use Floats ; wave
-def waveD = use Fwd(Floats) ; wave
-def waveR = use Rev    ; wave
-def fxyF  = use Floats ; fxy
-def fxyD  = use Fwd(Floats) ; fxy
-def fxyR  = use Rev    ; fxy
+def polyF with Floats = poly
+def polyD with Fwd(Floats) = poly
+def polyR with Rev = poly
+def waveF with Floats = wave
+def waveD with Fwd(Floats) = wave
+def waveR with Rev = wave
+def fxyF with Floats = fxy
+def fxyD with Fwd(Floats) = fxy
+def fxyR with Rev = fxy
 #   polyF : Float =Floats> Float,
 #   polyD : Dual(Float) =Fwd(Floats)> Dual(Float),
 #   polyR : Rev =Rev> Rev — one body, three principal types, and the
@@ -325,7 +325,7 @@ def fxyR  = use Rev    ; fxy
 # 6. SECOND DERIVATIVES — the same family, applied to itself
 # ---------------------------------------------------------------------
 # `Fwd` is a functor Mod(Smooth) → Mod(Smooth), so it can be applied to
-# a model it made.  `use Fwd(Fwd(Floats))` mints the model whose carrier
+# a model it made.  `with Fwd(Fwd(Floats))` mints the model whose carrier
 # is `Dual(Dual(Float))` and reads the SAME three templates — `poly`,
 # `wave` and `fxy` are not touched, and nothing below knows there is a
 # second derivative in the world.
@@ -347,9 +347,9 @@ def fxyR  = use Rev    ; fxy
 def seed2 = (x -> (x 1.0 ; Dual) (1.0 0.0 ; Dual) ; Dual)
 #   seed2 : Float ⇒ Dual(Dual(Float))
 
-def polyDD = use Fwd(Fwd(Floats)) ; poly
-def waveDD = use Fwd(Fwd(Floats)) ; wave
-def fxyDD  = use Fwd(Fwd(Floats)) ; fxy
+def polyDD with Fwd(Fwd(Floats)) = poly
+def waveDD with Fwd(Fwd(Floats)) = wave
+def fxyDD  with Fwd(Fwd(Floats)) = fxy
 #   polyDD : Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float)) —
 #   ONE receipt, `Fwd(Fwd(Floats))`, because ONE model read the
 #   template.  `Floats` never saw it.
@@ -414,8 +414,7 @@ def step = Dual(v, d) -> v d ; fdiv
 
 def close? = (r -> (r ; value ; fabs) 0.0000001 ; flt?)
 
-def newton =
-    use Recursive
+def newton with Recursive =
     x ->
     (x 1.0 ; Dual) ; polyD
     (r -> r ; close?
@@ -447,7 +446,7 @@ def newton =
 # sampled.  A `Dual` is two Float wires with a roll around it, so
 # `unDual` partitions into one track and the whole square normalizes.
 
-transformation Value : Fwd(Floats) ⇒ Floats = value, zeroTangent
+transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent
 #   A TRANSFORMATION NAMES A MODEL, and `Fwd(Floats)` is a model — which
 #   is the reason the instantiation spelling is an APPLICATION and not a
 #   scope stack: the applied form is the model's NAME, so it is writable
@@ -465,7 +464,7 @@ transformation Value : Fwd(Floats) ⇒ Floats = value, zeroTangent
 def transpose = Dual(x, dx) -> x (dx ; scaleK) ; Rev
 #   transpose : Dual(Float) ⇒ Rev
 
-transformation Transpose : Fwd(Floats) ⇒ Rev = transpose, gx
+transformation Transpose in Fwd(Floats) ⇒ Rev = transpose, gx
 #   at `g`, Fwd's tangent `Float` becomes Rev's `Grad`, and the map is
 #   `gx` — the tangent was seeded at x, so the gradient it represents is
 #   the one with that partial in slot 1.  Nothing new is defined for it.
@@ -527,7 +526,7 @@ def tcos = RevG(a, ka) -> (a ; fcos) \
 def tvalue = RevG(v, k) -> v
 def tseedX = (x -> x kx ; RevG)
 
-model RevThread : Smooth(RevG, Grad) =
+model RevThread in Smooth(RevG, Grad) =
     add     = tadd
     mul     = tmul
     neg     = tneg
@@ -544,12 +543,11 @@ model RevThread : Smooth(RevG, Grad) =
 # and it is the same `Grad` the summing model hands back.
 def tgradient = RevG(v, k) -> k (gzero ; Gradient) 1.0 ; ev ; unGradient
 
-def polyT = use RevThread ; poly
+def polyT with RevThread = poly
 # run the reverse sweep at adjoint 1.0, threading the accumulator
 def discharge = (gr RevG(v, k) -> k gr 1.0 ; ev)
 
-def gradPoly =
-    use Gradient
+def gradPoly with Gradient =
     tseedX
     polyT
     discharge
@@ -572,7 +570,7 @@ def gradPoly =
 # a model of `Smooth(Dual(a))` for ANY model of `Smooth(a)` — a model
 # PARAMETERIZED BY A MODEL — and a `model` head named a declared type,
 # not a model variable.  Since 2026-09-15 a head takes a parameter
-# clause and `use Fwd(Fwd(Floats))` is the whole of it: §6.)
+# clause and `with Fwd(Fwd(Floats))` is the whole of it: §6.)
 #
 # A KLEISLI CATEGORY, as the same construction over a monad.  `model
 # Kleisli(M : Monad(m)) : Arrow(Kl(m))` wants two things this file's

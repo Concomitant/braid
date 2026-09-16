@@ -29,29 +29,27 @@ theory Policy(a) =
     none : • ⇒ a
     law nothingForNothing = (none ; pay) 0 ; eq? ; (forget ; true | forget ; false) ; merge
 
-model Hourly : Policy(Int) =
+model Hourly in Policy(Int) =
     pay  = 20 _ ; *
     none = 0
 
-model Overtime : Policy(Int) =
+model Overtime in Policy(Int) =
     pay  = 30 _ ; *
     none = 0
 
 # ---- one timesheet ---------------------------------------------------
-# Inside `use` nothing is threaded by hand: `pay` is pure, `say` and
+# Inside `with` nothing is threaded by hand: `pay` is pure, `say` and
 # `hire` touch Books, and the elaborator writes every `_` and `...`.
 # The scope names a resource AND a model in one header — the
 # resource contributes a wire, the model contributes a renaming.
-def step =
-    use Books Hourly
+def step with Books Hourly =
     pay
     toStr
     say
     " " ; say
     hire                        # a0 ρ0 =Books> ρ0
 
-def rush =
-    use Books Overtime
+def rush with Books Overtime =
     pay ; toStr ; say ; " " ; say ; hire
 
 # ---- the pass --------------------------------------------------------
@@ -66,10 +64,9 @@ def report = unBooks ; (log n -> "paid: " log ; cat ; print ; n) ; print
 (8 10 40 ; pack) ; payroll ; report      # paid: 160 200 800   /  3
 (8 10 40 ; pack) ; rushJob ; report      # paid: 240 300 1200  /  3
 
-# `use` scopes COMPOSE: a word that threads exactly the scope's
+# `with` scopes COMPOSE: a word that threads exactly the scope's
 # resources needs no routing, so `step` is callable from another scope.
-def twice =
-    use Books
+def twice with Books =
     step
     step
 

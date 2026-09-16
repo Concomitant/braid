@@ -10,12 +10,11 @@ def node = alt2 >> Tree
 def total = [_] [+] ... >> foldTree
 
 ## number of leaves: hand-written recursion through unTree, for
-## contrast. `use Recursive` is where recursion lives — `foldTree`
+## contrast. `with Recursive` is where recursion lives — `foldTree`
 ## above is a structural recursor (a builtin that descends on a smaller
 ## value), so it needs no knot and mints no label; this one ties its own
 ## and says `=Recursive>` on its arrow.
-def size =
-  use Recursive
+def size with Recursive =
   unTree >> (drop >> 1 | _ (size) >> swap >> _ (size) >> +) >> merge
 
 1 >> leaf >> _ (2 >> leaf) >> node >> _ (4 >> leaf) >> node >> total >> print   # 7

@@ -1,8 +1,8 @@
 # A category whose carrier is the program AND its Code.
 #
 # `examples/circuits.braid` says the rule once: a theory declared
-# `over Doctrine` that takes the doctrine's `compose`, `embed` and
-# `first` presents a category, and `use` of one of its models
+# `in Doctrine` that takes the doctrine's `compose`, `embed` and
+# `first` presents a category, and `with` of one of its models
 # transports base programs into it.  This file is a second model of
 # that rule with nothing in common with circuits except the doctrine —
 # its carrier is a PAIR of the program and the Code the elaborator
@@ -19,17 +19,17 @@ data Coded(a, b) = Fn⟨a ⇒ b⟩ Code
 data Pair(a, b)  = a b
 
 # ---- the theory ------------------------------------------------------
-# `over Doctrine` is the declaration: `compose`, `embed` and `first` are
+# `in Doctrine` is the declaration: `compose`, `embed` and `first` are
 # the prelude doctrine's, at its signatures, and the elaborator checks
 # that rather than matching shapes.  `run` has a carrier in and none
-# out, so it is an EXIT: legal under `over`, never inside `use`.
+# out, so it is an EXIT: legal under `in`, never inside `with`.
 #
 # `observe` and `sample` are the doctrine's evidence slots, and taking
 # them is what puts this model under the SAME seven arrow laws that
 # `examples/circuits.braid` runs — over a carrier that is a program and
 # its Code.  `observe` runs the witness at 3 and at 4 through the exit,
 # so the laws are finite tests here too.
-theory Reflective(k(_, _)) over Doctrine =
+theory Reflective(k(_, _)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     first   : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
@@ -46,7 +46,7 @@ def orNil     = ((c -> c) | drop ; nil) ; merge
 
 # ---- the model -------------------------------------------------------
 # The embedding is the whole idea: take the program, ask it for its
-# Code, and keep both.  `getCode` works here because what `use` hands
+# Code, and keep both.  `getCode` works here because what `with` hands
 # the embedding is a literal quotation of the stage — not a closure.
 def embedC = (f -> f (f ; getCode) ; Coded)
 
@@ -75,7 +75,7 @@ def orZero    = (... | drop _ ; drop ; 0) ; merge
 def observeC  = (c -> (c 3 ; runC ; orZero) (c 4 ; runC ; orZero) ; +)
 def sampleC   = [dup ; +] ; embedC
 
-model Reified : Reflective(Coded) =
+model Reified in Reflective(Coded) =
     embed   = embedC
     compose = composeC
     first   = firstC
@@ -87,14 +87,14 @@ model Reified : Reflective(Coded) =
 # `dup` leaves two wires and `*` takes two, so neither is one-wire:
 # they transport through the strength, packed with the pairing `Pair`
 # that `first`'s declared type names.
-def sq = use Reified ; dup ; *
+def sq with Reified = dup ; *
 #   sq : Int =Reified> Int
 
 # The carrier is readable, because that is what this carrier IS.
 sq ; unCoded ; drop _ ; unparse ; print
 
 # ...and runnable, through the exit.
-def sq5 = over Reified ; sq ; _ 5 ; run
+def sq5 in Reified = sq ; _ 5 ; run
 sq5 ; orZero ; print    # 25
 
 # And the STRENGTH is real, not decoration.  `add1 ...` acts on the
@@ -102,7 +102,7 @@ sq5 ; orZero ; print    # 25
 # whiskers it with `first` — and this model's `first` routes the spine
 # as well as the witness, so the Code stays runnable.
 def add1 = _ 1 ; +
-def w    = use Reified ; dup ; add1 ... ; *
+def w with Reified = dup ; add1 ... ; *
 w ; unCoded ; drop _ ; unparse ; print
-def w5 = over Reified ; w ; _ 5 ; run
+def w5 in Reified = w ; _ 5 ; run
 w5 ; orZero ; print    # 30 — (5+1)·5

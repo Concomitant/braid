@@ -6,7 +6,7 @@
 # fold through the thunk would never terminate.
 #
 # The thunk is written `=Recursive>` because a producer written under
-# `use Recursive` fills it, and a written arrow means its manifest: an
+# `with Recursive` fills it, and a written arrow means its manifest: an
 # unlabelled `Fn⟨• ⇒ …⟩` would refuse `from` below. Productive, but
 # unbounded — `Recursive` claims the second thing, not divergence.
 
@@ -20,13 +20,11 @@ def tailS = Stream(h, t) -> t >> ev            # force one step
 # quotation is a CAPTURE, and abstraction elimination handles it like
 # any other captured wire; guardedness (and so productivity) is the
 # body's business, not the marker's.
-def from =
-  use Recursive
+def from with Recursive =
   (n -> n [n 1 >> + >> from] >> Stream)
 
 # a constant stream — same shape, different generator
-def repeat =
-  use Recursive
+def repeat with Recursive =
   (x -> x [x >> repeat] >> Stream)
 
 def nats = 0 >> from                             # 0, 1, 2, 3, …  (infinite)

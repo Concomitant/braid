@@ -18,8 +18,7 @@ import "traced.braid"
 "-- traced.braid's own main did not run: no markers above this line --" ; print
 
 # its functor is ours now
-def counted =
-    use Ticked
+def counted with Ticked =
     dup ; *
     _ 1 ; +
 
@@ -29,6 +28,6 @@ def counted =
 [dup ; +] ; getCode ; ticked ; unparse ; print
 
 # an imported def keeps the elaboration it was given: `poly` was written
-# under `use Traced` there, so it still announces every stage here, and
+# under `with Traced` there, so it still announces every stage here, and
 # its type still carries the receipt `Int =Traced> Int`
 5 ; poly ; print
