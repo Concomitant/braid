@@ -3859,6 +3859,12 @@ trade `theory` makes everywhere, and it is deliberate.
 
 ## 16. Further reading
 
+- `CONSTRUCTS.md` — the declaration layer as a **reference**: every
+  construct (theory, the four kinds of model, template, hand-built
+  morphism, transformation, the Doctrine, `with`, `in`, `table`,
+  receipts), what it is, its syntax, what the checker does with it,
+  which example file uses it, and its refusals — plus what is *not* a
+  construct and why.
 - `design-control-flow.md` — the control-flow design record (idiom
   inventory, deferral theorem, the guard-syntax history).
 - `design-exponents.md` — exponents: theory, unification, erasure,

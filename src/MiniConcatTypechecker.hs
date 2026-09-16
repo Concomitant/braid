@@ -2500,6 +2500,11 @@ parseSeqStmt ln toks = do
 parseStage :: Int -> [Token] -> Either String (Stage, [Token])
 parseStage ln = go []
   where
+    -- a header word at the head of a stage, wherever the stage begins:
+    -- `def f = dup ; use Log ; …` reaches here rather than
+    -- `parseProgramToks`, and must get the same refusal (2026-09-16)
+    go [] (TokIdent w : TokIdent _ : _)
+      | Just e <- retiredHeader w = here e
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
@@ -7996,7 +8001,7 @@ checkModuleRaw base src = do
     (n : _) | n `elem` map fst ownBases || n `elem` map inName insts ->
       Left $ "Duplicate model declaration: " ++ n ++ " (a functor and a "
           ++ "model share one namespace — each declares a name a `with` "
-          ++ "header may carry)"
+          ++ "clause may carry)"
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories trans) insts

@@ -579,7 +579,8 @@ worked example for each row.
 
 A design-driven prototype: one Haskell module for the whole language
 (typechecker, interpreter, REPL), a 1133-case test suite, a full
-reference (`MANUAL.md` — every feature, with checker-verified types),
+reference (`MANUAL.md` — every feature, with checker-verified types;
+`CONSTRUCTS.md` — the declaration layer construct by construct),
 and design notes recording each decision and the theorems that forced
 it —
 `expanded-spec.md`, `spec-sums.md`, `spec-code.md`,
