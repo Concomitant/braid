@@ -14,7 +14,7 @@
 # Three models of one theory: `Floats` evaluates, `Fwd` carries a
 # tangent (forward mode), `Rev` carries the TRANSPOSE of the same
 # linear map as a continuation (reverse mode).  `Fwd` is not one model
-# but a FAMILY: `model Fwd(R : Smooth(a, g))` is a functor
+# but a FAMILY: `model Fwd(Smooth(a, _))` is a functor
 # Mod(Smooth) → Mod(Smooth), so `with Fwd(Fwd(Floats))` differentiates
 # TWICE and §6 prints second derivatives.  Forward and reverse are
 # not two algorithms here; they are two REPRESENTATIONS of one linear
@@ -143,7 +143,7 @@ def fcosOf = (a -> a quarterTurn ; fadd ; fsin)
 # is written once, in `mul`, and nothing anywhere composes derivatives
 # by hand.
 #
-# `model Fwd(R : Smooth(a, g))` is A MODEL PARAMETERIZED BY A MODEL, and
+# `model Fwd(Smooth(a, _))` is A MODEL PARAMETERIZED BY A MODEL, and
 # it is not one model: it is a FAMILY, a functor Mod(Smooth) →
 # Mod(Smooth) (Kiselyov's interpreter transformers; ML's higher-order
 # functors; the ring construction R ↦ R[ε]/ε²).  `with Fwd(Floats)`
@@ -178,7 +178,7 @@ def fcosOf = (a -> a quarterTurn ; fadd ; fsin)
 
 data Dual(a) = a a
 
-model Fwd(Smooth(a, g)) in Smooth(Dual(a), a) =
+model Fwd(Smooth(a, _)) in Smooth(Dual(a), a) =
     add = Dual(x, dx) Dual(y, dy) -> (x y ; add) (dx dy ; add) ; Dual
     mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual
     neg = Dual(x, dx) -> (x ; neg) (dx ; neg) ; Dual

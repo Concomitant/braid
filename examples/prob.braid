@@ -284,31 +284,35 @@ model Nondet in Prob(Poss, Reach) =
 # `first` acts on the DEEPER wire of a pairing.  Acting on the other one
 # is `swap ; first ; swap`, and the swap is an ordinary base program
 # embedded — which is the whole construction of the monoidal product
-# `f ⊗ g` out of a strength, written once per model because a template
-# `in Prob` is not instantiable by `with Enum` (§12, pragmatics).
+# `f ⊗ g` out of a strength.
+#
+# IT IS WRITTEN ONCE, over the THEORY (2026-09-16).  A def whose `in`
+# clause names `Prob` is a morphism of what `Prob` presents, in `Prob`'s
+# vocabulary; `with Enum` on such a def INSTANTIATES it — the slot names
+# become Enum's words and the `;` stays base composition, because a
+# morphism of B[Prob] composes like the base.  Until 2026-09-16 the
+# same header did both jobs and the expansion was transported a second
+# time, so these four words were three hand-copied pairs.
 
 def swapP = unPair ; swap ; Pair
 
-def secondE in Enum =
+def second in Prob =
     (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
-def secondS in Sampler =
-    (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
+def secondE in Prob with Enum    = second
+def secondS in Prob with Sampler = second
 #   secondE : Kern(a, b) ⇒ Kern(Pair(c, a), Pair(c, b))
 
 ## two independent flips, as `flip ⊗ flip`: the strength twice, with a
 ## swap between.  This is the word the thesis turns on.
-def bothFlipE in Enum =
+def bothFlip in Prob =
     (flip ; first)
     _ ([swapP] ; embed) ; compose
     _ (flip ; first) ; compose
     _ ([swapP] ; embed) ; compose
-def bothFlipS in Sampler =
-    (flip ; first)
-    _ ([swapP] ; embed) ; compose
-    _ (flip ; first) ; compose
-    _ ([swapP] ; embed) ; compose
+def bothFlipE in Prob with Enum    = bothFlip
+def bothFlipS in Prob with Sampler = bothFlip
 #   bothFlipE : • ⇒ Kern(Pair(Float, Float), Pair(Bool, Bool)) — a word
-#   of the category built BY HAND, so `in` and not `with`, and it
+#   of the category, built out of the theory's own slots, and it
 #   composes inside a `with Enum` scope like any transported stage.
 
 ## the biases, as ordinary base stages: one wire in, one wire out, so
@@ -328,11 +332,7 @@ def twoIndepE with Enum = twoBiases ; bothFlipE
 
 def twoEqualS with Sampler = half ; flip ; dup
 def twoIndepS with Sampler = twoBiases ; bothFlipS
-def bothFlipN in Nondet =
-    (flip ; first)
-    _ ([swapP] ; embed) ; compose
-    _ (flip ; first) ; compose
-    _ ([swapP] ; embed) ; compose
+def bothFlipN in Prob with Nondet = bothFlip
 def twoEqualN with Nondet = half ; flip ; dup
 def twoIndepN with Nondet = twoBiases ; bothFlipN
 #   `bothFlipE` is ENUM's word, and the elaborator says so if it is
@@ -399,8 +399,9 @@ countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
 # different problem — Monty *Fall* — and it answers 1/2.  The model has
 # to say what the host does; `condition` cannot repair a wrong one.)
 
-def coinSndE in Enum = (([half] ; embed) flip ; compose) ; secondE
-def coinSndS in Sampler = (([half] ; embed) flip ; compose) ; secondS
+def coinSnd in Prob = (([half] ; embed) flip ; compose) ; second
+def coinSndE in Prob with Enum    = coinSnd
+def coinSndS in Prob with Sampler = coinSnd
 #   coinSndE : • ⇒ Kern(Pair(c, Int), Pair(c, Bool)) — flip a fair coin
 #   ON TOP of whatever is riding below
 
@@ -471,7 +472,8 @@ distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; printFrame
 
 def quarter  = (n -> 0.25)
 def biasOf2  = (r x -> r (r 0.875 0.125 ; select))   # Bool Bool ⇒ Bool Float
-def flipSndE in Enum = flip ; secondE
+def flipSnd in Prob = flip ; second
+def flipSndE in Prob with Enum = flipSnd
 def keepAlarm = (p -> p ; unPair ; (r a -> a r ; Pair))
 def showRain = (b -> b "rain" "dry" ; select)
 

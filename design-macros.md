@@ -3975,3 +3975,216 @@ make it.
 a body, since a body is written in the parameter's vocabulary. The head
 refuses a second and says that; qualified slot names (`R@add`) are the
 obvious answer and are not worth their cost until something wants them.
+
+## Amendment (2026-09-16): `in` and `with`
+
+`over` and `use` are gone. The declaration layer has **two header
+words**, and a def's grammar is
+
+```text
+def NAME [in T] [with M …] = body
+```
+
+`in` at most once, `with` a list, `in` before `with`, both **header
+clauses** — left of the `=`, never in a body — and the body is a pure
+spine.
+
+### The four glyphs, one meaning each
+
+The rename was forced by a rule that had been true of the glyphs and not
+yet of the words:
+
+| glyph | means | and nothing else |
+|---|---|---|
+| `;` | **COMPOSES** | not "separates", not "then declare" |
+| `,` | **LISTS** the items of a declaration | bindings, components, arguments |
+| `:` | **TYPES** a slot (`add : a a ⇒ a`) | not "is a member of" |
+| `=` | **DEFINES** the body | never equality — equality in Braid is always a program |
+
+Under that rule three heads were misspelled. `model Floats : Smooth(…)`
+used `:` for membership; so did `transformation Value : A ⇒ B`; and a
+`;` between two model bindings looked like a separator. All three now
+read the same way:
+
+```braid
+theory Arrow(k(_, _)) in Doctrine = …
+model Floats in Smooth(Float, Float) = …
+model Fwd(Smooth(a, _)) in Smooth(Dual(a), a) = …
+transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent
+def poly in Smooth = …
+def polyD with Fwd(Floats) = poly
+```
+
+`table Trades = "…"` is unchanged: a table names a file, and that is a
+definition.
+
+### Membership against application
+
+`in` says **what this def is** — a morphism of the category `T`
+presents, written in `T`'s vocabulary. It applies nothing, writes no
+wire and mints no label. `with` says **what is applied to the body** —
+a model, a resource, a functor, a `Recursive` knot — and every `with`
+mints its receipt exactly as `use` did.
+
+That is the distinction `over`/`use` already drew; what the rename buys
+is that the words now *say* it, and that one word never means two
+things. `over` was a preposition doing a verb's job ("this def is over
+Circuits" reads like "this def ranges over circuits"); `use` said
+nothing about what was being used for what.
+
+### Why header-only: a scope is not a stage
+
+`use R ; body` took the rest of the enclosing scope as its body, which
+made it look like a stage and put it in the same placement family as
+`x y ->` and `...` (MANUAL §4). It is not one. A scope is a property of
+the **definition**, not a step in the pipeline: it decides how every
+stage is elaborated, and a thing that decides how the spine is read
+cannot be a point in the spine. Two consequences fell out for free:
+
+- `def f = 1 ; over Monoid ; op` had to be refused by a special rule
+  ("`over` may only be a def's own header — the first thing in its
+  body"). With the clause left of the `=` there is no such position to
+  refuse, and the grammar says it.
+- The block-body trap is gone. `def f = over Enum ;` followed by a
+  newline silently lost the scope for every line after the first
+  (design-macros.md, 2026-09-15). A header clause has no body to lose.
+
+The one place `with` still stands on a line of its own is the **REPL**,
+where a session has no `def` to hang it on and the rest of the session
+*is* the body — which is what ML's `open` does.
+
+A **quotation** is the other place a body is written, and it takes the
+same clause introduced by the same `=`: `[with Fuel = dup ; *]`.
+`traced.braid` and `metered.braid` turn on being able to reify a
+program *as a scope elaborated it*, receipt and routing included, and
+that program is not a whole def. A quotation declares nothing, so there
+is no `in` there.
+
+### Instantiate against transport, decided by `in`
+
+The 2026-09-15 amendment ended with a finding it could not fix: a
+template over a Doctrine theory *did* expand under `with M` and was then
+**transported a second time**, because `with M` on a Doctrine model both
+instantiated the template and embedded every base stage. The expansion's
+own `embed` and `compose` got embedded and the refusal was a stack
+failure about `Plain(•, b)`. That note said a flag would be the wrong
+answer and the one-spelling rule wanted a better one.
+
+`in` is the better one, and it is not a second knob — it is the clause
+that was already there:
+
+| the def | `with M` does | because |
+|---|---|---|
+| `def f in T with M = …`, T = M's theory | **instantiates**: slots resolve to M's words, the spine stays BASE composition | the body is already a morphism of `B[T]`, and a morphism of `B[T]` composes like the base |
+| `def f with M = …`, no `in` | **transports**: stage ↦ `embed`, `;` ↦ `compose` | the body is a base program and M is the functor carrying it in |
+
+Never both. So `prob.braid`'s three hand-copied `second`/`bothFlip`
+words are writable once:
+
+```braid
+def second in Prob = (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
+def secondE in Prob with Enum = second
+```
+
+and the mixed case `in K with K` — K's own words inline, base stages
+transported around them — is allowed and means what it looks like.
+
+**The pin.** The two readings are different programs with different
+types, and both are legal:
+
+```text
+def a with Enum = half ; flip ; dup   # a0 =Enum Recursive> Pair(Bool, Bool)
+def b in Enum   = flip ; dup          # • =Recursive> Kern(Float, Bool) Kern(Float, Bool)
+```
+
+`a` is the Markov copy — one flip, copied, HH and TT at ½. `b` is two
+kernel *values* side by side, which is not a kernel at all. Nothing but
+`in` tells them apart, which is the argument that it belongs in the
+grammar rather than in a flag.
+
+### `in Recursive` is refused, and what it would have been
+
+```text
+`Recursive` is applied, not lived in: write `with Recursive`; the
+open-recursion body is `fix` by hand (MANUAL §8)
+```
+
+The walk-through, because the refusal is a design decision and not an
+omission. `with Recursive` on a def `f` is exactly **`in B[f]` plus the
+knot model**: `B[f]` is the base presentation extended by one generator
+— `f` itself — so it is a one-slot theory *per def*, whose slot's type
+is not written anywhere but inferred from the body's use of it. A def
+written over that theory is an **open-recursion** body: it names `f`
+and does not say what `f` is. `with Recursive` then applies the knot
+model, the unique one that sends that generator to the fixed point of
+the body — which is what `tieKnot` builds and what `fix` computes.
+
+So `in Recursive` would be the open half alone: a body over a theory
+with no name, waiting for a model nobody can write down. The honest
+spelling of that today is `fix` by hand, which the prelude already has
+and `examples/recursion.braid` already shows. If the one-slot theory
+ever becomes writable — an inferred-slot theory, `theory Self(a) = self
+: ?` — `in Recursive` becomes the thing to say, and the refusal names
+it in advance.
+
+### A family head without a name
+
+`model Fwd(R : Smooth(a, g))` named its parameter `R`, and nothing ever
+used the name. A family's bodies are written in **the theory's**
+vocabulary, not in the parameter's — `add` inside `add`'s body is the
+argument model's `add` because the slot being defined is not in scope in
+its own body — and there is exactly one parameter, so there is nothing
+to disambiguate. The head is now
+
+```braid
+model Fwd(Smooth(a, _)) in Smooth(Dual(a), a) = …
+```
+
+— the theory the argument must model, and a name for each of that
+model's own arguments so the head can write its own, with `_` for a
+binder the head does not use. `Fwd`'s `g` was such a binder from the day
+it was written.
+
+### The comma, and why it is unambiguous
+
+`;` composes, so it never separates two bindings. A declaration's items
+are separated by a **comma on one line** and by a **newline in a block**
+— models, transformations and theories alike, one rule:
+
+```braid
+model Ints in Ring(Int) = add = +, mul = *
+```
+
+The body of a binding runs to the next **top-level** comma, and brackets
+are balanced, so `mul = (x y -> x ; f ; y ; g)` is one binding whose
+body composes twice and contains a comma-free parenthesis; a comma
+inside `Dual(x, dx)` is inside a bracket and is not a separator. The
+test the checker actually makes is a second **top-level `=`**: a
+binding's image is a program and a program has no `=` in it, so a second
+one at depth zero is two bindings run together. The message says so:
+
+```text
+`;` composes; separate bindings with `,` or a newline
+```
+
+Every model now has the inline form, not just a model of `Base` — `def`
+has both forms and a model is a definition too.
+
+### The receipt is `with@F`
+
+It was `use@F`. A receipt is minted by a `with` clause and by nothing
+else, and it is visible in reflected code (`traced.braid` prints
+`with@Ticked >> dup >> "tick" pass …`), so leaving it spelled after a
+retired word would have left exactly one mention of `use` in the
+language — one the reader could not look up and could not write. One
+spelling per thing. That example's printed line changed; nothing else
+did.
+
+### What it cost
+
+Forty-one `in` sites across twelve example files, seven theory heads,
+every `with` clause, the prelude's nine `Recursive` defs, ~230 test
+mentions and ~290 doc mentions. The whole of it is spelling except the
+four items above (instantiate-vs-transport, the quotation clause, the
+comma refusal, the inline model body), and four printed lines changed —
+three that quoted the retired syntax in a banner, and the receipt.

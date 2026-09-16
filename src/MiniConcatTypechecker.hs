@@ -7145,7 +7145,7 @@ matchStack cons cm0 tm0 s1 s2 = do
     one (cm, tm) (t, t') | t == t' = Just (cm, tm)
     one _ _ = Nothing
 
--- `theory T(…) over D` — the claim, checked.  Every slot T declares
+-- `theory T(…) in D` — the claim, checked.  Every slot T declares
 -- that D also declares must be D's slot at D's shape; the constructor
 -- parameters D names are instantiated once for the whole theory.
 checkExtends :: [Theory] -> Theory -> Either String ConMap
@@ -8290,9 +8290,20 @@ checkModuleRaw base src = do
                              , sl <- sls ])
                         (normalizeArrow arr)
             _ -> Right ()
-          let kws2 = case asc of
-                Just m | isKWordShape m (normalizeArrow arr) ->
+          -- ...and an INSTANTIATED template is classified the same way
+          -- (2026-09-16): `def f in Prob with Enum = …` is a morphism
+          -- of the theory read by a model, so if it builds one carrier
+          -- out of nothing it is one of that model's words and a later
+          -- `with Enum` must leave it alone.  Same question, same test,
+          -- asked of the model the `with` named.
+          let kws2 = case (asc, instOf) of
+                (Just m, _) | isKWordShape m (normalizeArrow arr) ->
                   (name, tpName m) : kws'
+                (Nothing, i : _)
+                  | (m : _) <- [ t | t <- trans, tpName t == i
+                                   , isJust (tpCompose t) ]
+                  , isKWordShape m (normalizeArrow arr) ->
+                      (name, tpName m) : kws'
                 _ -> kws'
           let sc = generalizeWith env1 dsubs arr
           pure ( M.insert name sc env

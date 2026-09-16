@@ -48,7 +48,7 @@ transformationVerdictTests =
                , "  sample  sampled (`pack` has no closed arity)" ] )
     -- forgetting the tangent: every square proved, which is the
     -- strongest verdict the machinery has — and the model is now
-    -- `Fwd(Floats)`, a MEMBER of the family `model Fwd(R : Smooth(a, g))`
+    -- `Fwd(Floats)`, a MEMBER of the family `model Fwd(Smooth(a, _))`
     -- minted by `with Fwd(Floats)`, which a transformation names exactly
     -- as it names any other model (2026-09-15) — `gradient` included, since
     -- 2026-09-14: its result type is a theory PARAMETER, so `Value` has
