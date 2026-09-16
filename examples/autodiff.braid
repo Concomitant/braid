@@ -47,16 +47,19 @@
 # varies by model is a theory parameter (§8 shows what it buys —
 # `Transpose`'s gradient half becomes a square like any other).
 #
-# `cos` IS A GENERATOR BECAUSE `Fwd` IS A MODEL OF THIS THEORY
-# (2026-09-15).  A theory closed under differentiation must be able to
-# WRITE each generator's derivative in its own vocabulary: d(exp x) is
-# `exp`, d(sin x) is `cos`, d(cos x) is `sin` and `neg`.  While `Fwd`
-# was a hand-written model over `Float` it could reach `fcos`, a base
-# word, and the theory did not have to say `cos`.  A model of `Smooth`
-# parameterized by a model of `Smooth` has no base words to reach: the
-# only vocabulary it has is the theory's.  So the theory grew the
-# generator its own differentiation needed, which is the honest reading
-# of "closed under D".
+# THERE IS NO `cos` GENERATOR, AND THE THEORY IS STILL CLOSED UNDER
+# DIFFERENTIATION (2026-09-16).  A theory a family like `Fwd` can be
+# built over must be able to WRITE each generator's derivative in its
+# own vocabulary: d(exp x) is `exp`, and d(sin x) is the cosine.  The
+# cosine is not a second generator — it is this theory's own sine, a
+# quarter turn along:
+#
+#     cos x = sin(x + π/2)
+#
+# which is `cosOf` below, an ordinary TEMPLATE over `Smooth`.  A
+# generator is a thing a model must be asked to supply; a definable
+# word is not one, and `cos` was definable all along.  So `Smooth` has
+# nine slots and every model has one binding fewer to get wrong.
 #
 # `Smooth` is NOT declared `in Doctrine`.  The doctrine's carrier is
 # a hom-object `k(a, b)` — a category of arrows — and this is an
@@ -72,7 +75,6 @@ theory Smooth(a, g) =
     lit     : Float ⇒ a
     exp     : a ⇒ a
     sin     : a ⇒ a
-    cos     : a ⇒ a
     sample  : • ⇒ a
     observe : a ⇒ Float
     gradient : a ⇒ g
@@ -90,6 +92,14 @@ theory Smooth(a, g) =
     law addUnit  = (sample (0.0 ; lit) ; add ; observe) (sample ; observe) ; eq? ; verdict
     law mulUnit  = (sample (1.0 ; lit) ; mul ; observe) (sample ; observe) ; eq? ; verdict
     law negAdd   = (sample (sample ; neg) ; add ; observe) (0.0 ; lit ; observe) ; eq? ; verdict
+
+# THE COSINE, DEFINED.  A quarter turn along the sine: one template
+# over the theory, so every model gets it and no model binds it.  This
+# is what "closed under differentiation" costs when the closure is a
+# DEFINITION rather than a generator — nothing.
+def quarterTurn = 1.5707963267948966
+def cosOf in Smooth = (x -> x (quarterTurn ; lit) ; add ; sin)
+#   cosOf : a ⇒ a, at whichever model reads it
 
 # ---------------------------------------------------------------------
 # 2. Evaluation — the model everything else is compared against
@@ -111,10 +121,17 @@ model Floats in Smooth(Float, Float) =
     lit     = id
     exp     = fexp
     sin     = fsin
-    cos     = fcos
     sample  = 1.5
     observe = id
     gradient = zeroTangent
+
+# ...and the same quarter turn at the base, which is what the two
+# reverse models need: their slot bodies build the adjoint out of
+# ordinary `Float` arithmetic rather than out of the theory, and a
+# `Fn` field written pure cannot carry a model's receipt.  ONE
+# constant, read two ways.
+def fcosOf = (a -> a quarterTurn ; fadd ; fsin)
+#   fcosOf : Float ⇒ Float
 
 # ---------------------------------------------------------------------
 # 3. Forward mode — the value, paired with a tangent, over ANY model
@@ -169,9 +186,10 @@ model Fwd(Smooth(a, g)) in Smooth(Dual(a), a) =
     lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)
     # d(exp x) = exp x · dx, and the value is shared with the tangent
     exp = Dual(x, dx) -> (x ; exp) ; (e -> e (e dx ; mul) ; Dual)
-    # d(sin x) = cos x · dx, d(cos x) = −sin x · dx — both in R's words
-    sin = Dual(x, dx) -> (x ; sin) ((x ; cos) dx ; mul) ; Dual
-    cos = Dual(x, dx) -> (x ; cos) ((x ; sin ; neg) dx ; mul) ; Dual
+    # d(sin x) = cos x · dx, and the cosine is `cosOf` — the theory's
+    # own sine, a quarter turn along.  So the theory needs no `cos`
+    # generator, and `Fwd` reaches for no word R does not have.
+    sin = Dual(x, dx) -> (x ; sin) ((x ; cosOf) dx ; mul) ; Dual
     sample  = sample (1.0 ; lit) ; Dual
     observe = Dual(v, t) -> v ; observe
     gradient = Dual(v, t) -> t
@@ -179,6 +197,14 @@ model Fwd(Smooth(a, g)) in Smooth(Dual(a), a) =
 def value   = Dual(v, t) -> v
 def tangent = Dual(v, t) -> t
 #   value, tangent : Dual(a) ⇒ a — ordinary words over any carrier
+
+# THE DERIVATIVE OF A ONE-INPUT PROGRAM, as a word.  Seed the input
+# with tangent 1, run the program, keep the tangent: that is the whole
+# of forward mode, and it is three stages.  `f` is a QUOTATION, so any
+# `Dual(Float) ⇒ Dual(Float)` goes in — `polyD`, `waveD`, `[wave]` read
+# by whatever model is in scope.
+def derivative = (f x -> x 1.0 ; Dual ; f ... ; ev ; tangent)
+#   derivative : Fn⟨Dual(Float) ⇒ Dual(Float)⟩ Float ⇒ Float
 
 # ---------------------------------------------------------------------
 # 4. Reverse mode — the value, paired with the TRANSPOSE of that map
@@ -224,9 +250,7 @@ def rneg = Rev(a, ka) -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev
 # the same CODE the `lit` square's other side normalizes to (§8)
 def rlit = (c -> c (0.0 ; scaleK) ; Rev)
 def rexp = Rev(a, ka) -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Rev)
-def rsin = Rev(a, ka) -> (a ; fsin) [(d -> ka (d (a ; fcos) ; fmul) ; ev)] ; Rev
-def rcos = Rev(a, ka) -> (a ; fcos) \
-    [(d -> ka (d (a ; fsin ; fneg) ; fmul) ; ev)] ; Rev
+def rsin = Rev(a, ka) -> (a ; fsin) [(d -> ka (d (a ; fcosOf) ; fmul) ; ev)] ; Rev
 def rvalue = Rev(v, k) -> v
 
 # THE EXIT PROBLEM, and how it is resolved.
@@ -258,7 +282,6 @@ model Rev in Smooth(Rev, Grad) =
     lit     = rlit
     exp     = rexp
     sin     = rsin
-    cos     = rcos
     # the transpose of `Fwd`'s own sample: value 1.5, tangent 1.0
     sample  = 1.5 (1.0 ; scaleK) ; Rev
     observe = rvalue
@@ -304,22 +327,23 @@ def fxyR with Rev = fxy
 
 "-- w(x) = sin(2x^2), at x = 2 --" ; print
 2.0 ; waveF ; print                       # 0.9893582466233818  = sin 8
-(2.0 1.0 ; Dual) ; waveD ; tangent ; print
-                                          # -1.1640002704689083 = 8*cos 8,
-                                          #   cos 8 = -0.14550003380861354
+[waveD] 2.0 ; derivative ; print
+                                          # -1.1640002704689076 = 8*cos 8,
+                                          #   cos 8 = -0.14550003380861354,
+                                          #   and the seeding is `derivative`'s
 (2.0 ; seedX) ; waveR ; backward ; unGrad ; print ... ; print
-                                          # -1.1640002704689083, then 0.0
+                                          # -1.1640002704689076, then 0.0
 
 "-- f(x, y) = x*y + sin x, at (2, 3) --" ; print
 2.0 3.0 ; fxyF ; print                    # 6.909297426825682  = 6 + sin 2,
                                           #   sin 2 = 0.9092974268256817
 (2.0 1.0 ; Dual) (3.0 0.0 ; Dual) ; fxyD ; tangent ; print
-                                          # 2.5838531634528574 = y + cos x
+                                          # 2.583853163452858 = y + cos x
                                           #   = 3 - 0.4161468365471424
 (2.0 0.0 ; Dual) (3.0 1.0 ; Dual) ; fxyD ; tangent ; print   # 2.0  = x
 # ONE reverse sweep gives BOTH partials; forward mode needed two runs.
 (2.0 ; seedX) (3.0 ; seedY) ; fxyR ; backward ; unGrad ; print ... ; print
-                                          # 2.5838531634528574, then 2.0
+                                          # 2.583853163452858, then 2.0
 
 # ---------------------------------------------------------------------
 # 6. SECOND DERIVATIVES — the same family, applied to itself
@@ -366,7 +390,7 @@ def fxyDD  with Fwd(Fwd(Floats)) = fxy
 
 "-- w(x) = sin(2x^2) twice, at x = 2 --" ; print
 2.0 ; seed2 ; waveDD ; tangent ; value ; print
-                                          # -1.1640002704689083 = 8*cos 8,
+                                          # -1.1640002704689076 = 8*cos 8,
                                           #   the number §5 printed
 2.0 ; seed2 ; waveDD ; tangent ; tangent ; print
                                           # w''(x) = 4*cos(2x^2)
@@ -441,7 +465,7 @@ def newton with Recursive =
 #
 #     Fwd(Floats)@s ; Value  =  Value…Value ; Floats@s
 #
-# commutes.  All TEN of them — add, mul, neg, lit, exp, sin, cos,
+# commutes.  All NINE of them — add, mul, neg, lit, exp, sin,
 # sample, observe and gradient — are PROVED by the normalizer, for every input, not
 # sampled.  A `Dual` is two Float wires with a roll around it, so
 # `unDual` partitions into one track and the whole square normalizes.
@@ -469,14 +493,14 @@ transformation Transpose in Fwd(Floats) ⇒ Rev = transpose, gx
 #   `gx` — the tangent was seeded at x, so the gradient it represents is
 #   the one with that partial in slot 1.  Nothing new is defined for it.
 
-# What its TEN squares establish (`:transformations` in the REPL
+# What its NINE squares establish (`:transformations` in the REPL
 # prints the verdicts): `lit`, `sample` and `observe` are PROVED by the
 # normalizer, for every input — which is why `rlit` builds the ZERO
 # LINEAR MAP `(0.0 ; scaleK)` rather than `[(d -> gzero)]`: the two are
 # the same map and only the first is the same CODE, and `lit`'s input
 # is a `Float` rather than the carrier, so no `sample` reaches it and a
-# proof is the only verdict available.  The other seven — `add`, `mul`,
-# `neg`, `exp`, `sin`, `cos` and `gradient` — are SAMPLED at the theory's
+# proof is the only verdict available.  The other six — `add`, `mul`,
+# `neg`, `exp`, `sin` and `gradient` — are SAMPLED at the theory's
 # evidence.  `:transformations` says WHY each needed the samples:
 # `differ in the free category`.  `sameCode` does not refuse them — it
 # DECIDES them false, because the two sides are equal only up to
@@ -520,9 +544,7 @@ def tmul = RevG(a, ka) RevG(b, kb) -> (a b ; fmul) \
 def tneg = RevG(a, ka) -> (a ; fneg) [(gr d -> ka gr (d ; fneg) ; ev)] ; RevG
 def tlit = (c -> c [(gr d -> gr)] ; RevG)
 def texp = RevG(a, ka) -> (a ; fexp) ; (e -> e [(gr d -> ka gr (d e ; fmul) ; ev)] ; RevG)
-def tsin = RevG(a, ka) -> (a ; fsin) [(gr d -> ka gr (d (a ; fcos) ; fmul) ; ev)] ; RevG
-def tcos = RevG(a, ka) -> (a ; fcos) \
-    [(gr d -> ka gr (d (a ; fsin ; fneg) ; fmul) ; ev)] ; RevG
+def tsin = RevG(a, ka) -> (a ; fsin) [(gr d -> ka gr (d (a ; fcosOf) ; fmul) ; ev)] ; RevG
 def tvalue = RevG(v, k) -> v
 def tseedX = (x -> x kx ; RevG)
 
@@ -533,7 +555,6 @@ model RevThread in Smooth(RevG, Grad) =
     lit     = tlit
     exp     = texp
     sin     = tsin
-    cos     = tcos
     sample  = 1.5 kx ; RevG
     observe = tvalue
     gradient = tgradient

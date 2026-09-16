@@ -62,7 +62,6 @@ transformationVerdictTests =
                , "  lit       proved"
                , "  exp       proved"
                , "  sin       proved"
-               , "  cos       proved"
                , "  sample    proved"
                , "  observe   proved"
                , "  gradient  proved" ] )
@@ -81,7 +80,6 @@ transformationVerdictTests =
                , "  lit       proved"
                , "  exp       sampled (1 point; differ in the free category)"
                , "  sin       sampled (1 point; differ in the free category)"
-               , "  cos       sampled (1 point; differ in the free category)"
                , "  sample    proved"
                , "  observe   proved"
                  -- THE GRADIENT HALF, machine-checked at last: the two
