@@ -3170,6 +3170,102 @@ meaning — but it is visible in the free category, and `twice` is
 therefore reported outside the image. Both kinds are shown, side by
 side, in `examples/optimizer.braid`.
 
+### Reflected types *(2026-09-16)*
+
+`Code` reflects a **program**. These reflect its **type**, and a
+**declaration**. They are not a new layer: every one of them answers
+with a fact the checker already holds, so they are pure, they are cheap,
+and they may be called at **elaboration** — a `functor` is an ordinary
+pure `Code ⇒ Code` word, so a derivation that reads a declaration is an
+ordinary Braid word too.
+
+```text
+typeOfWord : Str      ⇒ (TypeRep | Str)     a word's principal scheme
+declOf     : Str      ⇒ (Decl | Str)        a data/type/theory declaration
+showType   : TypeRep  ⇒ Str                 the display `:t` prints
+```
+
+They are **prims** (§9), not declarations: they read the checker's own
+tables, which is exactly the criterion the kernel uses (`README`).
+
+**The rep.** `data TypeRep` mirrors the checker's `Ty`, `SType`,
+`EffRow` and `Arrow` in seven alternatives — a base type by name, a
+type **variable** by name, a declared type at its argument stacks, `Fn`
+around an arrow, a sum (its alternatives and the row tail), a stack's
+**open end**, and an **arrow** (in, out, the grade's labels, the effect
+tail). A stack is `type StackRep = List(TypeRep)`, front wire first;
+only the open-end alternative is not a wire, and it stands last in a
+stack and nowhere else. `foldTypeRep` is the seven-way eliminator, and
+`baseOf`, `wire?`, `stackWidth` and `firstAlt` (the prelude) are the
+small vocabulary written on it.
+
+**Equality is `eq?` — after normalization.** `typeOfWord` normalizes
+before it answers (`normalizeArrow`: variables become `a0`, `ρ0`, `σ0`,
+`ε0` in order of first appearance), so two schemes are the same scheme
+exactly when their reps are `eq?`. A rep you assembled by hand carries
+no such guarantee: `eq?` on an unnormalized rep compares variable
+*names*, which is a different question.
+
+**What has no rep.** A bundle exponent (`Intⁿ`) and `Fin(n)` ride the
+**miss track**, with the reason: a width is a second sort — an exponent
+is not a type — and a rep that flattened it would make two different
+types equal. `typeOfWord "pack"` misses; `:t pack` still prints.
+
+**What is not admitted, on its own merits.** There is no
+`∀a. a ⇒ TypeRep`. Nothing above takes a **wire** and answers its type:
+the inputs are a *name* and (§below) *code*, both static. Such a word
+could not be written even if it were wanted — no atom produces a
+`TypeRep` from a value — and that is what keeps the free theorems:
+`∀a. a ⇒ a` is still the identity, because nothing inside it can ask
+what `a` is.
+
+**No type families.** A type-level function is an ordinary Braid word
+on `TypeRep` values, run at elaboration, producing a declaration or a
+program. It never enters unification, where a non-injective function
+would break principal types. That is the whole rule, and
+`examples/typerep.braid` is where it is exercised.
+
+### Deriving: a printer nobody wrote
+
+`declOf` hands back a declaration as data, so a word that is a function
+*of the declaration* can be derived rather than written. The first
+customer is a data frame's row printer:
+
+```braid
+cellsFor : Decl ⇒ Code
+```
+
+— the prelude word that turns a `data` declaration with named fields
+into the `Code` of `(r -> (r ; f₁) (r ; f₂ ; toStr) … ; pack)`, reading
+the field names and their types off the rep (`toStr` on every field
+that is not already a `Str`). `examples/frame.braid` uses it:
+
+```braid
+def cellsWitness = (r -> (r ; sym) ; single)
+def tradesCode   = "Trades" ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge
+def tradeCells   =
+    t -> [cellsWitness] (tradesCode) (t) ; evalAs ; ((c -> c) | (e x -> e ; single)) ; merge
+```
+
+and prints byte for byte what the hand-written line printed. The
+**witness** is the expectation: `Trades ⇒ List(Str)`, spelled as a
+program because Braid has no type syntax inside terms (§12, the splice
+check).
+
+**The gap this hits, and it is stage 8's.** `evalAs` runs the derived
+Code at *run time*. Deriving at *elaboration* is already possible — a
+`functor` is handed the body as `Code` and may return anything — but
+every `with` mints a receipt, so a derived `tradeCells` would be
+`Trades =Cells> List(Str)` and no longer fit `embed`'s `Fn⟨a ⇒ b⟩`. What
+is missing is a way to **declare a def from Code** without applying a
+scope to it: a declaration form whose body is computed. Until then, a
+derivation either pays a runtime `evalAs` or wears a label.
+
+One consequence worth stating: because `cellsFor` must stay **pure**
+(an `=Recursive>` printer would not fit `embed` either), it is written
+as a fold over the field names carrying the remaining types, not as
+`zip` — the prelude's `zip` ties a knot.
+
 ## 13. Open arity and exponents (summary)
 
 Words whose input has an open region (`ρ` tail or `aⁿ` exponent) work

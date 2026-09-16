@@ -6,8 +6,8 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (**60 morphisms**, counted
-2026-09-14) and prove it spans everything else **in the language
+The design bet: keep the primitive set tiny (**63 morphisms**, counted
+2026-09-16) and prove it spans everything else **in the language
 itself**. A word keeps its place in the kernel only if it is a
 structure map of the doctrine — cartesian, coproduct, exponential — or
 if it touches the implementation (arithmetic, strings, io, reflection)
@@ -318,6 +318,23 @@ bare `with` leaves.
     is one line, and the tracer that lifts everywhere is a marker, not
     a probe. `lift2` applies any such functor at run time with the
     program as its own witness and fallback.
+15. **Types are data too, and so are declarations.** `typeOfWord :
+    Str ⇒ (TypeRep | Str)` hands back a word's principal scheme,
+    `declOf : Str ⇒ (Decl | Str)` hands back a `data`/`type`/`theory`
+    declaration, and `showType` renders a rep exactly as `:t` does —
+    one renderer for a type, reached two ways. Nothing new is
+    computed: these are the checker's own tables, so the words are
+    pure and a `functor` may call them, which makes an
+    **elaboration-time derivation** an ordinary Braid word. The first
+    customer is a data frame's row printer: `cellsFor : Decl ⇒ Code`
+    (the prelude) turns `data Trades = (sym: Str, px: Float, qty: Int)`
+    into the `Code` of `(r -> (r ; sym) (r ; px ; toStr)
+    (r ; qty ; toStr) ; pack)`, and `examples/frame.braid` prints it
+    byte for byte as the hand-written line did. What is deliberately
+    *absent* is `∀a. a ⇒ TypeRep`: nothing takes a **wire** and answers
+    its type, so no free theorem is lost — and a type-level function is
+    an ordinary word on `TypeRep` values run at elaboration, never a
+    family inside unification. (2026-09-16)
 
     **Every `with` leaves a receipt**, and only a `with` mints one:
     `with IntSum` puts `IntSum` on the manifest of everything it read,
@@ -377,7 +394,7 @@ bare `with` leaves.
     `functor` keyword names the non-tabular case — a program on syntax,
     re-inferred at the splice — and it is the escape hatch, not the
     front door.
-15. **A file is a presentation, an import is the inclusion.**
+16. **A file is a presentation, an import is the inclusion.**
     `import "geometry.braid"` puts one file's declarations — defs,
     types, resources, theories, models (including models of
     `Base`) and functors — in another file's
@@ -386,7 +403,7 @@ bare `with` leaves.
     reported. What does not travel is the imported file's main program,
     so a library keeps its own demo. Nothing needed machinery of its
     own; the composite is checked as a single module.
-16. **Differentiation is a model.** Not a library, not a macro, not a
+17. **Differentiation is a model.** Not a library, not a macro, not a
     `Code ⇒ Code` pass. Differentiation is a functor into pairs of a
     value and a linear map (Elliott), a model of a theory *is* a
     functor out of the free category on that theory's generators —
@@ -439,7 +456,7 @@ bare `with` leaves.
     family (that needs equality modulo the parameter theory's laws), so
     they are checked **at each instantiation** and a false family is
     refused where it is first applied.
-17. **A data frame is a model too — so you never write a loop over
+18. **A data frame is a model too — so you never write a loop over
     rows.** You write a program on ONE ROW, a stack of scalars, and
     `with Frame` lifts it to the whole frame. `Frame` models the same
     `Doctrine` `Circuits` does: the hom-object is a **function between
@@ -462,7 +479,7 @@ bare `with` leaves.
     it, groups, sorts, joins and prints, and states a frame-level law
     the doctrine does not: `keep` with an all-true mask is the identity.
 
-18. **A CSV's header is a presentation.** So it declares a type, and
+19. **A CSV's header is a presentation.** So it declares a type, and
     the declaration is a line:
     ```braid
     table Trades = "examples/data/trades.csv"
@@ -484,7 +501,7 @@ bare `with` leaves.
     act. Everything that *runs* is Braid: the generated loader re-reads
     the file and puts a bad row on the miss track with its line number.
     (2026-09-15)
-19. **Probability is a model — and it is what makes copying stop being
+20. **Probability is a model — and it is what makes copying stop being
     natural.** A Markov category (Fritz) is a monoidal category where
     every wire copies and discards and **copying is not natural**: copy
     after a coin flip gives two equal bits, two coin flips give two
@@ -510,7 +527,7 @@ bare `with` leaves.
     renormalizing, and a random walk under `with Recursive`.
     `examples/prob.braid` (2026-09-15), with the frame library as its
     first client: every distribution printed is a frame.
-20. **A refusal names the place and the rule.** Every error from a file
+21. **A refusal names the place and the rule.** Every error from a file
     reads `path:line`, and `, in def X` when it is inside one; a main
     program names the line of the **stage** that failed, and an imported
     file names its own path. Six shapes that cost real time — a row arm
@@ -578,7 +595,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1133-case test suite, a full
+(typechecker, interpreter, REPL), a 1143-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types;
 `CONSTRUCTS.md` — the declaration layer construct by construct),
 and design notes recording each decision and the theorems that forced

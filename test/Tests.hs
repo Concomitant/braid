@@ -2650,7 +2650,52 @@ evalTests =
   , (idF ++ "def v = (\"proved\" | \"not proved\") ; merge\n\
      \[with Same = dup ; _ dup] [dup ; dup _] ; sameCode ; v ; print",
      ["proved"], "")
+    -- REFLECTED TYPES (2026-09-16).  `typeOfWord` answers with the
+    -- word's principal scheme as data, and `showType` renders it
+    -- exactly as `:t` does \8212 one renderer for a type, reached two ways.
+  , (showT ++ "\"dup\" ; typeOfWord ; say ; print",
+     ["a0 ⇒ a0 a0"], "")
+  , (showT ++ "\"fold\" ; typeOfWord ; say ; print",
+     ["Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0"], "")
+    -- ...including the ALIAS FOLD: the rep is structural, and the
+    -- display folds `(\8226 | \8226)` back to `Bool`, because the display
+    -- is the REPL's own \8212 one renderer for a type, two ways in.
+  , (showT ++ "\"and\" ; typeOfWord ; say ; print",
+     ["Bool Bool ⇒ Bool"], "")
+    -- a word that is not one: the miss track carries the checker's
+    -- own message, which is what makes the word TOTAL
+  , (showT ++ "\"nope\" ; typeOfWord ; (drop ; \"?\" | (e -> e)) ; merge ; print",
+     ["typeOfWord: nope is not a word at this point.  A template (`def f in T`) is not one either: it has no type until a model reads it."], "")
+    -- THE WIDTH TIER HAS NO REP: a bundle exponent is a WIDTH, not a
+    -- type, and a rep that flattened it would make two types equal
+  , (showT ++ "\"pack\" ; typeOfWord ; (drop ; \"a type\" | drop ; \"a width\") ; merge ; print",
+     ["a width"], "")
+    -- A DECLARATION as data: the field names a `data` wrote
+  , (declSrc ++ "\"Trade\" ; declOf ; ((d -> d ; fieldsOf) | drop ; nil) ; merge ; [symStr] ... ; map ; print",
+     ["list(sym, px, qty)"], "")
+    -- ...and the types of its one alternative, rendered
+  , (declSrc ++ "\"Trade\" ; declOf ; ((d -> d ; altOf) | drop ; nil) ; merge ; [showType] ... ; map ; print",
+     ["list(Str, Float, Int)"], "")
+    -- a `type` alias reflects too (tag 2), and it names no fields
+  , (declSrc ++ "\"Maybe\" ; declOf ; ((d -> d ; unDecl ; ((n p b f -> 1) | (n p b -> 2) | (n p s l -> 3)) ; mergeDecl) | drop ; 0) ; merge ; print",
+     ["2"], "")
+    -- ...and so does a `theory`: its slots, by name
+  , (declSrc ++ "theory Mon(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n\"Mon\" ; declOf ; ((d -> d ; unDecl ; ((n p b f -> nil) | (n p b -> nil) | (n p s l -> s ; [(e -> e ; unBox ; (nm t -> nm))] ... ; map)) ; mergeDecl) | drop ; nil) ; merge ; [symStr] ... ; map ; print",
+     ["list(unit, op)"], "")
+    -- THE DERIVED ROW PRINTER, the first deriving customer.  The
+    -- printer nobody wrote agrees with the one somebody did, cell
+    -- for cell \8212 which is the whole claim examples/frame.braid makes.
+  , (declSrc ++ "def byHand = (t -> (t ; sym) (t ; px ; toStr) (t ; qty ; toStr) ; pack)\ndef code = \"Trade\" ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge\ndef wit = (r -> (r ; sym) ; single)\ndef derived = (t -> [wit] (code) (t) ; evalAs ; ((c -> c) | (e x -> e ; single)) ; merge)\ndef row = \"AAPL\" 190.5 100 ; Trade\n(row ; derived) (row ; byHand) ; eq? ; (forget ; \"same\" | forget ; \"differ\") ; merge ; print",
+     ["same"], "")
   ]
+
+-- the two preambles the reflected-type tests share (2026-09-16)
+showT :: String
+showT = "def say = ((t -> t ; showType) | (e -> e)) ; merge\n"
+
+declSrc :: String
+declSrc =
+  "data Trade = (sym: Str, px: Float, qty: Int)\ndef fieldsOf = (d -> d ; unDecl ; ((n p b f -> f) | (n p b -> nil) | (n p s l -> nil)) ; mergeDecl)\ndef altOf = (d -> d ; unDecl ; ((n p b f -> b ; firstAlt) | (n p b -> nil) | (n p s l -> nil)) ; mergeDecl)\n"
 
 -- a rule set over four interchangeable words, reused by the 5b tests
 ruleMod :: String
@@ -3531,7 +3576,7 @@ runPureE (nm, fuel, src, expected) =
         t0 <- parseProgram src
         t1 <- elabHeaders (elabCtx0 (modEnv preludeModule) []) t0
         (out, _) <- runPureEvalWith fuel
-                      (evalTerm (modEnv preludeModule)
+                      (evalTerm (moduleRCtx preludeModule)
                                 (moduleRunDefs preludeModule) emptyVarEnv t1 [])
         pure (unwords (map show out))
   in case (expected, got) of

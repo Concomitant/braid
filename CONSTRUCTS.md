@@ -745,6 +745,48 @@ with@Ticked is the receipt of `with Ticked`, not a word: a label is
 
 ---
 
+## the reflection words — **not** declarations *(2026-09-16)*
+
+**What they are.** Three **prims**: `typeOfWord : Str ⇒ (TypeRep |
+Str)`, `declOf : Str ⇒ (Decl | Str)` and `showType : TypeRep ⇒ Str`.
+They belong on this page only to say where they sit: they **declare
+nothing, apply nothing and mint nothing**. They are words, and the only
+reason they are in the kernel rather than derived is the kernel's own
+criterion — they touch the implementation, reading the four tables the
+checker holds (the environment, the `data`/`resource` declarations, the
+`type` aliases and the theories) exactly as `print` touches the world.
+
+**What they answer with.** `data TypeRep` and `data Decl`, declared in
+the prelude beside `data Atom`, for the same reason: a prim's scheme
+has to point at something. `TypeRep` mirrors `Ty`/`SType`/`EffRow`/
+`Arrow` in seven alternatives; `Decl` is a `data` (name, parameters,
+body, **field names**), a `type` (name, parameters, body) or a `theory`
+(name, parameters, slots, law names). A `resource` reflects as the
+`data` it is; a `table` reflects as the `data` declaration it wrote.
+
+**Why this is not a new declaration layer.** Every construct on this
+page is a *claim* the checker audits. These three are the opposite
+direction: they hand a program what the checker already decided. So
+there is nothing to check, nothing to mint, and no clause to write —
+and a `functor` may call them, which is what makes an
+**elaboration-time derivation** an ordinary Braid word rather than a
+construct of its own (`cellsFor`, the prelude; `examples/frame.braid`).
+
+**What is not reflected, and why.**
+
+| not reflected | why |
+|---|---|
+| `model`, `transformation`, `functor`, `resource`'s routing | nothing has asked; each needs a rep of its own and none of them is a function of the *declaration* alone |
+| a bundle exponent (`Intⁿ`), `Fin(n)` | a width is a second sort — an exponent is not a type — and a rep that flattened it would make two different types equal.  The miss track says so |
+| a template (`def f in T`) | it has no type until a model reads it, so `typeOfWord` has nothing to answer |
+
+**Refusals.** None of their own: both `typeOfWord` and `declOf` are
+total, and put the checker's own message on the **miss track** —
+"there is no such word" is an answer, not a failure. `showType` is the
+one that can fail, and only on a rep nobody built.
+
+---
+
 ## The same thing said four ways
 
 A model is **a presentation interpreted in a category, given by an

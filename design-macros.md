@@ -4188,3 +4188,177 @@ mentions and ~290 doc mentions. The whole of it is spelling except the
 four items above (instantiate-vs-transport, the quotation clause, the
 comma refusal, the inline model body), and four printed lines changed —
 three that quoted the retired syntax in a banner, and the receipt.
+
+## Amendment (2026-09-16): reflected types
+
+**TypeRep, in two halves.** Both halves are REFLECTION of things the
+checker already knows, exposed as DATA in the language. Neither adds a
+type-level anything: no type families, no type classes, no runtime type
+passing. The whole design is one sentence — *the checker holds four
+tables; let a program read them* — and everything below is a
+consequence of taking that literally.
+
+### Why not type families
+
+The obvious shape for "compute a type from a type" is a type-level
+function in the type system: `Cols(P(x, y)) = P(Cols x, Cols y)`. It is
+the obvious shape and it is wrong here. A type family is
+**non-injective**: from `Cols a ~ Cols b` you cannot conclude `a ~ b`,
+so unification can no longer solve for a variable under one, and
+principal types go with it. Haskell pays for this with a constraint
+solver, deferred equalities and `TypeError` as a genre. Braid's whole
+bet is that inference is a one-pass mechanical thing with no solver
+behind it.
+
+So the rule, stated once:
+
+> A type-level function is an **ordinary Braid word on `TypeRep`
+> values**, run at **elaboration**, producing a declaration or a
+> program. It never enters unification.
+
+That is strictly more expressive at the places it is wanted (the
+function may branch, recurse, print, fail with a message) and strictly
+less dangerous everywhere else (unification never sees it). What it
+costs is that the function's result must be *pinned somewhere* — a
+generated declaration, or code spliced by a `functor` — rather than
+floating as an unsolved equality. That cost is the feature.
+
+### B1 — reflected declarations (shipped)
+
+```text
+typeOfWord : Str      ⇒ (TypeRep | Str)
+declOf     : Str      ⇒ (Decl | Str)
+showType   : TypeRep  ⇒ Str
+```
+
+Three prims, all pure, all total with the checker's own message on the
+miss track. `data TypeRep` mirrors `Ty`/`SType`/`EffRow`/`Arrow` in
+seven alternatives (base, variable, declared type at argument stacks,
+`Fn` around an arrow, sum, a stack's open end, arrow); `type StackRep =
+List(TypeRep)`; `data Decl` is a `data`, a `type` or a `theory`.
+
+Four decisions inside that shape, each with its reason.
+
+1. **A stack is a list, and its open end is an item of the list.** The
+   alternative was `Box(List(TypeRep) Sym)` — items beside a tail. It
+   would have been purer and it would have cost a `Box` unroll at every
+   read. A tail is last in a stack and nowhere else, which is a
+   statable invariant, so the list won.
+2. **Equality is `eq?` after `normalizeArrow`, and the words normalize
+   before they answer.** Otherwise `eq?` compares variable *names*, and
+   two identical schemes that were generalized in a different order
+   compare false. This is the one rule a reader must carry: a rep you
+   *built* compares; a rep you *assembled* does not.
+3. **A scheme's rep is its arrow's.** Quantifiers become the named
+   variables `a0`/`ρ0`/`σ0`/`ε0` the REPL already prints, so a rep needs
+   no binder list, and the display the REPL shows and the display
+   `showType` shows are the same function (`showArrowA`, alias folding
+   included).
+4. **The width tier has no rep.** A bundle exponent (`Intⁿ`) and
+   `Fin(n)` ride the miss track. An `Exp` is a second sort — it is not a
+   type — and a rep that flattened it would make two different types
+   equal, which is the one thing a rep must never do. `:t` still prints
+   them; `typeOfWord` says why it will not.
+
+**What it cost the implementation.** One record, `RCtx` — environment,
+`data` declarations, aliases, theories — threaded where `Env` alone
+used to travel (`evalTerm`, `runBuiltin`, `ElabCtx`). That is the whole
+of it: a reflection prim reads the prefix scope, and the prefix scope
+is one thing, so it is one argument rather than four.
+
+### The first deriving customer
+
+`table Trades = "trades.csv"` already writes Braid text from a
+declaration; that was the precedent. `cellsFor : Decl ⇒ Code` is the
+same move made **in the language**: the prelude word that turns a
+`data` with named fields into the `Code` of its row printer. Its
+customer is `examples/frame.braid`, where `tradeCells` used to be a
+hand-written line and is now derived, printing byte for byte what it
+printed before.
+
+**And it hit a gap, which is stage 8's.** Deriving at *elaboration* is
+already possible — a `functor` is an ordinary pure `Code ⇒ Code` word
+and may return anything, including code that ignores its input entirely
+— but **every `with` mints a receipt**, so a derived `tradeCells` would
+be `Trades =Cells> List(Str)` and no longer fit `embed`'s
+`Fn⟨a ⇒ b⟩`. The receipt is right (a functor that leaves no receipt
+cannot be audited) and the refusal is right (a label is part of the
+type). What is missing is a **declaration form whose body is computed**
+— a way to declare a def *from Code* without applying a scope to it.
+Until it exists a derivation either pays a runtime `evalAs` against a
+witness (what `frame.braid` does) or wears a label.
+
+A smaller consequence, worth recording because it will recur: the
+derived word must stay **pure**, so `cellsFor` is written as a fold over
+the field names carrying the remaining types rather than as `zip` — the
+prelude's `zip` ties a knot, and an `=Recursive>` printer does not fit
+`Fn⟨a ⇒ b⟩` either. *Grades propagate into derived code*, and a
+deriving word therefore has a grade budget.
+
+### What is NOT admitted, on its own merits
+
+**`∀a. a ⇒ TypeRep`.** Runtime type passing. It would kill the free
+theorems — `∀a. a ⇒ a` stops being the identity the moment something
+inside it can ask what `a` is — and it would make erasure a lie. It is
+also **unwritable**: nothing above takes a *wire* and answers a type.
+The inputs are a **name** (`typeOfWord`, `declOf`) and **code**
+(`typeOfCode`, B2), both of them static. There is no atom to build such
+a word out of, so the refusal needs no rule; it is a property of the
+generator set.
+
+**Rewriting triggered by the manifest of the def being elaborated.**
+Impossible by construction, and worth saying because it is the first
+thing anyone tries: elaboration *precedes* inference. When a `functor`
+runs, the def it is rewriting has no type yet — the types available are
+the **prefix scope's**, fixed before this definition. A functor can ask
+what `dup` is and what `Trades` is; it cannot ask what the word it is
+building is, because that is not a fact yet.
+
+### The retired objections
+
+Two objections parked this in 2026-09-09 and both have since been paid
+off by other work, which is why the amendment is dated now rather than
+then.
+
+- *"`typeOfCode` could see `.recurse` and loop."* There is no
+  `.recurse` atom. Since 5a½ `with Recursive` rewrites to a closed
+  spine over `#fix`, so every def — recursive ones included — is a
+  **closed spine** with a principal scheme per stage read off the prefix
+  scope. Inferring a Code value's type is inferring an ordinary
+  program's type.
+- *"Reading a type at elaboration is reading a type that is still being
+  computed."* Only if the type being read is the current def's, and it
+  cannot be (above). Every other type in scope was settled by the time
+  the current declaration was reached; that is what "prefix scope"
+  means, and it is the same property that lets a `functor` be *run*
+  while the module is still being checked.
+
+### B2 — `typeOfCode`, and the bootstrap
+
+The second half is `typeOfCode : Code ⇒ (TypeRep | Str)` — the
+principal scheme of a **Code value**, inferred in the prefix scope. Its
+customers are in `examples/typerep.braid`: diagram **cuts** (the
+connected components of a spine, which is the parallelism question
+asked structurally), a **type-level function as a word** (`colsOf`, the
+column store's `P(x, y) ↦ P(Cols x, Cols y)`, non-injective and living
+entirely outside unification), and a **differential check** over every
+prelude word — `typeOfWord w` against `typeOfCode [w]`.
+
+That differential check is the first rung of a longer ladder, and the
+ladder is the reason any of this is worth building:
+
+1. `typeOfWord w` = `typeOfCode [w]`, over the whole prelude, pinned as
+   a test. *(the rung this stage ships)*
+2. A Braid **checker** for a fragment of Braid, written on `TypeRep`,
+   checked by the host checker.
+3. The two run against each other over the corpus — the differential
+   test at scale.
+4. Self-application: the Braid checker checks itself, and the host's
+   answer is the oracle.
+5. Optionally, a switch: the host checker becomes one implementation of
+   a specification written in the language it checks.
+
+Nothing about steps 2–5 is promised here. What is claimed is that step
+1 is the honest first rung and that the rep was designed to carry the
+rest of the climb: it is structural, it is total on everything but the
+width tier, it normalizes, and equality on it is `eq?`.

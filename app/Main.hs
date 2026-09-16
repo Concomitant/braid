@@ -188,6 +188,12 @@ dispOf :: ReplState -> Disp
 dispOf st = Disp (rsAliases st) [ dName d | d <- rsDatas st, dResource d ]
                  [ (tpName m, tpCarrier m) | m <- rsTrans st ]
 
+-- ...and what the REFLECTION words read in a session (2026-09-16): the
+-- same four tables, so `:type`, `declOf` and `typeOfCode` all answer
+-- over the session's own prefix scope
+replRCtx :: ReplState -> RCtx
+replRCtx st = RCtx (rsEnv st) (rsDatas st) (rsAliases st) (rsTheories st)
+
 trim :: String -> String
 trim = dropWhile isSpace . reverse . dropWhile isSpace . reverse
 
@@ -301,7 +307,7 @@ elabIn st src = do
                        -- a session declares no `table` of its own: one is
                        -- a file declaration, and `:import` brings in only
                        -- the two words it generates
-                       Nothing [])
+                       Nothing [] (replRCtx st))
     (case rsUse st of { [] -> term0 ; ns -> With Transporting ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -561,7 +567,7 @@ handleLine st line =
                ++ "'  (:s to inspect, :clear to reset, or pass it along with ...)"
 
     evalLine term =
-      runExceptT (evalTerm (rsEnv st) (rsRun st) M.empty term (rsStack st))
+      runExceptT (evalTerm (replRCtx st) (rsRun st) M.empty term (rsStack st))
 
 -- Rename the stack type's free variables into a namespace the inference
 -- fresh-name generator (a0…, ρ0…) can never produce, so vars surviving

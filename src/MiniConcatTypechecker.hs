@@ -2847,6 +2847,28 @@ lawParts n = case breakOn "@law@" n of
           | take (length pat) r == pat = Just (reverse acc, drop (length pat) r)
           | otherwise = go (c : acc) cs
 
+-- WHAT REFLECTION READS (2026-09-16).  The reflection words answer with
+-- facts the checker already has, so the runtime has to be handed the
+-- same four tables the checker holds: the environment (every word's
+-- scheme), the `data`/`resource` declarations, the `type` aliases (the
+-- display folds against them, exactly as the REPL does) and the
+-- theories.  It travels where `Env` alone used to, which is why it is
+-- one record rather than four arguments — a prim that reads a
+-- declaration is reading the prefix scope, and the prefix scope is one
+-- thing.
+data RCtx = RCtx
+  { rcEnv      :: Env
+  , rcDatas    :: [DataDecl]
+  , rcAliases  :: [Alias]
+  , rcTheories :: [Theory]
+  } deriving (Eq, Show)
+
+-- the context a caller who has only an environment can offer: nothing
+-- is declared, so `declOf` answers "not declared" and `typeOfWord`
+-- still works
+rctxOf :: Env -> RCtx
+rctxOf env = RCtx env [] [] []
+
 dataSig :: DataDecl -> (String, [TyParam])
 dataSig d = (dName d, dParams d)
 
@@ -4927,6 +4949,22 @@ primEnv =
        -- than testing them at chosen inputs (§12.9).  Both must lie in
        -- the structural fragment; outside it this is an error, not a
        -- `false`, because "I cannot tell" is not "they differ".
+       -- REFLECTED TYPES (2026-09-16).  Four words that answer with
+       -- what the checker already knows, and one that lists it.  All
+       -- pure, all on the miss track when there is nothing to answer:
+       -- they read the PREFIX SCOPE, so a `functor` may call them and
+       -- an elaboration-time derivation is an ordinary Braid word
+       -- (MANUAL §12).
+       , ("typeOfWord", Forall [] [] [] [] [] []
+           (arrPure (one TStr)
+                  (one (TSum (RCons (one typeRepTy)
+                        (RCons (one TStr) RNil))))))
+       , ("declOf",    Forall [] [] [] [] [] []
+           (arrPure (one TStr)
+                  (one (TSum (RCons (one declReprTy)
+                        (RCons (one TStr) RNil))))))
+       , ("showType",  Forall [] [] [] [] [] []
+           (arrPure (one typeRepTy) (one TStr)))
        , ("sameCode",  Forall [] [gam, del] [] [] [epsV] []
            (arrPure (SCons (TFn (arrEps (STail gam) (STail del)))
                           (one (TFn (arrEps (STail gam) (STail del)))))
@@ -5153,7 +5191,21 @@ data ElabCtx = ElabCtx
                                    -- that `Trades@cellAt` is refused as
                                    -- a TABLE's insides rather than as a
                                    -- model's slot
+  , ecRefl  :: RCtx                -- what the REFLECTION words read
+                                   -- (2026-09-16).  A functor is an
+                                   -- ordinary pure word run at
+                                   -- elaboration, so `declOf` inside one
+                                   -- must see the declarations the
+                                   -- prefix scope has made; `rcEnv` here
+                                   -- is ignored in favour of `ecEnv`,
+                                   -- which is the same scope kept up to
+                                   -- date in one place.
   }
+
+-- the reflection context a scope evaluates in: its own environment over
+-- the declarations it was built with
+ecRCtx :: ElabCtx -> RCtx
+ecRCtx ctx = (ecRefl ctx) { rcEnv = ecEnv ctx }
 
 -- `with Recursive` (2026-09-14): the MARKER that puts a def's own name
 -- back in scope in its own body.  It is not a functor and not a model —
@@ -5230,6 +5282,7 @@ type TemplateTable = [(String, (String, Term))]
 elabCtx0 :: Env -> SlotTable -> ElabCtx
 elabCtx0 env slots =
   ElabCtx env M.empty slots [] [] [] [] [] [] [] False Nothing []
+          (rctxOf env)
 
 -- Apply one functor to a scope body: reify the code, RUN the word
 -- (purely, on a step budget), splice the result back.  The word's type
@@ -5241,7 +5294,7 @@ runFunctor ctx (fname, word) body = do
   -- That is the ordering rule made concrete.
   either (Left . (pre ++)) Right (checkFunctorWord (ecEnv ctx) fname word)
   cv  <- inF (reflectPure (ecEnv ctx) body)
-  out <- inF (runPureEval (evalTerm (ecEnv ctx) (ecRun ctx) emptyVarEnv
+  out <- inF (runPureEval (evalTerm (ecRCtx ctx) (ecRun ctx) emptyVarEnv
                             (Prim word) [cv]))
   case fst out of
     [c] -> inF (codeToTermV c)
@@ -6857,6 +6910,14 @@ codeTy :: Ty
 codeTy = TData "List"
            [SCons (TData "List" [SCons (TData "Atom" []) SEnd]) SEnd]
 
+-- the two nominal types the reflection prims name; the prelude declares
+-- both, exactly as it declares `Atom` for `codeTy` (2026-09-16)
+typeRepTy :: Ty
+typeRepTy = TData "TypeRep" []
+
+declReprTy :: Ty
+declReprTy = TData "Decl" []
+
 --------------------------------------------------------------------------------
 -- 10.3b Instances of `Base`: a declared, named, once-checked rewrite
 --
@@ -8049,7 +8110,8 @@ checkModuleRaw base src = do
   -- every module def and every slot's declared signature
   (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
     foldM (addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
-                  ownBases resNames [ (inName i, inScope i) | i <- insts ] allDatas)
+                  ownBases resNames [ (inName i, inScope i) | i <- insts ] allDatas
+                  (RCtx M.empty allDatas allAliases theories))
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
@@ -8082,7 +8144,8 @@ checkModuleRaw base src = do
         (term0, mainStart) <- parseProgramFrom mainLine allDatas mainSrc
         term1 <- elabHeaders (ElabCtx env' runFinal slotTable funcs tmpls
                                       thNames trans kwords ownBases []
-                                      False Nothing tblTypes)
+                                      False Nothing tblTypes
+                                      (RCtx M.empty allDatas allAliases theories))
                              term0
         arr <- inferTermInAt mainStart env' term1
         pure (Just (term1, arr))
@@ -8156,7 +8219,7 @@ checkModuleRaw base src = do
                , dd : filter ((/= n) . dName) datasIn
                , ownAl, dd : ownDt, docs'' )
     addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans bases
-           resources instScopes datas
+           resources instScopes datas refl
            (env, run, shadow, acc, docs, tmpls, kws) (name, hdr, bodySrc, doc) =
       -- ATTRIBUTION, ONCE (2026-09-15).  Everything a def's own check
       -- can refuse — the parse, the destructuring rewrite, the `\`
@@ -8261,7 +8324,7 @@ checkModuleRaw base src = do
                       (ElabCtx env1 run slotTable funcs tmpls
                                thNames trans kws bases self
                                ('@' `elem` name || name `elem` tblGen)
-                               (Just name) tblTypes)
+                               (Just name) tblTypes refl)
                       termH
           -- `in M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.
@@ -8654,6 +8717,37 @@ preludeSrc = unlines
   , "def untilFn = (p f -> [p ... >> ev >> (done | f ... >> ev >> again) >> merge])"
   , "## run step until predicate hits; exit with the hit payload"
   , "def until = untilFn ... >> loop"
+    -- REFLECTED TYPES (2026-09-16).  The checker's own `Ty`, `SType`,
+    -- `EffRow` and `Arrow`, and a `data`/`type`/`theory` declaration,
+    -- as ordinary data.  They are declared here for the same reason
+    -- `Atom` is: the prims name them, and a prim's scheme has to point
+    -- at something.  The vocabulary below is the small library that
+    -- makes a rep readable; `cellsFor` is the first DERIVING customer
+    -- (MANUAL §12, examples/typerep.braid).
+  , "## a reflected TYPE: the checker's Ty, SType, EffRow and Arrow as data.  Seven alternatives -- a base type by name; a type VARIABLE by name; a declared type at its argument STACKS; Fn around an arrow; a sum (its alternatives, and the row tail, `.\8226` when closed); a stack's OPEN END; and an ARROW (in, out, the grade's labels, the effect tail).  Only `tail` is not a wire: it stands last in a stack and nowhere else.  Equality is `eq?` on reps the reflection words BUILT -- they normalize first (MANUAL 12); a rep assembled by hand compares variable names."
+  , "data TypeRep = (Sym | Sym | Sym List(List(TypeRep)) | TypeRep | List(List(TypeRep)) Sym | Sym | List(TypeRep) List(TypeRep) List(Sym) Sym)"
+  , "## a stack of wires as a type rep: front wire first, an open end last"
+  , "type StackRep = List(TypeRep)"
+  , "## a reflected DECLARATION: a `data` (name, parameters, body, FIELD NAMES), a `type` (name, parameters, body) or a `theory` (name, parameters, slots, law names).  A parameter is (name, kind, arity): the kind is .wire .stack .row .width or .con, and the arity counts a constructor's underscores."
+  , "data Decl = (Sym List(Box(Sym Sym Int)) TypeRep List(Sym) | Sym List(Box(Sym Sym Int)) TypeRep | Sym List(Box(Sym Sym Int)) List(Box(Sym TypeRep)) List(Sym))"
+  , "## the name of a BASE type rep (.Int .Float .Str .Sym), or .none"
+  , "def baseOf = [(s -> s)] [(s -> .none)] [(n as -> .none)] [(a -> .none)] [(as t -> .none)] [(s -> .none)] [(i o ls t -> .none)] ... >> foldTypeRep"
+  , "## is this rep a WIRE, rather than a stack's open end?"
+  , "def wire? = [(s -> true)] [(s -> true)] [(n as -> true)] [(a -> true)] [(as t -> true)] [(s -> false)] [(i o ls t -> true)] ... >> foldTypeRep"
+  , "## the closed width of a stack rep: its wires, an open end not counted"
+  , "def stackWidth = [(n x -> (x >> wire?) (n 1 >> +) n >> select)] 0 ... >> fold"
+  , "## the FIRST alternative of a type rep, as a stack -- nil unless it is a sum"
+  , "def firstAlt = [(s -> nil)] [(s -> nil)] [(n as -> nil)] [(a -> nil)] [(as t -> as >> unList >> (nil | (x r -> x)) >> merge)] [(s -> nil)] [(i o ls t -> nil)] ... >> foldTypeRep"
+  , "## does this rep stand for Str?"
+  , "def strRep? = (t -> (t >> baseOf >> symStr) \"Str\" >> equals)"
+  , "## one column of a row printer, as SOURCE: `(r ; name)`, with `; toStr` unless the field is already a Str"
+  , "def cellSrc = (e -> e >> unBox >> (f t -> (\"(r ; \" (f >> symStr) >> cat) ((t >> strRep?) \")\" \" ; toStr)\" >> select) >> cat))"
+  , "## the printer, as Code: the source it is, parsed -- nil if it will not"
+  , "def cellsCode = (s -> ((\"(r -> \" s >> cat) \"; pack)\" >> cat) >> parse >> ((c -> c) | drop >> nil) >> merge)"
+  , "## DERIVE a row printer from a declaration: `Decl => Code`, the Code of `(r -> (r ; f1) (r ; f2 ; toStr) ... ; pack)` for a `data` with named fields.  nil for a `type`, a `theory`, or a `data` that named none -- there are no columns to print.  The first deriving customer of reflected declarations (MANUAL 12)."
+  , "## one step of the derivation: the source so far and the types left over, one field at a time.  Written as a fold over the FIELD NAMES carrying the remaining types rather than as `zip`, because the prelude's `zip` ties a knot and a derived printer must stay PURE -- an `=Recursive>` printer no longer fits `embed`'s `Fn\10216a \8658 b\10217` (examples/frame.braid)."
+  , "def cellStep = (acc f -> acc >> unBox >> (src ts -> ts >> unList >> ((src nil >> Box) | (t r -> ((src ((f t >> Box) >> cellSrc) >> cat) \" \" >> cat) r >> Box)) >> merge))"
+  , "def cellsFor = (d -> d >> unDecl >> ((n ps body fs -> (fs >> [cellStep] (\"\" (body >> firstAlt) >> Box) ... >> fold >> unBox >> (src rest -> src)) >> cellsCode) | (n ps body -> nil) | (n ps sl ls -> nil)) >> mergeDecl)"
     -- THE DOCTRINE, declared.  Every module sees it, because a theory
     -- that says `in Doctrine` is claiming membership in THIS one and
     -- a claim needs something to point at.  The three structure slots
@@ -9587,6 +9681,11 @@ extendRunDefs = foldl step
 moduleRunDefs :: Module -> RunDefs
 moduleRunDefs = buildRunDefs M.empty
 
+-- ...and what the reflection words read while it runs: the same four
+-- tables the checker finished with (2026-09-16).
+moduleRCtx :: Module -> RCtx
+moduleRCtx m = RCtx (modEnv m) (modDatas m) (modAliases m) (modTheories m)
+
 -- Fold a module's data artifacts and defs onto a base environment.
 -- Data-artifact bodies are prim-only (constructors, unrollers, merge),
 -- so their scope is inert.
@@ -9674,9 +9773,9 @@ runPureEvalWith n m = evalStateT m n
 emptyVarEnv :: VarEnv
 emptyVarEnv = M.empty
 
-{-# SPECIALIZE evalTerm :: Env -> RunDefs -> VarEnv -> Term -> [Value]
+{-# SPECIALIZE evalTerm :: RCtx -> RunDefs -> VarEnv -> Term -> [Value]
                         -> Eval ([Value], [String]) #-}
-evalTerm :: EvalM m => Env -> RunDefs -> VarEnv -> Term -> [Value]
+evalTerm :: EvalM m => RCtx -> RunDefs -> VarEnv -> Term -> [Value]
          -> m ([Value], [String])
 evalTerm env defs vars term st =
   case term of
@@ -10016,7 +10115,7 @@ evalTerm env defs vars term st =
               dummyScheme =
                 Forall [dummy] [] [] [] [] [] (arrPure SEnd (SCons (TVarTy dummy) SEnd))
               arityEnv = foldr (\n -> M.insert n dummyScheme)
-                               env (M.keys vars)
+                               (rcEnv env) (M.keys vars)
           Arrow i _ _ <- liftEither (inferTermIn arityEnv t')
           let k = closedArity i
           (args, stk') <- takeWires "grouped program" k stk
@@ -10059,10 +10158,10 @@ evalTerm env defs vars term st =
         _ -> throwError "evalAs: expected a witness and a Code value"
 
     -- the witness's TYPE is what it contributes; it is never applied
-    witnessArrow wv wt = groundTerm env wv wt >>= inferTermIn env
+    witnessArrow wv wt = groundTerm (rcEnv env) wv wt >>= inferTermIn (rcEnv env)
 
     checkAgainst term want = do
-      (got, gsubs) <- inferTermSub env term
+      (got, gsubs) <- inferTermSub (rcEnv env) term
       subsumes (generalizeWith M.empty gsubs got) want
 
     recErr what = "Runtime type error in a structural recursor: " ++ what
@@ -10104,7 +10203,7 @@ builtinArity name =
     Just (Forall _ _ _ _ _ _ (Arrow i _ _)) -> Right (closedArity i)
     Nothing -> Left $ "Unknown primitive at runtime: " ++ name
 
-runBuiltin :: Env -> RunDefs -> String -> [Value]
+runBuiltin :: RCtx -> RunDefs -> String -> [Value]
            -> Either String ([Value], [String])
 runBuiltin _ _ "_"     [v]              = Right ([v], [])
 runBuiltin _ _ "swap"  [x, y]           = Right ([y, x], [])
@@ -10132,7 +10231,7 @@ runBuiltin env defs "sameCode" [VFn s1 v1 t1, VFn s2 v2 t2]
       Left "sameCode: a quotation that captured a bound name is outside \
            \the structural fragment"
   | otherwise =
-      case sameProgram env (M.union s1 defs) (M.union s2 defs) t1 t2 of
+      case sameProgram (rcEnv env) (M.union s1 defs) (M.union s2 defs) t1 t2 of
         Right same -> Right ([VSum (if same then 0 else 1) []], [])
         Left e     -> Left ("sameCode: " ++ e)
 -- The same question asked of CODE.  Two differences from `sameCode`,
@@ -10144,7 +10243,7 @@ runBuiltin env defs "sameCode" [VFn s1 v1 t1, VFn s2 v2 t2]
 runBuiltin env defs "sameCodeC" [c1, c2] = do
   t1 <- inC (codeToTermV c1)
   t2 <- inC (codeToTermV c2)
-  same <- inC (sameProgram env defs defs t1 t2)
+  same <- inC (sameProgram (rcEnv env) defs defs t1 t2)
   Right ([VSum (if same then 0 else 1) []], [])
   where inC = either (Left . ("sameCodeC: " ++)) Right
 -- The rule-set engine.  Atomwise on NAMES, because Code carries names
@@ -10196,16 +10295,27 @@ runBuiltin _ _ "unparse" [c]            = do
   t <- codeToTermV c
   Right ([VStr (renderTerm t)], [])
 runBuiltin env _ "parse" [VStr src]     =
-  case parseProgram src >>= reflectPure env of
+  case parseProgram src >>= reflectPure (rcEnv env) of
     Right c -> Right ([VSum 0 [c]], [])
     Left e  -> Right ([VSum 1 [VStr e]], [])
 runBuiltin env _ "reflect" [VFn _ cv t] =
-  case reflectFn env cv t of
+  case reflectFn (rcEnv env) cv t of
     Right c -> Right ([VSum 0 [c]], [])
     Left e  -> Right ([VSum 1 [VStr e]], [])
+-- REFLECTED TYPES (2026-09-16).  Each reads the prefix scope the
+-- evaluator is running over — the same four tables the checker
+-- finished with — and nothing else.
+runBuiltin ctx _ "typeOfWord" [VStr w] =
+  Right ([railed (typeOfWordV ctx w)], [])
+runBuiltin ctx _ "declOf" [VStr n] =
+  Right ([railed (declOfV ctx n)], [])
+runBuiltin ctx _ "showType" [r] =
+  case showTypeV ctx r of
+    Right t -> Right ([VStr t], [])
+    Left e  -> Left ("showType: " ++ e)
 runBuiltin env _ "interpose" [eta, c]    = do
   etaT <- codeToTermV eta
-  checkInterposed env etaT
+  checkInterposed (rcEnv env) etaT
   etaS <- decodeListV eta
   cs   <- decodeListV c
   Right ([encodeListV (concat [ s : etaS | s <- cs ])], [])
@@ -10434,6 +10544,226 @@ codeToTermV stagesV = do
       pure (Alts cs res)
     atomTerm (VSum 6 [c])       = codeToTermV c
     atomTerm v = Left $ "malformed atom value: " ++ show v
+
+--------------------------------------------------------------------------------
+-- 11.6 Reflected types (2026-09-16)
+--
+-- `Ty`, `SType`, `EffRow` and `Arrow` as DATA, in the language, plus a
+-- `data`/`type`/`theory` declaration as data.  Everything here is a
+-- STATIC FACT about the prefix scope — the checker already knows it —
+-- so the words that read it are pure, usable at elaboration, and cost
+-- nothing at run time.
+--
+-- What is NOT here, on its own merits: `∀a. a ⇒ TypeRep`.  Nothing
+-- below produces a rep from a WIRE, only from a NAME or from CODE, so
+-- no free theorem is lost and no type is passed at run time.  Such a
+-- word cannot be written, either: there is no atom that takes a value
+-- and answers its type (MANUAL §12).
+--
+-- EQUALITY.  Every rep built here is built from a NORMALIZED arrow
+-- (`normalizeArrow`), so two schemes are the same scheme exactly when
+-- their reps are `eq?`.  A rep assembled any other way carries no such
+-- guarantee: `eq?` on unnormalized reps compares variable NAMES.
+--
+-- The seven alternatives of `data TypeRep`, by tag:
+--   0 base   .Int .Float .Str .Sym
+--   1 var    a type variable, by name
+--   2 data   Name, and one stack per argument
+--   3 fn     Fn⟨…⟩, around an arrow rep
+--   4 sum    the alternatives, and the row tail (`.•` when closed)
+--   5 tail   a stack's open end ρ — only ever LAST in a stack
+--   6 arrow  Γ, Δ, the labels, and the effect tail (`.•` when closed)
+-- A stack is `List(TypeRep)` (`type StackRep`), front wire first.
+
+-- the one sym that is not a name: the closed end of a row, of an effect
+-- row, or the absence of a tail.  `•` is unwritable as a word, so it
+-- cannot collide with a variable.
+closedSym :: Value
+closedSym = VSym ".•"
+
+symOf :: String -> Value
+symOf n = VSym ('.' : n)
+
+-- The width tier is a SECOND SORT — an `Exp` is not a type, and `Fin`'s
+-- bound is an `Exp` — so neither has a rep.  Flattening them would make
+-- two different types equal, which is exactly what a rep must not do.
+noRepErr :: String -> String
+noRepErr what =
+  "no type rep for " ++ what ++ ": a bundle exponent is a WIDTH, not a "
+    ++ "type, and a rep that dropped it would make two different types "
+    ++ "equal.  Read this type with `:t`, or ask for the type of a word "
+    ++ "that does not mention a bundle."
+
+reprTyV :: Ty -> Either String Value
+reprTyV TInt             = Right (VSum 0 [VSym ".Int"])
+reprTyV TFloat           = Right (VSum 0 [VSym ".Float"])
+reprTyV TStr             = Right (VSum 0 [VSym ".Str"])
+reprTyV TSym             = Right (VSum 0 [VSym ".Sym"])
+reprTyV (TVarTy (TV n))  = Right (VSum 1 [symOf n])
+reprTyV (TData n args)   = do
+  as <- mapM reprStackV args
+  Right (VSum 2 [symOf n, encodeListV as])
+reprTyV (TFn arr)        = (\a -> VSum 3 [a]) <$> reprArrowV arr
+reprTyV (TSum row)       = do
+  (alts, tl) <- reprRowV row
+  Right (VSum 4 [encodeListV alts, tl])
+reprTyV t@(TFin _)       = Left (noRepErr (show t))
+
+reprStackV :: SType -> Either String Value
+reprStackV st = encodeListV <$> go st
+  where
+    go SEnd             = Right []
+    go (STail (SV n))   = Right [VSum 5 [symOf n]]
+    go (SCons t r)      = (:) <$> reprTyV t <*> go r
+    go (SExp b e _)     = Left (noRepErr (showExpAt b e))
+
+reprRowV :: SumRow -> Either String ([Value], Value)
+reprRowV RNil            = Right ([], closedSym)
+reprRowV (RTail (RV n))  = Right ([], symOf n)
+reprRowV (RCons st r)    = do
+  v        <- reprStackV st
+  (vs, tl) <- reprRowV r
+  Right (v : vs, tl)
+
+reprArrowV :: Arrow -> Either String Value
+reprArrowV (Arrow i o (Eff ls tl)) = do
+  iv <- reprStackV i
+  ov <- reprStackV o
+  Right (VSum 6 [ iv, ov
+                , encodeListV (map symOf (S.toList ls))
+                , maybe closedSym (\(EV n) -> symOf n) tl ])
+
+-- A SCHEME's rep is its arrow's, normalized: the quantifiers become the
+-- named variables `a0`, `ρ0`, `σ0`, `ε0` the REPL already prints, so a
+-- rep needs no binder list and `eq?` decides equality.
+reprSchemeV :: Scheme -> Either String Value
+reprSchemeV (Forall _ _ _ _ _ _ arr) = reprArrowV (normalizeArrow arr)
+
+-- ...and back.  The inverse is what `showType` is written on: the rep
+-- goes home to a `Ty`/`Arrow` and the display is the REPL's own, alias
+-- folding included, so there is exactly one renderer for a type.
+tyOfRepV :: Value -> Either String Ty
+tyOfRepV (VSum 0 [VSym s]) =
+  Right $ case s of
+    ".Int"   -> TInt
+    ".Float" -> TFloat
+    ".Str"   -> TStr
+    ".Sym"   -> TSym
+    _        -> TData (drop 1 s) []   -- a base name nobody declared
+tyOfRepV (VSum 1 [VSym s]) = Right (TVarTy (TV (drop 1 s)))
+tyOfRepV (VSum 2 [VSym s, asV]) = do
+  as <- decodeListV asV >>= mapM stackOfRepV
+  Right (TData (drop 1 s) as)
+tyOfRepV (VSum 3 [a]) = TFn <$> arrowOfRepV a
+tyOfRepV (VSum 4 [altsV, VSym tl]) = do
+  alts <- decodeListV altsV >>= mapM stackOfRepV
+  let end | tl == ".•" = RNil
+          | otherwise  = RTail (RV (drop 1 tl))
+  Right (TSum (foldr RCons end alts))
+tyOfRepV v = Left ("this type rep is not a WIRE: " ++ show v)
+
+stackOfRepV :: Value -> Either String SType
+stackOfRepV v = decodeListV v >>= go
+  where
+    go []                      = Right SEnd
+    go [VSum 5 [VSym s]]       = Right (STail (SV (drop 1 s)))
+    go (VSum 5 [VSym s] : _)   =
+      Left ("a stack's open end " ++ drop 1 s ++ " is its LAST item, and \
+            \this rep puts wires after it")
+    go (t : ts)                = SCons <$> tyOfRepV t <*> go ts
+
+arrowOfRepV :: Value -> Either String Arrow
+arrowOfRepV (VSum 6 [iv, ov, lsV, VSym tl]) = do
+  i  <- stackOfRepV iv
+  o  <- stackOfRepV ov
+  ls <- decodeListV lsV >>= mapM lab
+  let end | tl == ".•" = Nothing
+          | otherwise  = Just (EV (drop 1 tl))
+  Right (Arrow i o (Eff (S.fromList ls) end))
+  where
+    lab (VSym s) = Right (drop 1 s)
+    lab x        = Left ("a grade label is a Sym, and this one is " ++ show x)
+arrowOfRepV v = Left ("this type rep is not an ARROW: " ++ show v)
+
+-- the display context the reflection words render in: the module's own
+-- aliases and resources, exactly as the REPL builds it
+dispOfRCtx :: RCtx -> Disp
+dispOfRCtx ctx =
+  Disp (rcAliases ctx) [ dName d | d <- rcDatas ctx, dResource d ] []
+
+-- `showType` — the REPL's own display, from the rep.  An arrow rep
+-- renders as an arrow, a stack-position rep as the stack it stands in,
+-- everything else as the wire it is.
+showTypeV :: RCtx -> Value -> Either String String
+showTypeV ctx v@(VSum 6 _) = showArrowA d <$> arrowOfRepV v
+  where d = dispOfRCtx ctx
+showTypeV ctx v@(VSum 5 _) = showStackA d <$> stackOfRepV (encodeListV [v])
+  where d = dispOfRCtx ctx
+showTypeV ctx v            = showTyA (dispOfRCtx ctx) <$> tyOfRepV v
+
+-- A PARAMETER, as data: its name, its kind, and the arity a constructor
+-- parameter's underscores counted (0 for every other kind).
+reprParamV :: TyParam -> Value
+reprParamV p = VSum 0 [symOf (pName p), VSym kind, VInt arity]
+  where
+    (kind, arity) = case p of
+      PWire _  -> (".wire",  0)
+      PStack _ -> (".stack", 0)
+      PRow _   -> (".row",   0)
+      PWidth _ -> (".width", 0)
+      PCon _ k -> (".con",   k)
+
+-- The three alternatives of `data Decl`, by tag:
+--   0 data   name, parameters, body, FIELD NAMES (empty when none)
+--   1 type   name, parameters, body            (a transparent alias)
+--   2 theory name, parameters, slots, law names
+-- A `resource` is a `data` declaration and reflects as one; a `table`
+-- reflects as the `data` declaration it wrote.
+declOfV :: RCtx -> String -> Either String Value
+declOfV ctx name =
+  case ([ d | d <- rcDatas ctx, dName d == name ]
+       ,[ a | a <- rcAliases ctx, aName a == name ]
+       ,[ t | t <- rcTheories ctx, thName t == name ]) of
+    (d : _, _, _) -> do
+      b <- reprTyV (dBody d)
+      Right (VSum 0 [ symOf (dName d)
+                    , encodeListV (map reprParamV (dParams d))
+                    , b
+                    , encodeListV (map symOf (dFields d)) ])
+    (_, a : _, _) -> do
+      b <- reprTyV (aBody a)
+      Right (VSum 1 [ symOf (aName a)
+                    , encodeListV (map reprParamV (aParams a))
+                    , b ])
+    (_, _, t : _) -> do
+      sl <- mapM (\(s, arr) -> (\r -> VSum 0 [symOf s, r])
+                                 <$> reprArrowV (normalizeArrow arr))
+                 (thSlots t)
+      Right (VSum 2 [ symOf (thName t)
+                    , encodeListV (map reprParamV (thParams t))
+                    , encodeListV sl
+                    , encodeListV [ symOf n | (n, _) <- thLaws t ] ])
+    _ -> Left ("declOf: " ++ name ++ " is not a `data`, `type` or `theory` "
+            ++ "declared at this point.  A model, a transformation and a "
+            ++ "functor have no rep yet; a `table` reflects as the `data` "
+            ++ "declaration it wrote.")
+
+-- A WORD's principal scheme, as data.  Prims, prelude words, module
+-- defs and every generated word are one lookup, because they are all in
+-- one environment — which is the whole reason this is three lines.
+typeOfWordV :: RCtx -> String -> Either String Value
+typeOfWordV ctx w =
+  case M.lookup w (rcEnv ctx) of
+    Just sc -> reprSchemeV sc
+    Nothing ->
+      Left ("typeOfWord: " ++ w ++ " is not a word at this point.  A "
+         ++ "template (`def f in T`) is not one either: it has no type "
+         ++ "until a model reads it.")
+
+-- the miss track carries the checker's own message, which is the whole
+-- reason these words are total: "there is no such word" is an answer.
+railed :: Either String Value -> Value
+railed = either (\e -> VSum 1 [VStr e]) (\v -> VSum 0 [v])
 
 -- embed a runtime value as code that pushes it
 valueToCode :: Env -> Value -> Either String Term
@@ -10714,7 +11044,7 @@ runModuleAt lm src = runExceptT $ do
       | closedArity i > 0 ->
           throwError $ "main requires a nonempty input stack: " ++ show arr
       | otherwise -> do
-          (out, logs) <- evalTerm (modEnv m) (moduleRunDefs m) M.empty term []
+          (out, logs) <- evalTerm (moduleRCtx m) (moduleRunDefs m) M.empty term []
           case desyncError o out of
             Just e  -> throwError e
             Nothing -> pure (out, logs)
@@ -10723,7 +11053,7 @@ runModuleAt lm src = runExceptT $ do
 runLaw :: Module -> (String, Term)
        -> ExceptT String IO ()
 runLaw m (n, t) = do
-  (out, _) <- evalTerm (modEnv m) (moduleRunDefs m) M.empty t []
+  (out, _) <- evalTerm (moduleRCtx m) (moduleRunDefs m) M.empty t []
   case out of
     [VSum 0 []] -> pure ()
     _ ->
@@ -10754,7 +11084,7 @@ sampledSquare m mo sl =
 -- failure names the slot whose square does not commute.
 runSquare :: Module -> (String, Term) -> ExceptT String IO ()
 runSquare m (n, t) = do
-  (out, _) <- evalTerm (modEnv m) (moduleRunDefs m) M.empty t []
+  (out, _) <- evalTerm (moduleRCtx m) (moduleRunDefs m) M.empty t []
   case out of
     [VSum 0 []] -> pure ()
     _ ->

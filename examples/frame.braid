@@ -273,8 +273,29 @@ def sectorSyms  = "AAPL" "MSFT" "GOOG" "NFLX" ; pack
 def sectorNames = "Hardware" "Software" "Ads" "Media" ; pack
 def withSector  = (ts -> ([tsym] ts ; column) ts sectorSyms sectorNames ; join)
 
-## cells — a row becomes the `List(Str)` the printer takes
-def tradeCells  = (t -> (t ; sym) (t ; px ; toStr) (t ; qty ; toStr) ; pack)
+## cells — a row becomes the `List(Str)` the printer takes.
+##
+## `tradeCells` is DERIVED (2026-09-16), and this is the whole of it: a
+## row printer is a function of the DECLARATION and of nothing else, so
+## writing one by hand is writing out what `table Trades` already said.
+## `declOf` hands back that declaration as data, `cellsFor` (the
+## prelude) turns it into the printer's `Code` — `(r -> (r ; sym)
+## (r ; px ; toStr) (r ; qty ; toStr) ; pack)`, read off the field names
+## and their types — and `evalAs` runs that Code against a WITNESS whose
+## arrow it must meet.  The output below is byte for byte what the
+## hand-written line printed.
+##
+## The witness is one column wide: it says `Trades ⇒ List(Str)` and
+## nothing more, which is exactly the expectation the derived printer
+## has to satisfy.  What is missing is a way to DECLARE a def from Code:
+## a `functor` would splice this at ELABORATION and cost nothing at run
+## time, but every `with` mints a receipt, and `Trades =Cells> List(Str)`
+## no longer fits `embed`'s `Fn⟨a ⇒ b⟩`.  That gap is stage 8's
+## (MANUAL §12, design-macros.md 2026-09-16).
+def cellsWitness = (r -> (r ; sym) ; single)
+def tradesCode   = "Trades" ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge
+def tradeCells   =
+    t -> [cellsWitness] (tradesCode) (t) ; evalAs ; ((c -> c) | (e x -> e ; single)) ; merge
 def totalCells  = (t -> (t ; tsym) (t ; tval ; toStr) ; pack)
 def joinCells   = (e -> e ; unBox ; (t sec -> (t ; tsym) (t ; tval ; toStr) sec ; pack))
 def symNotional =
