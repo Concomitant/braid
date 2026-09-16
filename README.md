@@ -17,7 +17,7 @@ minus; and why `split` and `asFloat?` are prims and `lines` is not: a
 `Str` is a machine string, and a newline is a separator like any other. The entire
 standard library is derived user code: `id`, booleans, three of the four
 comparisons, iteration (`loop` and `fix` are both derived under the
-`use Recursive` marker), `while` and `until`, the list type and
+`with Recursive` marker), `while` and `until`, the list type and
 its library, the sum monad, conditionals and guard ladders, data-type
 folds — and the metaprogramming layer, where reflected code is a list
 you munge with the same library.
@@ -82,9 +82,9 @@ braid> :doc decide
 the prelude; `:transformations` lists every declared transformation
 with the verdict on each of its squares; every REPL line runs against a
 persistent typed stack. A
-bare `use Log` line opens an ambient scope over the rest of the
+bare `with Log` line opens an ambient scope over the rest of the
 session — the resource threads itself through every later line, and a
-bare `use` leaves.
+bare `with` leaves.
 
 ## A tour, in sixteen ideas
 
@@ -118,7 +118,7 @@ bare `use` leaves.
    `reflect` compiles it back to dup/swap/drop to prove it — and, for a
    name a quotation or a row branch closed over, to `curry`/`ev`, the
    exponential's two maps. Closures are wiring too, so `reflect` is
-   total on binder code and `use Traced` over a `use Recursive` def works.
+   total on binder code and `with Traced` over a `with Recursive` def works.
 6. **Guard ladders are ordinary words.** Bind the subject and a guard
    is a bare Bool beside its answer; `...` accumulates one lane per
    line and `decide` folds the product — first true lane wins:
@@ -132,7 +132,7 @@ bare `use` leaves.
    Guards-as-data variants (`firstTrue`, clause ladders + `choose`,
    `if`/`elif`/`else` fold-as-you-go) are all prelude defs. No guard
    syntax exists in the parser.
-7. **Loops are values, and so is the knot.** Write `use Recursive` in a
+7. **Loops are values, and so is the knot.** Write `with Recursive` in a
    def's header to put the def's own name in scope in its own body.
    Elaboration rewrites the body to the closed form so the def is still a
    closed spine; `Recursive` is the receipt that scope mints. `fix` and
@@ -181,15 +181,15 @@ bare `use` leaves.
         sample : • ⇒ a
         law leftUnit = (sample ; unit ... ; op) sample ; eq? ; (forget ; true | forget ; false) ; merge
 
-    model IntSum : Monoid(Int) =
+    model IntSum in Monoid(Int) =
         unit   = 0
         op     = +
         sample = 7
 
-    def total = use IntSum ; [op] unit ... ; foldExp     # Intⁿ⁰ =IntSum> Int
+    def total with IntSum = [op] unit ... ; foldExp     # Intⁿ⁰ =IntSum> Int
     ```
     This is not typeclasses: nothing is inferred and nothing is
-    dispatched. `use IntSum` picks a model **by name**, and the
+    dispatched. `with IntSum` picks a model **by name**, and the
     pick is a renaming at elaboration — once per scope, no dictionary
     per call. The trade is deliberate: you give up inferring *which*
     model, and keep annotation-freeness, coherence in a structural
@@ -208,8 +208,8 @@ bare `use` leaves.
     The **prelude** declares that interface once and for all as
     `theory Doctrine(k(_, _), p(_, _))` — `compose`, `embed`, `first`,
     and the seven arrow laws — and a theory joins it by writing
-    `over Doctrine` and declaring its operations. That declaration is
-    what makes `use M` *transport* a whole block into the category,
+    `in Doctrine` and declaring its operations. That declaration is
+    what makes `with M` *transport* a whole block into the category,
     and how much it declares is the level: composition alone composes
     by hand, `+ embed` carries one-wire stages, `+ first` carries any
     stage. The laws are inherited and run at model check, so
@@ -218,7 +218,7 @@ bare `use` leaves.
     audited against the same seven.
 
     Two models of one theory have **transformations** between them:
-    `transformation Len : ListMonoid ⇒ IntSum = len` says `len` is a
+    `transformation Len in ListMonoid ⇒ IntSum = len` says `len` is a
     homomorphism, and the elaborator generates one naturality square
     per slot and *decides* it — proved by `sameCode` where the
     normalizer reaches, sampled at the theory's own `sample` slot where
@@ -227,22 +227,23 @@ bare `use` leaves.
     that is an **internal functor**, and the squares are functoriality
     (`examples/transformations.braid`).
 
-    A body can be written **once over the theory**. Two header words
-    say which side you are on: **`over X` declares** that this def is a
-    morphism of X, and **`use X` applies** X to the block that follows
-    — *what follows is written in the domain of X, and X is applied to
-    it*. So a def headed `over Monoid` is a **template**, and a def
-    headed `use IntSum` expands it there and re-infers it there:
-    `def fold1 = over Monoid ; [op] unit ... ; foldExp` becomes
-    `Intⁿ⁰ =IntSum> Int` under `use IntSum` and `Strⁿ⁰ =StrCat> Str`
-    under `use StrCat`, each with its own
+    A body can be written **once over the theory**. Two header
+    clauses, both left of the `=` — `def NAME [in T] [with M …] = body`
+    — say which side you are on: **`in X` declares** that this def is a
+    morphism of X, and **`with X` applies** X to the body — *the body is
+    written in the domain of X, and X is applied to it*. So a def headed
+    `in Monoid` is a **template**, and a def
+    headed `with IntSum` expands it there and re-infers it there:
+    `def fold1 in Monoid = [op] unit ... ; foldExp` becomes
+    `Intⁿ⁰ =IntSum> Int` under `with IntSum` and `Strⁿ⁰ =StrCat> Str`
+    under `with StrCat`, each with its own
     principal type and nothing passed at run time. It is ML's functor
     application spelled as scope: no new syntax, no parameter list, and
     a template called outside every model scope is an error naming
     the theory (`examples/build.braid`). Models of base theories point
     *into* the base; a model with a carrier, a resource and a functor
-    point *out* of it; `over` is the only way to declare membership and
-    `use` the only way to apply a functor.
+    point *out* of it; `in` is the only way to declare membership and
+    `with` the only way to apply a functor.
 
     Laws about *functors* are the same idea one level up. A functor's
     output is `Code`, so `sameCodeC : Code Code ⇒ Bool` states them —
@@ -262,7 +263,7 @@ bare `use` leaves.
     resource names do. The manifest is a SET, though: a functor scope
     mints its own label onto everything it rewrote (item 14), and
     `=IO Traced>` is an ordinary type. `Recursive` (item 7) is the second
-    built-in member: the `use Recursive` scope mints it, and `fix` and
+    built-in member: the `with Recursive` scope mints it, and `fix` and
     `loop` (written under that marker) carry it; structural recursors
     (and so `fold`, `map`, `filter`) do not — so **knot-free pure code
     terminates by construction**, and an unlabelled written type
@@ -281,19 +282,18 @@ bare `use` leaves.
     threaded wire — nominal, so `Int Int` is never silently a
     GameState, and one wire however wide its contents. A run of them
     shared by both sides of an arrow folds onto the arrow, grade
-    included: `note : Str =Log> •`, `peek : • =IO Log> •`. And `use`
+    included: `note : Str =Log> •`, `peek : • =IO Log> •`. And `with`
     makes the threading disappear — it opens a scope over its
     resources, taking the rest of the block as its body, and an
     elaborator writes every `_` and `...` for you:
     ```text
-    def score =
-        use Log Counter
+    def score with Log Counter =
         dup ; *
         bump
         "scored "
         note                # Int ρ0 =Log Counter> Int ρ0
     ```
-    Nothing there is compiler magic you couldn't write: what `use` does
+    Nothing there is compiler magic you couldn't write: what `with` does
     to a pure stage is `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩`, an
     ordinary prelude word (tensorial strength — run a program one wire
     deeper). It only saves you the counting (`examples/resources.braid`
@@ -310,7 +310,7 @@ bare `use` leaves.
     through disk. The graphical-linear-algebra transpose is
     `reverse >> map dualize`.
 14. **Elaboration is a library.** A `functor` is any pure `Code ⇒
-    Code` word, and `use Traced` applies it to a scope's wiring at
+    Code` word, and `with Traced` applies it to a scope's wiring at
     elaboration; the expansion is re-inferred, never trusted. One
     functor is *checked* rather than re-inferred: `interpose` inserts a
     stage after every cut and admits only stages that read no wire
@@ -319,17 +319,17 @@ bare `use` leaves.
     a probe. `lift2` applies any such functor at run time with the
     program as its own witness and fallback.
 
-    **Every `use` leaves a receipt**, and only a `use` mints one:
-    `use IntSum` puts `IntSum` on the manifest of everything it read,
-    `use Traced` puts `Traced` on everything it rewrote
+    **Every `with` leaves a receipt**, and only a `with` mints one:
+    `with IntSum` puts `IntSum` on the manifest of everything it read,
+    `with Traced` puts `Traced` on everything it rewrote
     (`poly : Int =Traced> Int`), so the type says which models and
     which functors built a word and every caller inherits it. Written
     by hand a receipt is an error, which is what makes it evidence.
-    `over` mints nothing — it applies nothing.
+    `in` mints nothing — it applies nothing.
 
     An **model of `Base`** is the declared, once-checked rewrite:
     `Base` is the ambient presentation — every word in scope, its own
-    scheme as the slot's declared type — and `model Opt : Base =
+    scheme as the slot's declared type — and `model Opt in Base =
     dupInt = dup, twice = double` is a *partial* model of it, the
     generators it names reinterpreted and every other mapped to itself.
     Each binding is blessed where it is written, by *subsumption* —
@@ -337,7 +337,7 @@ bare `use` leaves.
     rank-2 statement no `Fn` type can hold, which is why it is a
     declaration and not a word. *Unification blesses a call;
     subsumption blesses a rule.* The renaming reaches through
-    quotations, rows and `fix` bodies, and `use Opt` mints `=Opt>` —
+    quotations, rows and `fix` bodies, and `with Opt` mints `=Opt>` —
     an optimizer you can audit rather than one you have to trust. (An
     model of `Base` whose images are *provably equal* to the
     generators is an optimizer; one whose images merely satisfy the
@@ -348,12 +348,16 @@ bare `use` leaves.
     hom-object (`theory Arrow(k(_, _))`) and declares slots at the
     composition and embedding *shapes* — `k(a,b) k(b,c) ⇒ k(a,c)` and
     `Fn⟨a ⇒ b⟩ ⇒ k(a,b)`, read off the written types, never off a slot's
-    name — then `use Circuits ; add1 ; dbl` elaborates every stage to
-    that model's embedding and every `;` to its composition, so a block
+    name — then `def easy with Circuits = add1 ; dbl` elaborates every stage to
+    that model's embedding and every `;` to its composition, so a body
     reads as the ordinary program it is and comes out a circuit. A third
     shape, the **strength** `k(a,b) ⇒ k(P(a,c), P(b,c))`, names the
-    pairing that packs a wider stage, so `use Circuits ; dup ; *` is a
-    circuit that squares: `_`-padding with `first` in place of `_`.
+    pairing that packs a wider stage, so `def sq with Circuits = dup ; *`
+    is a circuit that squares: `_`-padding with `first` in place of `_`.
+    Whether `with M` transports or merely **instantiates** is decided by
+    the `in` clause and by nothing else: a def declared `in T` for M's
+    theory is already a morphism of `B[T]`, so M supplies its slot words
+    and the spine stays base composition.
     That shape rule is the base's own doctrine — a Freyd category,
     Hughes' `arr`/`>>>`/`first` — made declarable, so "a target must
     have the structure the source has" is checked rather than assumed.
@@ -364,8 +368,8 @@ bare `use` leaves.
     scope, which makes a theory with no eliminator a **sealed**
     category — abstract types for free. A morphism that is not the
     transport of any base program — a stateful circuit, say — is
-    declared instead of transported: `def sum0 = over Circuits ; 0 ;
-    sumFrom`, recognized by its carrier, and it composes under `use
+    declared instead of transported: `def sum0 in Circuits = 0 ;
+    sumFrom`, recognized by its carrier, and it composes under `with
     Circuits` like any other (`examples/circuits.braid`).
 
     `Code ⇒ Code` functors come **last** in that list on purpose. The
@@ -394,38 +398,38 @@ bare `use` leaves.
     ```text
     theory Smooth(a, g) = add : a a ⇒ a ; mul : a a ⇒ a ; … ; observe : a ⇒ Float
 
-    model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a) =
+    model Fwd(Smooth(a, g)) in Smooth(Dual(a), a) =
         mul = Dual(x, dx) Dual(y, dy) -> (x y ; mul) ((x dy ; mul) (dx y ; mul) ; add) ; Dual
         …
 
-    def poly   = over Smooth ; (x -> …)         # written once
-    def polyD  = use Fwd(Floats) ; poly         # Dual(Float) =Fwd(Floats)> …
-    def polyDD = use Fwd(Fwd(Floats)) ; poly    # …and second derivatives
+    def poly   in Smooth = (x -> …)         # written once
+    def polyD  with Fwd(Floats) = poly         # Dual(Float) =Fwd(Floats)> …
+    def polyDD with Fwd(Fwd(Floats)) = poly     # …and second derivatives
     ```
     Three models of the one theory: `Floats` evaluates, `Fwd` carries a
     tangent (forward mode), `Rev` carries the **transpose** of that same
     linear map as a continuation (reverse mode) — so forward and reverse
     are two representations of one map rather than two algorithms, and
     fan-out needs no special case because continuations are linear.
-    `transformation Value : Fwd(Floats) ⇒ Floats = value, zeroTangent`
+    `transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent`
     says *AD computes the right value*, and all ten of its squares are
     **proved**, not sampled.  The theory's gradient exit is
     `gradient : a ⇒ g` — an exit whose result varies by model is a
     theory **parameter**, filled `Float` by `Fwd` and `Grad` by `Rev` —
     so a transformation carries one component per parameter and
     `Transpose`'s gradient square is decided like any other.
-    Newton's method comes along under `use Recursive`, and a fourth
+    Newton's method comes along under `with Recursive`, and a fourth
     model threads the adjoint through a `resource` instead of summing
     it. `Float` itself arrived for this (a base type beside `Int`,
     sharing no word with it).
 
     And `Fwd` is **a model parameterized by a model** (2026-09-15): the
-    head `model Fwd(R : Smooth(a, g)) : Smooth(Dual(a), a)` makes it a
+    head `model Fwd(Smooth(a, g)) in Smooth(Dual(a), a)` makes it a
     *family* — a functor Mod(Smooth) → Mod(Smooth), which is ML's
     higher-order functor, Kiselyov's interpreter transformer and the
-    ring construction R ↦ R[ε]/ε² — and `use Fwd(Floats)` **applies**
+    ring construction R ↦ R[ε]/ε² — and `with Fwd(Floats)` **applies**
     it, minting a model whose name is the application. So a family can
-    be applied to a member of itself: `use Fwd(Fwd(Floats))` types at
+    be applied to a member of itself: `with Fwd(Fwd(Floats))` types at
     `Dual(Dual(Float))` and computes **second derivatives**, with the
     three templates untouched. The carrier is a *substitution*, never a
     type-level function: the head's binders take the argument's own
@@ -437,14 +441,14 @@ bare `use` leaves.
     refused where it is first applied.
 17. **A data frame is a model too — so you never write a loop over
     rows.** You write a program on ONE ROW, a stack of scalars, and
-    `use Frame` lifts it to the whole frame. `Frame` models the same
+    `with Frame` lifts it to the whole frame. `Frame` models the same
     `Doctrine` `Circuits` does: the hom-object is a **function between
     columns**, `embed` is `map`, `compose` is composition, and `first`
     is **unzip / map / zip** — the strength is *the other columns ride
     past*, which is what carries a two-wire row stage.
     ```text
     data Trade = (sym: Str, px: Float, qty: Int)   # names generate sym, px, qty
-    def notional = use Frame ; dup ; px qty ; _ toFloat ; fmul
+    def notional with Frame = dup ; px qty ; _ toFloat ; fmul
     #   notional : Trade =Frame Recursive> Float
     ```
     The columns are the **field words** a `data` declaration generates
@@ -488,10 +492,10 @@ bare `use` leaves.
     natural — `examples/laws.braid` has the normalizer **prove**
     `dup ; f f = f ; dup` for an arbitrary word — and a model of the
     `Doctrine` whose hom-object is a stochastic map is the category
-    `use M` maps into. So the distinction is drawn structurally:
+    `with M` maps into. So the distinction is drawn structurally:
     ```braid
-    def twoEqualE = use Enum ; half ; flip ; dup        # ONE flip, copied
-    def twoIndepE = use Enum ; twoBiases ; bothFlipE    # TWO flips
+    def twoEqualE with Enum = half ; flip ; dup        # ONE flip, copied
+    def twoIndepE with Enum = twoBiases ; bothFlipE    # TWO flips
     ```
     `{HH: ½, TT: ½}` against four cells of ¼, in all three models, with
     nothing in the file declaring that they differ. A generator is an
@@ -503,7 +507,7 @@ bare `use` leaves.
     enumeration, a threaded-seed sampler (a 48-bit LCG in Braid, so the
     counts are reproducible), the support — the doctrine's seven laws
     over each, Monty Hall and a noisy sensor with `condition` and
-    renormalizing, and a random walk under `use Recursive`.
+    renormalizing, and a random walk under `with Recursive`.
     `examples/prob.braid` (2026-09-15), with the frame library as its
     first client: every distribution printed is a frame.
 20. **A refusal names the place and the rule.** Every error from a file
@@ -523,7 +527,7 @@ bare `use` leaves.
 (railway), `ladder` (every guard idiom), `iterate` (while), then `nat`
 and `tree` (data types and folds), `lists`, `conditionals` and `case`
 (rows, deferred sums, `case3`), `tag` (naming wires in passing),
-`resources` (threaded wires and `use`),
+`resources` (threaded wires and `with`),
 `lifting` (every functor is `Fn⟨a ⇒ b⟩ ⇒ something better`:
 the logged version of a function, game rules as lifted moves),
 `index` (Fin(n) and a small dataframe),
@@ -532,7 +536,7 @@ the logged version of a function, game rules as lifted moves),
 `build` (one pipeline as a template, instantiated by two configurations),
 `arrows` (Control.Arrow's interface, as plain syntax), `circuits`
 (the arrows that aren't: stream transducers as ordinary data, and the
-`over Doctrine` declaration that transports base programs into them),
+`in Doctrine` declaration that transports base programs into them),
 `reified` (the same doctrine over a carrier that is the program AND its
 Code — `getCode` and `evalAs` as one model's embedding and exit) and
 `transformations` (a natural transformation between two models, its
@@ -548,7 +552,7 @@ one theory of arithmetic — no `Code`, no chain rule — where forward
 mode is a model **parameterized by a model**, so applying it twice
 gives second derivatives),
 `frame` (a data frame as a model of the same doctrine: row programs
-lifted by `use Frame`, the columns being the `data` declaration's field
+lifted by `with Frame`, the columns being the `data` declaration's field
 words, and two CSVs loaded by one `table` line each — the second with a
 written schema),
 `prob` (the third flagship: probability as a Markov category — one
@@ -565,8 +569,8 @@ so "a new kind of computation" is never a new arrow. It is a `data`
 (a new carrier, codata included), a `resource` (state threaded through a
 region), a plain `def` (a new combinator — loops and guards are already
 values), a `theory` + `model` (a swappable interface with runnable
-laws), a `model F(R : T(a))` — a model built out of another model, a
-*family*, applied by `use F(M)` and iterable — or, for a genuinely
+laws), a `model F(T(a))` — a model built out of another model, a
+*family*, applied by `with F(M)` and iterable — or, for a genuinely
 different category like a stream transducer,
 a `data` plus your own composition word. MANUAL §15 is the table, with a
 worked example for each row.
@@ -574,7 +578,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1132-case test suite, a full
+(typechecker, interpreter, REPL), a 1133-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types),
 and design notes recording each decision and the theorems that forced
 it —
@@ -589,7 +593,7 @@ annotated bibliography behind all of them. Deliberately absent so
 far: labeled record fields, totality checking (`Recursive` marks
 what *may* recurse without bound — provenance, not a proof), and the
 last stage of the effects staging —
-`resource` wires, `use` scopes, and theories/models with runnable
+`resource` wires, `with` scopes, and theories/models with runnable
 laws have shipped, but there is no resource mark, no linear `World`
 and no handlers (`design-effects.md` has the position, the staging,
 and the two decisions implementation reversed).
