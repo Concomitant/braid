@@ -747,10 +747,11 @@ with@Ticked is the receipt of `with Ticked`, not a word: a label is
 
 ## the reflection words — **not** declarations *(2026-09-16)*
 
-**What they are.** Three **prims**: `typeOfWord : Str ⇒ (TypeRep |
-Str)`, `declOf : Str ⇒ (Decl | Str)` and `showType : TypeRep ⇒ Str`.
-They belong on this page only to say where they sit: they **declare
-nothing, apply nothing and mint nothing**. They are words, and the only
+**What they are.** Five **prims**: `typeOfWord : Str ⇒ (TypeRep |
+Str)`, `typeOfCode : Code ⇒ (TypeRep | Str)`, `declOf : Str ⇒ (Decl |
+Str)`, `showType : TypeRep ⇒ Str` and `envOf : • ⇒ List(Box(Str
+TypeRep))`. They belong on this page only to say where they sit: they
+**declare nothing, apply nothing and mint nothing**. They are words, and the only
 reason they are in the kernel rather than derived is the kernel's own
 criterion — they touch the implementation, reading the four tables the
 checker holds (the environment, the `data`/`resource` declarations, the
@@ -780,10 +781,19 @@ construct of its own (`cellsFor`, the prelude; `examples/frame.braid`).
 | a bundle exponent (`Intⁿ`), `Fin(n)` | a width is a second sort — an exponent is not a type — and a rep that flattened it would make two different types equal.  The miss track says so |
 | a template (`def f in T`) | it has no type until a model reads it, so `typeOfWord` has nothing to answer |
 
-**Refusals.** None of their own: both `typeOfWord` and `declOf` are
-total, and put the checker's own message on the **miss track** —
-"there is no such word" is an answer, not a failure. `showType` is the
-one that can fail, and only on a rep nobody built.
+**Refusals.** None of their own: `typeOfWord`, `typeOfCode` and
+`declOf` are total, and put the checker's own message on the **miss
+track** — "there is no such word" is an answer, not a failure.
+`showType` is the one that can fail, and only on a rep nobody built.
+
+**Where a derivation goes.** A `functor` may call all five, so a def
+whose body names a declaration can elaborate into the program that
+declaration implies (`examples/typerep.braid` §4). What such a
+derivation cannot do yet is **declare** anything: the scope that runs
+the functor mints a receipt, so the derived word wears `=F>` and no
+longer fits an `Fn⟨a ⇒ b⟩`. A declaration form whose body is computed
+is what is missing, and it is the one construct this page expects to
+gain (`design-macros.md`, 2026-09-16).
 
 ---
 

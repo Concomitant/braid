@@ -92,7 +92,7 @@ repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type (:t! raw), :doc <name>, :import \"f.braid\", :s stack, :defs, :transformations, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type (:t! raw), :tc <prog> the type of the Code it leaves, :doc <name>, :import \"f.braid\", :s stack, :defs, :transformations, :clear, :q quit"
   runInputT defaultSettings (loop initialState)
 
 -- haskeline supplies line editing, history (up-arrow), and ctrl-d;
@@ -143,6 +143,9 @@ loop st = do
               loop st
           | ":t " `isPrefixOf` l -> do
               liftIO (typeOfWith (showArrowA (dispOf st)) st (drop 3 l))
+              loop st
+          | ":tc " `isPrefixOf` l -> do
+              liftIO (typeOfCodeWith st (drop 4 l))
               loop st
           | ":doc " `isPrefixOf` l -> do
               liftIO (docOf st (trim (drop 5 l)))
@@ -315,6 +318,33 @@ typeOfWith render st src =
   case first (locFor [] src) (elabIn st src >>= inferTermIn (rsEnv st)) of
     Left err  -> putStrLn $ "error: " ++ err
     Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
+
+-- `:tc <prog>` — the type of the CODE the line produces (2026-09-16).
+-- A different question from `:t`, not a second spelling of it:
+-- `:t [dup ; +] ; getCode` is `\8226 \8658 Code`, and what you wanted to know
+-- is `Int \8658 Int`.  The line is RUN (against the session's stack, which
+-- it leaves alone) and `typeOfCode` is asked about the one value it
+-- left \8212 so the command is the word, and nothing else.
+typeOfCodeWith :: ReplState -> String -> IO ()
+typeOfCodeWith st src =
+  case first (locFor [] src) (elabIn st src) of
+    Left err -> putStrLn $ "error: " ++ err
+    Right term -> do
+      r <- runExceptT (evalTerm (replRCtx st) (rsRun st) M.empty term
+                                (rsStack st))
+      case r of
+        Left err -> putStrLn $ "error: " ++ err
+        Right (out, logs) -> do
+          mapM_ putStrLn logs
+          case out of
+            [c] -> say c
+            _   -> putStrLn $ "error: `:tc` wants a line that leaves exactly \
+                              \one Code value, and this one left "
+                           ++ show (length out) ++ " wire(s)"
+  where
+    say c = putStrLn $ trim src ++ " : "
+                    ++ either ("error: " ++) id
+                         (typeOfCodeV (replRCtx st) c >>= showTypeV (replRCtx st))
 
 -- `:import "path.braid"` — the file's DECLARATIONS, in this session's
 -- scope.  Its main program is not run (a library's demo is its own

@@ -2,13 +2,66 @@
 module Main (main) where
 
 import MiniConcatTypechecker
-import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort)
+import Data.List (isInfixOf, isPrefixOf, isSuffixOf, sort, intercalate)
+import qualified Data.Map as M
+import qualified Data.Set as S
 import System.Exit (exitFailure, exitSuccess)
 import System.Directory (listDirectory)
 
 -- Every examples/*.braid must run without error (catches rot: an
 -- unknown prim, a type error, a desync).  Output-regression checking
 -- is a future enhancement; "runs clean" is the high-value signal.
+-- THE DIFFERENTIAL CHECK, pinned (2026-09-16).  For every word in the
+-- prelude there are two ways to ask what its type is \8212 look the word up
+-- (`typeOfWord`, which is its stored scheme) or hand the checker the
+-- one-atom program that calls it (`typeOfCode`).  They must agree, and
+-- this is the first rung of the type-system bootstrap
+-- (design-macros.md, 2026-09-16; examples/typerep.braid \8470 3).
+--
+-- UP TO THE EFFECT TAIL, and that qualification is the finding rather
+-- than a fudge: a prim's scheme is written with a CLOSED pure row
+-- (`arrPure`), while an inferred one's row is OPEN (a fresh \949 later
+-- constraints may fill).  Closing every tail on both sides is what
+-- makes the comparison the one the display already makes \8212 effect
+-- tails are invisible in every user-facing renderer.
+--
+-- Skipped: names no source can write (`#fix`, the recursor prims) and
+-- types with no rep (a bundle exponent is a WIDTH, not a type).
+closeEffs :: Arrow -> Arrow
+closeEffs arr =
+  let (_, _, _, _, evs) = varsOfArrow arr
+  in substOnce (Subst M.empty M.empty M.empty M.empty
+                  (M.fromList [ (v, Eff S.empty Nothing) | v <- evs ])) arr
+
+-- the pairs actually compared: a word, its STORED arrow, and the one
+-- inference gives the single-atom program that calls it
+preludeDifferentialPairs :: [(String, Arrow, Arrow)]
+preludeDifferentialPairs =
+  [ (n, normalizeArrow (closeEffs arr), normalizeArrow (closeEffs garr))
+  | (n, sc) <- M.toAscList (modEnv preludeModule)
+  , all (`notElem` "#@") n
+  , Right _ <- [reprSchemeV sc]
+  , let Forall _ _ _ _ _ _ arr = sc
+  , Right (a, gs) <- [inferTermSub (modEnv preludeModule) (Prim n)]
+  , let Forall _ _ _ _ _ _ garr = generalizeWith M.empty gs a ]
+
+preludeDifferential :: [String]
+preludeDifferential =
+  [ n ++ ": stored " ++ show want ++ ", inferred " ++ show got
+  | (n, want, got) <- preludeDifferentialPairs, want /= got ]
+
+runDifferential :: Maybe String
+runDifferential
+  | length preludeDifferentialPairs < 150 =
+      Just $ "the differential check compared only "
+          ++ show (length preludeDifferentialPairs) ++ " words: something "
+          ++ "stopped having a rep, or stopped inferring"
+  | null preludeDifferential = Nothing
+  | otherwise =
+      Just $ "typeOfWord and typeOfCode disagree on "
+          ++ show (length preludeDifferential) ++ " prelude word(s): "
+          ++ intercalate "; " (take 5 preludeDifferential)
+
 runExample :: String -> IO (Maybe String)
 runExample name = do
   loaded <- loadSource ("examples/" ++ name)
@@ -2682,6 +2735,18 @@ evalTests =
     -- ...and so does a `theory`: its slots, by name
   , (declSrc ++ "theory Mon(a) =\n    unit : • ⇒ a\n    op : a a ⇒ a\n\"Mon\" ; declOf ; ((d -> d ; unDecl ; ((n p b f -> nil) | (n p b -> nil) | (n p s l -> s ; [(e -> e ; unBox ; (nm t -> nm))] ... ; map)) ; mergeDecl) | drop ; nil) ; merge ; [symStr] ... ; map ; print",
      ["list(unit, op)"], "")
+    -- `typeOfCode` (2026-09-16): the principal scheme of a CODE
+    -- value, inferred in the prefix scope.
+  , (showT ++ "[dup ; +] ; getCode ; typeOfCode ; say ; print",
+     ["Int ⇒ Int"], "")
+    -- ...and a program that does not type puts the checker's own
+    -- message on the miss track, rather than failing the caller
+  , (showT ++ "\"1 2 ; cat\" ; parse ; ((c -> c ; typeOfCode ; (drop ; \"typed\" | drop ; \"did not type\") ; merge) | drop ; \"no parse\") ; merge ; print",
+     ["did not type"], "")
+    -- `envOf` is every word in scope with its scheme: the seed the
+    -- differential check is run over (examples/typerep.braid)
+  , (showT ++ "envOf ; [(e -> e ; unBox ; (nm r -> (nm \"dup\" ; equals) 1 0 ; select))] ... ; map ; sum ; print",
+     ["1"], "")
     -- THE DERIVED ROW PRINTER, the first deriving customer.  The
     -- printer nobody wrote agrees with the one somebody did, cell
     -- for cell \8212 which is the whole claim examples/frame.braid makes.
@@ -3628,6 +3693,7 @@ main = do
         ++ tbIFs
         ++ mvFs
         ++ famFs
+        ++ [runDifferential]
         )
       total = length passTests + length failTests
             + length moduleTypeTests + length evalTests + length moduleFailTests
@@ -3638,6 +3704,7 @@ main = do
             + length tableImportTests
             + length transformationVerdictTests
             + length familyReportTests
+            + 1                       -- the prelude differential check
   mapM_ (putStrLn . ("FAIL " ++)) failures
   putStrLn $ show (total - length failures) ++ "/" ++ show total ++ " tests passed"
   if null failures then exitSuccess else exitFailure

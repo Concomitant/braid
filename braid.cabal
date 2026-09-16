@@ -42,5 +42,6 @@ test-suite braid-tests
     build-depends:    base
                     , braid
                     , directory
+                    , containers
     hs-source-dirs:   test
     default-language: GHC2021

@@ -20,6 +20,7 @@ each feature is the way it is), `examples/` (everything running).
 ```
 
 REPL commands: `:t <prog>` type · `:t! <prog>` raw (no alias folding) ·
+`:tc <prog>` the type of the `Code` it leaves (§12) ·
 `:doc <name>` doc comment · `:defs` whole prelude with types ·
 `:transformations` every declared transformation, with the verdict on
 each of its squares · `:s` show stack · `:clear` reset stack · `:q` quit. Every REPL line runs
@@ -3181,9 +3182,16 @@ ordinary Braid word too.
 
 ```text
 typeOfWord : Str      ⇒ (TypeRep | Str)     a word's principal scheme
+typeOfCode : Code     ⇒ (TypeRep | Str)     a Code value's, inferred here
 declOf     : Str      ⇒ (Decl | Str)        a data/type/theory declaration
 showType   : TypeRep  ⇒ Str                 the display `:t` prints
+envOf      : • ⇒ List(Box(Str TypeRep))     every word in scope
 ```
+
+In the REPL, `:tc <prog>` runs a line and asks `typeOfCode` about the
+one value it left. It is a different question from `:t`, not a second
+spelling of it — `:t [dup ; +] ; getCode` is `• ⇒ Code`, and what you
+wanted to know is `Int ⇒ Int`.
 
 They are **prims** (§9), not declarations: they read the checker's own
 tables, which is exactly the criterion the kernel uses (`README`).
@@ -3223,7 +3231,44 @@ what `a` is.
 on `TypeRep` values, run at elaboration, producing a declaration or a
 program. It never enters unification, where a non-injective function
 would break principal types. That is the whole rule, and
-`examples/typerep.braid` is where it is exercised.
+`examples/typerep.braid` is where it is exercised: `colsOf : TypeRep ⇒
+TypeRep` is the column store's object map, `P(x, y) ↦ P(Cols x, Cols
+y)` with `t ↦ List(t)` at the base — non-injective, and living entirely
+outside the type system.
+
+**`typeOfCode` and elaboration.** Inferring a Code value's type in the
+prefix scope is sound on a closed spine, and every def is one: since
+5a½ `with Recursive` rewrites to a closed spine over `#fix`, so there
+is no `.recurse` atom to loop on. It cannot see the def it is inside,
+either — **elaboration precedes inference**, so when a `functor` runs,
+the word it is building has no type yet. The types available are the
+prefix scope's, fixed before this declaration was reached.
+
+Three things `examples/typerep.braid` does with it:
+
+- **diagram cuts.** `cuts : Code ⇒ List(Code)` splits a spine into its
+  connected components — atoms as nodes, wires as edges, each atom's
+  arity read off `typeOfCode` of the one-atom spine that calls it. So
+  `1 2 3 4 ; + _ _ ; _ *` comes back as `1 2 ; + ; _` and `3 4 ; _ _ ;
+  *`: two halves with no wire between them, and nothing in the *text*
+  said so. Analysis, not runtime parallelism — what it licenses is the
+  reading that a component whose grade is ∅ is **central** (interchange
+  holds) and may be reordered or run anywhere, while one carrying a
+  label may not, because the label is the claim that its order is
+  observable.
+- **the bootstrap seed.** `envOf` is every word in scope with its
+  scheme, and for each there are two ways to ask its type: look the word
+  up, or hand the checker the one-atom program that calls it. They
+  agree — pinned as a test over all 182 prelude words that have a rep,
+  **up to the effect tail**: a prim's scheme is written with a closed
+  pure row, an inferred one's row is open. The display hides effect
+  tails, so it hides exactly this; the test closes both sides and
+  compares. This is the first rung of the type-system bootstrap
+  (`design-macros.md`, 2026-09-16).
+- **deriving at elaboration.** A `functor` whose body is a sym naming a
+  declaration elaborates into the printer that declaration implies
+  (`rowCells with Cells = .Row`). The derived word wears the scope's
+  receipt, which is the gap below.
 
 ### Deriving: a printer nobody wrote
 

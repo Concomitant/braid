@@ -6,7 +6,7 @@ juxtaposition is parallel wires, `>>` (or `;`, or a newline) is
 composition, and the type system infers a principal type for every
 diagram with no annotations, ever.
 
-The design bet: keep the primitive set tiny (**63 morphisms**, counted
+The design bet: keep the primitive set tiny (**65 morphisms**, counted
 2026-09-16) and prove it spans everything else **in the language
 itself**. A word keeps its place in the kernel only if it is a
 structure map of the doctrine — cartesian, coproduct, exponential — or
@@ -334,7 +334,16 @@ bare `with` leaves.
     *absent* is `∀a. a ⇒ TypeRep`: nothing takes a **wire** and answers
     its type, so no free theorem is lost — and a type-level function is
     an ordinary word on `TypeRep` values run at elaboration, never a
-    family inside unification. (2026-09-16)
+    family inside unification. `typeOfCode : Code ⇒ (TypeRep | Str)`
+    asks the same question of a **Code value**, inferred in the prefix
+    scope, and `examples/typerep.braid` spends it three ways: `cuts`
+    splits a spine into its connected components (so `1 2 3 4 ; + _ _ ;
+    _ *` comes back as two independent halves, read off the wires and
+    not the layout); `colsOf` is the column store's non-injective object
+    map as a word; and `envOf` feeds a **differential check** —
+    `typeOfWord w` against `typeOfCode [w]`, over all 182 prelude words
+    with a rep, pinned as a test. That check is the first rung of the
+    type-system bootstrap. (2026-09-16)
 
     **Every `with` leaves a receipt**, and only a `with` mints one:
     `with IntSum` puts `IntSum` on the manifest of everything it read,
@@ -555,7 +564,10 @@ the logged version of a function, game rules as lifted moves),
 (the arrows that aren't: stream transducers as ordinary data, and the
 `in Doctrine` declaration that transports base programs into them),
 `reified` (the same doctrine over a carrier that is the program AND its
-Code — `getCode` and `evalAs` as one model's embedding and exit) and
+Code — `getCode` and `evalAs` as one model's embedding and exit),
+`typerep` (types and declarations as data: diagram cuts, a type-level
+function as an ordinary word, and the differential check that is the
+bootstrap's first rung) and
 `transformations` (a natural transformation between two models, its
 squares generated and decided — proved for an internal functor, sampled for a fold),
 `payroll` (a whole small program: a resource, a theory and a grade
@@ -595,7 +607,7 @@ worked example for each row.
 ## Status
 
 A design-driven prototype: one Haskell module for the whole language
-(typechecker, interpreter, REPL), a 1143-case test suite, a full
+(typechecker, interpreter, REPL), a 1148-case test suite, a full
 reference (`MANUAL.md` — every feature, with checker-verified types;
 `CONSTRUCTS.md` — the declaration layer construct by construct),
 and design notes recording each decision and the theorems that forced

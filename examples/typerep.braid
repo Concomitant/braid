@@ -1,0 +1,348 @@
+# TYPES ARE DATA — and so are declarations.
+#
+# `examples/code.braid` reflects a PROGRAM: `reflect` turns a quotation
+# into its spine and the list library becomes the metaprogramming
+# library.  This file reflects the other half — the program's TYPE, and
+# the DECLARATION it was written against.
+#
+#     typeOfWord : Str     ⇒ (TypeRep | Str)     a word's principal scheme
+#     typeOfCode : Code    ⇒ (TypeRep | Str)     a Code value's, inferred here
+#     declOf     : Str     ⇒ (Decl | Str)        a data/type/theory declaration
+#     showType   : TypeRep ⇒ Str                 the display `:t` prints
+#     envOf      : • ⇒ List(Box(Str TypeRep))    every word in scope
+#
+# Nothing here computes anything new.  Every one of these words answers
+# with a fact the checker already holds, so they are pure, they cost
+# nothing, and a `functor` may call them — which is what makes an
+# ELABORATION-TIME derivation an ordinary Braid word rather than a
+# construct of its own (§5 below).
+#
+# THE ONE RULE ABOUT EQUALITY.  These words NORMALIZE before they
+# answer (`normalizeArrow`: variables become a0, ρ0, σ0, ε0 in order of
+# first appearance), so two schemes are the same scheme exactly when
+# their reps are `eq?`.  A rep you assembled by hand carries no such
+# guarantee — `eq?` on an unnormalized rep compares variable NAMES,
+# which is a different question.  MANUAL §12.
+
+def say = ((t -> t ; showType) | (e -> e)) ; merge
+
+"-- a word's scheme, as data, rendered back --" ; print
+("dup  : " ("dup" ; typeOfWord ; say) ; cat) ; print       # a0 ⇒ a0 a0
+("fold : " ("fold" ; typeOfWord ; say) ; cat) ; print
+("and  : " ("and" ; typeOfWord ; say) ; cat) ; print       # Bool Bool ⇒ Bool
+#   `and`'s rep is a structural sum; the display folds it back to
+#   `Bool`, because the display is the REPL's own — one renderer for a
+#   type, reached two ways.
+
+"" ; print
+"-- and what has no rep, with the reason --" ; print
+("pack : " ("pack" ; typeOfWord ; say) ; cat) ; print
+#   a bundle exponent is a WIDTH, not a type.  A rep that flattened it
+#   would make two different types equal, which is the one thing a rep
+#   must never do — so it rides the miss track and `:t pack` still
+#   prints.
+
+# ---------------------------------------------------------------------
+# 1. DIAGRAM CUTS — what runs beside what
+# ---------------------------------------------------------------------
+# A spine is a string diagram.  Its ATOMS are nodes and its WIRES are
+# edges, so "which parts of this program are independent of which" is a
+# question about connected components — and the arities that say which
+# wire an atom eats come from `typeOfCode`, one atom at a time.
+#
+# `cuts : Code ⇒ List(Code)` splits a spine into those components.  Two
+# halves of a tensor with no wire between them come back separately;
+# what remains between components is the dependency structure, which is
+# to say none.
+#
+# WHAT THIS IS AND IS NOT.  It is ANALYSIS, not runtime parallelism —
+# nothing here runs anything anywhere.  What it licenses is a reading:
+# a component whose grade is ∅ is CENTRAL (interchange holds for it),
+# so it may be reordered against anything and run wherever it likes; a
+# component carrying a label may not, because the label is exactly the
+# claim that its order is observable.  The grade is on the arrow, so
+# `typeOfCode` of a component answers that question too.
+
+## the walk's state: the next fresh component id, the live stack's ids,
+## the current stage's outputs and tags, and the stages already done
+data Cut = (Int List(Int) List(Int) List(Int) List(List(Int)))
+
+## MERGING is one relabelling, which is why every id-carrying field of
+## the state is rewritten together
+def relab    = (old new l -> l ; [(x -> (x old ; equals) new x ; select)] ... ; map)
+def relabAll = (old new ls -> ls ; [(l -> old new l ; relab)] ... ; map)
+def relabCut =
+    old new c ->
+    c ; unCut
+      ; (n s o t d -> n (old new s ; relab) (old new o ; relab) (old new t ; relab) \
+                        (old new d ; relabAll) ; Cut)
+
+## an ATOM's arity, read off its own type: `typeOfCode` of the one-atom
+## spine, and the closed width of each side of the arrow
+def arrWidths =
+    [(s -> 0 0 ; Box)] [(s -> 0 0 ; Box)] [(nm as -> 0 0 ; Box)] [(x -> 0 0 ; Box)] \
+    [(as tl -> 0 0 ; Box)] [(s -> 0 0 ; Box)] \
+    [(i o ls tl -> (i ; stackWidth) (o ; stackWidth) ; Box)] ... ; foldTypeRep
+
+def atomArity =
+    a -> ((a ; single) ; single) ; typeOfCode
+       ; ((r -> r ; arrWidths) | drop ; (0 0 ; Box)) ; merge
+
+def headOr   = (z l -> l ; unList ; (z | (x r -> x)) ; merge)
+def copies   = (m g -> (m ; range) ; [(i -> g)] ... ; map)
+def cutMerge = (c cs g -> cs ; [(acc x -> x g acc ; relabCut)] c ... ; fold)
+def freshIf  = (es n -> (es ; len ; zero) (n 1 ; +) n ; select)
+def groupIf  = (es n -> (es ; len ; zero) n (0 es ; headOr) ; select)
+
+## one atom: eat k wires off the front, join their components, and push
+## m copies of the joined id back.  An atom that eats nothing starts a
+## component of its own.
+def cutAtom =
+    c a ->
+    a ; atomArity ; unBox ; (k m ->
+      c ; unCut ; (n s o t d ->
+        (k s ; take) ; (eaten ->
+          (eaten n ; freshIf) ; (n2 ->
+            (eaten n ; groupIf) ; (g ->
+              ((n2 (k s ; skip) o t d ; Cut) eaten g ; cutMerge)
+                ; unCut
+                ; (n3 s3 o3 t3 d3 ->
+                    n3 s3 ((m g ; copies) o3 ; append) (g t3 ; cons) d3 ; Cut))))))
+
+## one stage: its atoms left to right, then its outputs go in front of
+## whatever the stage did not touch
+def cutStage =
+    c stage ->
+    stage ; [cutAtom] c ... ; fold ; unCut
+      ; (n s o t d -> n ((o ; reverse) s ; append) nil nil ((t ; reverse) d ; cons) ; Cut)
+
+def cutWalk =
+    code ->
+    code ; [cutStage] (0 nil nil nil nil ; Cut) ... ; fold ; unCut
+         ; (n s o t d -> d ; reverse)
+
+def elemI     = (x col -> col ; [(seen y -> seen (x y ; equals) ; or)] false ... ; fold)
+def distinctI =
+    col ->
+    col ; [(seen x -> (x seen ; elemI) seen (x seen ; cons) ; select)] nil ... ; fold ; reverse
+
+def pickStage =
+    g stage ids ->
+    (ids stage ; zip)
+      ; [(p -> p ; unBox ; (i a -> (i g ; equals) (a ; single) nil ; select))] ... ; flatMap
+
+def cutComponent =
+    g code tags ->
+    (code tags ; zip) ; [(e -> e ; unBox ; (st ids -> g st ids ; pickStage))] ... ; map
+      ; [(s -> (s ; len ; zero) nil (s ; single) ; select)] ... ; flatMap
+
+def cuts =
+    code ->
+    code ; cutWalk
+         ; (tags -> (tags ; concat ; distinctI) ; [(g -> g code tags ; cutComponent)] ... ; map)
+
+"" ; print
+"-- the components of a spine --" ; print
+[1 2 3 4 ; + _ _ ; _ *] ; getCode
+  ; (c ->
+      ("whole: " (c ; unparse) ; cat) ; print
+      (c ; cuts) ; [(k -> "  cut: " (k ; unparse) ; cat)] ... ; map ; printAll)
+#   whole: 1 2 3 4 >> + _ _ >> _ *
+#     cut: 1 2 >> + >> _
+#     cut: 3 4 >> _ _ >> *
+#
+# Two components, and nothing in the TEXT said so: the `_`s in stage two
+# and stage three are what carry each half past the other, and the cut
+# is read off the wires rather than off the layout.
+
+# ---------------------------------------------------------------------
+# 2. A TYPE-LEVEL FUNCTION — as a word
+# ---------------------------------------------------------------------
+# `Cols` is the column store's object map: a pair of columns is a pair
+# of column-stores, and anything else becomes a column of itself.
+#
+#     Cols(P(x, y)) = P(Cols x, Cols y)          Cols t = List(t)
+#
+# In a type system this is a TYPE FAMILY, and a type family is
+# NON-INJECTIVE: from `Cols a ~ Cols b` you cannot conclude `a ~ b`, so
+# unification can no longer solve for a variable underneath one, and
+# principal types go with it.  Here it is an ORDINARY WORD on `TypeRep`
+# values — it may branch, recurse, fail, print — and it never enters
+# unification at all.  That is the whole rule (design-macros.md,
+# 2026-09-16): a type-level function is a Braid word run at
+# elaboration, producing a declaration or a program.
+
+data P(a, b) = a b
+
+def listOf = (t -> .List ((t ; single) ; single) ; alt3 ; TypeRep)
+
+def colsOf with Recursive =
+    t ->
+    t ; unTypeRep
+      ; ( (s -> t ; listOf) \
+        | (s -> t ; listOf) \
+        | (nm as -> (((nm ; symStr) "P" ; equals) ((as ; len) 2 ; equals) ; and) \
+                      [nm (as ; [(st -> st ; [colsOf] ... ; map)] ... ; map) ; alt3 ; TypeRep] \
+                      [t ; listOf] ... ; cond) \
+        | (x -> t ; listOf) \
+        | (as tl -> t ; listOf) \
+        | (s -> t ; listOf) \
+        | (i o ls tl -> t ; listOf) ) ; mergeTypeRep
+
+## the OUTPUT side of an arrow rep, and its first wire — how a word's
+## result type is got at without any type syntax in the term
+def arrOut =
+    [(s -> nil)] [(s -> nil)] [(nm as -> nil)] [(x -> nil)] \
+    [(as tl -> nil)] [(s -> nil)] [(i o ls tl -> o)] ... ; foldTypeRep
+def noRep   = .none ; alt1 ; TypeRep
+def headRep = (l -> l ; unList ; (noRep | (x r -> x)) ; merge)
+def resultOf =
+    w -> w ; typeOfWord ; ((r -> r ; arrOut ; headRep) | drop ; noRep) ; merge
+
+def rowP = (x y -> (x 1 ; +) (y "" ; cat) ; P)
+def anInt = (x -> x 1 ; +)
+
+"" ; print
+"-- a non-injective type-level function, living in the language --" ; print
+("rowP  : " (("rowP" ; resultOf) ; showType) ; cat) ; print
+("Cols  : " (("rowP" ; resultOf) ; colsOf ; showType) ; cat) ; print
+("anInt : " (("anInt" ; resultOf) ; showType) ; cat) ; print
+("Cols  : " (("anInt" ; resultOf) ; colsOf ; showType) ; cat) ; print
+#   rowP  : P(Int, Str)
+#   Cols  : P(List(Int), List(Str))
+#   anInt : Int
+#   Cols  : List(Int)
+#
+# What is NOT here: a way to turn that answer back into a DECLARATION.
+# `colsOf` computes the column store's object map and prints it; to
+# make `data ColsP = …` out of it we would need a declaration form
+# whose body is computed, and that is the same gap §5 hits.  Nothing
+# about the function is missing; what is missing is a door.
+
+# ---------------------------------------------------------------------
+# 3. THE BOOTSTRAP SEED — a differential check
+# ---------------------------------------------------------------------
+# `envOf` is every word in scope with its scheme.  For each of them
+# there are TWO ways to ask what its type is: look the word up
+# (`typeOfWord`), or hand the checker the one-atom program that calls
+# it (`typeOfCode`).  They should agree, and this is the first rung of
+# a longer ladder:
+#
+#   1. `typeOfWord w` = `typeOfCode [w]`, over everything in scope
+#   2. a Braid CHECKER for a fragment of Braid, written on `TypeRep`
+#   3. the two run against each other over the corpus
+#   4. self-application: the Braid checker checks itself
+#   5. optionally, a switch — the host checker becomes one
+#      implementation of a specification written in the language it
+#      checks
+#
+# Only rung 1 is claimed.  It is the honest first one, and the rep was
+# designed to carry the rest of the climb: structural, total except for
+# the width tier, normalizing, and with `eq?` for equality.
+
+def sameShown =
+    e ->
+    e ; unBox
+      ; (nm rep ->
+          nm ; parse
+             ; ( (c -> c ; typeOfCode
+                        ; ((r -> (rep ; showType) (r ; showType) ; equals) | drop ; false) \
+                        ; merge) \
+               | drop ; false ) ; merge)
+
+def sameRep =
+    e ->
+    e ; unBox
+      ; (nm rep ->
+          nm ; parse
+             ; ( (c -> c ; typeOfCode ; ((r -> rep r ; eq? ; verdict) | drop ; false) ; merge) \
+               | drop ; false ) ; merge)
+
+def countIf = (f l -> l ; [(n e -> f e ; ev ; (b -> b (n 1 ; +) n ; select))] 0 ... ; fold)
+def nameOf  = (e -> e ; unBox ; (nm rep -> nm))
+def failing = (f l -> l ; [(e -> f e ; ev ; (b -> b nil (e ; nameOf ; single) ; select))] ... ; map ; concat)
+
+"" ; print
+"-- the differential check, over every word in scope --" ; print
+("words with a rep: " (envOf ; len ; toStr) ; cat) ; print
+("agree as displayed: " ([sameShown] envOf ; countIf ; toStr) ; cat) ; print
+("agree as reps: " ([sameRep] envOf ; countIf ; toStr) ; cat) ; print
+"displayed disagreements: " ; print
+[sameShown] envOf ; failing ; [(n -> "  " n ; cat)] ... ; map ; printAll
+#   The one name that cannot agree is `#fix`, and it cannot for a good
+#   reason: since 2026-09-14 no source can NAME it (`#` opens a
+#   comment), so `parse "#fix"` has nothing to parse.  `with Recursive`
+#   emits it and nothing else does.
+#
+# THE RESIDUE, stated plainly.  Every word agrees on what is DISPLAYED
+# and only about two thirds agree as REPS, and the difference is the
+# EFFECT TAIL: a prim's scheme is written with a closed pure row
+# (`arrPure`), while an inferred scheme's row is open (a fresh ε that
+# later constraints may fill).  The display hides effect tails on
+# purpose, so it hides exactly this.  It is a real difference — "pure,
+# full stop" is a stronger claim than "pure so far" — and the honest
+# report is both numbers rather than a comparison rigged to agree.
+
+# ---------------------------------------------------------------------
+# 4. DERIVING AT ELABORATION — a functor that reads a declaration
+# ---------------------------------------------------------------------
+# A `functor` is handed the body's `Code` and may return anything.
+# Since the reflection words are pure and read the PREFIX SCOPE, a
+# functor may call them — so a def whose body is a SYM naming a
+# declaration can elaborate into the printer that declaration implies.
+# Nothing runs at run time: what the def contains after elaboration IS
+# the derived program, checked by ordinary inference like any other.
+
+data Row = (label: Str, n: Int)
+
+def symOfAtom =
+    [(s -> s)] [(i -> .none)] [(t -> .none)] [(s -> s)] \
+    [(c -> .none)] [(cs b -> .none)] [(c -> .none)] ... ; foldAtom
+
+def firstSym =
+    c ->
+    c ; unList
+      ; ( .none \
+        | (st r -> st ; unList ; (.none | (a r2 -> a ; symOfAtom)) ; merge) ) ; merge
+
+def cellsOfCode =
+    c -> (c ; firstSym ; symStr) ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge
+
+functor Cells = cellsOfCode
+
+def rowCells with Cells = .Row
+#   rowCells : Row =Cells> List(Str) — the body is the DERIVED printer,
+#   and the `=Cells>` on the arrow is the receipt that says so.
+
+"" ; print
+"-- a printer derived at elaboration --" ; print
+("x" 7 ; Row) ; rowCells ; [(s -> "  " s ; cat)] ... ; map ; printAll
+("rowCells : " ("rowCells" ; typeOfWord ; say) ; cat) ; print
+
+# THE GAP, and it is stage 8's.  That receipt is not decoration: it is
+# part of the type, so `rowCells` no longer fits an `Fn⟨a ⇒ b⟩` — which
+# is why `examples/frame.braid` derives `tradeCells` through a runtime
+# `evalAs` against a witness instead of through a functor.  The receipt
+# is right (a functor that leaves no receipt cannot be audited) and the
+# refusal is right (a label is part of the type).  What is missing is a
+# DECLARATION FORM WHOSE BODY IS COMPUTED — a way to declare a def from
+# Code without applying a scope to it.  Until it exists, a derivation
+# either pays a runtime `evalAs` or wears a label.
+
+# ---------------------------------------------------------------------
+# 5. WHAT IS NOT ADMITTED, on its own merits
+# ---------------------------------------------------------------------
+# There is no `∀a. a ⇒ TypeRep`.  Every word above takes a NAME or
+# CODE — both static, both settled before the program runs — and none
+# of them takes a WIRE.  That is what keeps the free theorems: `∀a.
+# a ⇒ a` is still the identity, because nothing inside it can ask what
+# `a` is.  Such a word is not refused; it is UNWRITABLE, because no
+# atom produces a `TypeRep` from a value.
+#
+# And rewriting triggered by the manifest of the def BEING elaborated
+# is impossible by construction: elaboration precedes inference, so
+# when `Cells` ran above, `rowCells` had no type yet.  What a functor
+# can read is the prefix scope — `Row`, `dup`, `cellsFor` — which was
+# settled before this declaration was reached.  That is what "prefix
+# scope" means, and it is the same property that lets a functor be RUN
+# while the module is still being checked.

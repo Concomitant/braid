@@ -4333,16 +4333,48 @@ then.
   means, and it is the same property that lets a `functor` be *run*
   while the module is still being checked.
 
-### B2 — `typeOfCode`, and the bootstrap
+### B2 — `typeOfCode`, and the bootstrap (shipped)
 
 The second half is `typeOfCode : Code ⇒ (TypeRep | Str)` — the
-principal scheme of a **Code value**, inferred in the prefix scope. Its
-customers are in `examples/typerep.braid`: diagram **cuts** (the
-connected components of a spine, which is the parallelism question
-asked structurally), a **type-level function as a word** (`colsOf`, the
-column store's `P(x, y) ↦ P(Cols x, Cols y)`, non-injective and living
-entirely outside unification), and a **differential check** over every
-prelude word — `typeOfWord w` against `typeOfCode [w]`.
+principal scheme of a **Code value**, inferred in the prefix scope —
+with `envOf : • ⇒ List(Box(Str TypeRep))` beside it and `:tc <prog>` in
+the REPL. Its customers are in `examples/typerep.braid`.
+
+**Diagram cuts.** `cuts : Code ⇒ List(Code)` splits a spine into its
+connected components: atoms are nodes, wires are edges, and each atom's
+arity is read off `typeOfCode` of the one-atom spine that calls it. The
+walk keeps one component id per live wire and *merges* when an atom eats
+two; a merge is one relabelling, which is why the whole state is one
+record. `1 2 3 4 ; + _ _ ; _ *` comes back as `1 2 ; + ; _` and `3 4 ;
+_ _ ; *` — two halves with no wire between them, and nothing in the
+*text* said so; it is read off the wires. This is **analysis**, not
+runtime parallelism. What it licenses is a reading: a component whose
+grade is ∅ is **central** (interchange holds), so it may be reordered
+against anything and run wherever; a component carrying a label may
+not, because the label is the claim that its order is observable.
+
+**A type-level function as a word.** `colsOf : TypeRep ⇒ TypeRep` is
+the column store's object map, `P(x, y) ↦ P(Cols x, Cols y)` with
+`t ↦ List(t)` at the base — the exact shape that would be a type family
+elsewhere. It is an ordinary `with Recursive` word over `unTypeRep`, it
+prints through `showType`, and unification never hears of it. What it
+*cannot* do is turn its answer back into a `data` declaration — the
+same missing door B1 hit, from the other side.
+
+**The differential check.** `typeOfWord w` against `typeOfCode [w]`,
+over every word in scope, pinned as a test over the prelude: **182
+words have a rep, and all 182 agree — up to the effect tail.** That
+qualification is the finding rather than a fudge. A prim's scheme is
+written with a **closed** pure row (`arrPure`); an inferred scheme's row
+is **open** (a fresh ε later constraints may fill). Those are different
+claims — "pure, full stop" is stronger than "pure so far" — and every
+user-facing renderer hides effect tails, so the display hides exactly
+this. In the language the example reports both numbers; the pinned test
+closes every tail on both sides and demands exact equality, which is the
+comparison the display already makes. The one name that cannot be
+compared at all is `#fix`, and for a good reason: since 2026-09-14 no
+source can *name* it (`#` opens a comment), so there is nothing to
+parse.
 
 That differential check is the first rung of a longer ladder, and the
 ladder is the reason any of this is worth building:
@@ -4362,3 +4394,23 @@ Nothing about steps 2–5 is promised here. What is claimed is that step
 1 is the honest first rung and that the rep was designed to carry the
 rest of the climb: it is structural, it is total on everything but the
 width tier, it normalizes, and equality on it is `eq?`.
+
+### What hurt, recorded
+
+Two things, both worth remembering because neither is about types.
+
+*A binder shadows a word, silently and correctly.* `cuts`'s inner
+walk bound the eaten wires to a parameter named `cons`, and every later
+`cons` in that body was the list rather than the constructor. The
+refusal, when it came, was an arity mismatch three lines away. Nothing
+is wrong with the rule — a parameter shadows a word exactly as it
+shadows any other name, and that is what makes binders safe — but a
+shadow of a *prelude constructor* is the one that reads as a typo
+rather than as a binding.
+
+*A grouped compound closes its open output.* `(f e ; ev)` in non-final
+position is instantiated closed, and `ev`'s result stack is open, so
+the group produced **no** wires and the stage silently shifted. The fix
+is to put `f e ; ev` at the head of its own stage and bind the result —
+which is what every prelude word that calls a quoted predicate already
+does. Worth a line in §14 the next time that section is touched.

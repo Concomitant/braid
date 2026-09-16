@@ -4965,6 +4965,15 @@ primEnv =
                         (RCons (one TStr) RNil))))))
        , ("showType",  Forall [] [] [] [] [] []
            (arrPure (one typeRepTy) (one TStr)))
+       , ("typeOfCode", Forall [] [] [] [] [] []
+           (arrPure (one codeStructTy)
+                  (one (TSum (RCons (one typeRepTy)
+                        (RCons (one TStr) RNil))))))
+       , ("envOf",     Forall [] [] [] [] [] []
+           (arrPure SEnd
+                  (one (TData "List"
+                         [one (TData "Box"
+                                [SCons TStr (one typeRepTy)])]))))
        , ("sameCode",  Forall [] [gam, del] [] [] [epsV] []
            (arrPure (SCons (TFn (arrEps (STail gam) (STail del)))
                           (one (TFn (arrEps (STail gam) (STail del)))))
@@ -10309,6 +10318,9 @@ runBuiltin ctx _ "typeOfWord" [VStr w] =
   Right ([railed (typeOfWordV ctx w)], [])
 runBuiltin ctx _ "declOf" [VStr n] =
   Right ([railed (declOfV ctx n)], [])
+runBuiltin ctx _ "typeOfCode" [c] =
+  Right ([railed (typeOfCodeV ctx c)], [])
+runBuiltin ctx _ "envOf" [] = Right ([envOfV ctx], [])
 runBuiltin ctx _ "showType" [r] =
   case showTypeV ctx r of
     Right t -> Right ([VStr t], [])
@@ -10764,6 +10776,24 @@ typeOfWordV ctx w =
 -- reason these words are total: "there is no such word" is an answer.
 railed :: Either String Value -> Value
 railed = either (\e -> VSum 1 [VStr e]) (\v -> VSum 0 [v])
+
+-- ...and a CODE value's, inferred in the prefix scope.  Sound at
+-- elaboration on a closed spine: the types read are the prefix scope's,
+-- fixed before the definition being elaborated (design-macros.md).
+typeOfCodeV :: RCtx -> Value -> Either String Value
+typeOfCodeV ctx c = do
+  term         <- codeToTermV c
+  (arr, gsubs) <- inferTermSub (rcEnv ctx) term
+  reprSchemeV (generalizeWith M.empty gsubs arr)
+
+-- EVERY WORD IN SCOPE, with its scheme: the bootstrap seed.  Words
+-- whose type has no rep (a bundle exponent, a `Fin`) are left out
+-- rather than misreported \8212 `typeOfWord` still says why for each.
+envOfV :: RCtx -> Value
+envOfV ctx =
+  encodeListV [ VSum 0 [VStr n, r]
+              | (n, sc) <- M.toAscList (rcEnv ctx)
+              , Right r <- [reprSchemeV sc] ]
 
 -- embed a runtime value as code that pushes it
 valueToCode :: Env -> Value -> Either String Term
