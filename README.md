@@ -62,3 +62,8 @@ every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove
 that others do), handlers, and a linear world for `IO`.
+
+The documentation needs a cleanup pass. It was written stage by stage
+and uses terms it never defines for a reader (`spine`, `stage`,
+`receipt`, `K-word`, `carrier`, and others). Until that pass is done,
+`MANUAL.md` is accurate but not always self-explanatory.
