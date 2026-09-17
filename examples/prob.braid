@@ -29,7 +29,7 @@
 # number RESOURCE and draws (a small LCG in Braid, so every number
 # below is reproducible), `Nondet` keeps only the SUPPORT — the
 # possibilistic Markov category, where a weight is a bit.  The
-# Doctrine's seven arrow laws run for all three before anything prints.
+# Doctrine's five category laws run for all three before anything prints.
 #
 # There is no `Code`, no `functor` and no `getCode` anywhere below.
 # Binders and destructuring throughout.
@@ -40,25 +40,28 @@
 # outcome by `groupBy`.  A posterior is a frame operation.
 
 import "frame.braid"
-#   `Pair` comes from there too: the pairing the Doctrine's strength
-#   packs a wide stage with is the same `Pair(a, b) = a b` the frame's
-#   `first` unzips.  One spelling per thing, across two files.
+#   There is no `Pair` to import any more (2026-09-16).  Products in
+#   Braid are FLAT — the stack is the product — and the one place they
+#   used to nest was the hom-object, which now names a whole stack on
+#   each side.  `Pair` existed to be the packing; nothing packs.
 
 # ---------------------------------------------------------------------
 # 1. The theory: a Markov category, presented
 # ---------------------------------------------------------------------
-# `in Doctrine` is the declaration that `compose`, `embed` and `first`
-# are the prelude doctrine's, at its signatures — so `with M` of a model
+# `in Doctrine` is the declaration that `compose` and `embed` are the
+# prelude doctrine's, at its signatures — so `with M` of a model
 # transports base programs into the category M presents, and the
-# doctrine's seven arrow laws are inherited.
+# doctrine's five category laws are inherited.
 #
 # The GENERATORS are the distributions, and each is an ENTRY: a slot
 # that builds a carrier out of nothing, `• ⇒ k(_, _)`, read off its
 # declared arrow.  That is the answer to "how does `flip` take its
-# Float?" — it does NOT take one.  A hom-object `k(a, b)` names one
-# object on each side and there is no `k(•, Bool)`, because `•` is not
-# a wire; so a distribution is written as the KERNEL it is, `flip :
-# k(Float, Bool)`, the bias arriving on the wire the kernel consumes.
+# Float?" — it does NOT take one.  A distribution is written as the
+# KERNEL it is, `flip : k(Float, Bool)`, the bias arriving on the wire
+# the kernel consumes.  (`k(•, Bool)` is now perfectly spellable — a
+# hom-object's arguments are stacks and `•` is a stack — but it would
+# say something else: a generator with no domain, which is not how a
+# parameterized distribution is presented.)
 # The bias is then an ordinary base stage INSIDE the transported scope
 # — `half = (n -> 0.5)` is one wire in, one wire out, so it embeds —
 # and the composition of the scope routes it into `flip`'s domain.
@@ -84,15 +87,15 @@ import "frame.braid"
 # range and `Enum`'s `compose` walks a list, and a slot declares the
 # MOST a model may do.
 
-theory Prob(k(_, _), d(_)) in Doctrine =
+theory Prob(k(..., ...), d(...)) in Doctrine =
     compose   : k(a, b) k(b, c) =Recursive> k(a, c)
     embed     : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
-    first     : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
+    under     : k(a, b) =Recursive> k(c a, c b)
     observe   : k(Int, Int) =Recursive> Int
     sample    : • =Recursive> k(Int, Int)
     flip      : • =Recursive> k(Float, Bool)
     uniform   : • =Recursive> k(Int, Int)
-    condition : • =Recursive> k(Pair(Bool, a), a)
+    condition : • =Recursive> k(Bool a, a)
     report    : k(Int, b) =Recursive> d(b)
 
 # ---------------------------------------------------------------------
@@ -100,46 +103,56 @@ theory Prob(k(_, _), d(_)) in Doctrine =
 # ---------------------------------------------------------------------
 # The hom-object is a function into a WEIGHTED LIST: the Kleisli
 # category of the finite distribution monad.  `compose` is bind with
-# the weights multiplied, `first` is the strength, `embed` is the point
+# the weights multiplied, `under` is the strength, `embed` is the point
 # mass.  That is the entire model, and every law it obeys it obeys
 # because those three lines are what they are.
 
-data Weighted(b) = List(Box(b Float))
-data Kern(a, b)  = Fn⟨a =Recursive> Weighted(b)⟩
+## An OUTCOME is a whole stack, so it rides in a `Box` — the prelude's
+## anonymous product — and the weight beside it.  `Weighted(σ)`'s
+## argument is the bare stack; the box is how the list stores it, the
+## way `examples/frame.braid`'s column store boxes a row.
+data Weighted(b...) = List(Box(Box(b) Float))
+data Kern(a..., b...)  = Fn⟨a =Recursive> Weighted(b)⟩
 
 ## run a kernel at a point, down to the bare list of (outcome, weight)
-def atK   = (c x -> c ; unKern ; _ x ; ev ; unWeighted)
+def atK   = unKern ... ; ev ; unWeighted
 ## the point mass — `embed`'s whole content, and `dirac` is its name
-def dirac = (y -> (y 1.0 ; Box) ; single ; Weighted)
+def dirac = Box ; _ 1.0 ; Box ; single ; Weighted
 
-def eEmbed = (f -> [(x -> f ; _ x ; ev ; dirac)] ; Kern)
+def eEmbed = (f -> [f ... ; ev ; dirac] ; Kern)
 def scaleBy = (w e -> e ; unBox ; (y v -> y (w v ; fmul) ; Box))
 def eCompose =
     c e ->
-    [(x -> (c x ; atK)
-         ; [(b -> b ; unBox
-                    ; (y w -> (e y ; atK) ; [(e2 -> w e2 ; scaleBy)] ... ; map))] ... ; map
-         ; concat ; Weighted)] ; Kern
-def eFirst =
+    [c ... ; atK
+       ; [(b -> b ; unBox
+                  ; (y w -> (e (y ; unBox) ; atK)
+                          ; [(e2 -> w e2 ; scaleBy)] ... ; map))] ... ; map
+       ; concat ; Weighted] ; Kern
+## the STRENGTH, and it is this theory's own — see the note below the
+## model.  A wire rides UNDER the kernel's domain and is re-attached to
+## every outcome; no pairing appears, because a hom-object over stacks
+## has nothing to pair.
+def eUnder =
     c ->
-    [(p -> p ; unPair
-             ; (x r -> (c x ; atK)
-                     ; [(b -> b ; unBox ; (y w -> (y r ; Pair) w ; Box))] ... ; map
-                     ; Weighted))] ; Kern
+    [_ Box
+       ; (w r -> (c (r ; unBox) ; atK)
+               ; [(b -> b ; unBox
+                          ; (y v -> (w (y ; unBox) ; Box) v ; Box))] ... ; map
+               ; Weighted)] ; Kern
 
-def eFlip = [(p -> ((true p ; Box) (false (1.0 p ; fsub) ; Box) ; pack) ; Weighted)] ; Kern
+def eFlip = [(p -> (((true ; Box) p ; Box) ((false ; Box) (1.0 p ; fsub) ; Box) ; pack) ; Weighted)] ; Kern
 def eUniform =
-    [(n -> (n ; range) ; [(i -> i (1.0 (n ; toFloat) ; fdiv) ; Box)] ... ; map ; Weighted)] ; Kern
+    [(n -> (n ; range) ; [(i -> (i ; Box) (1.0 (n ; toFloat) ; fdiv) ; Box)] ... ; map ; Weighted)] ; Kern
 def eCondition =
-    [(p -> p ; unPair ; (b y -> b (y ; dirac) (nil ; Weighted) ; select))] ; Kern
+    [_ Box ; (b y -> b (y ; unBox ; dirac) (nil ; Weighted) ; select)] ; Kern
 def eReport = (c -> c ; unKern ; _ 0 ; ev)
 
 ## The doctrine's own evidence, and it is STOCHASTIC on purpose: the
-## seven arrow laws are then a real test of the model's bind, not of a
+## five category laws are then a real test of the model's bind, not of a
 ## deterministic special case.  The weights are dyadic, so every sum
 ## and product the laws take is an exact double.
 def eSample =
-    [(x -> (((x ; _ 1 ; +) 0.5 ; Box) ((x 2 ; *) 0.5 ; Box) ; pack) ; Weighted)] ; Kern
+    [(x -> (((x ; _ 1 ; + ; Box) 0.5 ; Box) ((x 2 ; * ; Box) 0.5 ; Box) ; pack) ; Weighted)] ; Kern
 
 ## the expected value of a weighted list of Ints, and the doctrine's
 ## `observe` built from it — two points, scaled and floored, because
@@ -147,7 +160,9 @@ def eSample =
 def eExpect =
     w ->
     w ; unWeighted
-      ; [(acc b -> b ; unBox ; (y p -> acc ((y ; toFloat) p ; fmul) ; fadd))] 0.0 ... ; fold
+      ; [(acc b -> b ; unBox
+                    ; (y p -> y ; unBox ; (n -> acc ((n ; toFloat) p ; fmul) ; fadd)))] 0.0 ...
+      ; fold
 def eObserve =
     c ->
     (((c 3 ; atK ; Weighted ; eExpect) (c 4 ; atK ; Weighted ; eExpect) ; fadd) 1000.0 ; fmul)
@@ -156,7 +171,7 @@ def eObserve =
 model Enum in Prob(Kern, Weighted) =
     compose   = eCompose
     embed     = eEmbed
-    first     = eFirst
+    under     = eUnder
     observe   = eObserve
     sample    = eSample
     flip      = eFlip
@@ -175,8 +190,8 @@ model Enum in Prob(Kern, Weighted) =
 # different test rather than a different program.
 
 resource Rng = Int
-data Draws(b)   = List(b)
-data Samp(a, b) = Fn⟨Rng a =Recursive> Rng b⟩
+data Draws(b...)      = List(Box(b))
+data Samp(a..., b...) = Fn⟨Rng a =Recursive> Rng b⟩
 
 ## A 48-bit linear congruential generator — the whole source of
 ## randomness in this file, four atoms wide.  An Int in Braid is exact
@@ -189,12 +204,14 @@ def drawRaw = (r -> r ; stepRng ; dup ; Rng _)          # Rng ⇒ Rng Int
 ## 2^16` is a good one.
 def unitOf  = (u -> ((u 65536 ; div) ; toFloat) 4294967296.0 ; fdiv)
 
-def runS    = (c r x -> c ; unSamp ; _ r x ; ev)
-def sEmbed  = (f -> [(r x -> r (f ; _ x ; ev))] ; Samp)
-def sCompose = (c e -> [(r x -> c r x ; runS ; (r2 y -> e r2 y ; runS))] ; Samp)
-def sFirst =
+def runS    = unSamp ... ; ev
+def sEmbed  = (f -> [_ f ... ; _ ev] ; Samp)
+def sCompose = (c e -> [c ... ; runS ; e ... ; runS] ; Samp)
+def sUnder =
     c ->
-    [(r p -> p ; unPair ; (x d -> c r x ; runS ; (r2 y -> r2 (y d ; Pair))))] ; Samp
+    [_ _ Box
+       ; (r w b -> c r (b ; unBox) ; runS ; _ Box
+                 ; (r2 y -> r2 w (y ; unBox)))] ; Samp
 
 ## a p-coin: one draw in [0, 1), true when it lands below p
 def sFlip =
@@ -203,14 +220,14 @@ def sUniform =
     [(r n -> r ; drawRaw ; (r2 u -> r2 (((u ; unitOf) (n ; toFloat) ; fmul) ; floor)))] ; Samp
 ## a sampler cannot drop a branch, so `condition` KEEPS: the model is a
 ## forward sampler and rejection is not part of it (§12).
-def sCondition = [(r p -> p ; unPair ; (b y -> r y))] ; Samp
+def sCondition = [_ _ Box ; (r b y -> r (y ; unBox))] ; Samp
 def sSample =
     [(r x -> r ; drawRaw
            ; (r2 u -> r2 (((u ; unitOf) 0.5 ; flt? ; verdict) (x ; _ 1 ; +) (x 2 ; *) ; select)))] ; Samp
 
 def theSeed  = 20260915
 def sOnce    = (c x -> c (theSeed ; Rng) x ; runS ; (r y -> y))
-def sObserve = (c -> (c 3 ; sOnce) (c 4 ; sOnce) ; +)
+def sObserve = (c -> c 3 ; sOnce ; (y -> c 4 ; sOnce ; (z -> y z ; +)))
 
 ## `report` draws 200 samples, threading ONE seed through all of them —
 ## which is what makes the tally below a tally and not 200 copies of
@@ -220,7 +237,7 @@ def drawsWanted = 200
 def sInto =
     c ->
     [(a i -> a ; unAcc
-               ; (s ys -> c (s ; Rng) 0 ; runS
+               ; (s ys -> c (s ; Rng) 0 ; runS ; _ Box
                         ; (r y -> (r ; unRng) (y ys ; cons) ; Acc)))]
 def sReport =
     c ->
@@ -230,7 +247,7 @@ def sReport =
 model Sampler in Prob(Samp, Draws) =
     compose   = sCompose
     embed     = sEmbed
-    first     = sFirst
+    under     = sUnder
     observe   = sObserve
     sample    = sSample
     flip      = sFlip
@@ -244,33 +261,36 @@ model Sampler in Prob(Samp, Draws) =
 # The possibilistic Markov category: a weight is a bit, so the
 # hom-object is a function into a plain list and `compose` is `flatMap`.
 # It is here because it is the model that says what a weight ADDS, by
-# taking them all away.  The seven doctrine laws run over it word for
+# taking them all away.  The five doctrine laws run over it word for
 # word, and the copy/two-flips distinction SURVIVES: `twoEqual`'s
 # support is {HH, TT} and `twoIndep`'s is {HH, HT, TH, TT}, which is
 # the possibilistic shadow of the same fact.  A model with no numbers
 # in it still tells copying from sampling — what the numbers add is
 # HOW MUCH, not WHETHER.
 
-data Reach(b)   = List(b)
-data Poss(a, b) = Fn⟨a =Recursive> Reach(b)⟩
+data Reach(b...)      = List(Box(b))
+data Poss(a..., b...) = Fn⟨a =Recursive> Reach(b)⟩
 
-def atP      = (c x -> c ; unPoss ; _ x ; ev ; unReach)
-def nEmbed   = (f -> [(x -> f ; _ x ; ev ; single ; Reach)] ; Poss)
-def nCompose = (c e -> [(x -> (c x ; atP) ; [(y -> e y ; atP)] ... ; map ; concat ; Reach)] ; Poss)
-def nFirst =
+def atP      = unPoss ... ; ev ; unReach
+def nEmbed   = (f -> [f ... ; ev ; Box ; single ; Reach] ; Poss)
+def nCompose = (c e -> [c ... ; atP ; [(y -> e (y ; unBox) ; atP)] ... ; map ; concat ; Reach] ; Poss)
+def nUnder =
     c ->
-    [(p -> p ; unPair ; (x r -> (c x ; atP) ; [(y -> y r ; Pair)] ... ; map ; Reach))] ; Poss
-def nFlip      = [(p -> true false ; pack ; Reach)] ; Poss
-def nUniform   = [(n -> n ; range ; Reach)] ; Poss
-def nCondition = [(p -> p ; unPair ; (b y -> b (y ; single) nil ; select ; Reach))] ; Poss
-def nSample    = [(x -> (x ; _ 1 ; +) (x 2 ; *) ; pack ; Reach)] ; Poss
-def nObserve   = (c -> ((c 3 ; atP) ; sum) ((c 4 ; atP) ; sum) ; +)
+    [_ Box
+       ; (w r -> (c (r ; unBox) ; atP)
+               ; [(y -> w (y ; unBox) ; Box)] ... ; map ; Reach)] ; Poss
+def nFlip      = [(p -> (true ; Box) (false ; Box) ; pack ; Reach)] ; Poss
+def nUniform   = [(n -> n ; range ; [Box] ... ; map ; Reach)] ; Poss
+def nCondition = [_ Box ; (b y -> b (y ; single) nil ; select ; Reach)] ; Poss
+def nSample    = [(x -> (x ; _ 1 ; + ; Box) (x 2 ; * ; Box) ; pack ; Reach)] ; Poss
+def nSum       = [unBox] ... ; map ; sum
+def nObserve   = (c -> c 3 ; atP ; nSum ; (y -> c 4 ; atP ; nSum ; (z -> y z ; +)))
 def nReport    = (c -> c ; unPoss ; _ 0 ; ev)
 
 model Nondet in Prob(Poss, Reach) =
     compose   = nCompose
     embed     = nEmbed
-    first     = nFirst
+    under     = nUnder
     observe   = nObserve
     sample    = nSample
     flip      = nFlip
@@ -281,37 +301,46 @@ model Nondet in Prob(Poss, Reach) =
 # ---------------------------------------------------------------------
 # 5. The words a Markov program needs, and where they come from
 # ---------------------------------------------------------------------
-# `first` acts on the DEEPER wire of a pairing.  Acting on the other one
-# is `swap ; first ; swap`, and the swap is an ordinary base program
-# embedded — which is the whole construction of the monoidal product
-# `f ⊗ g` out of a strength.
+# `under` is THIS THEORY'S OWN STRENGTH, and the note is worth the
+# space (2026-09-16).  The Doctrine has none any more: a base stage of
+# any width embeds as itself, because a hom-object `k(ρ, σ)` names a
+# whole stack on each side.  But a GENERATOR is not a base stage — an
+# entry slot like `flip` is a carrier at a FIXED width, `k(Float,
+# Bool)`, and nothing in the base can widen it.  A Markov category is
+# exactly a theory that has such generators, so `Prob` declares the
+# widening itself, as an ordinary slot of its own:
 #
-# IT IS WRITTEN ONCE, over the THEORY (2026-09-16).  A def whose `in`
+#     under : k(a, b) ⇒ k(c a, c b)
+#
+# One wire rides UNDER the kernel's domain.  There is no pairing in
+# that signature and there is nothing to unpack: over stacks the
+# strength is whiskering and whiskering is concatenation.  `c` is a
+# wire rather than a stack because a stack variable can only sit in
+# tail position — `c a` is spellable and `a c` is a splice — which is
+# the same rule every declaration in the language obeys.
+#
+# Acting on the DEEPER wire instead is `swap ; under ; swap`, and the
+# swap is an ordinary base program embedded — which is the whole
+# construction of the monoidal product `f ⊗ g` out of a strength.
+#
+# It is WRITTEN ONCE, over the THEORY (2026-09-16).  A def whose `in`
 # clause names `Prob` is a morphism of what `Prob` presents, in `Prob`'s
 # vocabulary; `with Enum` on such a def INSTANTIATES it — the slot names
 # become Enum's words and the `;` stays base composition, because a
-# morphism of B[Prob] composes like the base.  Until 2026-09-16 the
-# same header did both jobs and the expansion was transported a second
-# time, so these four words were three hand-copied pairs.
-
-def swapP = unPair ; swap ; Pair
-
-def second in Prob =
-    (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
-def secondE in Prob with Enum    = second
-def secondS in Prob with Sampler = second
-#   secondE : Kern(a, b) ⇒ Kern(Pair(c, a), Pair(c, b))
+# morphism of B[Prob] composes like the base.
+#
+# `second` is gone with the pairing: acting on the wire above ONE wire
+# riding below IS `under`, so it has no second spelling.
 
 ## two independent flips, as `flip ⊗ flip`: the strength twice, with a
 ## swap between.  This is the word the thesis turns on.
 def bothFlip in Prob =
-    (flip ; first)
-    _ ([swapP] ; embed) ; compose
-    _ (flip ; first) ; compose
-    _ ([swapP] ; embed) ; compose
+    ([swap] ; embed) (flip ; under) ; compose
+    _ ([swap] ; embed) ; compose
+    _ (flip ; under) ; compose
 def bothFlipE in Prob with Enum    = bothFlip
 def bothFlipS in Prob with Sampler = bothFlip
-#   bothFlipE : • ⇒ Kern(Pair(Float, Float), Pair(Bool, Bool)) — a word
+#   bothFlipE : • ⇒ Kern(Float Float, Bool Bool) — a word
 #   of the category, built out of the theory's own slots, and it
 #   composes inside a `with Enum` scope like any transported stage.
 
@@ -326,8 +355,8 @@ def twoBiases = (n -> 0.5 0.5)
 
 def twoEqualE with Enum = half ; flip ; dup
 def twoIndepE with Enum = twoBiases ; bothFlipE
-#   twoEqualE : Int =Enum Recursive> Pair(Bool, Bool)
-#   twoIndepE : Int =Enum Recursive> Pair(Bool, Bool) — the SAME type,
+#   twoEqualE : Int =Enum Recursive> Bool Bool
+#   twoIndepE : Int =Enum Recursive> Bool Bool — the SAME type,
 #   and `with Enum` is the only reason either of them is a kernel at all.
 
 def twoEqualS with Sampler = half ; flip ; dup
@@ -342,17 +371,17 @@ def twoIndepN with Nondet = twoBiases ; bothFlipN
 
 ## reading a distribution as a FRAME — outcome, weight — with the
 ## weights summed per outcome by the frame library's `groupBy`
-def showBits = (p -> p ; unPair ; (a b -> (a "H" "T" ; select) (b "H" "T" ; select) ; cat))
+def showBits = (a b -> (a "H" "T" ; select) (b "H" "T" ; select) ; cat)
 def tallyW =
     sh w ->
     w ; unWeighted
-      ; (es -> ((es ; [(b -> b ; unBox ; (y p -> sh ; _ y ; ev))] ... ; map) \
+      ; (es -> ((es ; [(b -> b ; unBox ; (y p -> sh ; _ (y ; unBox) ; ev))] ... ; map) \
                 (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map) ; groupBy) \
              ; [(g -> (g ; key) ((g ; part ; sumF) ; toStr) ; pack)] ... ; map)
 def tallyD =
     sh d ->
     d ; unDraws
-      ; (ys -> ((ys ; [(y -> sh ; _ y ; ev)] ... ; map) ys ; groupBy) \
+      ; (ys -> ((ys ; [(y -> sh ; _ (y ; unBox) ; ev)] ... ; map) ys ; groupBy) \
              ; [(g -> (g ; key) ((g ; part ; len) ; toStr) ; pack)] ... ; map)
 def distHead  = "outcome" "weight" ; pack
 def countHead = "outcome" "draws" ; pack
@@ -382,8 +411,8 @@ countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
 
 "" ; print
 "== and possibilistically: the SUPPORT, weights forgotten ==" ; print
-(twoEqualN ; nReport ; unReach) ; [showBits] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
-(twoIndepN ; nReport ; unReach) ; [showBits] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
+(twoEqualN ; nReport ; unReach) ; [(y -> y ; unBox ; showBits)] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
+(twoIndepN ; nReport ; unReach) ; [(y -> y ; unBox ; showBits)] ... ; map ; [(a b -> (a " " ; cat) b ; cat)] "" ... ; fold ; print
 
 # ---------------------------------------------------------------------
 # 7. MONTY HALL, under `Enum`, with `condition`
@@ -392,23 +421,22 @@ countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
 # opens a door that is neither.  When the car IS behind door 0 the host
 # has a free choice and flips for it; otherwise the door is forced.
 # That dependence is the whole problem, and writing it needs the coin
-# to land beside the car — which is `second (flip)`, the strength with
-# a swap around it.
+# to land beside the car — which is `flip ; under`, the strength put to
+# the one job it exists for.
 #
 # (Conditioning a UNIFORM host on "the host missed the car" is a
 # different problem — Monty *Fall* — and it answers 1/2.  The model has
 # to say what the host does; `condition` cannot repair a wrong one.)
 
-def coinSnd in Prob = (([half] ; embed) flip ; compose) ; second
+def coinSnd in Prob = (([half] ; embed) flip ; compose) ; under
 def coinSndE in Prob with Enum    = coinSnd
 def coinSndS in Prob with Sampler = coinSnd
-#   coinSndE : • ⇒ Kern(Pair(c, Int), Pair(c, Bool)) — flip a fair coin
+#   coinSndE : • ⇒ Kern(c Int, c Bool) — flip a fair coin
 #   ON TOP of whatever is riding below
 
 def three    = (n -> 3)
 def hostFrom =
-    p -> p ; unPair
-           ; (car c -> car ((car 0 ; equals) (c 1 2 ; select) (3 car ; -) ; select) ; Pair)
+    car c -> car ((car 0 ; equals) (c 1 2 ; select) (3 car ; -) ; select)
 
 def montyE with Enum =
     three
@@ -416,10 +444,10 @@ def montyE with Enum =
     dup
     coinSndE
     hostFrom
-#   montyE : Int =Enum Recursive> Pair(Int, Int) — the JOINT of (car, host)
+#   montyE : Int =Enum Recursive> Int Int — the JOINT of (car, host)
 
 def showCH =
-    p -> p ; unPair ; (car h -> (("car " (car ; toStr) ; cat) ", host " ; cat) (h ; toStr) ; cat)
+    car h -> (("car " (car ; toStr) ; cat) ", host " ; cat) (h ; toStr) ; cat
 
 "" ; print
 "== Monty Hall: the joint distribution of (car, host) ==" ; print
@@ -434,7 +462,7 @@ distHead ([showCH] (montyE ; eReport) ; tallyW) ; printFrame
 ## the evidence: the host opened door 1.  `condition` takes a Bool
 ## beside the value it is keeping, so the stage before it PAIRS the
 ## verdict with what survives.
-def keepHost1 = (p -> p ; unPair ; (car h -> (h 1 ; equals) car ; Pair))
+def keepHost1 = (car h -> (h 1 ; equals) car)
 
 def montyPostE with Enum =
     three
@@ -454,6 +482,7 @@ def renorm =
       ; (es -> (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map ; sumF) \
              ; (m -> es ; [(b -> b ; unBox ; (y p -> y (p m ; fdiv) ; Box))] ... ; map \
                         ; Weighted))
+## the outcome, unboxed — a `Weighted(σ)` stores each outcome in a Box
 def showCar = (n -> "car " (n ; toStr) ; cat)
 
 "" ; print
@@ -472,9 +501,9 @@ distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; printFrame
 
 def quarter  = (n -> 0.25)
 def biasOf2  = (r x -> r (r 0.875 0.125 ; select))   # Bool Bool ⇒ Bool Float
-def flipSnd in Prob = flip ; second
+def flipSnd in Prob = flip ; under
 def flipSndE in Prob with Enum = flipSnd
-def keepAlarm = (p -> p ; unPair ; (r a -> a r ; Pair))
+def keepAlarm = (r a -> a r)
 def showRain = (b -> b "rain" "dry" ; select)
 
 def sensorE with Enum =
@@ -483,10 +512,10 @@ def sensorE with Enum =
     dup
     biasOf2
     flipSndE
-#   sensorE : Int =Enum Recursive> Pair(Bool, Bool) — (rain?, alarm?)
+#   sensorE : Int =Enum Recursive> Bool Bool — (rain?, alarm?)
 
 def showRA =
-    p -> p ; unPair ; (r a -> ((r ; showRain) ", alarm " ; cat) (a "yes" "no" ; select) ; cat)
+    r a -> ((r ; showRain) ", alarm " ; cat) (a "yes" "no" ; select) ; cat
 
 def sensorPostE with Enum =
     quarter
@@ -521,7 +550,7 @@ distHead ([showRain] (sensorPostE ; eReport ; renorm) ; tallyW) ; printFrame
 
 def idS in Sampler = [_] ; embed
 def thenS in Sampler = compose
-def moveBy = (p -> p ; unPair ; (x b -> b (x ; _ 1 ; +) (x 1 ; -) ; select))
+def moveBy = (x b -> b (x ; _ 1 ; +) (x 1 ; -) ; select)
 
 def stepS with Sampler = dup ; coinSndS ; moveBy
 #   stepS : Int =Sampler Recursive> Int
@@ -623,9 +652,11 @@ def halveW  = (w -> w ; unWeighted ; [(e -> e ; unBox ; (y p -> y (p 0.5 ; fmul)
 def mixW    = (u v -> (u ; halveW) (v ; halveW) ; append ; Weighted)
 def meanW   =
     w ->
-    w ; unWeighted ; [(acc e -> e ; unBox ; (y p -> acc (y p ; fmul) ; fadd))] 0.0 ... ; fold
-def twoPts  = ((1.0 0.5 ; Box) (3.0 0.5 ; Box) ; pack) ; Weighted     # mean 2.0
-def onePt   = (4.0 1.0 ; Box) ; single ; Weighted                     # mean 4.0
+    w ; unWeighted
+      ; [(acc e -> e ; unBox ; (y p -> y ; unBox ; (v -> acc (v p ; fmul) ; fadd)))] 0.0 ...
+      ; fold
+def twoPts  = (((1.0 ; Box) 0.5 ; Box) ((3.0 ; Box) 0.5 ; Box) ; pack) ; Weighted   # mean 2.0
+def onePt   = ((4.0 ; Box) 1.0 ; Box) ; single ; Weighted                           # mean 4.0
 
 model Mixtures in Convex(Weighted(Float)) =
     mix     = mixW
@@ -696,25 +727,25 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 # work — forgetting the weights really is a homomorphism, it is the
 # support functor from the distribution monad to the nonempty powerset
 # — and it is refused for a reason worth writing down.  Every square
-# but one is fine; the `first` square is not:
+# but one is fine; the `under` square is not:
 #
-#     error: transformation Support: the square for slot 'first' does not
+#     error: transformation Support: the square for slot 'under' does not
 #     commute at the theory's samples — … The two carriers were compared
 #     with `eq?` directly, because the theory declares no exit whose
 #     input FITS this slot's result — an exit at `k(Int, Int)` does not
-#     reach the hom-object at a PAIRING, which is what `first` leaves.
+#     reach the hom-object at another pair of stacks.
 #
 # (That message named the wrong thing until 2026-09-15: it said the
 # theory declares NO exit, and this theory declares two.  A refusal
 # that misreports its own cause sends the reader to the wrong repair,
 # so it now says `no exit whose input FITS`.)
 #
-# A second exit at the pairing cannot help either, and this is the
+# A second exit at the wider stack cannot help either, and this is the
 # sharp end of it: the square THAT exit would itself need is fed by the
 # theory's first entry — `sample : • ⇒ k(Int, Int)`, the doctrine's —
-# whose object is `Int` and not a pair, so the exit's own square does
-# not even typecheck.  The carriers are therefore compared directly,
-# and they are closures.
+# whose object is one Int wire and not two, so the exit's own square
+# does not even typecheck.  The carriers are therefore compared
+# directly, and they are closures.
 #
 # The general statement, which is the pragmatics item this file buys:
 # a component must be generic in the hom-object's arguments, so it can
@@ -722,9 +753,9 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 # therefore decidable only when the normalizer proves it, which needs
 # the component to pass the witness through untouched.
 # `examples/transformations.braid`'s `Forget : Names ⇒ Funcs` is exactly
-# that case (drop a `Str` field) and proves all five.  A component that
-# TRANSFORMS the witness — which is what forgetting a weight is — is out
-# of reach at the pairing.
+# that case (drop a `Str` field).  A component that TRANSFORMS the
+# witness — which is what forgetting a weight is — is out of reach at
+# the wider stack.
 
 # ---------------------------------------------------------------------
 # 13. What is NOT built, plainly
@@ -734,7 +765,7 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 # carrier would be a density against a base measure, which is the
 # `Density` model this file does not ship — and not because it is
 # tedious: scoring a density needs the OUTCOME as an input, so its
-# `flip` would be `k(Pair(Float, Bool), Bool)` and not `k(Float, Bool)`.
+# `flip` would be `k(Float Bool, Bool)` and not `k(Float, Bool)`.
 # A slot has ONE type for every model, so a scoring semantics is a model
 # of a DIFFERENT theory, and saying that is more use than shipping a
 # third carrier that repeats `Sampler`'s threading with `Weight` in
@@ -759,8 +790,8 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 #
 # NO CHOICE SLOT.  A row program that branches into two different
 # KERNELS cannot be written inside a `with` scope: transporting a sum
-# needs ArrowChoice' `left`, and the Doctrine has `first` and not
-# `left`.  `hostFrom` and `biasOf2` sidestep it the way
+# needs ArrowChoice' `left`, and neither the Doctrine nor `Prob` has
+# one.  `hostFrom` and `biasOf2` sidestep it the way
 # `examples/frame.braid`'s `keep` does — the deciding is deterministic
 # and rides the wire, and the only randomness is a generator composed
 # unconditionally.  `coinSndE` flips even when the coin will be ignored,

@@ -22,6 +22,8 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   slot by slot, proved where a normalizer can and sampled otherwise.
 - Models of the Doctrine transport whole programs into another
   category: circuits, data frames, probability as a Markov category.
+  The Doctrine's hom-object ranges over whole STACKS, so a stage of any
+  width transports as itself — products stay flat.
 - `Code` as data, with reflection (`getCode`, `typeOfCode`, `declOf`)
   and user-written `Code ⇒ Code` functors.
 - 65 primitives; everything else is in the prelude, in Braid.
@@ -57,7 +59,7 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1148-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1153-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove

@@ -61,19 +61,30 @@ unLog >> print                                     # 100 — the log
 # The carrier is written UNFOLDED (`Fn⟨Log a =Log> Log b⟩`): a resource
 # folds onto the glyph for DISPLAY, and a written type says what the
 # stack actually holds. The same is true of `=Notes>` itself.
-data Logged(a, b) = Fn⟨Log a =Log> Log b⟩
+# The hom-object's two arguments are STACKS, so `Logged(ρ, σ)` is the
+# logged version of a program of ANY width — `Lifting` never declared a
+# strength and now does not need one.  Inside, the two stacks ride in a
+# `Box`, and THAT is where this file pays for the move: the wrapper
+# logs its input with `toStr`, and `toStr` is a word about ONE WIRE.
+# Braid has no renderer for a whole stack — `dup` copies a wire, `pack`
+# wants a homogeneous bundle — so a logger over stacks logs the BOX,
+# and a box renders as the one-alternative sum it is: `alt1(100)`
+# rather than `100`.  Writing that down is more use than pretending
+# otherwise; a `Show` for stacks is the thing that would fix it, and
+# nothing in stage 7a ships one.
+data Logged(a..., b...) = Fn⟨Log Box(a) =Log> Log Box(b)⟩
 
-theory Lifting(k(_, _)) in Doctrine =
+theory Lifting(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     runP    : k(a, b) Log a =Log> Log b
 
 # `embed` IS `logged`, one `Logged` wrapper later. The other two are the
 # plumbing the transport does for you: written once, here, per model.
-def logArr  = logged >> Logged
+def logArr  = (f -> [unBox >> f ... >> ev >> Box] >> logged >> Logged)
 def logThen = (f g -> [(l x -> f >> unLogged >> _ l >> _ _ x >> ev >> (m y -> g >> unLogged >> _ m >> _ _ y >> ev))] >> Logged)
-def logRun  = (f l x -> f >> unLogged >> _ l >> _ _ x >> ev)
-#   logArr : Fn⟨a ⇒ b⟩ ⇒ Logged(a, b)
+def logRun  = _ _ Box >> (f l x -> f >> unLogged >> _ l >> _ _ x >> ev) >> _ unBox
+#   logArr : Fn⟨ρ ⇒ σ⟩ ⇒ Logged(ρ, σ)
 
 model Notes in Lifting(Logged) =
     embed   = logArr
@@ -94,10 +105,12 @@ def piped with Notes = celsius >> triple
 # inside `with Notes`, and called under `in Notes`, which puts the
 # model's words in scope and transports nothing.
 #
-# `Lifting` does not take the doctrine's `first`, so every stage of a
-# `with Notes` block must be one wire in and one wire out — the refusal
-# says so and names the slot that would have carried it.
+# `Lifting` takes the doctrine's `compose` and `embed`, which since
+# 2026-09-16 is the whole interface — so a stage of ANY width goes
+# through, and this model never had to write a strength to get it.
+# There are two levels now, not three: compose alone composes carriers
+# by hand, and + embed transports.
 def report in Notes = piped >> _ ("" >> Log) >> _ _ 100 >> runP
 
 report >> _ print                                  # 636 — 212 tripled
-unLog >> print                                     # 100 212 — the log
+unLog >> print                                     # alt1(100) alt1(212) — the log

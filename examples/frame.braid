@@ -6,8 +6,10 @@
 # programs below.  What does the lifting is `with Frame`, and `Frame` is
 # a model of the same `Doctrine` that `examples/circuits.braid` models:
 # hom-object a FUNCTION BETWEEN COLUMNS, `embed` = `map`, `compose` =
-# composition, `first` = unzip / map / zip.  The strength IS "the other
-# columns ride past", which is what makes a two-wire row stage legal.
+# composition.  A row program of any width transports, because the
+# hom-object's two arguments are whole STACKS — "the other columns ride
+# past" is what the base's own `...` already means, and since
+# 2026-09-16 there is no strength slot saying it again.
 #
 # So the functor laws of `map` are not something this file promises.
 # They are the doctrine's seven arrow laws, and the audit runs them
@@ -34,73 +36,74 @@
 # it composes, quotes and reflects like every other word.
 
 # ---------------------------------------------------------------------
-# 1. The carrier, the pairing, and the model
+# 1. The carrier and the model
 # ---------------------------------------------------------------------
-# `Col(a, b)` is a function from the a-column to the b-column.  The
-# arrow inside is `=Recursive>` for one reason: `first` is written with
-# `zip` and `unzip`, and those are written with the knot (the prelude's
-# `zip` has been `=Recursive>` since it was written).  The walk is
-# structural and terminates, so the label is conservative rather than
-# wrong; a bounded `zip`, folded Church-style the way the prelude's
-# `fold` is, would drop it.  `examples/circuits.braid` carries the same
-# label for the same kind of reason.
+# The arrow inside the carrier is `=Recursive>` for one reason: it is
+# built from `map` over a `List`, and the prelude's list walkers are
+# written with the knot.  The walk is structural and terminates, so the
+# label is conservative rather than wrong; a bounded fold, Church-style
+# the way the prelude's `fold` is, would drop it.
+# `examples/circuits.braid` carries the same label for the same kind of
+# reason.
 
-data Col(a, b) = Fn⟨List(a) =Recursive> List(b)⟩
-data Pair(a, b) = a b
+## `Col(ρ, σ)` is a function from the ρ-columns to the σ-columns, and
+## ρ and σ are STACKS (2026-09-16): a row program takes a whole row and
+## leaves a whole row.  The ROW STORE inside is a `List(Box(ρ))` — one
+## list of boxed rows — and NOT a stack of lists, which is the honest
+## reason this type is written the way it is: a stack of lists is the
+## non-injective column store (three columns of ten and ten columns of
+## three are the same stack of Ints) and it must not enter the type.
+## The box is a representation choice; `Col`'s arguments are the bare
+## stacks, which is what the doctrine's `k(..., ...)` asks for.
+data Col(a..., b...) = Fn⟨List(Box(a)) =Recursive> List(Box(b))⟩
+
+## run a column function on a boxed frame — the carrier's own spelling
+def runColB = (c rows -> c ; unCol ; _ rows ; ev)
 
 ## run a column function on a frame — the base word, used outside every
-## `with Frame` scope
-def runCol = (c rows -> c ; unCol ; _ rows ; ev)
+## `with Frame` scope.  It boxes on the way in and unboxes on the way
+## out, so a one-column-in, one-column-out program (which is every one
+## below) reads exactly as it did.
+def runCol =
+    c rows ->
+    c ; unCol ; _ (rows ; [Box] ... ; map) ; ev ; [unBox] ... ; map
 
 ## embed: a row word becomes a column word.  This IS `map`, and saying
 ## so is the model's defining equation.
-def cembed = (f -> [(rows -> f rows ; map)] ; Col)
+def cembed = (f -> [(rows -> rows ; [(e -> e ; unBox ; f ... ; ev ; Box)] ... ; map)] ; Col)
 
 ## compose: run one column function, then the next
-def ccompose = (f g -> [(rows -> f rows ; runCol ; (mid -> g mid ; runCol))] ; Col)
-
-## the strength: THE OTHER COLUMNS RIDE PAST.  Unzip the pairing into
-## two columns, run f on the first, zip the answer back against the
-## second.  Nothing else in this file needs to know that a wide row
-## stage is possible; `first` is why it is.
-def cfirst =
-    f ->
-    [(rows ->
-        (rows ; [(p -> p ; unPair ; Box)] ... ; map ; unzip) \
-      ; (as cs -> ((f as ; runCol) cs ; zip) ; [(b -> b ; unBox ; Pair)] ... ; map))] ; Col
+def ccompose = (f g -> [(rows -> f rows ; runColB ; (mid -> g mid ; runColB))] ; Col)
 
 ## the audit's evidence: a fixed three-row frame, and a column function
 ## observed by summing what it produces there
 def sample3   = 1 (2 (3 nil ; cons) ; cons) ; cons
 def cobserve  = (c -> (c sample3 ; runCol) ; sum)
 
-theory Columns(k(_, _)) in Doctrine =
+theory Columns(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     compose : k(a, b) k(b, c) =Recursive> k(a, c)
-    first   : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
     observe : k(Int, Int) =Recursive> Int
     sample  : • =Recursive> k(Int, Int)
 
 model Frame in Columns(Col) =
     embed   = cembed
     compose = ccompose
-    first   = cfirst
     observe = cobserve
     sample  = [dup ; +] ; cembed
 
-# All FIVE doctrine slots are declared, so all SEVEN of its laws run —
-# leftId, rightId, assoc, embedFunctor, firstFst, firstEmbed,
-# firstCompose — and they are exactly the functor laws of `map` read at
-# the hom-object.  They run before this file prints anything, and a
+# All FOUR doctrine slots are declared, so all FIVE of its laws run —
+# leftId, rightId, assoc, embedFunctor, embedWide — and they are
+# exactly the functor laws of `map` read at the hom-object.  They run before this file prints anything, and a
 # model whose `compose` is wrong stops the file with
 # `law 'leftId' fails for model Frame`.
 
 # ---------------------------------------------------------------------
 # 2. Transport, checked on Ints before a single trade is loaded
 # ---------------------------------------------------------------------
-# A one-wire stage embeds on its own; a wider one is packed with `Pair`
-# and whiskered by `first`.  `sq` is the two-wire case the strength
-# exists for.
+# Every stage embeds on its own, at the width it is written: `embed
+# [dup]` is `Col(Int, Int Int)`.  `sq` is the two-wire case that used
+# to need a packing and a strength, and now needs neither.
 
 def sq with Frame = dup ; *
 def poly with Frame = dup ; _ dup ; _ _ (_ 1 ; +) ; _ * ; +
@@ -244,7 +247,7 @@ table Trades = "examples/data/trades.csv"
 # ---------------------------------------------------------------------
 
 ## THE ROW PROGRAM.  `px qty` is a two-wire stage — two column names
-## side by side — and the strength is what carries it.  No `List`, no
+## side by side — and it embeds as itself, at two wires.  No `List`, no
 ## index, no loop, and nothing here knows there is more than one row.
 def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 #   notional : Trades =Frame Recursive> Float

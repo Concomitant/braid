@@ -26,15 +26,15 @@ def emitTwice in Sink = emit ; emit
 
 ## a TRANSPORTING MODEL travels like any other declaration: the model,
 ## its shape, the word of its own name and the K-word table all cross
-data Arr(a, b) = Fn⟨a ⇒ b⟩
+data Arr(a..., b...) = Fn⟨a ⇒ b⟩
 
-theory Arrow(k(_, _)) in Doctrine =
+theory Arrow(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     runP    : k(a, b) a ⇒ b
 
-def thenA = (f g -> [(x -> f ; unArr ; _ x ; ev ; (y -> g ; unArr ; _ y ; ev))] ; Arr)
-def runA  = (f x -> f ; unArr ; _ x ; ev)
+def runA  = unArr ... ; ev
+def thenA = (f g -> [f ... ; runA ; g ... ; runA] ; Arr)
 
 model Funcs in Arrow(Arr) =
     embed   = Arr

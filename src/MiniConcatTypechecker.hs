@@ -18,7 +18,7 @@ import Control.Monad.IO.Class (liftIO)
 import Control.Exception (try, IOException, evaluate)
 import Control.Monad (foldM)
 import Data.Char (isAlpha, isAlphaNum, isDigit, isLower, isSpace, isUpper,
-                  toLower, toUpper)
+                  toLower)
 import Data.Bifunctor (first)
 import Numeric (showFFloat)
 import System.Directory (doesFileExist, canonicalizePath)
@@ -2619,7 +2619,7 @@ parseDelimited = parseProgramToks
 -- ALTERNATIVES (σ).  Every σ used to be inferred and unwritable; a
 -- `---` parameter is what lets a declaration say "at least these
 -- alternatives, maybe more".
-data TyParam = PWire TVar | PStack SVar | PWidth NVar | PCon String Int
+data TyParam = PWire TVar | PStack SVar | PWidth NVar | PCon String [Bool]
              | PRow RVar
   deriving (Eq, Show)
 
@@ -2635,7 +2635,7 @@ pKind :: TyParam -> String
 pKind (PWire _)    = "a wire"
 pKind (PStack _)   = "a stack (`...`)"
 pKind (PWidth _)   = "a width"
-pKind (PCon _ k)   = "a type constructor of arity " ++ show k
+pKind (PCon _ ks)  = "a type constructor of arity " ++ show (length ks)
 pKind (PRow _)     = "a row (`---`)"
 
 isStackParam :: TyParam -> Bool
@@ -2806,7 +2806,7 @@ data InstArg = IAStack SType | IACon String
 -- functor scope does, and the carrier `Circuit(a, b)` is an ordinary
 -- data type the display folds against the label.
 --
--- Nothing here is a name convention.  `arrP`/`thenP`/`firstP` are what
+-- Nothing here is a name convention.  `arrC`/`compC` are what
 -- `examples/circuits.braid` happens to call its slots; what the
 -- elaborator reads is the DECLARED arrow of each slot, which is a
 -- written type (invariant five).
@@ -2815,9 +2815,7 @@ data Transport = Transport
   , tpTheory   :: String          -- the theory it models
   , tpCarrier  :: String          -- the hom-object's constructor
   , tpCompose  :: Maybe String    -- k(a, b) k(b, c) ⇒ k(a, c)
-  , tpEmbed    :: Maybe String    -- Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-  , tpStrength :: Maybe (String, String)
-                                  -- k(a, b) ⇒ k(P(a, c), P(b, c)), and P
+  , tpEmbed    :: Maybe String    -- Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)
   , tpExits    :: [String]        -- slots taking the carrier, returning base
   , tpEnters   :: [String]        -- slots building a carrier out of base alone
   } deriving (Eq, Show)
@@ -3162,12 +3160,15 @@ parseTheory aliases dataSigs header body = do
         ++ "takes at most `in <Theory>` (this theory's slots that the "
         ++ "named one also declares are ITS slots, at its shape, and its "
         ++ "laws are this theory's): " ++ header
-    -- A bare name is a WIRE, `...` a STACK, and `k(_, _)` a type
-    -- CONSTRUCTOR — the arity written as underscores, because the two
-    -- bare readings are already taken and a kind that is invisible is a
-    -- kind that is guessed.
+    -- A bare name is a WIRE, `...` a STACK, and `k(..., ...)` a type
+    -- CONSTRUCTOR — the arity written as one `...` per argument, because
+    -- the two bare readings are already taken and a kind that is
+    -- invisible is a kind that is guessed.  Every argument of a
+    -- constructor parameter is a STACK (2026-09-16): a hom-object
+    -- `k(ρ, σ)` names a whole side of a diagram, not one wire, which is
+    -- what deleted the pairing from the Doctrine.
     theoryParams (TokIdent p : TokLParen : r) = do
-      (ar, r1) <- conArity 0 r
+      (ar, r1) <- conArity [] r
       case r1 of
         (TokComma : r2)   -> first' (PCon p ar :) <$> theoryParams r2
         (TokRParen : r2)  -> Right ([PCon p ar], r2)
@@ -3183,11 +3184,18 @@ parseTheory aliases dataSigs header body = do
 
     first' f (xs, r) = (f xs, r)
 
-    -- `_`, `_, _`, … : the arity of a constructor parameter
-    conArity n (TokIdent "_" : TokComma : r)  = conArity (n + 1) r
-    conArity n (TokIdent "_" : TokRParen : r) = Right (n + 1 :: Int, r)
+    -- `_` and `...`, one per argument: the KINDS of a constructor
+    -- parameter's arguments.  `_` is a wire, `...` a stack — the same
+    -- two readings a declaration's own parameter list has — so a
+    -- hom-object over stacks is `k(..., ...)` and a parameterized exit
+    -- over one wire is still `d(_)` (2026-09-16).
+    conArity ks (TokEllipsis : TokComma : r)  = conArity (ks ++ [True]) r
+    conArity ks (TokEllipsis : TokRParen : r) = Right (ks ++ [True], r)
+    conArity ks (TokIdent "_" : TokComma : r)  = conArity (ks ++ [False]) r
+    conArity ks (TokIdent "_" : TokRParen : r) = Right (ks ++ [False], r)
     conArity _ _ = Left ("A constructor parameter's kind is written with "
-                      ++ "underscores, one per argument: k(_, _)")
+                      ++ "one mark per argument — `_` for a wire, `...` "
+                      ++ "for a stack: k(..., ...), d(_)")
 
     -- `law nm = program` | `slot : Σ ⇒ Θ`
     parseEntry params l =
@@ -3229,13 +3237,49 @@ parseTheory aliases dataSigs header body = do
             , n `notElem` acc = fresh (acc ++ [n]) rest
           fresh acc (_ : rest) = fresh acc rest
           fresh acc []         = acc
-          wires = [ PWire (TV n) | n <- fresh [] toks ]
+          -- A slot-local name used as an ARGUMENT OF A CONSTRUCTOR
+          -- PARAMETER is a STACK, because every such argument is one
+          -- (2026-09-16): `compose : k(a, b) k(b, c) ⇒ k(a, c)` names
+          -- three stacks, and `embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` names the
+          -- same two on both sides of the arrow.  The kind is declared
+          -- once, in the theory head, and read off here — nothing is
+          -- annotated twice.
+          -- ...and it is the LAST element of that argument that is the
+          -- stack: `under : k(a, b) => k(c a, c b)` names a WIRE `c`
+          -- riding under a STACK `a`, because a stack variable can only
+          -- sit in tail position (a splice is unspellable).
+          cons  = [ (pName q, ks) | q@(PCon _ ks) <- params ]
+          inCon = nub (scan toks)
+          scan (TokIdent n : TokLParen : rest)
+            | Just ks <- lookup n cons
+            , (grps, rest') <- argGroups rest =
+                concat (zipWith stackArgNames (ks ++ repeat False) grps)
+                  ++ concatMap scan grps ++ scan rest'
+          scan (_ : rest) = scan rest
+          scan []         = []
+          stackArgNames isStk grp =
+            [ n | isStk, (TokIdent n : _) <- [reverse grp]
+                , not (null n), isLower (head n) ]
+          -- the top-level comma-separated groups of an argument list,
+          -- and what follows its closing paren
+          argGroups = go (0 :: Int) [] []
+            where
+              go _ grp acc []                 = (reverse (reverse grp : acc), [])
+              go 0 grp acc (TokRParen : r)    = (reverse (reverse grp : acc), r)
+              go 0 grp acc (TokComma : r)     = go 0 [] (reverse grp : acc) r
+              go d grp acc (t : r)
+                | t == TokLParen || t == TokLAngle = go (d + 1) (t : grp) acc r
+                | t == TokRParen || t == TokRAngle = go (d - 1) (t : grp) acc r
+                | otherwise                        = go d (t : grp) acc r
+          names = fresh [] toks
+          wires = [ PWire (TV n) | n <- names, n `notElem` inCon ]
+          stacks = [ PStack (SV n) | n <- names, n `elem` inCon ]
           -- one slot-local stack for the whole slot, named so that no
           -- source identifier can shadow it (`…` lexes as `...`)
           stk = [ PStack (SV "…")
                 | TokEllipsis `elem` toks
                 , not (any isStackParam params) ]
-      pure (wires ++ stk)
+      pure (wires ++ stacks ++ stk)
 
 -- `model Name : Theory(args)` + indented `slot = program`
 -- Split a type-argument list on commas that are not nested inside
@@ -3393,17 +3437,22 @@ parseInstance aliases dataSigs theories header body = do
                     ++ " declares '" ++ pName q ++ "' as " ++ pKind q
                     ++ ", so its argument names a declared data type; '"
                     ++ c ++ "' is not one" ++ conHint c
-          if length ps /= ar
+          if length ps /= length ar
             then Left $ "model " ++ nm ++ ": theory " ++ t
                      ++ " declares '" ++ pName q ++ "' with arity "
-                     ++ show ar ++ ", but " ++ c ++ " takes "
+                     ++ show (length ar) ++ ", but " ++ c ++ " takes "
                      ++ show (length ps) ++ " argument(s)"
-            else if not (all isWireParam ps)
-              then Left $ "model " ++ nm ++ ": " ++ c
+            else case [ (k, q') | (k, q') <- zip ar ps
+                      , k /= isStackParam q' ] of
+              ((k, _) : _) -> Left $ "model " ++ nm ++ ": " ++ c
                        ++ " cannot fill the constructor parameter '"
-                       ++ pName q ++ "' — every parameter of "
-                       ++ "a constructor argument must be a wire"
-              else Right (IACon c)
+                       ++ pName q ++ "' — theory " ++ t ++ " declares it "
+                       ++ "at " ++ pName q ++ "("
+                       ++ intercalate ", " [ if b then "..." else "_" | b <- ar ]
+                       ++ "), so " ++ c ++ "'s parameters must be declared "
+                       ++ (if k then "`...` (a stack) where that says `...`"
+                                else "bare (a wire) where that says `_`")
+              [] -> Right (IACon c)
         _ -> Left $ "model " ++ nm ++ ": theory " ++ t ++ " declares '"
                  ++ pName q ++ "' as " ++ pKind q ++ ", so its argument "
                  ++ "must be a bare constructor name, not '"
@@ -3736,10 +3785,18 @@ parseTypeLine aliases dataSigs line =
           | kw `elem` declKws, validName name ->
               (,,) kw name <$> paramList rest
         _ -> Left $ "Malformed type declaration: " ++ line
-    -- a bare name is ONE WIRE; `...` is a whole stack and may only be
-    -- the last parameter (one stack parameter at most).  That placement
-    -- rule is what keeps a stack variable in tail position, so no
-    -- declaration can spell a splice.
+    -- a bare name is ONE WIRE; `...` is a whole stack.  An ANONYMOUS
+    -- `...` may only be the last parameter (`data Box(...)`), because
+    -- the body spells it `...` and one spelling can name one thing.
+    -- A NAMED stack parameter — `data Circuit(a..., b...)` — may sit
+    -- anywhere and there may be several (2026-09-16): the body names
+    -- each one, and the placement rule that keeps a stack variable in
+    -- tail position is enforced where it belongs, in the BODY, by
+    -- `goStack`'s "must be the last thing in its stack".  That is what
+    -- lets a hom-object range over stacks.
+    paramList (TokIdent p : TokEllipsis : TokComma : rest) =
+      (PStack (SV p) :) <$> paramList rest
+    paramList [TokIdent p, TokEllipsis, TokRParen] = Right [PStack (SV p)]
     paramList (TokIdent p : TokComma : rest) = (PWire (TV p) :) <$> paramList rest
     paramList [TokIdent p, TokRParen]        = Right [PWire (TV p)]
     paramList [TokEllipsis, TokRParen]       = Right [PStack (SV "s")]
@@ -3828,18 +3885,23 @@ parseTyElem aliases dataSigs params toks = case toks of
   -- is ever forward-declared, so no constructor variable reaches
   -- inference.
   (TokIdent name : TokLParen : rest)
-    | Just (PCon _ ar) <- lookupParam name params -> do
-        (args, rest') <- goArgs (replicate ar (PWire (TV "_"))) rest
-        if length args /= ar
+    | Just (PCon _ ks) <- lookupParam name params -> do
+        -- each argument is parsed at its DECLARED kind: `_` takes one
+        -- wire, `...` takes a whole stack (2026-09-16 — which is what
+        -- lets a hom-object name a side of a diagram)
+        (args, rest') <- goArgs [ if k then PStack (SV "_") else PWire (TV "_")
+                                | k <- ks ] rest
+        if length args /= length ks
           then Left $ "Type constructor parameter '" ++ name
-                   ++ "' takes " ++ show ar ++ " argument(s), but was "
+                   ++ "' takes " ++ show (length ks) ++ " argument(s), but was "
                    ++ "given " ++ show (length args)
           else do
             sts <- mapM (stackArg name) args
-            case [ a | a <- sts, closedArity a /= 1 || openTailedS a ] of
+            case [ a | (False, a) <- zip ks sts
+                     , closedArity a /= 1 || openTailedS a ] of
               (a : _) -> Left $ "Type constructor parameter '" ++ name
-                             ++ "': every argument is one wire, but was "
-                             ++ "given '" ++ show a ++ "'"
+                             ++ "': an argument declared `_` is one wire, "
+                             ++ "but was given '" ++ show a ++ "'"
               [] -> pure (TData name sts, rest')
   (TokIdent name : TokLParen : rest)
     | Just ps <- lookup name dataSigs -> do
@@ -3874,11 +3936,11 @@ parseTyElem aliases dataSigs params toks = case toks of
         Left $ "Type parameter " ++ name
              ++ " is a row (`---`): write it as the last alternative of a "
              ++ "sum — (A | ---)"
-    | Just (PCon _ ar) <- lookupParam name params ->
+    | Just (PCon _ ks) <- lookupParam name params ->
         Left $ "Type parameter " ++ name ++ " is a type constructor of "
-             ++ "arity " ++ show ar ++ ": it is not a wire, write it "
+             ++ "arity " ++ show (length ks) ++ ": it is not a wire, write it "
              ++ "applied — " ++ name ++ "("
-             ++ intercalate ", " (replicate ar "_") ++ ")"
+             ++ intercalate ", " [ if k then "..." else "_" | k <- ks ] ++ ")"
     | Just [] <- lookup name dataSigs -> pure (TData name [], rest)
     | Just _ <- lookup name dataSigs ->
         Left $ "Type " ++ name ++ " expects arguments"
@@ -3992,9 +4054,12 @@ parseTyElem aliases dataSigs params toks = case toks of
       Left $ "Type " ++ n ++ ": a width argument (" ++ show e
           ++ ") is not allowed here — width parameters are supported on "
           ++ "`type` aliases only"
+    -- the ANONYMOUS `...` in a body names the declaration's stack
+    -- parameter, and only when there is exactly one to name: with
+    -- several, each is named in the head and spelled by its name
     stackParam ps = case [ q | q@(PStack _) <- ps ] of
-                      (q : _) -> Just q
-                      []      -> Nothing
+                      [q] -> Just q
+                      _   -> Nothing
     -- constructor/alias arguments, parsed against the DECLARED kinds:
     -- a width position takes a number (or a width parameter in scope),
     -- everything else takes a stack.
@@ -5321,15 +5386,15 @@ runFunctor ctx (fname, word) body = do
 -- code it emits.  Which slot is which is read off the theory's declared
 -- arrows (`transportOf`), never off a slot's name.
 --
--- WIDTH.  A hom-object `k(a, b)` names one wire on each side, so a
--- transported spine is one carrier wire whose object is the base stack
--- PACKED with the pairing the strength names — `firstP : k(a, b) =>
--- k(P(a, c), P(b, c))` says that P is how this category pairs.  A stage
--- of k wires in and j out is embedded as `unP ... ; stage ; P ...` and
--- then whiskered by the strength once per wire riding above it, which
--- is `_`-padding with `firstP` in place of `_`.  The widths come from
--- the stage's own arrow in the prefix scope: an ARITY, the same
--- mechanical read of a written signature that `checkKWordShape` makes.
+-- WIDTH — and there is nothing to do about it (2026-09-16).  A
+-- hom-object `k(ρ, σ)` names a whole STACK on each side, so a stage of
+-- any width embeds as itself: `embed [stage]`, whatever `stage` covers.
+-- The base already makes every stage cover the stack it is handed —
+-- that is what `_` and `...` are for — so the base's own widths ride
+-- through the functor untouched.  Until this date the carrier was ONE
+-- WIRE, which is why there was an arity to read, a pairing to pack
+-- with, and a strength to whisker by: three warts with one cause.  They
+-- are gone with the cause.
 --
 -- The one thing it must know without any of that is which atoms are
 -- ALREADY carriers: the defs declared under `with M` or `in M`, held
@@ -5365,11 +5430,9 @@ runTransport ctx tp body = do
   case stages of
     []       -> Left $ "`with " ++ nm ++ "`: the scope is empty, and a "
                     ++ "transported scope must build a " ++ tpCarrier tp
-    (s : ss) -> do
-      w0 <- entryWidth s
-      (out, _) <- foldM (step embW thenW) ([], w0) (zip (True : repeat False)
-                                                        (s : ss))
-      pure (chainTerm out)
+    (s : ss) ->
+      pure (chainTerm (concat (zipWith (step embW thenW)
+                                       (True : repeat False) (s : ss))))
   where
     nm     = tpName tp
     stages = filter (not . null) (spineOf body)
@@ -5381,87 +5444,20 @@ runTransport ctx tp body = do
     kword [Prim n] = lookup n (ecKWords ctx) == Just nm || n `elem` enters
     kword _        = False
 
-    -- the arity of a stage, from its arrow in the prefix scope: the
-    -- closed wires it takes, whether a tail rides above them, and the
-    -- closed wires it leaves.  `Nothing` when the stage has no arrow
-    -- here (a forward reference, a stage that will not type) — the
-    -- caller then treats it as the one-wire stage 5c always assumed and
-    -- lets inference report whatever is really wrong.
-    arityOfStage s = case inferTermIn (ecEnv ctx) (chainTerm [s]) of
-      Right (Arrow i o _) | Just (k, open) <- stackPrefix i
-                          , Just (j, _)    <- stackPrefix o -> Just (k, open, j)
-      _ -> Nothing
-
-    entryWidth s
-      | kword s = Right 1
-      | otherwise = case arityOfStage s of
-          Just (0, _, _) -> Left (zeroIn s)
-          Just (k, _, _) -> Right k
-          Nothing        -> Right 1
-
     -- the stages one source stage becomes, given nothing on the stack:
-    -- they build its carrier.  `follow` then puts the running carrier
-    -- underneath with `_` and composes.
-    carrierOf embW w s
-      | kword s   = Right ([s], 1)
-      | otherwise = case arityOfStage s of
-          Nothing -> Right ([[Quote (chainTerm [s])], [Prim embW]], 1)
-          Just (k, open, j)
-            | k == 0 -> Left (zeroIn s)
-            | j == 0 -> Left (zeroOut s)
-            | not open, k /= w -> Left (widthClash s k w)
-            | k > w -> Left (widthClash s k w)
-            | k == 1, j == 1, w == 1 ->
-                Right ([[Quote (chainTerm [s])], [Prim embW]], 1)
-            | otherwise -> do
-                (p, strW) <- pairing s
-                let unP  = [ Prim ("un" ++ p) : replicate i (Prim "_")
-                           | i <- [0 .. k - 2] ]
-                    pk   = [ Prim p : replicate i (Prim "_")
-                           | i <- reverse [0 .. j - 2] ]
-                    prog = chainTerm (unP ++ [s] ++ pk)
-                pure ( [[Quote prog], [Prim embW]]
-                         ++ replicate (w - k) [Prim (slotDefName nm strW)]
-                     , j + (w - k) )
+    -- they build its carrier.  A carrier already on the stack is put
+    -- underneath with `_` and composed.
+    carrierOf embW s
+      | kword s   = [s]
+      | otherwise = [[Quote (chainTerm [s])], [Prim embW]]
 
-    step embW thenW (out, w) (first, s) = do
-      (cs, w') <- carrierOf embW w s
-      pure ( out ++ (if first then cs
-                              else map (Prim "_" :) cs ++ [[Prim thenW]])
-           , w' )
-
-    pairing s = case tpStrength tp of
-      Just (slot, p) -> Right (p, slot)
-      Nothing -> Left $
-        "`with " ++ nm ++ "`: " ++ renderTerm (stageT' s) ++ " is not one wire "
-          ++ "in and one wire out, and theory " ++ tpTheory tp ++ "'s hom-object "
-          ++ tpCarrier tp ++ "(a, b) names ONE object on each side.  A wider "
-          ++ "stage transports through `" ++ doctrineFirst ++ "` — "
-          ++ doctrineName ++ "'s strength, `k(a, b) \8658 k(p(a, c), p(b, c))`, "
-          ++ "whose pairing the elaborator packs with — and theory "
-          ++ tpTheory tp ++ " does not declare it.  Declare it, or keep every "
-          ++ "stage of the scope one wire wide."
-
-    zeroIn s = "`with " ++ nm ++ "`: " ++ renderTerm (stageT' s) ++ " takes no "
-            ++ "wire, and " ++ tpCarrier tp ++ "(a, b) has an object on each "
-            ++ "side — there is no `" ++ tpCarrier tp ++ "(\8226, b)`.  Fold it "
-            ++ "into the stage that consumes it (`_ 1 ; +`)."
-    zeroOut s = "`with " ++ nm ++ "`: " ++ renderTerm (stageT' s) ++ " leaves no "
-             ++ "wire, and " ++ tpCarrier tp ++ "(a, b) has an object on each "
-             ++ "side.  Leave the wire, or call an exit outside the scope."
-    widthClash s k w =
-      "`with " ++ nm ++ "`: " ++ renderTerm (stageT' s) ++ " takes " ++ show k
-        ++ plural k " wire" ++ ", but the scope is running " ++ show w
-        ++ plural w " wire" ++ " wide.  A stage covers the stack it is "
-        ++ "handed, exactly as in the base; write `...` to pass the rest "
-        ++ "along (which is what the strength whiskers) or `_` to step over "
-        ++ "a wire."
-    plural n u = u ++ (if n == 1 then "" else "s")
-    stageT' xs = chainTerm [xs]
+    step embW thenW first s =
+      let cs = carrierOf embW s
+      in if first then cs else map (Prim "_" :) cs ++ [[Prim thenW]]
 
     noEmbed = "`with " ++ nm ++ "`: theory " ++ tpTheory tp ++ " takes "
            ++ doctrineName ++ "'s `" ++ doctrineCompose ++ "` and not its `"
-           ++ doctrineEmbed ++ "` (`Fn\10216a \8658 b\10217 \8658 k(a, b)`): `with "
+           ++ doctrineEmbed ++ "` (`Fn\10216\961 \8658 \963\10217 \8658 k(\961, \963)`): `with "
            ++ nm ++ "` cannot transport a base stage; `in " ++ nm ++ "` and "
            ++ "compose by hand."
 
@@ -5915,9 +5911,9 @@ checkLawType env n = do
 -- slot bodies are the user's programs with the model's own slots in
 -- scope (so a law may call `op` and mean this model's `op`), which
 -- is the same renaming `with` performs — resolution once, not per call.
-instanceDefs :: [Theory] -> [Transport] -> Instance
+instanceDefs :: [Theory] -> Instance
              -> Either String [(String, DefHdr, String, Maybe String)]
-instanceDefs theories trans inst = do
+instanceDefs theories inst = do
   th <- theoryOf theories (inTheory inst)
   ext <- case thIn th of
            Just d  -> Just <$> theoryOf theories d
@@ -5950,13 +5946,6 @@ instanceDefs theories trans inst = do
       slots  = [ ( slotDefName (inName inst) n, hdr', body
                  , Just ("slot '" ++ n ++ "' of " ++ inName inst) )
                | (n, body) <- inBindings inst ]
-      -- a constructor parameter's WORDS: `p(_, _)` is a type in a
-      -- signature and the constructor `P` (with `unP`) in a law, so a
-      -- doctrine's laws can name the pairing its models chose
-      cons   = [ ( slotDefName (inName inst) w, rename, img
-                 , Just ("the constructor " ++ img ++ ", which " ++ inName inst
-                         ++ " gave " ++ w) )
-               | (w, img) <- instanceConWords trans inst ]
       -- An INHERITED law runs when the model can STATE it: every slot of
       -- the extended theory that the law names is one this theory
       -- declares.  A theory that takes the doctrine's composition and
@@ -5972,7 +5961,7 @@ instanceDefs theories trans inst = do
                  , Just ("law '" ++ nm ++ "' of " ++ inName inst
                          ++ " — runs at module start") )
                | (nm, body) <- thLaws th ++ inherited ]
-  pure (cons ++ slots ++ laws)
+  pure (slots ++ laws)
 
 -- A NATURAL TRANSFORMATION BETWEEN MODELS:
 -- `transformation Len : ListMonoid \8658 IntSum = len`.
@@ -6388,7 +6377,7 @@ componentArrows theories insts mo = do
     -- hom-object (2026-09-15).
     one (PCon _ ar) (IACon ca) (IACon cb) =
       let vs = [ SCons (TVarTy (TV v)) SEnd
-               | v <- take ar (map (: []) "\945\946\947\948\949\950") ]
+               | v <- take (length ar) (map (: []) "\945\946\947\948\949\950") ]
       in Right (arrPure (SCons (TData ca vs) SEnd)
                         (SCons (TData cb vs) SEnd))
     one (PWire _) (IAStack sa) (IAStack sb) = Right (arrPure sa sb)
@@ -6499,25 +6488,6 @@ lawWords :: String -> [String]
 lawWords src = case tokenize src of
   Right toks -> nub [ n | TokIdent n <- toks, not (null n), head n /= '"' ]
   Left _     -> []
-
--- A constructor parameter names a TYPE in a signature and a
--- CONSTRUCTOR in a law: the doctrine's `p(_, _)` gives the words `P`
--- and `unP`, which resolve to whatever pairing this model chose.  They
--- are ordinary generated defs, so `with M` renames them exactly as it
--- renames a slot.
-instanceConWords :: [Transport] -> Instance -> [(String, String)]
-instanceConWords trans inst =
-  case [ tp | tp <- trans, tpName tp == inName inst ] of
-    (tp : _) -> maybe [] (conPair doctrineP . snd) (tpStrength tp)
-    []       -> []
-  where
-    -- a word that is already its own image needs no renaming, and
-    -- renaming it would make the generated def refer to itself
-    conPair p c = [ (w, i) | (w, i) <- [ (capWord p, c)
-                                       , ("un" ++ capWord p, "un" ++ c) ]
-                           , w /= i ]
-    capWord (x : xs) = toUpper x : xs
-    capWord []       = []
 
 theoryOf :: [Theory] -> String -> Either String Theory
 theoryOf ths n = case [ t | t <- ths, thName t == n ] of
@@ -7131,47 +7101,49 @@ parseFunctorLine l =
     _ -> Left $ "Malformed functor declaration (want `functor Name = word`): "
              ++ dropWhile isSpace l
 
--- THE DOCTRINE.  `theory Doctrine(k(_, _), p(_, _))` is declared in the
+-- THE DOCTRINE.  `theory Doctrine(k(..., ...))` is declared in the
 -- prelude, so every module sees it, and a theory that says `in
--- Doctrine` declares — in writing — that its `compose`, `embed` and
--- `first` are the doctrine's:
+-- Doctrine` declares — in writing — that its `compose` and `embed` are
+-- the doctrine's:
 --
---   compose   k(a, b) k(b, c) ⇒ k(a, c)
---   embed     Fn⟨a ⇒ b⟩ ⇒ k(a, b)
---   first     k(a, b) ⇒ k(p(a, c), p(b, c))     — and p is the pairing
+--   compose   k(ρ, σ) k(σ, τ) ⇒ k(ρ, τ)
+--   embed     Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)
+--
+-- The hom-object's arguments are STACKS.  That is the whole of stage
+-- 7a: products in Braid are flat — the stack IS the product — so a
+-- hom-object that named one WIRE per side was the one place they
+-- nested, and it cost three things.  A pairing parameter `p` whose only
+-- job was to name the packing; a `data Pair` declared once per file to
+-- be that packing; and a routing pass that wrapped every wide stage in
+-- `unP … ; stage ; P …` and whiskered it with `first`.  Over stacks,
+-- a stage of any width embeds as itself and the base's own `...` IS
+-- the strength, so all three are gone.
 --
 -- A model of such a theory transports (`with M`), at the LEVEL its
--- theory declared: composition alone composes carriers by hand, +
--- embedding transports one-wire stages, + first transports any stage.
--- Exits (a carrier in, none out) and entries (nothing in, one carrier
--- out) are read off the remaining slots' declared arrows, as 5c did.
+-- theory declared: composition alone composes carriers by hand,
+-- + embedding transports ANY stage.  Two levels, where there were
+-- three.  Exits (a carrier in, none out) and entries (nothing in, one
+-- carrier out) are read off the remaining slots' declared arrows, as 5c
+-- did.
 --
 -- Until 2026-09-13 this was DETECTED: three arrow shapes matched
 -- against every slot, names never read.  Detection answered "does this
 -- theory happen to look like a category"; the declaration answers "does
 -- this theory claim to be one", which is the question, and it is the
 -- same move `in` makes for a def.
---
--- NOT admitted: a stack-shaped embedding `Fn⟨... ⇒ ...⟩ ⇒ k(..., ...)`.
--- A constructor parameter is applied to TYPES — `k(a, b)` names one wire
--- on each side and `k(..., ...)` does not parse — so there is no shape
--- for it to be declared at.  A wider stage transports through `first`
--- instead: the pairing p packs the stack into one object, which is
--- Hughes' answer and the reason `first` is in the interface at all.
 doctrineName :: String
 doctrineName = "Doctrine"
 
--- the three structure slots, in the order the level table reads them
-doctrineCompose, doctrineEmbed, doctrineFirst :: String
+-- the two structure slots, in the order the level table reads them
+doctrineCompose, doctrineEmbed :: String
 doctrineCompose = "compose"
 doctrineEmbed   = "embed"
-doctrineFirst   = "first"
 
--- and its two constructor parameters: the hom-object, and the pairing
--- `first` packs a wide stage with
-doctrineK, doctrineP :: String
+-- and its one constructor parameter: the hom-object, whose two
+-- arguments are STACKS (2026-09-16 — the pairing parameter `p` and the
+-- strength `first` went with the packing they existed for)
+doctrineK :: String
 doctrineK = "k"
-doctrineP = "p"
 
 -- What a theory's `in D` clause CHECKED: for each of D's slots this
 -- theory also declares, its arrow is D's arrow with D's constructor
@@ -7189,35 +7161,46 @@ type ConMap = Map String String
 -- circuits are built with `fix`, and that is the theory's business.
 matchArrow :: [String] -> Arrow -> Arrow -> Maybe ConMap
 matchArrow cons (Arrow i1 o1 _) (Arrow i2 o2 _) =
-  matchStack cons M.empty M.empty i1 i2 >>= \(cm, tm) ->
-    fst <$> matchStack cons cm tm o1 o2
+  matchStack cons (M.empty, M.empty, M.empty) i1 i2 >>= \st ->
+    fst3 <$> matchStack cons st o1 o2
+  where fst3 (cm, _, _) = cm
 
--- the wire map is the alpha-renaming of the pattern's variables; a
--- pattern variable is nonlinear (`k(a, b) k(b, c)`), so it must agree
-matchStack :: [String] -> ConMap -> Map String Ty -> SType -> SType
-           -> Maybe (ConMap, Map String Ty)
-matchStack cons cm0 tm0 s1 s2 = do
-  ws1 <- closedWires s1
-  ws2 <- closedWires s2
-  if length ws1 == length ws2 then Just () else Nothing
-  foldM one (cm0, tm0) (zip ws1 ws2)
+-- The match state: the constructor map, the alpha-renaming of the
+-- pattern's WIRE variables, and — since the doctrine's hom-object
+-- ranges over stacks (2026-09-16) — of its STACK variables.  Every
+-- pattern variable is nonlinear (`k(a, b) k(b, c)`), so each must agree
+-- with itself everywhere it appears.
+type MatchSt = (ConMap, Map String Ty, Map String SType)
+
+matchStack :: [String] -> MatchSt -> SType -> SType -> Maybe MatchSt
+matchStack cons st0@(cm, tm, sm) s1 s2 = case (s1, s2) of
+  -- a pattern TAIL swallows whatever is left, which is how `k(a, b)`
+  -- with `a` a stack matches a theory's `k(ρ, σ)` at any width
+  (STail (SV v), _) -> case M.lookup v sm of
+    Just s' | s' /= s2 -> Nothing
+    _                  -> Just (cm, tm, M.insert v s2 sm)
+  (SEnd, SEnd)               -> Just st0
+  (SCons t1 r1, SCons t2 r2) -> one st0 (t1, t2) >>= \st1 ->
+                                  matchStack cons st1 r1 r2
+  _ | s1 == s2 -> Just st0
+    | otherwise -> Nothing
   where
     args acc as as'
       | length as /= length as' = Nothing
-      | otherwise = foldM (\(c, t) (a, b) -> matchStack cons c t a b) acc
+      | otherwise = foldM (\c (a, b) -> matchStack cons c a b) acc
                           (zip as as')
-    one (cm, tm) (TVarTy (TV v), t) = case M.lookup v tm of
+    one (c, tm', sm') (TVarTy (TV v), t) = case M.lookup v tm' of
       Just t' | t' /= t -> Nothing
-      _                 -> Just (cm, M.insert v t tm)
-    one (cm, tm) (TData n as, TData n' as')
-      | n `elem` cons = case M.lookup n cm of
+      _                 -> Just (c, M.insert v t tm', sm')
+    one st@(c, tm', sm') (TData n as, TData n' as')
+      | n `elem` cons = case M.lookup n c of
           Just m | m /= n' -> Nothing
-          _                -> args (M.insert n n' cm, tm) as as'
-      | n == n'          = args (cm, tm) as as'
-    one (cm, tm) (TFn (Arrow a b _), TFn (Arrow a' b' _)) = do
-      (cm1, tm1) <- matchStack cons cm tm a a'
-      matchStack cons cm1 tm1 b b'
-    one (cm, tm) (t, t') | t == t' = Just (cm, tm)
+          _                -> args (M.insert n n' c, tm', sm') as as'
+      | n == n'          = args st as as'
+    one st (TFn (Arrow a b _), TFn (Arrow a' b' _)) = do
+      st1 <- matchStack cons st a a'
+      matchStack cons st1 b b'
+    one st (t, t') | t == t' = Just st
     one _ _ = Nothing
 
 -- `theory T(…) in D` — the claim, checked.  Every slot T declares
@@ -7287,10 +7270,8 @@ transportOf theories inst = do
   if thIn th == Just doctrineName
     then do
       kNm <- conArg th cm doctrineK
-                    ("the hom-object `" ++ doctrineK ++ "(_, _)`")
-      pNm <- conArg th cm doctrineP
-                    ("the pairing `" ++ doctrineP ++ "(_, _)`")
-      Just <$> build th (M.lookup doctrineK cm) kNm pNm
+                    ("the hom-object `" ++ doctrineK ++ "(..., ...)`")
+      Just <$> build th (M.lookup doctrineK cm) kNm
     else Right Nothing
   where
     here = "model " ++ inName inst ++ ": "
@@ -7304,12 +7285,13 @@ transportOf theories inst = do
             ++ " is declared `in " ++ doctrineName ++ "` but no slot of "
             ++ "it names " ++ what ++ ": declare `" ++ doctrineCompose
             ++ "`, and the hom-object is the one it composes."
-        | otherwise -> Right Nothing   -- no `first`: no pairing to name
+        | otherwise -> Right Nothing
       Just nm -> case [ ar | PCon p ar <- thParams th, p == nm ] of
         (ar : _)
-          | ar /= 2 -> Left $ here ++ "theory " ++ thName th
-              ++ "'s constructor parameter `" ++ nm ++ "` has arity "
-              ++ show ar ++ ", and " ++ doctrineName ++ " declares " ++ what
+          | ar /= [True, True] -> Left $ here ++ "theory " ++ thName th
+              ++ "'s constructor parameter `" ++ nm ++ "` is " ++ nm ++ "("
+              ++ intercalate ", " [ if k then "..." else "_" | k <- ar ]
+              ++ "), and " ++ doctrineName ++ " declares " ++ what
           | otherwise ->
               case [ c | (PCon p _, IACon c) <- zip (thParams th) (inArgs inst)
                        , p == nm ] of
@@ -7322,7 +7304,7 @@ transportOf theories inst = do
                ++ "parameter a MODEL chooses (`theory " ++ thName th
                ++ "(" ++ nm ++ "(_, _)) over " ++ doctrineName ++ "`)."
            | otherwise -> Right (Just nm)    -- a data type named outright
-    build th kParam kNm pNm = do
+    build th kParam kNm = do
       carrier <- maybe (Left (here ++ "internal: no carrier")) Right kNm
       -- a slot's DECLARED arrow still says `k(_, _)`: the theory's own
       -- name for the hom-object, not the model's argument for it
@@ -7331,8 +7313,7 @@ transportOf theories inst = do
           isCar (TData n [_, _]) = Just n == kParam
           isCar _                = False
           carriers st = length (filter isCar (fromMaybe [] (closedWires st)))
-          spoken  = catMaybes [has doctrineCompose, has doctrineEmbed,
-                               has doctrineFirst]
+          spoken  = catMaybes [has doctrineCompose, has doctrineEmbed]
           -- an EXIT consumes a carrier and hands back base; an ENTRY is
           -- the mirror, building a carrier out of nothing.  Both are read
           -- off the DECLARED arrow, so a model cannot hide one.
@@ -7340,14 +7321,8 @@ transportOf theories inst = do
                        , carriers i >= 1, carriers o == 0 ]
           enters = [ n | (n, Arrow i o _) <- slots, n `notElem` spoken
                        , i == SEnd, carriers o == 1 ]
-      str <- case (has doctrineFirst, pNm) of
-        (Just s, Just p) -> Right (Just (s, p))
-        (Just _, Nothing) -> Left $ here ++ "theory " ++ thName th
-                          ++ " declares `" ++ doctrineFirst ++ "` but names "
-                          ++ "no pairing"
-        _                -> Right Nothing
       pure (Transport (inName inst) (thName th) carrier
-                      (has doctrineCompose) (has doctrineEmbed) str
+                      (has doctrineCompose) (has doctrineEmbed)
                       exits enters)
 
 -- The transport as a WORD, of the model's own name: the same functor as
@@ -7863,15 +7838,15 @@ loadWith isRoot0 root =
 -- from an imported module, since it cannot declare one itself.
 moduleSlotTable :: Module -> Either String SlotTable
 moduleSlotTable m =
-  sequence [ (\th -> (inName i, (thName th, slotWords (modTrans m) th i)))
+  sequence [ (\th -> (inName i, (thName th, slotWords th)))
                  <$> theoryOf (modTheories m) (inTheory i)
            | i <- modInstances m ]
 
--- Every word `with M` renames: M's slots, and the constructor words its
--- theory's parameters gave it.
-slotWords :: [Transport] -> Theory -> Instance -> [String]
-slotWords trans th i =
-  map fst (thSlots th) ++ map fst (instanceConWords trans i)
+-- Every word `with M` renames: M's slots.  (Until 2026-09-16 it also
+-- renamed the constructor words a pairing parameter gave a model; the
+-- Doctrine has no pairing parameter now.)
+slotWords :: Theory -> [String]
+slotWords = map fst . thSlots
 
 -- Check a module against the prelude: user defs and type aliases may
 -- shadow prelude ones (once each); the prelude's defs, aliases, and
@@ -8074,7 +8049,7 @@ checkModuleRaw base src = do
           ++ "clause may carry)"
     (n : _) -> Left $ "Duplicate functor declaration: " ++ n
     []      -> Right ()
-  instDefs <- concat <$> mapM (instanceDefs theories trans) insts
+  instDefs <- concat <$> mapM (instanceDefs theories) insts
   -- A TRANSFORMATION contributes its component as a word, the two sides of
   -- every square, and the sampled law for each square the theory's
   -- evidence can decide.  They are ordinary defs, named with the
@@ -8082,7 +8057,7 @@ checkModuleRaw base src = do
   transformationParts <- mapM (transformationDefs theories insts) ownTransformations
   let transformationDefSrcs = concatMap fst transformationParts
   slotTable <- (++ mbSlots base)
-                 <$> sequence [ (\th -> (inName i, (thName th, slotWords trans th i)))
+                 <$> sequence [ (\th -> (inName i, (thName th, slotWords th)))
                                   <$> theoryOf theories (inTheory i)
                               | i <- insts ]
   slotSigs <- concat <$> mapM (declaredSlots theories) insts
@@ -8759,37 +8734,38 @@ preludeSrc = unlines
   , "def cellsFor = (d -> d >> unDecl >> ((n ps body fs -> (fs >> [cellStep] (\"\" (body >> firstAlt) >> Box) ... >> fold >> unBox >> (src rest -> src)) >> cellsCode) | (n ps body -> nil) | (n ps sl ls -> nil)) >> mergeDecl)"
     -- THE DOCTRINE, declared.  Every module sees it, because a theory
     -- that says `in Doctrine` is claiming membership in THIS one and
-    -- a claim needs something to point at.  The three structure slots
-    -- are the base's own structure — Hughes' `arr`/`>>>`/`first`,
-    -- Atkey's categorical model of arrows — and the laws below are the
-    -- arrow laws, written once here instead of once per theory.
+    -- a claim needs something to point at.  The two structure slots
+    -- are the base's own structure — Hughes' `arr`/`>>>`, Atkey's
+    -- categorical model of arrows — and the laws below are the category
+    -- laws, written once here instead of once per theory.
+    --
+    -- The HOM-OBJECT RANGES OVER STACKS (2026-09-16): `k(..., ...)`,
+    -- and `compose : k(a, b) k(b, c) => k(a, c)` names six stacks, not
+    -- six wires.  That is what deleted `first` and the pairing
+    -- parameter `p` from this theory: a stage of any width embeds as
+    -- itself, so the strength a one-wire hom-object needed is the
+    -- BASE'S OWN `...` and needs no slot.  `embedWide` is the law that
+    -- says so — the old `firstFst`/`firstEmbed`/`firstCompose` restated
+    -- where the whiskering now happens, inside the quotation.
     --
     -- `observe` and `sample` are the AUDIT'S EVIDENCE, and they are
     -- slots like the rest: a carrier is often codata, so it cannot be
     -- compared, only observed.  A theory extending the doctrine
-    -- declares as many of the five as it has; the laws that name only
+    -- declares as many of the four as it has; the laws that name only
     -- declared slots are the ones its models are audited against, and a
     -- sealed category — one that declares no way out — is honestly
     -- unaudited.
-    --
-    -- `P` and `unP` are the pairing PARAMETER's constructor: a
-    -- constructor parameter `p(_, _)` names a type in a signature and
-    -- its roll/unroll words, capitalized, in a law.  A model's argument
-    -- substitutes both.
-  , "## the arrow doctrine: a category with hom-objects, the embedding of the base, and the strength that carries a wide stage.  `theory T(k(_, _)) over Doctrine` declares membership; `with M` of a model of T transports."
-  , "theory Doctrine(k(_, _), p(_, _)) ="
-  , "    compose : k(a, b) k(b, c) ⇒ k(a, c)"
-  , "    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)"
-  , "    first   : k(a, b) ⇒ k(p(a, c), p(b, c))"
-  , "    observe : k(Int, Int) ⇒ Int"
-  , "    sample  : • ⇒ k(Int, Int)"
+  , "## the arrow doctrine: a category whose hom-objects range over STACKS, and the embedding of the base.  `theory T(k(..., ...)) in Doctrine` declares membership; `with M` of a model of T transports."
+  , "theory Doctrine(k(..., ...)) ="
+  , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+  , "    embed   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
+  , "    observe : k(Int, Int) \8658 Int"
+  , "    sample  : \8226 \8658 k(Int, Int)"
   , "    law leftId = ([_] ... >> embed ... >> _ sample >> compose >> observe) (sample >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
   , "    law rightId = (sample >> _ [_] >> _ embed >> compose >> observe) (sample >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
   , "    law assoc = (sample sample sample >> compose _ >> compose >> observe) (sample sample sample >> _ compose >> compose >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
   , "    law embedFunctor = ([_ 1 >> + >> _ 2 >> *] ... >> embed ... >> observe) ([_ 1 >> +] ... >> embed ... >> _ [_ 2 >> *] >> _ embed >> compose >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
-  , "    law firstFst = ([dup >> P] ... >> embed ... >> _ sample >> _ first >> compose >> _ [unP >> _ drop] >> _ embed >> compose >> observe) ([dup >> P] ... >> embed ... >> _ [unP >> _ drop] >> _ embed >> compose >> _ sample >> compose >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
-  , "    law firstEmbed = ([dup >> P] ... >> embed ... >> _ [unP >> (_ 1 >> +) _ >> P] >> _ embed >> compose >> _ [unP >> _ drop] >> _ embed >> compose >> observe) ([dup >> P] ... >> embed ... >> _ [_ 1 >> +] >> _ embed >> _ first >> compose >> _ [unP >> _ drop] >> _ embed >> compose >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
-  , "    law firstCompose = ([dup >> P] ... >> embed ... >> _ sample sample >> _ compose >> _ first >> compose >> _ [unP >> _ drop] >> _ embed >> compose >> observe) ([dup >> P] ... >> embed ... >> _ sample >> _ first >> compose >> _ sample >> _ first >> compose >> _ [unP >> _ drop] >> _ embed >> compose >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
+  , "    law embedWide = ([dup] ... >> embed ... >> _ [(_ 1 >> +) _] >> _ embed >> compose >> _ [*] >> _ embed >> compose >> observe) ([dup >> (_ 1 >> +) _ >> *] ... >> embed ... >> observe) >> eq? >> (forget >> true | forget >> false) >> merge"
   ]
 
 -- `##` docs for PRIMS.  Prims are not defs, so they have no `##` line to
@@ -10723,7 +10699,7 @@ reprParamV p = VSum 0 [symOf (pName p), VSym kind, VInt arity]
       PStack _ -> (".stack", 0)
       PRow _   -> (".row",   0)
       PWidth _ -> (".width", 0)
-      PCon _ k -> (".con",   k)
+      PCon _ k -> (".con",   length k)
 
 -- The three alternatives of `data Decl`, by tag:
 --   0 data   name, parameters, body, FIELD NAMES (empty when none)
@@ -11135,8 +11111,8 @@ runSquare m (n, t) = do
                                ++ "directly, because the theory declares no "
                                ++ "exit whose input FITS this slot's result "
                                ++ "\8212 an exit at `k(Int, Int)` does not "
-                               ++ "reach the hom-object at a PAIRING, which "
-                               ++ "is what `" ++ doctrineFirst ++ "` leaves. "
+                               ++ "reach the hom-object at another pair of "
+                               ++ "stacks. "
                                ++ "If the carrier holds a function, `eq?` is "
                                ++ "syntactic: declare an exit `observe` in "
                                ++ "the theory at the shape this slot leaves"

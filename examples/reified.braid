@@ -15,33 +15,33 @@
 # special floor that metaprogramming happens on; it is one more carrier
 # a theory can name, reached and left through slots like any other.
 
-data Coded(a, b) = Fn⟨a ⇒ b⟩ Code
-data Pair(a, b)  = a b
+data Coded(a..., b...) = Fn⟨a ⇒ b⟩ Code
 
 # ---- the theory ------------------------------------------------------
-# `in Doctrine` is the declaration: `compose`, `embed` and `first` are
+# `in Doctrine` is the declaration: `compose` and `embed` are
 # the prelude doctrine's, at its signatures, and the elaborator checks
 # that rather than matching shapes.  `run` has a carrier in and none
 # out, so it is an EXIT: legal under `in`, never inside `with`.
 #
 # `observe` and `sample` are the doctrine's evidence slots, and taking
-# them is what puts this model under the SAME seven arrow laws that
+# them is what puts this model under the SAME five category laws that
 # `examples/circuits.braid` runs — over a carrier that is a program and
 # its Code.  `observe` runs the witness at 3 and at 4 through the exit,
 # so the laws are finite tests here too.
-theory Reflective(k(_, _)) in Doctrine =
+theory Reflective(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
-    first   : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
     run     : k(a, b) a ⇒ (b | Str a)
     observe : k(Int, Int) ⇒ Int
     sample  : • ⇒ k(Int, Int)
 
 # ---- what the prelude lacks ------------------------------------------
-# Composition of two WITNESSES, at one wire.  The prelude has `lift`
-# and `around` but no `Fn ; Fn` — it is three atoms with a binder, and
-# `ev` is what makes it possible at all (the closure gate, 5a¾).
-def composeFn = (f g -> [(x -> f ; _ x ; ev ; (y -> g ; _ y ; ev))])
+# Composition of two WITNESSES, at any width.  The prelude has `lift`
+# and `around` but no `Fn ; Fn` — it is four atoms, and `ev` is what
+# makes it possible at all (the closure gate, 5a¾).  `f ...` slides the
+# witness UNDER the segment it is about to run on, which is how every
+# open word takes its fixed arguments (guide-open-arity.md, Rule 2).
+def composeFn = (f g -> [f ... ; ev ; g ... ; ev])
 def orNil     = ((c -> c) | drop ; nil) ; merge
 
 # ---- the model -------------------------------------------------------
@@ -55,38 +55,34 @@ def embedC = (f -> f (f ; getCode) ; Coded)
 # multiplication.
 def composeC = (c d -> c ; unCoded ; (f p -> d ; unCoded ; (g q -> (f g ; composeFn) (p q ; append) ; Coded)))
 
-# The strength lifts the witness the ordinary way, and ROUTES the
-# spine: a program on the deepest wire of a pair is the spine quoted,
-# slid under, and applied to that wire alone — `[p] ... >> onFirst` —
-# between `unPair` and `Pair`.  Written as source and parsed, because
-# that is what a Code-building API would give us and stage 6 does not
-# have one yet (pragmatics item E).
-def onFirst    = (q x d -> q ; _ x ; ev ; (y -> y d))
-def firstSpine = (s -> "unPair >> [" (s ; unparse) ; cat ; _ "] ... >> onFirst >> Pair" ; cat ; parse ; orNil)
-
-def firstC = (c -> c ; unCoded ; (f s -> [(q -> q ; unPair ; (x d -> f ; _ x ; ev ; (y -> y d ; Pair)))] (s ; firstSpine) ; Coded))
-
+# There is no strength, and this file is where its absence is VISIBLE.
+# Until 2026-09-16 `first` had to route the Code as well as the
+# witness — a program on the deepest wire of a pair was re-emitted as
+# source, `unPair >> [p] ... >> onFirst >> Pair`, parsed back, and
+# spliced — because the hom-object named one wire on each side and a
+# wide stage had to be packed to fit.  Over STACKS the spine that comes
+# out is the spine that went in, which is why `w`'s Code below reads
+# `dup >> add1 ... >> *` and used to read three times that.
+#
 # The exit runs the SPINE against the witness, which is `evalAs`: the
 # witness is the ascription and the re-inference at the splice is the
 # check.  A model's exit, not a language escape hatch.
-def runC = (c x -> c ; unCoded ; _ _ x ; evalAs)
+def runC = unCoded ... ; evalAs
 
 def orZero    = (... | drop _ ; drop ; 0) ; merge
-def observeC  = (c -> (c 3 ; runC ; orZero) (c 4 ; runC ; orZero) ; +)
+def observeC  = (c -> c 3 ; runC ; orZero ; (y -> c 4 ; runC ; orZero ; (z -> y z ; +)))
 def sampleC   = [dup ; +] ; embedC
 
 model Reified in Reflective(Coded) =
     embed   = embedC
     compose = composeC
-    first   = firstC
     run     = runC
     observe = observeC
     sample  = sampleC
 
 # ---- transport -------------------------------------------------------
-# `dup` leaves two wires and `*` takes two, so neither is one-wire:
-# they transport through the strength, packed with the pairing `Pair`
-# that `first`'s declared type names.
+# `dup` leaves two wires and `*` takes two.  Each embeds at the width
+# it is written, because `k(ρ, σ)` names a whole stack on each side.
 def sq with Reified = dup ; *
 #   sq : Int =Reified> Int
 
@@ -97,10 +93,10 @@ sq ; unCoded ; drop _ ; unparse ; print
 def sq5 in Reified = sq ; _ 5 ; run
 sq5 ; orZero ; print    # 25
 
-# And the STRENGTH is real, not decoration.  `add1 ...` acts on the
-# deepest wire and the one above it rides along, so the elaborator
-# whiskers it with `first` — and this model's `first` routes the spine
-# as well as the witness, so the Code stays runnable.
+# And the whiskering is real, not decoration.  `add1 ...` acts on the
+# deepest wire and the one above it rides along — in the BASE, inside
+# the quotation, before `embed` ever sees it.  Nothing routes anything;
+# the Code stays runnable because it was never rewritten.
 def add1 = _ 1 ; +
 def w with Reified = dup ; add1 ... ; *
 w ; unCoded ; drop _ ; unparse ; print

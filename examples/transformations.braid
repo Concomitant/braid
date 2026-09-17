@@ -72,49 +72,45 @@ transformation Len in ListMonoid ⇒ IntSum = len
 # ---- the same declaration over a DOCTRINE --------------------------
 # When the two models are models of a theory that extends `Doctrine`,
 # they are internal categories, and a transformation between them is an
-# INTERNAL FUNCTOR: the squares for `compose`, `embed` and `first` are
-# exactly functoriality — preserves composition, preserves the image of
-# the base, preserves the strength.
+# INTERNAL FUNCTOR: the squares for `compose` and `embed` are exactly
+# functoriality — preserves composition, preserves the image of the
+# base.  There is no strength square, because since 2026-09-16 there is
+# no strength: a hom-object names a whole STACK on each side, so a wide
+# stage embeds as itself.
 #
 # Here is one worth having: a function that CARRIES ITS NAME, and the
 # functor that forgets the name.
 
-data Named(a, b) = Fn⟨a ⇒ b⟩ Str
-data Plain(a, b) = Fn⟨a ⇒ b⟩
-data Pair(a, b)  = a b
+data Named(a..., b...) = Fn⟨a ⇒ b⟩ Str
+data Plain(a..., b...) = Fn⟨a ⇒ b⟩
 
-theory Arrow(k(_, _)) in Doctrine =
+theory Arrow(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
     compose : k(a, b) k(b, c) ⇒ k(a, c)
-    first   : k(a, b) ⇒ k(Pair(a, c), Pair(b, c))
     observe : k(Int, Int) ⇒ Int
     sample  : • ⇒ k(Int, Int)
 
 # the named category: composition concatenates the names
 def embedN   = (f -> f "" ; Named)
-def composeN = (c d -> c ; unNamed ; (f s -> d ; unNamed ; (g t -> [(x -> f ; _ x ; ev ; (y -> g ; _ y ; ev))] (s t ; cat) ; Named)))
-def firstN   = (c -> c ; unNamed ; (f s -> [(p -> p ; unPair ; (x d -> f ; _ x ; ev ; (y -> y d ; Pair)))] s ; Named))
+def composeN = (c d -> c ; unNamed ; (f s -> d ; unNamed ; (g t -> [f ... ; ev ; g ... ; ev] (s t ; cat) ; Named)))
 def witnessN = (c -> c ; unNamed ; _ drop)
-def runN     = (c x -> c ; witnessN ; _ x ; ev)
-def observeN = (c -> (c 3 ; runN) (c 4 ; runN) ; +)
+def runN     = witnessN ... ; ev
+def observeN = (c -> c 3 ; runN ; (y -> c 4 ; runN ; (z -> y z ; +)))
 
 model Names in Arrow(Named) =
     embed   = embedN
     compose = composeN
-    first   = firstN
     observe = observeN
     sample  = [dup ; +] "double" ; Named
 
 # the plain category: the same functions with nothing attached
-def runP     = (f x -> f ; unPlain ; _ x ; ev)
-def composeP = (f g -> [(x -> f ; unPlain ; _ x ; ev ; (y -> g ; unPlain ; _ y ; ev))] ; Plain)
-def firstP   = (f -> [(p -> p ; unPair ; (x d -> f ; unPlain ; _ x ; ev ; (y -> y d ; Pair)))] ; Plain)
-def observeP = (f -> (f 3 ; runP) (f 4 ; runP) ; +)
+def runP     = unPlain ... ; ev
+def composeP = (f g -> [f ... ; runP ; g ... ; runP] ; Plain)
+def observeP = (f -> f 3 ; runP ; (y -> f 4 ; runP ; (z -> y z ; +)))
 
 model Funcs in Arrow(Plain) =
     embed   = Plain
     compose = composeP
-    first   = firstP
     observe = observeP
     sample  = [dup ; +] ; Plain
 
@@ -123,17 +119,32 @@ model Funcs in Arrow(Plain) =
 def strip = (c -> c ; witnessN ; Plain)
 
 transformation Forget in Names ⇒ Funcs = strip
-#   Forget : Named(a, b) ⇒ Plain(a, b)
+#   Forget : Named(ρ, σ) ⇒ Plain(ρ, σ)
 
 def namedSq in Names = sample sample ; compose
 namedSq ; unNamed ; drop _ ; print             # doubledouble — the name
 namedSq ; Forget ; observeP ; print            # 28 — 3·4 + 4·4
 
-# Both models run the doctrine's seven laws at their own samples, and
-# the five squares above are checked besides.  ALL FIVE ARE PROVED —
-# `compose`, `embed`, `first`, `observe` and `sample` — which is the
-# difference the carrier makes: a hom-object pins its own `Fn⟨a ⇒ b⟩`
-# to one wire on each side, so applying it is a neutral application and
-# the normalizer can follow the whole square.  `Len` above proves none
-# and samples all three.  The same declaration, and two different
-# verdicts, decided rather than chosen.
+# Both models run the doctrine's five laws at their own samples, and
+# the four squares above are checked besides.  `embed` and `sample` are
+# PROVED; `compose` and `observe` are SAMPLED, and the reason is the
+# 2026-09-16 move itself:
+#
+#     embed    proved
+#     compose  sampled (2 points; ev of an open wire)
+#     observe  sampled (1 point; ev of an open wire)
+#     sample   proved
+#
+# Until that date a hom-object pinned its own `Fn⟨a ⇒ b⟩` to ONE WIRE
+# on each side, so applying it was a neutral application and the
+# normalizer followed all five squares.  Over STACKS the witness is
+# `Fn⟨ρ ⇒ σ⟩` with ρ open, and `ev` of an open wire has no closed
+# arity — the same wall `Len` has always stood at, reached now by the
+# carrier models too.  That is what flat products cost here, said out
+# loud: the pairing, the `data Pair` and the routing pass went, and two
+# of these four verdicts went with them.  What would buy them back is a
+# normalizer that reads a stack's width from the type at the splice,
+# which is a stage of its own.
+#
+# `Len` above proves none and samples all three.  The same declaration,
+# and different verdicts, decided rather than chosen.
