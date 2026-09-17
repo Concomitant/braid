@@ -5462,6 +5462,21 @@ runFunctor ctx (fname, word) body = do
 -- refused here — so every transported def produces a carrier, and
 -- nothing else can.
 runTransport :: ElabCtx -> Transport -> Term -> Either String Term
+-- THE FUSED PATH (stage 7b).  A REPRESENTABLE fibre's hom-object is an
+-- object of the base, so `embed [s] >> compose` has a NORMAL FORM \8212
+-- `_^k s ...` \8212 and that is character for character what `elabScope`
+-- emits.  Running the unfused path here would build and immediately
+-- destroy an `R@k` wrapper at every stage: every reflected program
+-- would change, and `metered.braid` would count a different number of
+-- stages.  So the routing pass is not deleted, it is RESTATED as the
+-- fused evaluator of the resource model, and what goes is the idea
+-- that routing is a separate kind of scope.
+--
+-- One model here; `elabHeaders` calls the same evaluator with the
+-- whole GROUP a clause names, because the carrier SEGMENT is ordered
+-- and the padding depth is the group's size.
+runTransport ctx tp body
+  | Just e <- tpResource tp = elabScope (ecEnv ctx) [e] body
 runTransport ctx tp body = do
   embW <- maybe (Left noEmbed) Right (fmap (slotDefName nm) (tpEmbed tp))
   thenW <- maybe (Left "internal: transport with no composition") Right
@@ -5645,9 +5660,16 @@ elabHeaders ctx t0 = do
       -- ...and except an INSTANTIATING scope (`Apply`): the body it
       -- wraps is already a morphism of the theory, so the model says
       -- what the slot names mean and composition stays the base's.
+      -- A REPRESENTABLE model \8212 the one a `resource` generates \8212 is
+      -- transported by the FUSED path below, with the whole group the
+      -- clause names, so it is not one of the categories counted here.
+      -- That is also why `with Log Counter` is not "two categories": a
+      -- representable fibre's carriers are disjoint WIRES and commute
+      -- by geometry, where two hom-object carriers would embed each
+      -- other's.
       let ms  = [ tp | ap == Transporting
                      , tp <- ecTrans ctx, tpName tp `elem` ns
-                     , isJust (tpCompose tp)
+                     , isJust (tpCompose tp), isNothing (tpResource tp)
                      , tpName tp `notElem` ecSelf ctx ]
           mns = map tpName ms
       case ms of
@@ -5683,6 +5705,10 @@ elabHeaders ctx t0 = do
           b'' = foldr (\tbl t -> renameWordsT tbl t)
                       (foldr (\(i, sl) t -> renameSlotsT i sl t) b' is)
                       (map snd bs)
+      -- the RESOURCES, transported into the models their declarations
+      -- generated, as one group: `elabScope` is those models' fused
+      -- evaluator (`runTransport`'s first clause is the k = 1 case of
+      -- exactly this call).
       routed0 <- case rs of
                    [] -> pure b''
                    _  -> elabScope (ecEnv ctx) rs b''
@@ -5812,14 +5838,16 @@ expandTemplates ctx scope busy = go
 inTarget :: [String] -> [Transport] -> SlotTable -> [(String, String)]
          -> [BaseInstance] -> [String] -> String -> Either String Transport
 inTarget thNames trans slots funcs bases resources n
-  | (m : _) <- [ m | m <- trans, tpName m == n ] = Right m
-  | n `elem` thNames = Left $ internal ++ "a theory reached inTarget"
   -- A RESOURCE is asked FIRST, because since stage 7b it also names the
   -- model its declaration generated, and the answer a user needs is the
-  -- one about the resource they wrote.
+  -- one about the resource they wrote.  There is nothing to inhabit
+  -- either: a representable fibre's carrier is CANCELLED, so no def
+  -- ever holds one.
   | n `elem` resources =
       Left $ pre ++ "names a resource, and a resource is threaded through "
           ++ "a body.  Write `with " ++ n ++ "`."
+  | (m : _) <- [ m | m <- trans, tpName m == n ] = Right m
+  | n `elem` thNames = Left $ internal ++ "a theory reached inTarget"
   | Just (th, _) <- lookup n slots =
       Left $ pre ++ "names a model of " ++ th ++ " in the base: it has no "
           ++ "carrier to build \8212 write `with " ++ n ++ "`, or `in " ++ th
@@ -5898,6 +5926,18 @@ renameWordsT tbl = go
     go (OpenAbs sl h b) = OpenAbs sl h (go b)
     go t                = t
 
+-- THE RESOURCE MODEL'S FUSED EVALUATOR (stage 7b restates this).
+--
+-- `with Log Counter` is transport into the models `resource Log` and
+-- `resource Counter` generate, and this is what their `embed` and
+-- `compose` come to once the `R@k` wrapper is cancelled: `embed [s]`
+-- is `_^k s ...` and `compose` is nothing at all, because composition
+-- in a representable fibre IS base composition of representatives.
+-- Everything here that transport does not do \8212 the claim assertion,
+-- the one-resource-op stage, the whole-scope word, the two refusals \8212
+-- is the part of the scope that is about the SEGMENT rather than about
+-- the functor, and the segment is an ordered object the grade cannot
+-- hold.  See design-7b.md §3.2 and `runTransport`'s first clause.
 elabScope :: Env -> [String] -> Term -> Either String Term
 elabScope env rs body = do
   stages <- mapM routeStage (spineLines body)
@@ -8248,13 +8288,14 @@ checkModuleRaw base src = do
   -- shape is read here, once, and `with` of it transports.  There is no
   -- `mode` line any more — the model is the declaration.
   ownTrans <- catMaybes <$> mapM (transportOf allDatas theories) insts
-  let trans0 = ownTrans ++ mbTrans base
-      -- STAGE 7b commit 3: the generated resource model EXISTS and is
-      -- checked, but `with R` still ROUTES by the old path \8212 this
-      -- commit is the statement, and nothing elaborates differently.
-      -- Commit 4 drops this filter and `runTransport` grows the fused
-      -- path that routing turns out to be.
-      trans = [ m | m <- trans0, isNothing (tpResource m) ]
+  -- every model with a carrier, REPRESENTABLE ONES INCLUDED (stage 7b
+  -- commit 4).  Each consumer says for itself why it treats a
+  -- representable one differently: `elabHeaders` transports it fused
+  -- with the group it was named beside, `inTarget` answers about the
+  -- resource, `transDefs` writes it no word (the roll constructor has
+  -- the name), and a def under `with R` is not a K-word of R (it
+  -- produces no carrier \8212 the carrier is cancelled).
+  let trans = ownTrans ++ mbTrans base
       funcs = ownFuncs ++ mbFuncs base
       -- one namespace for every name a `with` header may carry
       useNames = map fst funcs ++ map fst ownBases
@@ -8511,6 +8552,7 @@ checkModuleRaw base src = do
                   With Transporting ns _
                     | (k : _) <- [ tpName m | m <- trans
                                             , isJust (tpCompose m)
+                                            , isNothing (tpResource m)
                                             , tpName m `elem` ns ] ->
                         (name, k) : kws
                   _ -> kws

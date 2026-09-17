@@ -324,9 +324,7 @@ elabIn st src = do
   term0 <- parseProgramIn (rsDatas st) src
   elabHeaders (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
-                       -- a RESOURCE's generated model does not transport
-                       -- yet (stage 7b commit 3): `with R` routes.
-                       [ m | m <- rsTrans st, tpResource m == Nothing ]
+                       (rsTrans st)
                        (rsKWords st) (rsBases st) [] False
                        -- a session declares no `table` of its own: one is
                        -- a file declaration, and `:import` brings in only

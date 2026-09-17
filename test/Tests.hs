@@ -1127,6 +1127,24 @@ moduleTypeTests =
   , ("resource Log = Str\nresource Counter = Int\n\
      \data W3 = Fn⟨Log Counter Int =IO> Log Counter Int⟩\nunW3",
      "W3 ⇒ Fn⟨Int =IO Log Counter> Int⟩")
+    -- STAGE 7b commit 4: a resource-shaped carrier whose model is NOT
+    -- named for the resource is NOT representable, so `with M2` takes
+    -- the UNFUSED transport path and really does build a carrier.
+    -- This is the clause that keeps `examples/prob.braid`'s
+    -- hand-written `Sampler` (which threads `Rng`) on the path it was
+    -- written for.
+  , ("resource Rg = Int\n\
+     \data K2(a..., b...) = Fn⟨Rg a ⇒ Rg b⟩\n\
+     \theory T2(k(..., ...)) in Doctrine =\n\
+     \    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n\
+     \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \def k2Embed = (f -> [_ f ... ; _ ev] ; K2)\n\
+     \def k2Then = (c e -> [c ... ; unK2 ... ; ev ; e ... ; unK2 ... ; ev] ; K2)\n\
+     \model M2 in T2(K2) =\n\
+     \    embed   = k2Embed\n\
+     \    compose = k2Then\n\
+     \def g with M2 = dup ; *\ng",
+     "Int =M2> Int")
     -- STAGE 4: `with` opens an ambient scope and the elaborator writes
     -- every `_`/`...` — the body below contains none.
   , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f with Log Counter = dup >> * >> bump\nf",
@@ -1550,6 +1568,16 @@ sealedMod = unlines
 -- (module source, expected print log, expected final stack rendering)
 evalTests :: [(String, [String], String)]
 evalTests =
+    -- STAGE 7b commit 4: `with R` is TRANSPORT into the model
+    -- `resource R` generated, evaluated FUSED.  This pins what it
+    -- emits, character for character: `embed [s]` is `_ s ...` and
+    -- `compose` is nothing at all, which is the routing pass
+    -- unchanged.  `examples/metered.braid` counts stages by burning
+    -- fuel, so any change here is a changed burn count.
+  [ ("resource Fuel = Int\n\
+     \[with Fuel = dup ; * ; _ 1 ; +] ; getCode ; unparse ; print",
+     ["(unFuel >> Fuel) pass >> _ dup pass >> _ * pass \
+      \>> _ _ 1 pass >> _ + pass"], "")
     -- A FAMILY'S SLOT BODY NAMES THE PARAMETER'S SLOT (2026-09-15).
     -- `lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)` — every theory name in
     -- a family's body is R's, the slot being defined included, so `lit`
@@ -1557,7 +1585,7 @@ evalTests =
     -- self-reference rule.  The zero tangent is `0.0 ; lit` and not a
     -- `zero` slot: the theory already names its zero, and `addUnit`
     -- already pins it.
-  [ (famSrc ++ "def l with Fwd(Floats) = lit\n3.0 ; l ; unDual ; print ... ; print",
+  , (famSrc ++ "def l with Fwd(Floats) = lit\n3.0 ; l ; unDual ; print ... ; print",
      ["3.0", "0.0"], "")
     -- SECOND DERIVATIVES, by applying the family to a member of itself.
     -- cube(x) = x\179 + 1, so cube''(2) = 6*2 = 12, and the file that
