@@ -1397,6 +1397,46 @@ that name is now a duplicate declaration rather than a shadow.
 
 Routing itself no longer needs the header at all — see §6.
 
+**`Dict`, the dictionary's own wire** *(2026-09-18)*. A declaration is
+an **act on the dictionary**, and the dictionary is a resource like any
+other: a label whose carrier is looked up from its declaration, exactly
+as `Log`'s is `Log ⊗ –` and `IO`'s is `World ⊗ –`. Every declaration
+word says so in its own arrow — `defW : Code Str =Dict> •` — which is
+the phase distinction the keyword-initial surface marks, written down
+as a grade.
+
+What it holds is the module's **declarations so far**: the defs with
+their headers and source, the type lines, the theory/model/functor/
+transformation blocks, the imports, the tables, the keyword table, and
+the program lines the declarations did not take. It is not the finished
+module — a module holds an environment, a scheme and a term, none of
+which has a Braid rep, and handing one to a program would be a
+reflection of the checker rather than a declaration layer. `Dict` is the
+**write** handle; the **read** side already exists and is the reflection
+words (`declOf`, `typeOfWord`, `envOf`, §12), which read the four tables
+the checker holds at the point the word runs.
+
+**A program cannot discharge it, structurally.** A handler is `seed ;
+… ; unwrap`, and both ends come from the `data` machinery a `resource`
+line drives. `Dict` is not declared by `resource` — it is not declared
+at all — so there is no `Dict` to seed one with and no `unDict` to open
+one with, and the name may not be taken:
+
+```text
+`Dict` is the dictionary's own wire and may not be declared: `Dict` is
+  the carrier every declaration word acts on (`defW : Code Str =Dict>
+  •`), it is threaded by the loader, and there is no `Dict` to seed one
+  with and no `unDict` to open one with — which is what keeps a program
+  from discharging it.  Rename it.  MANUAL § 8.
+```
+
+That is `World`'s argument, made once for both: the wire whose carrier
+lives in the compiler's `@` namespace is discharged by the **host**, and
+here the host is the loader — it holds the dictionary, hands it to each
+declaration word in turn, and turns what comes back into a module.
+`:doc Dict` prints all of this, including the two words it deliberately
+has not got.
+
 **`theory` / `model`** — named slots, models, and laws that run.
 Both are **block** declarations: a header line ending in `=`, then
 indented lines, the same shape as `def name =` with an indented body. A

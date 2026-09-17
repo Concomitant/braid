@@ -3696,6 +3696,17 @@ moduleFailTests =
   , (zeroFirstRingMod ++ "transformation Halved in Ints \8658 Halves = halve\n1 ; print",
      "transformation Halved: the square for slot 'add' does not commute \
      \at the theory's samples")
+    -- STAGE 8: `Dict` is the dictionary's own wire, and discharge is
+    -- structural — there is no `Dict` and no `unDict` because the
+    -- name may not be declared at all, by any keyword.
+  , ("resource Dict = Int\n1 ; print",
+     "`Dict` is the dictionary's own wire and may not be declared")
+  , ("data Dict = Int\n1 ; print",
+     "`Dict` is the dictionary's own wire and may not be declared")
+  , ("def Dict = 1\n1 ; print",
+     "`Dict` is the dictionary's own wire and may not be declared")
+  , ("def unDict = (x -> x)\n1 ; print",
+     "`unDict` is the dictionary's own wire and may not be declared")
     -- STAGE 5c½: `in` names a theory or a model with a carrier, and
     -- nothing else.  Each other kind is refused by kind, with the word
     -- to write.

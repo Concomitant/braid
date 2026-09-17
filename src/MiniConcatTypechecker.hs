@@ -125,6 +125,41 @@ ioLabel = "IO"
 ioCarrier :: String
 ioCarrier = ioLabel ++ "@World"
 
+-- THE DICTIONARY'S OWN WIRE (stage 8, 2026-09-18).  A declaration is
+-- an ACT ON THE DICTIONARY, and the dictionary is a resource like any
+-- other after 7b: a label naming a functor, with a carrier looked up
+-- from the label's declaration.  `def f = body` is `[body] "f" defW`,
+-- and `defW : Code Str =Dict> •` says in its own arrow what it does —
+-- the phase distinction the keyword-initial surface marks, written
+-- down as a grade (design-macros.md, "direction 3", 2026-08-29).
+--
+-- WHAT IT HOLDS is the module's DECLARATIONS SO FAR, not the finished
+-- `Module`: the defs with their headers and source, the type lines,
+-- the theory/model/functor/transformation blocks, the imports, the
+-- tables, the keyword table, and the program lines the declarations did
+-- not take.  Not the `Module`, because a `Module` holds an `Env`, a
+-- `Scheme` and a `Term`, none of which has a Braid rep — handing one
+-- to a program would be bootstrap rung 2 and not a declaration layer.
+-- `Dict` is the WRITE handle; the read side already exists and is the
+-- reflection words (`declOf`, `typeOfWord`, `envOf`), which read the
+-- four tables the checker holds at the point the word runs.
+--
+-- DISCHARGE IS IMPOSSIBLE STRUCTURALLY, exactly as it is for `World`
+-- and for the same reason: a handler is `seed ; • ; unwrap`, and both
+-- ends come from the `data` machinery a `resource` declaration drives.
+-- `Dict` is not declared by `resource` — it is not declared at all —
+-- so there is no `Dict` to seed one with and no `unDict` to open one
+-- with, and the name may not be declared either (the refusal below).
+-- Its carrier lives in the compiler's `@` namespace, which source may
+-- not write.  The one thing that discharges it is the LOADER, which is
+-- the host: it holds the dictionary, hands it to each declaration word
+-- in turn, and turns what comes back into a module.
+dictLabel :: String
+dictLabel = "Dict"
+
+dictCarrier :: String
+dictCarrier = dictLabel ++ "@Dict"
+
 -- The second built-in label (2026-09-09; renamed and made a MARKER
 -- 2026-09-14).  `Recursive` is the name of a scope — `with Recursive`
 -- puts a def's own name in scope in its body — and, like every other
@@ -7367,7 +7402,68 @@ data Module = Module
                                         -- originated it, for `:t!`
   }
 
--- Split source into `def name = body` lines, `type …` declaration
+-- THE DICTIONARY, as a carrier (stage 8, 2026-09-18).  What a module's
+-- declarations amount to, in the order they were written: the record
+-- every declaration word acts on, and the thing the `Dict` wire stands
+-- for.  `splitDefsIx` reads the source into one of these and the
+-- checker reads it back out; a declaration word is a function on it.
+--
+-- It is the DECLARATIONS, not the finished module (see `dictLabel`):
+-- what is here is what was written, and what the checker makes of it
+-- is the `Module` at the other end.
+data Dict = Dict
+  { dkDefs     :: [(String, DefHdr, String, Maybe String, Int)]
+    -- ^ `def`: name, header clauses, body source, doc, first body line
+  , dkTypes    :: [(String, Maybe String)]
+    -- ^ `type` / `data` / `resource`: the line, and its doc
+  , dkBlocks   :: [(String, [String], Maybe String)]
+    -- ^ `theory` / `model` / `functor` / `transformation`: head, block, doc
+  , dkImports  :: [String]        -- ^ `import` lines, raw for the loader
+  , dkTables   :: [String]        -- ^ `table` lines, raw for the loader
+  , dkProgram  :: [(Int, String)] -- ^ every line the declarations left
+  }
+
+emptyDict :: Dict
+emptyDict = Dict [] [] [] [] [] []
+
+-- ...and the module's own declarations read into one.  This is the
+-- only place the six buckets are assembled, so the checker below reads
+-- a dictionary rather than a tuple.
+dictOf :: ( [(String, DefHdr, String, Maybe String, Int)]
+          , [(String, Maybe String)]
+          , [(String, [String], Maybe String)]
+          , [String], [String], [(Int, String)] )
+       -> Dict
+dictOf (ds, ts, bs, is, tb, ps) = Dict ds ts bs is tb ps
+
+-- Every name this dictionary declares, for the checks that are about
+-- names and not about kinds.  A type line's name may carry parameters
+-- (`data Box(a) = a`), so it is cut at the paren.
+dictNames :: Dict -> [String]
+dictNames dk =
+  [ n | (n, _, _, _, _) <- dkDefs dk ]
+    ++ [ headName l | (l, _) <- dkTypes dk ]
+    ++ [ headName h | (h, _, _) <- dkBlocks dk ]
+  where
+    headName l = case drop 1 (words l) of
+      (n : _) -> takeWhile (`notElem` "(:=") n
+      []      -> ""
+
+-- `Dict` is the dictionary's own wire, and a module may not declare
+-- it: that is what makes discharge structural rather than a check.
+dictReserved :: Dict -> Either String ()
+dictReserved dk = case [ n | n <- dictNames dk
+                           , n `elem` [dictLabel, "un" ++ dictLabel] ] of
+  (n : _) -> Left $ "`" ++ n ++ "` is the dictionary's own wire and may "
+                 ++ "not be declared: `Dict` is the carrier every "
+                 ++ "declaration word acts on (`defW : Code Str =Dict> "
+                 ++ "\8226`), it is threaded by the loader, and there is "
+                 ++ "no `Dict` to seed one with and no `unDict` to open "
+                 ++ "one with \8212 which is what keeps a program from "
+                 ++ "discharging it.  Rename it.  MANUAL \167 8."
+  []      -> Right ()
+
+-- Split source into `def name = body` lines, `type \8230` declaration
 -- lines, and the main program (all remaining lines, in order, joined
 -- by newline-sequencing).  A `## text` line is a doc comment: it binds
 -- to the next def or type line (consecutive doc lines join); doc text
@@ -8283,6 +8379,31 @@ resModelDefs r =
              ++ " \8212 base composition of representatives") ) ]
   where k = resCarrierName r
 
+-- ...and what `:doc Dict` shows.  `Dict` is a resource like any other
+-- and is declared by nobody, so the thing to print is the shape it
+-- WOULD have had and the two words it deliberately has not got.
+dictResourceDoc :: [String]
+dictResourceDoc =
+  [ dictLabel ++ " \8212 the dictionary, a resource the LOADER threads"
+  , "## a declaration is an act on it: `def f = body` is "
+      ++ "`[body] \"f\" defW`, and"
+  , "## every declaration word says so in its own arrow "
+      ++ "(`defW : Code Str =" ++ dictLabel ++ "> \8226`)."
+  , "## it holds the module's declarations so far \8212 defs, types, "
+      ++ "theories, models,"
+  , "## transformations, tables, imports, and the keyword table."
+  , "## what is DECLARED is here; what the checker made of it is read "
+      ++ "back with the"
+  , "## reflection words (`declOf`, `typeOfWord`, `envOf`)."
+  , "## there is no `" ++ dictLabel ++ "` and no `un" ++ dictLabel
+      ++ "`: a handler is `seed ; \8230 ; unwrap` and both"
+  , "## ends come from the `data` machinery a `resource` line drives, "
+      ++ "so a wire"
+  , "## nobody declared cannot be discharged by anything a program can "
+      ++ "write."
+  , "## the loader discharges it, because the loader is the host."
+  ]
+
 -- what `:doc R` shows: the sugar, spelled out
 resourceModelDoc :: String -> [String]
 resourceModelDoc r =
@@ -8900,8 +9021,15 @@ checkModuleRaw base src = do
       shadow0  = mbShadow base
       aliases0 = mbAliases base
       datas0   = mbDatas base
-  (defSrcs0, tyLines, declLines0, importLines, tableLines, mainLines)
-    <- splitDefsIx src
+  dict <- dictOf <$> splitDefsIx src
+  -- the dictionary's own wire is not a name a module may take
+  dictReserved dict
+  let defSrcs0   = dkDefs dict
+      tyLines    = dkTypes dict
+      declLines0 = dkBlocks dict
+      importLines = dkImports dict
+      tableLines = dkTables dict
+      mainLines  = dkProgram dict
   -- every generated def is the compiler's own text and reports the def,
   -- not a line (0); a written one reports the line its body starts on
   let defSrcs  = [ (n, h, b, d) | (n, h, b, d, _) <- defSrcs0 ]
@@ -11777,6 +11905,7 @@ dispOfRCtx :: RCtx -> Disp
 dispOfRCtx ctx =
   Disp (rcAliases ctx)
        ((ioLabel, ioCarrier)
+        : (dictLabel, dictCarrier)
         : [ (dName d, dName d) | d <- rcDatas ctx, dResource d ])
 
 -- `showType` — the REPL's own display, from the rep.  An arrow rep

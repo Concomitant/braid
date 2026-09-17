@@ -277,6 +277,11 @@ renderDef st name =
 
 docOf :: ReplState -> String -> IO ()
 docOf st name
+  -- THE DICTIONARY (stage 8).  It is a resource nobody declared, so
+  -- nothing in the session's tables answers about it, and it is still
+  -- a thing `:doc` must answer about \8212 the more so because what it
+  -- has NOT got is the point.
+  | name == dictLabel = mapM_ putStrLn dictResourceDoc
   | M.member name (rsEnv st) || isAlias || isObjModel =
       case M.lookup name (rsDocs st) of
         Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine
