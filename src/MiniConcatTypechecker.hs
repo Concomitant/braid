@@ -2818,6 +2818,16 @@ data Transport = Transport
   , tpEmbed    :: Maybe String    -- Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)
   , tpExits    :: [String]        -- slots taking the carrier, returning base
   , tpEnters   :: [String]        -- slots building a carrier out of base alone
+  , tpResource :: Maybe String    -- REPRESENTABLE at a resource wire
+                                  -- (stage 7b): the carrier's body is
+                                  -- `Fn\10216E \961 \8658 E \963\10217` for a declared
+                                  -- `resource E` that is this model's
+                                  -- own name.  Then the fibre's
+                                  -- hom-object IS an object of the
+                                  -- base, `embed` is `_`-padding and
+                                  -- `compose` is `;`, so transport
+                                  -- FUSES to what the routing pass
+                                  -- already writes (design-7b.md §3.2).
   } deriving (Eq, Show)
 
 -- the two levels `with M` needs, and the message when one is missing
@@ -3464,7 +3474,11 @@ parseInstance aliases dataSigs theories header body = do
     one _ mps _ _ src = do
       ty <- parseTyBody aliases dataSigs (concatMap mpBinders mps) src
       Right (IAStack (SCons ty SEnd))
-    isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!" :: String)
+    -- `@` is the compiler's character, and a generated declaration may
+    -- name a type with it: `resource R` writes `model R in R@t(R@k)`
+    -- (stage 7b).  Source cannot reach those names \8212 `elabHeaders`
+    -- refuses `@` in a term \8212 so admitting it here costs nothing.
+    isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!@" :: String)
     conHint "Fn" = " (`Fn` is built in and takes an arrow, not wires; "
                 ++ "wrap it — `data Arr(a, b) = Fn⟨a ⇒ b⟩` — to name it here)"
     conHint c | isJust (lookupAlias c aliases) =
@@ -5305,6 +5319,12 @@ data ElabCtx = ElabCtx
                                    -- that `Trades@cellAt` is refused as
                                    -- a TABLE's insides rather than as a
                                    -- model's slot
+  , ecRes   :: [String]           -- the module's RESOURCE names (stage
+                                   -- 7b).  A resource generates a model
+                                   -- of its own name, so the name is in
+                                   -- `ecSlots` too; `with R` on a
+                                   -- resource is routing, and this is
+                                   -- what says which reading wins.
   , ecRefl  :: RCtx                -- what the REFLECTION words read
                                    -- (2026-09-16).  A functor is an
                                    -- ordinary pure word run at
@@ -5395,7 +5415,7 @@ type TemplateTable = [(String, (String, Term))]
 
 elabCtx0 :: Env -> SlotTable -> ElabCtx
 elabCtx0 env slots =
-  ElabCtx env M.empty slots [] [] [] [] [] [] [] False Nothing []
+  ElabCtx env M.empty slots [] [] [] [] [] [] [] False Nothing [] []
           (rctxOf env)
 
 -- Apply one functor to a scope body: reify the code, RUN the word
@@ -5649,9 +5669,16 @@ elabHeaders ctx t0 = do
           rest = [ n | n <- ns
                      , isNothing (lookup n (ecBases ctx))
                      , n `elem` mns || isNothing (lookup n (ecFuncs ctx)) ]
+          -- A RESOURCE IS ROUTED, even though it also names the model
+          -- its declaration generates (stage 7b): `with Log` threads
+          -- the wire.  The one exception is the generated model's own
+          -- slot bodies, where `with Log` resolves slot names and
+          -- applies nothing, exactly as every other model's do.
           (is, rs) = partitionEithers
-                       [ maybe (Right n) (\(_, sl) -> Left (n, sl))
-                               (lookup n (ecSlots ctx))
+                       [ if n `elem` ecRes ctx && n `notElem` ecSelf ctx
+                           then Right n
+                           else maybe (Right n) (\(_, sl) -> Left (n, sl))
+                                      (lookup n (ecSlots ctx))
                        | n <- rest ]
           b'' = foldr (\tbl t -> renameWordsT tbl t)
                       (foldr (\(i, sl) t -> renameSlotsT i sl t) b' is)
@@ -5787,6 +5814,12 @@ inTarget :: [String] -> [Transport] -> SlotTable -> [(String, String)]
 inTarget thNames trans slots funcs bases resources n
   | (m : _) <- [ m | m <- trans, tpName m == n ] = Right m
   | n `elem` thNames = Left $ internal ++ "a theory reached inTarget"
+  -- A RESOURCE is asked FIRST, because since stage 7b it also names the
+  -- model its declaration generated, and the answer a user needs is the
+  -- one about the resource they wrote.
+  | n `elem` resources =
+      Left $ pre ++ "names a resource, and a resource is threaded through "
+          ++ "a body.  Write `with " ++ n ++ "`."
   | Just (th, _) <- lookup n slots =
       Left $ pre ++ "names a model of " ++ th ++ " in the base: it has no "
           ++ "carrier to build \8212 write `with " ++ n ++ "`, or `in " ++ th
@@ -5798,9 +5831,6 @@ inTarget thNames trans slots funcs bases resources n
   | isJust (lookup n funcs) =
       Left $ pre ++ "names a functor, and a functor is applied to a body, "
           ++ "not inhabited by one.  Write `with " ++ n ++ "`."
-  | n `elem` resources =
-      Left $ pre ++ "names a resource, and a resource is threaded through "
-          ++ "a body.  Write `with " ++ n ++ "`."
   | otherwise =
       Left $ pre ++ "names nothing declared at this point.  `in` takes a "
           ++ "THEORY (this def is then a template, instantiated by whatever "
@@ -7302,8 +7332,9 @@ stackPrefix = go (0 :: Int)
 -- `Nothing` means "this model has no carrier": its theory has no
 -- constructor parameter, so `with M` is the renaming it has always been
 -- and `in M` is refused.
-transportOf :: [Theory] -> Instance -> Either String (Maybe Transport)
-transportOf theories inst = do
+transportOf :: [DataDecl] -> [Theory] -> Instance
+            -> Either String (Maybe Transport)
+transportOf datas theories inst = do
   th <- either (const (Left ("Unknown theory: " ++ inTheory inst)))
                Right (theoryOf theories (inTheory inst))
   cm <- checkExtends theories th
@@ -7363,7 +7394,130 @@ transportOf theories inst = do
                        , i == SEnd, carriers o == 1 ]
       pure (Transport (inName inst) (thName th) carrier
                       (has doctrineCompose) (has doctrineEmbed)
-                      exits enters)
+                      exits enters
+                      (representableAt datas (inName inst) carrier))
+
+-- WHEN A MODEL'S FIBRE IS REPRESENTABLE AT A RESOURCE WIRE (stage 7b).
+--
+-- `K_E(\931, \920) = C(E \8855 \931, E \8855 \920)` is Power & Robinson's state
+-- construction, and it is representable: the hom-object is a genuine
+-- object of the base, `Fn\10216E \961 \8658 E \963\10217`.  So fibre composition IS
+-- base composition of representatives, `embed` IS the `_`-padding the
+-- routing pass writes, and `with E` fuses to exactly what
+-- `elabScope` emits.  This is the test, and it is deliberately narrow:
+--
+--   * the carrier's body is an `Fn` whose arrow is PURE (a carrier
+--     with a grade of its own \8212 `examples/prob.braid`'s
+--     `Fn\10216Rng a =Recursive> Rng b\10217` \8212 composes by the
+--     written-meets-written rule and must not be fused away), and
+--   * the threaded wire is the same declared `resource` on both
+--     sides, and
+--   * that resource is the MODEL'S OWN NAME.
+--
+-- The last clause is what keeps a hand-written resource-shaped model
+-- out: `Sampler` threads `Rng`, and `Rng` is not `Sampler`, so
+-- `prob.braid` keeps the unfused path it was written for.
+representableAt :: [DataDecl] -> String -> String -> Maybe String
+representableAt datas modelNm carrier =
+  case [ d | d <- datas, dName d == carrier ] of
+    (d : _)
+      | TFn (Arrow i o g) <- dBody d
+      , g == effPure
+      , [e] <- leadingRes resNames i
+      , [e] == leadingRes resNames o
+      , e == modelNm
+      -> Just e
+    _ -> Nothing
+  where resNames = [ dName r | r <- datas, dResource r ]
+
+--------------------------------------------------------------------------------
+-- What `resource R = Ty` GENERATES (stage 7b, 2026-09-17)
+--
+-- Beside the roll and the unroll the `data` machinery already writes,
+-- a resource declares a MODEL OF THE DOCTRINE: the carrier, the theory
+-- it models, and the model itself.  Not a compiler secret \8212 an
+-- ordinary model, in the compiler's namespace (`@`, unwritable in
+-- source) and visible through `:doc R`, because sugar you cannot read
+-- is a feature rather than a desugaring.
+--
+-- The theory declares `compose` and `embed` ONLY, and that is forced
+-- rather than lazy.  `observe : k(Int, Int) \8658 Int` would have to RUN a
+-- resource program, which needs a SEED, and seeds live at the install
+-- site with no declared defaults \8212 a generated `observe` would be
+-- `mempty`-conjuring by another name.  The happy consequence is that
+-- no inherited law runs: `instanceDefs`' `inherited` filter keeps a
+-- doctrine law only when every doctrine slot it names is one this
+-- theory declares, and all five Doctrine laws name `observe` or
+-- `sample`.  The category laws hold by construction (`embed` is
+-- padding, `compose` is `;`).
+--
+-- The two images are, verbatim, the shapes `examples/prob.braid`
+-- writes by hand for `Samp` (`sEmbed`, `sCompose`), which is the
+-- verification that this is the resource shape and not a guess.
+--------------------------------------------------------------------------------
+
+resCarrierName, resTheoryName, resEmbedName, resComposeName
+  :: String -> String
+resCarrierName r = r ++ "@k"
+resTheoryName  r = r ++ "@t"
+resEmbedName   r = r ++ "@arr"
+resComposeName r = r ++ "@then"
+
+-- every name `resource R` puts in the compiler's namespace
+resGenNames :: String -> [String]
+resGenNames r = [ resCarrierName r, resTheoryName r
+                , resEmbedName r, resComposeName r ]
+
+-- `data R@k(a..., b...) = Fn<R a => R b>`
+resCarrierLine :: String -> String
+resCarrierLine r =
+  "data " ++ resCarrierName r ++ "(a..., b...) = Fn\10216"
+    ++ r ++ " a \8658 " ++ r ++ " b\10217"
+
+-- `theory R@t(k(..., ...)) in Doctrine = compose : \8230, embed : \8230`
+resTheoryDecl :: String -> (String, [String])
+resTheoryDecl r =
+  ( "theory " ++ resTheoryName r ++ "(k(..., ...)) in " ++ doctrineName ++ " ="
+  , [ "    " ++ doctrineCompose ++ " : k(a, b) k(b, c) \8658 k(a, c)"
+    , "    " ++ doctrineEmbed ++ "   : Fn\10216a \8658 b\10217 \8658 k(a, b)" ] )
+
+-- `model R in R@t(R@k) = compose = R@then, embed = R@arr`
+resModelDecl :: String -> (String, [String])
+resModelDecl r =
+  ( "model " ++ r ++ " in " ++ resTheoryName r
+      ++ "(" ++ resCarrierName r ++ ") ="
+  , [ "    " ++ doctrineCompose ++ " = " ++ resComposeName r
+    , "    " ++ doctrineEmbed ++ "   = " ++ resEmbedName r ] )
+
+-- the two images, as defs.  `_ f ... >> _ ev` steps over the carrier,
+-- runs the stage on everything above it and comes back \8212 which is
+-- `routeStage`'s pure branch at k = 1, and `sEmbed`'s body with the
+-- wrapper and the `ev` in place.
+resModelDefs :: String -> [(String, DefHdr, String, Maybe String)]
+resModelDefs r =
+  [ ( resEmbedName r, noHdr
+    , "(f -> [_ f ... >> _ ev] >> " ++ k ++ ")"
+    , Just ("generated by `resource " ++ r ++ "`: the Doctrine's `"
+             ++ doctrineEmbed ++ "` at " ++ r
+             ++ " \8212 a base stage with the " ++ r
+             ++ " wire whiskered underneath") )
+  , ( resComposeName r, noHdr
+    , "(c e -> [c ... >> un" ++ k ++ " ... >> ev >> e ... >> un" ++ k
+        ++ " ... >> ev] >> " ++ k ++ ")"
+    , Just ("generated by `resource " ++ r ++ "`: the Doctrine's `"
+             ++ doctrineCompose ++ "` at " ++ r
+             ++ " \8212 base composition of representatives") ) ]
+  where k = resCarrierName r
+
+-- what `:doc R` shows: the sugar, spelled out
+resourceModelDoc :: String -> [String]
+resourceModelDoc r =
+  [ "## generated by `resource " ++ r ++ "` (a model of "
+      ++ doctrineName ++ "):"
+  , resCarrierLine r ]
+  ++ (th : tb) ++ (mh : mb)
+  where (th, tb) = resTheoryDecl r
+        (mh, mb) = resModelDecl r
 
 -- The transport as a WORD, of the model's own name: the same functor as
 -- a value, so `[Circuits]` is a quote and `lift2 [Circuits]` applies it
@@ -7972,7 +8126,7 @@ checkModuleRaw base src = do
       shadow0  = mbShadow base
       aliases0 = mbAliases base
       datas0   = mbDatas base
-  (defSrcs0, tyLines, declLines, importLines, tableLines, mainLines)
+  (defSrcs0, tyLines, declLines0, importLines, tableLines, mainLines)
     <- splitDefsIx src
   -- every generated def is the compiler's own text and reports the def,
   -- not a line (0); a written one reports the line its body starts on
@@ -8005,8 +8159,26 @@ checkModuleRaw base src = do
       -- helper; source cannot claim the exemption, because a def of
       -- that name would collide with the generated one
       tblGen   = concatMap tableGenNames tables
-  (env1, runTy, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
+  (env1a, runTya, allAliasesA, allDatasA, ownAliasesA, ownDatasA, docs0a) <-
     foldM (addType tblTypes) (env0, run0, aliases0, datas0, [], [], M.empty) tyLines
+  -- STAGE 7b: a `resource` declares a MODEL OF THE DOCTRINE, and the
+  -- carrier is a `data` line the compiler writes \8212 exactly the way a
+  -- `table` writes one.  It is appended AFTER the module's own types so
+  -- that `data R@k = Fn<R a => R b>` can name `R`, and it goes through
+  -- the same `addType` every written line does, so a name collision is
+  -- the ordinary duplicate-declaration refusal.
+  let ownRes = [ dName d | d <- ownDatasA, dResource d, null (dParams d) ]
+  (env1, runTy, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
+    foldM (addType tblTypes)
+          (env1a, runTya, allAliasesA, allDatasA, ownAliasesA, ownDatasA, docs0a)
+          [ (resCarrierLine r, Nothing) | r <- ownRes ]
+  -- ...and the theory it models and the model itself, in the same
+  -- bucket a written `theory`/`model` block lands in
+  let declLines = declLines0
+                ++ concat [ [ (th, tb, Nothing), (mh, mb, Nothing) ]
+                          | r <- ownRes
+                          , let (th, tb) = resTheoryDecl r
+                          , let (mh, mb) = resModelDecl r ]
   -- theory and model heads name types, and the type they name is
   -- routinely one of the prelude's (`Wrap(List(Int))`), so they are
   -- parsed against every alias and data type in scope — not just the
@@ -8075,8 +8247,14 @@ checkModuleRaw base src = do
   -- A model whose theory has a hom-object is a CATEGORY model: its
   -- shape is read here, once, and `with` of it transports.  There is no
   -- `mode` line any more — the model is the declaration.
-  ownTrans <- catMaybes <$> mapM (transportOf theories) insts
-  let trans = ownTrans ++ mbTrans base
+  ownTrans <- catMaybes <$> mapM (transportOf allDatas theories) insts
+  let trans0 = ownTrans ++ mbTrans base
+      -- STAGE 7b commit 3: the generated resource model EXISTS and is
+      -- checked, but `with R` still ROUTES by the old path \8212 this
+      -- commit is the statement, and nothing elaborates differently.
+      -- Commit 4 drops this filter and `runTransport` grows the fused
+      -- path that routing turns out to be.
+      trans = [ m | m <- trans0, isNothing (tpResource m) ]
       funcs = ownFuncs ++ mbFuncs base
       -- one namespace for every name a `with` header may carry
       useNames = map fst funcs ++ map fst ownBases
@@ -8123,7 +8301,13 @@ checkModuleRaw base src = do
                     , Just ("model " ++ tpName m ++ " in " ++ tpTheory m
                              ++ " — `;` is " ++ c ++ ", a stage is " ++ e
                              ++ ", the carrier is " ++ tpCarrier m) )
-                  | m <- ownTrans, Just c <- [tpCompose m], Just e <- [tpEmbed m] ]
+                  | m <- ownTrans, isNothing (tpResource m)
+                  , Just c <- [tpCompose m], Just e <- [tpEmbed m] ]
+      -- ...and a RESOURCE model gets no word of its own name, because
+      -- the name is already taken by the roll constructor the `data`
+      -- machinery wrote: `Log : Str \8658 Log` IS the entry to `Log`'s
+      -- category, and a second def of that name would be a duplicate.
+      resDefs = concatMap resModelDefs ownRes
       baseDefs = [ ( nm, noHdr, baseInstDefSrc rs
                    , Just ("model " ++ nm ++ " in Base — "
                             ++ intercalate ", " [ p ++ " = " ++ q
@@ -8139,7 +8323,7 @@ checkModuleRaw base src = do
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base)
-          (baseDefs ++ transDefs ++ defSrcs ++ instDefs
+          (baseDefs ++ transDefs ++ resDefs ++ defSrcs ++ instDefs
              ++ [ (n, noHdr, b, d) | (n, b, d) <- transformationDefSrcs ])
   -- the generated transport word is checked like any other functor's
   -- word: if a model's slots ever stop composing, the message says so
@@ -8168,7 +8352,7 @@ checkModuleRaw base src = do
         (term0, mainStart) <- parseProgramFrom mainLine allDatas mainSrc
         term1 <- elabHeaders (ElabCtx env' runFinal slotTable funcs tmpls
                                       thNames trans kwords ownBases []
-                                      False Nothing tblTypes
+                                      False Nothing tblTypes resNames
                                       (RCtx M.empty allDatas allAliases theories))
                              term0
         arr <- inferTermInAt mainStart env' term1
@@ -8348,7 +8532,7 @@ checkModuleRaw base src = do
                       (ElabCtx env1 run slotTable funcs tmpls
                                thNames trans kws bases self
                                ('@' `elem` name || name `elem` tblGen)
-                               (Just name) tblTypes refl)
+                               (Just name) tblTypes resources refl)
                       termH
           -- `in M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.

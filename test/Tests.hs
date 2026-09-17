@@ -3292,6 +3292,28 @@ moduleFailTests =
      \`with IntSum`")
   , (tmplMod ++ "1 2 ; IntSum@op ; print",
      "is the compiler's spelling of a slot")
+    -- STAGE 7b commit 3: `resource R = Ty` GENERATES a model of the
+    -- Doctrine — the carrier `R@k`, the theory `R@t` and the model `R`
+    -- — and the four generated names sit in the compiler's namespace,
+    -- refused in source by the rule that already refuses a slot.
+  , ("resource Log = Str\ndef q = Log@arr\n1 ; print",
+     "is the compiler's spelling of a slot")
+  , ("resource Log = Str\ndef q = Log@then\n1 ; print",
+     "is the compiler's spelling of a slot")
+    -- the carrier is a `data` line the compiler wrote, so a written
+    -- declaration of that name is the ordinary duplicate refusal
+  , ("resource Log = Str\ndata Log@k = Int\n1 ; print",
+     "Duplicate type declaration: Log@k")
+    -- ...and the MODEL is real: it takes the resource's own name, so a
+    -- functor of that name collides with it.  (This is the cheapest
+    -- proof from source that the generated model exists at all.)
+  , ("resource Log = Str\ndef w = (c -> c)\nfunctor Log = w\n1 ; print",
+     "Duplicate model declaration: Log")
+    -- `in R` still answers about the RESOURCE, not about the model its
+    -- declaration generated
+  , ("resource Log = Str\ndef bad in Log = dup\n1 ; print",
+     "`in Log` names a resource, and a resource is threaded through a \
+     \body.  Write `with Log`.")
     -- a template shares the def namespace
   , (tmplMod ++ "def fold1 = dup\n1 ; print", "Duplicate definition: fold1")
     -- STAGE 5b/5c½: MODELS OF `Base`.  `q` may stand wherever `p`

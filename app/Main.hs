@@ -120,11 +120,18 @@ loop st = do
           loop st
         ":defs" -> do
           liftIO $ do
-            mapM_ (putStrLn . renderData st) (reverse (rsDatas st))
-            mapM_ (putStrLn . renderAlias st) (reverse (rsAliases st))
+            -- `@` is the compiler's character: a model's slots, a
+            -- table's insides and a resource's generated carrier and
+            -- images are all named with it, and source may not write
+            -- one.  `:defs` lists what you can NAME (stage 7b).
+            let own n = '@' `notElem` n
+            mapM_ (putStrLn . renderData st)
+                  (filter (own . dName) (reverse (rsDatas st)))
+            mapM_ (putStrLn . renderAlias st)
+                  (filter (own . aName) (reverse (rsAliases st)))
             let preludeOnly = filter (`notElem` rsUserDefs st) preludeNames
             mapM_ (putStrLn . renderDef st) preludeOnly
-            mapM_ (putStrLn . renderDef st) (rsUserDefs st)
+            mapM_ (putStrLn . renderDef st) (filter own (rsUserDefs st))
             mapM_ (\(n, (th, _)) ->
                      putStrLn ("def " ++ n ++ " : template over " ++ th))
                   (reverse (rsTmpls st))
@@ -257,8 +264,10 @@ docOf :: ReplState -> String -> IO ()
 docOf st name
   | M.member name (rsEnv st) || isAlias =
       case M.lookup name (rsDocs st) of
-        Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine >> verdicts
-        Nothing -> putStrLn "(no doc)" >> putStrLn renderTypeLine >> verdicts
+        Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine
+                     >> generated >> verdicts
+        Nothing -> putStrLn "(no doc)" >> putStrLn renderTypeLine
+                     >> generated >> verdicts
   | otherwise = putStrLn $ "unknown name: " ++ name
   where
     -- a transformation's word is a def like any other, and its squares
@@ -266,6 +275,14 @@ docOf st name
     verdicts =
       mapM_ (putStrLn . transformationDocLine)
             [ mi | mi <- rsTransformations st, tiName mi == name ]
+    -- STAGE 7b: `resource R` declares a MODEL OF THE DOCTRINE besides
+    -- the wire, and sugar you cannot read is a feature rather than a
+    -- desugaring — so `:doc R` prints the three declarations it wrote,
+    -- exactly as a `table` shows the `data` line it wrote.
+    generated
+      | any (\d -> dName d == name && dResource d) (rsDatas st) =
+          mapM_ putStrLn (resourceModelDoc name)
+      | otherwise = pure ()
     isAlias = any ((== name) . aName) (rsAliases st)
               || any ((== name) . dName) (rsDatas st)
     renderTypeLine =
@@ -307,11 +324,16 @@ elabIn st src = do
   term0 <- parseProgramIn (rsDatas st) src
   elabHeaders (ElabCtx (rsEnv st) (rsRun st) (rsSlots st) (rsFuncs st)
                        (rsTmpls st) (map thName (rsTheories st))
-                       (rsTrans st) (rsKWords st) (rsBases st) [] False
+                       -- a RESOURCE's generated model does not transport
+                       -- yet (stage 7b commit 3): `with R` routes.
+                       [ m | m <- rsTrans st, tpResource m == Nothing ]
+                       (rsKWords st) (rsBases st) [] False
                        -- a session declares no `table` of its own: one is
                        -- a file declaration, and `:import` brings in only
                        -- the two words it generates
-                       Nothing [] (replRCtx st))
+                       Nothing []
+                       [ dName d | d <- rsDatas st, dResource d ]
+                       (replRCtx st))
     (case rsUse st of { [] -> term0 ; ns -> With Transporting ns term0 })
 
 typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
@@ -468,6 +490,12 @@ handleLine st line =
     Right ([(name, _, _, _)], [], [], [], [], rest)
       | all isSpace rest -> defLine name
     Right ([], [(tyLine, _)], [], [], [], rest)
+      -- A `resource` DECLARES A MODEL OF THE DOCTRINE since stage 7b —
+      -- a carrier, a theory and the model — so a session's resource
+      -- line goes through the module checker, which is the one place
+      -- that generation lives.  A `type`/`data` line still takes the
+      -- short path: it generates no declaration beyond its own.
+      | all isSpace rest, ("resource" : _) <- words tyLine -> resourceLine tyLine
       | all isSpace rest -> typeLine tyLine
     Right ([], [], [], [], [], _) -> programLine
     -- theory/model/functor are block declarations: they need a whole
@@ -486,6 +514,38 @@ handleLine st line =
     Right _           -> report "one definition per line, please"
   where
     report err = putStrLn ("error: " ++ err) >> pure st
+
+    -- resource Name = rhs : the wire, AND the model its declaration
+    -- generates.  Checked as a one-line module so a session and a file
+    -- agree about what a resource is.
+    resourceLine src =
+      case checkModuleWith (baseOf st) src
+             >>= \m -> (,) m <$> moduleSlotTable m of
+        Left err -> report err
+        Right (m, slots) -> do
+          let n = case words src of (_ : nm : _) -> takeWhile (/= '(') nm
+                                    _            -> src
+              shadowed = map aName (modAliases m) ++ map dName (modDatas m)
+          putStrLn $ "type " ++ n ++ "   (" ++ n ++ " rolls, un"
+                   ++ n ++ " unrolls, and a model of Doctrine — `:doc "
+                   ++ n ++ "`)"
+          pure st
+            { rsEnv      = modEnv m
+            , rsRun      = buildRunDefs (rsRun st) m
+            , rsAliases  = modAliases m
+                             ++ filter ((`notElem` shadowed) . aName)
+                                       (rsAliases st)
+            , rsDatas    = modDatas m
+                             ++ filter ((`notElem` shadowed) . dName)
+                                       (rsDatas st)
+            , rsDocs     = modDocs m `M.union` rsDocs st
+            , rsSlots    = slots ++ rsSlots st
+            , rsTheories = modTheories m
+            , rsTrans    = modTrans m
+                             ++ [ t | t <- rsTrans st
+                                    , tpName t `notElem` map tpName (modTrans m) ]
+            , rsModels   = modInstances m
+            }
 
     -- type Name(...) = rhs : declare (or replace) a type alias or a
     -- recursive (nominal) data type
@@ -541,7 +601,11 @@ handleLine st line =
              , mbTemplates = filter ((/= name) . fst) (rsTmpls st) } line of
         Left err -> report err
         Right m  ->
-          case modDefs m of
+          -- BY NAME, not by count: a session carries its models, and a
+          -- model's slot defs are regenerated on every line — as are a
+          -- resource's two images since stage 7b — so `modDefs` holds
+          -- more than the one the user just wrote.
+          case [ d | d@(n, _, _) <- modDefs m, n == name ] of
             -- a template is not a def: it never enters the environment,
             -- so it comes back in the template table instead
             [] | Just (th, _) <- lookup name (modTemplates m) -> do
