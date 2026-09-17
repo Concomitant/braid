@@ -140,10 +140,14 @@ def cubicMod with Mod = cubic
 # That it is a homomorphism of RINGS is a further and stronger claim,
 # and `transformation` is where it is made and checked — square by
 # square, one per generator, exactly as for any two models of a theory.
-# `sample` is declared FIRST among the slots that build an `a` out of
-# nothing, because that is the one a sampled square reaches for: the
-# evidence a theory offers is read in declaration order, so the theory
-# says which value its audits run at by writing it first.
+# EVERY slot that builds an `a` out of nothing is evidence, and a slot
+# with two inputs is audited at every COMBINATION of them: `Ring` below
+# declares three (`sample`, `sample2`, `zero`), so `add` and `mul` are
+# each run at nine points and `neg` at three.  The order the slots are
+# written in decides nothing.  (Until 2026-09-17 a square reached for
+# the FIRST such slot only, which made the audit a fact about the
+# declaration order rather than about the models — §7 is the
+# counterexample that says why that was not good enough.)
 theory Ring(a) =
     sample  : • ⇒ a
     sample2 : • ⇒ a
@@ -177,9 +181,9 @@ model Mods in Ring(Mod7) =
 transformation Reduce in Ints ⇒ Mods = reduce
 #   `:transformations` reports every square:
 #
-#     sample   proved        sample2  proved
-#     add      sampled       mul      sampled
-#     neg      sampled       zero     sampled
+#     sample   proved            sample2  proved
+#     add      sampled (9 points) mul      sampled (9 points)
+#     neg      sampled (3 points) zero     sampled
 #
 #   The two sample squares are PROVED because `reduce` of the Int one
 #   IS the Mod7 one, as free programs — `Mods@sample` is literally
@@ -246,6 +250,13 @@ model Halves in Ring(Half) =
 # ⌊7/2⌋ + ⌊7/2⌋ = 3 + 3 = 6.  The object map typed; the homomorphism
 # did not hold; and the two are checked by two different declarations,
 # which is the whole point of having both.
+#
+# Note WHICH point catches it.  At (0, 0) floor-halving IS additive, and
+# at (0, 7) and (7, 0) it is too; only (7, 7) is false.  That is why the
+# square is run at every combination of the theory's entries rather than
+# at the first one — a theory that declared `zero` first would otherwise
+# have certified this as a ring homomorphism (`test/Tests.hs`,
+# `zeroFirstRingMod`).
 (7 7 ; + ; halve ; unHalf) (7 7 ; halve halve ; addH ; unHalf) ; eq? ; verdict ; says ; print   # false
 
 # ---------------------------------------------------------------------

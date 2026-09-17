@@ -569,9 +569,18 @@ theory's parameter** and the identity on the rest. Because the base is
 the *free* category on the generators, one square per generator is
 complete. `checkTransformation` decides each square: `sameCode` first
 (a **proof**, for every input), and where that answers false or cannot
-decide, the theory's own `sample` evidence. The verdicts are **stored
+decide, the theory's own evidence. The verdicts are **stored
 on the module**, so `:transformations` reads them rather than deciding
 again.
+
+**The evidence is every entry, and every combination of them.** A
+theory's evidence is each slot at `• ⇒ a` for a parameter `a` — every
+one it declares, not the first — and a slot with several inputs is run
+at the **cross product**, capped at 64 points per square (`sampleCap`)
+and reported as `n of N points` when the cap bites. Reading only the
+first entry made the audit a fact about the order the theory's slots
+were written in rather than about the models: with `zero` written above
+`sample`, floor-halving passed as a ring homomorphism at (0, 0).
 
 **What `with` does to it.** Nothing: a transformation contributes a
 word, and the word is called like any other.

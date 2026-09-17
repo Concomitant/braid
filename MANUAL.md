@@ -2546,6 +2546,20 @@ transformation must preserve it: `len` of `ListMonoid`'s sample must *be*
 If that reads as strict, it is the same strictness that makes a model
 an audited model — what the theory declares is what the models owe.
 
+**A point is one choice of entry per input wire** *(2026-09-17)*. A
+theory's evidence is **every** slot that builds the parameter out of
+nothing — `sample`, `sample2`, `zero`, `unit`, whatever it declared —
+and a slot with two inputs is run at the **cross product**: three
+entries make `add : a a ⇒ a` nine points, and `:transformations` reports
+the nine. The count is capped at **64 points per square**, and the cap
+is said rather than silent — over it the verdict reads `sampled (64 of
+169 points; …)`, so an audit never reports evidence it did not take.
+Until this, a square ran at the theory's **first** nullary entry alone,
+which made the audit a fact about the order the slots were *written* in:
+a theory declaring `zero` before `sample` certified floor-halving as a
+ring homomorphism, because ⌊(0+0)/2⌋ = ⌊0/2⌋ + ⌊0/2⌋ and nothing else
+was ever looked at (`examples/modular.braid` §7).
+
 **When both models are models of a theory extending `Doctrine`** they
 are internal categories, and a transformation between them is an
 **internal functor**: the squares for `compose` and `embed` are exactly

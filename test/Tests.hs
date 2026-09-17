@@ -79,6 +79,9 @@ runExample name = do
 -- two example files that declare transformations.  `proved` is
 -- `sameCode`, for every input; `sampled (n points; why)` is the theory's
 -- own evidence, and `why` is what the normalizer said instead of `true`.
+-- A POINT IS ONE CHOICE OF ENTRY PER INPUT WIRE (2026-09-17): a binary
+-- slot of a theory with three nullary entries is audited at all nine,
+-- and `n of N points` says so when the cap (`sampleCap`) bites.
 -- (example file, transformation, the rendering `:transformations` prints)
 transformationVerdictTests :: [(String, String, String)]
 transformationVerdictTests =
@@ -91,9 +94,9 @@ transformationVerdictTests =
     , unlines' [ "Reduce in Ints \8658 Mods"
                , "  sample   proved"
                , "  sample2  proved"
-               , "  add      sampled (2 points; differ in the free category)"
-               , "  mul      sampled (2 points; differ in the free category)"
-               , "  neg      sampled (1 point; differ in the free category)"
+               , "  add      sampled (9 points; differ in the free category)"
+               , "  mul      sampled (9 points; differ in the free category)"
+               , "  neg      sampled (3 points; differ in the free category)"
                , "  zero     sampled (differ in the free category)" ] ) :
     -- a hom-object carrier pins its own `Fn` to a whole STACK per side
     -- since 2026-09-16, so the two squares that APPLY the witness stop
@@ -103,7 +106,7 @@ transformationVerdictTests =
   [ ( "transformations.braid", "Forget"
     , unlines' [ "Forget in Names \8658 Funcs"
                , "  embed    proved"
-               , "  compose  sampled (2 points; ev of an open wire)"
+               , "  compose  sampled (1 point; ev of an open wire)"
                , "  observe  sampled (1 point; `runN` has no closed arity)"
                , "  sample   proved" ] )
     -- ...and `len` is a fold, which applies its handler, so two squares
@@ -112,7 +115,7 @@ transformationVerdictTests =
   , ( "transformations.braid", "Len"
     , unlines' [ "Len in ListMonoid \8658 IntSum"
                , "  unit    sampled (ev of an open wire)"
-               , "  op      sampled (2 points; ev of an open wire)"
+               , "  op      sampled (4 points; ev of an open wire)"
                , "  sample  sampled (`pack` has no closed arity)" ] )
     -- forgetting the tangent: every square proved, which is the
     -- strongest verdict the machinery has — and the model is now
@@ -142,8 +145,8 @@ transformationVerdictTests =
     -- exactly what the theory's evidence is for
   , ( "autodiff.braid", "Transpose"
     , unlines' [ "Transpose in Fwd(Floats) \8658 Rev"
-               , "  add       sampled (2 points; differ in the free category)"
-               , "  mul       sampled (2 points; differ in the free category)"
+               , "  add       sampled (1 point; differ in the free category)"
+               , "  mul       sampled (1 point; differ in the free category)"
                , "  neg       sampled (1 point; differ in the free category)"
                , "  lit       proved"
                , "  exp       sampled (1 point; differ in the free category)"
@@ -168,10 +171,10 @@ transformationVerdictTests =
     -- `Box`, whose arity is open.
   , ( "prob.braid", "Expect"
     , unlines' [ "Expect in Mixtures \8658 Means"
-               , "  mix      sampled (2 points; ev of an open wire)"
+               , "  mix      sampled (4 points; ev of an open wire)"
                , "  sample   sampled (`Box` has no closed arity)"
                , "  other    sampled (`Box` has no closed arity)"
-               , "  observe  sampled (1 point; ev of an open wire)" ] )
+               , "  observe  sampled (2 points; ev of an open wire)" ] )
   ]
   where unlines' = foldr1 (\a b -> a ++ "\n" ++ b)
 
@@ -3029,6 +3032,29 @@ halfRingMod =
   \model Halves in Ring(Half) =\n    sample = 7 ; halve\n    add = addH\n\
   \    mul = mulH\n    neg = negH\n"
 
+-- ...and the SAME counterexample with the evidence slots written in the
+-- other order (2026-09-17).  Until the evidence fix a sampled square
+-- ran at the theory's FIRST nullary entry, so a theory that declared
+-- `zero` before `sample` audited floor-halving at (0, 0) \8212 where it
+-- is a homomorphism \8212 and the false claim PASSED.  Evidence is every
+-- entry now, so the order a theory writes its slots in decides nothing.
+zeroFirstRingMod :: String
+zeroFirstRingMod =
+  "data Half = Int\ndef halve = (x -> x 2 ; div ; Half)\n\
+  \def addH = (Half(a) Half(b) -> a b ; + ; Half)\n\
+  \def mulH = (Half(a) Half(b) -> a b ; * ; Half)\n\
+  \def negH = (Half(a) -> 0 a ; - ; Half)\n\
+  \def negInt = (x -> 0 x ; -)\n\
+  \theory Ring(a) =\n\
+  \    zero : \8226 \8658 a\n    sample : \8226 \8658 a\n\
+  \    add : a a \8658 a\n\
+  \    mul : a a \8658 a\n    neg : a \8658 a\n\
+  \model Ints in Ring(Int) =\n    zero = 0\n    sample = 7\n    add = +\n\
+  \    mul = *\n    neg = negInt\n\
+  \model Halves in Ring(Half) =\n    zero = 0 ; Half\n\
+  \    sample = 7 ; halve\n    add = addH\n\
+  \    mul = mulH\n    neg = negH\n"
+
 ruleMod :: String
 ruleMod =
   "def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
@@ -3660,6 +3686,14 @@ moduleFailTests =
     -- halving is a perfectly good object map and not a ring map:
     -- \8970(7+7)/2\8971 = 7 but \8970 7/2\8971 + \8970 7/2\8971 = 6.
   , (halfRingMod ++ "transformation Halved in Ints \8658 Halves = halve\n1 ; print",
+     "transformation Halved: the square for slot 'add' does not commute \
+     \at the theory's samples")
+    -- ...and the order the theory writes its evidence in decides
+    -- NOTHING (2026-09-17): with `zero` declared before `sample` the
+    -- old machinery sampled at (0, 0), where floor-halving IS a
+    -- homomorphism, and the false claim passed.  Every entry is
+    -- evidence now, so it is refused at the same slot.
+  , (zeroFirstRingMod ++ "transformation Halved in Ints \8658 Halves = halve\n1 ; print",
      "transformation Halved: the square for slot 'add' does not commute \
      \at the theory's samples")
     -- STAGE 5c½: `in` names a theory or a model with a carrier, and

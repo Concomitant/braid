@@ -6594,29 +6594,47 @@ data TransformationSquare = TransformationSquare
   , tsqLaw    :: Maybe String
   , tsqWhy    :: String        -- why there is no sampled law, if there is none
   , tsqPoints :: Int           -- sample points the law runs at, if it has one
+  , tsqTotal  :: Int           -- ...out of how many the theory's evidence offers
   , tsqExit   :: Bool          -- ...and whether it compares through the exit
   }
 
--- A square's sampled law: the def it becomes, its source, how many of
--- the theory's sample points supply its inputs, and whether the
--- comparison goes through the theory's exit (it does not when the
+-- A square's sampled law: the def it becomes, its source, how many
+-- EVIDENCE POINTS it runs at, how many the theory offers, and whether
+-- the comparison goes through the theory's exit (it does not when the
 -- theory declares none, and then `eq?` weighs the carriers themselves).
+--
+-- A point is one CHOICE OF ENTRY PER INPUT WIRE (2026-09-17).  Until
+-- then a square ran at ONE point — the theory's FIRST nullary entry,
+-- in declaration order — so a theory that happened to declare `zero`
+-- before `sample` audited its squares at zero, where a false
+-- homomorphism is true.  Evidence is now the CROSS PRODUCT of every
+-- nullary entry over every input wire, capped at `sampleCap`.
 data SampledLaw = SampledLaw
   { slName   :: String
   , slSrc    :: String
   , slPoints :: Int
+  , slTotal  :: Int
   , slExit   :: Bool
   }
 
+-- How many evidence points one square is run at, at most.  A theory
+-- with e nullary entries audits a binary slot at e\178 points, and the
+-- cap is what keeps a theory with a dozen entries from turning module
+-- start into a benchmark.  The cap is SAID rather than silent: over it
+-- the verdict reads `sampled (64 of 169 points; —)`, so an audit
+-- never reports evidence it did not take.
+sampleCap :: Int
+sampleCap = 64
+
 -- What the checker decided about one square, kept so that
 -- `:transformations` READS the verdict rather than deciding it again.
--- `TVProved` is `sameCode` — for every input; `TVSampled n why` is the
--- theory's own evidence, at n sample points (a square with no inputs
--- runs at none), and `why` is the normalizer's refusal in a few words —
--- WHY the samples had to decide it (2026-09-14).  A square the
--- normalizer decided FALSE is not sampled at all: the transformation is
--- refused, naming the slot.
-data TransformationVerdict = TVProved | TVSampled Int String
+-- `TVProved` is `sameCode` — for every input; `TVSampled n tot why`
+-- is the theory's own evidence, at n of the tot points it offers (a
+-- square with no inputs runs at none), and `why` is the normalizer's
+-- refusal in a few words — WHY the samples had to decide it
+-- (2026-09-14).  A square the normalizer decided FALSE is not sampled
+-- at all: the transformation is refused, naming the slot.
+data TransformationVerdict = TVProved | TVSampled Int Int String
   deriving (Eq, Show)
 
 -- A declared transformation and its verdicts, slot by slot, in the
@@ -6647,12 +6665,14 @@ renderFamily i =
 -- inputs is run at no sample points and simply reads `sampled`.
 showVerdict :: TransformationVerdict -> String
 showVerdict TVProved            = "proved"
-showVerdict (TVSampled n why)
+showVerdict (TVSampled n tot why)
   | null parts = "sampled"
   | otherwise  = "sampled (" ++ intercalate "; " parts ++ ")"
   where
-    parts = [ show n ++ " point" ++ (if n == 1 then "" else "s")
-            | n > 0 ] ++ [ why | not (null why) ]
+    parts = [ points | n > 0 ] ++ [ why | not (null why) ]
+    -- the cap is SAID: `64 of 169 points` never claims the other 105
+    points | n < tot   = show n ++ " of " ++ show tot ++ " points"
+           | otherwise = show n ++ " point" ++ (if n == 1 then "" else "s")
 
 -- WHY the theory's samples had to decide a square, in a few words, to
 -- sit beside `sampled`.  Every refusal names its own case (\167 12.9);
@@ -6704,7 +6724,7 @@ transformationDocLine mi =
   where
     vs      = map snd (tiSquares mi)
     proved  = count (length [ () | TVProved <- vs ]) "proved"
-    sampled = count (length [ () | TVSampled _ _ <- vs ]) "sampled"
+    sampled = count (length [ () | TVSampled _ _ _ <- vs ]) "sampled"
     count 0 _    = ""
     count n what = show n ++ " " ++ what
 
@@ -6857,7 +6877,8 @@ transformationDefs theories insts mo = do
           rhsN = transformationDefName nm "rhs" sName
       (mlaw, why) <- pure (sampledLaw th ps a b sName sIn sOut)
       pure ( TransformationSquare sName lhsN rhsN (fmap slName mlaw) why
-                         (maybe 0 slPoints mlaw) (maybe False slExit mlaw)
+                         (maybe 0 slPoints mlaw) (maybe 0 slTotal mlaw)
+                         (maybe False slExit mlaw)
            , lhsS, rhsS, fmap slSrc mlaw )
 
     -- The square RUN at the theory's evidence: the standing pattern —
@@ -6865,21 +6886,49 @@ transformationDefs theories insts mo = do
     -- a carrier (comparing one directly is `eq?` on whatever it holds),
     -- and `eq?` decides.  `Nothing` carries the reason, which is what
     -- the refusal prints.
+    --
+    -- EVERY ENTRY, AND EVERY COMBINATION OF THEM (2026-09-17).  A slot
+    -- with k input wires is run at the cross product of the entries
+    -- that fill each one, and the law is the conjunction: one `false`
+    -- anywhere refuses the square.  Reading only the first entry made
+    -- the audit depend on the order the theory's slots were WRITTEN,
+    -- which is not a fact about the models — a floor-halving `add`
+    -- commutes at (0, 0) and nowhere else.
     sampledLaw th ps a b sName sIn sOut =
       case (closedWires sIn, closedWires sOut) of
         (Just ins, Just [out])
-          | Just atoms <- mapM sampleAtom ins ->
+          | Just choices <- mapM sampleAtoms ins ->
               let obs    = observer out
-                  lhsRun = joinSrc [unwords atoms, slotDefName (inName a) sName
-                                   , compAt sOut, obs]
-                  rhsRun = joinSrc [unwords atoms, compAt sIn
-                                   , slotDefName (inName b) sName, obs]
+                  combos = take sampleCap (sequence choices)
+                  total  = product (map length choices)
+                  sampled = or [ isJust (wordFor ps w) | w <- ins ]
+                  at atoms =
+                    let lhsRun = joinSrc [unwords atoms
+                                         , slotDefName (inName a) sName
+                                         , compAt sOut, obs]
+                        rhsRun = joinSrc [unwords atoms, compAt sIn
+                                         , slotDefName (inName b) sName, obs]
+                    in "(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
+                         ++ "(forget >> true | forget >> false) >> merge"
+                  -- The conjunction, written the way the remainder
+                  -- discipline wants it: `and : Bool Bool \8658 Bool` is
+                  -- CLOSED, so each further point is grouped and
+                  -- whiskered over the running verdict rather than
+                  -- simply appended.  One point is written exactly as
+                  -- it was before there were several.
+                  src = case map at combos of
+                          [p0]      -> p0
+                          (p0 : ps') ->
+                            joinSrc ( ("(" ++ p0 ++ ") (" ++ head ps' ++ ")")
+                                      : "and"
+                                      : concat [ ["_ (" ++ q ++ ")", "and"]
+                                               | q <- drop 1 ps' ] )
+                          []        -> "true"
               in ( Just (SampledLaw
                           (transformationDefName nm "square" sName)
-                          ("(" ++ lhsRun ++ ") (" ++ rhsRun ++ ") >> eq? >> "
-                            ++ "(forget >> true | forget >> false) >> merge")
-                          (length [ () | w <- ins
-                                         , isJust (wordFor ps w) ])
+                          src
+                          (if sampled then length combos else 0)
+                          (if sampled then total else 0)
                           (not (null obs)))
                  , "" )
           | otherwise ->
@@ -6893,14 +6942,22 @@ transformationDefs theories insts mo = do
         _ -> (Nothing, "its stacks are not closed")
       where
         compAt st = either (const "") id (stageFor ps sName st)
-        sampleAtom w
-          | isJust (wordFor ps w) = slotDefName (inName a) <$> sampleSlot w
-          | TFn _ <- w            = Just "[pass]"
+        -- EVERY atom that can fill this wire, in the theory's own
+        -- declaration order.  `Nothing` is "the theory offers none",
+        -- which is what the refusal reports.
+        sampleAtoms w
+          | isJust (wordFor ps w) =
+              case map (slotDefName (inName a)) (sampleSlots w) of
+                [] -> Nothing
+                as -> Just as
+          | TFn _ <- w            = Just ["[pass]"]
           | otherwise             = Nothing
-        -- an ENTRY of the source model supplies a value of THIS wire's
-        -- parameter (`sample : \8226 \8658 a` feeds an `a`, and a second
-        -- parameter would want a second entry)
-        sampleSlot w = listToMaybe
+        -- the ENTRIES of the source model that supply a value of THIS
+        -- wire's parameter (`sample : \8226 \8658 a` feeds an `a`, and a
+        -- second parameter would want an entry of its own).  ALL of
+        -- them: the theory's evidence is what it declared, not what it
+        -- declared first.
+        sampleSlots w = nub
           [ n | (q, _) <- ps, paramWire q w
               , (n, Arrow i o _) <- thSlots th, i == SEnd
               , Just [w'] <- [closedWires o], paramWire q w' ]
@@ -7045,7 +7102,8 @@ checkTransformation env defs theories insts mo squares = do
           -- square is refused as WRONG, naming the slot.
           Right False
             | isJust (tsqLaw sq) ->
-                Right (tsqSlot sq, TVSampled (tsqPoints sq) freeDiffer)
+                Right (tsqSlot sq, TVSampled (tsqPoints sq) (tsqTotal sq)
+                                              freeDiffer)
             | otherwise -> undecided sq
                    ("' is FALSE \8212 `sameCode` decides the two sides are "
                      ++ "different programs of the free category, and there "
@@ -7054,7 +7112,8 @@ checkTransformation env defs theories insts mo squares = do
           -- verdict records what stopped the proof
           Left why
             | isJust (tsqLaw sq) ->
-                Right (tsqSlot sq, TVSampled (tsqPoints sq) (shortReason why))
+                Right (tsqSlot sq, TVSampled (tsqPoints sq) (tsqTotal sq)
+                                              (shortReason why))
             | otherwise -> undecided sq
                    ("' does not decide \8212 `sameCode` cannot prove it ("
                      ++ shortReason why ++ ")")
@@ -12125,7 +12184,7 @@ runLaw m (n, t) = do
 sampledSquare :: Module -> String -> String -> Bool
 sampledSquare m mo sl =
   or [ True | mi <- modTransformations m, tiName mi == mo
-            , (s, TVSampled _ _) <- tiSquares mi, s == sl ]
+            , (s, TVSampled _ _ _) <- tiSquares mi, s == sl ]
     || null [ () | mi <- modTransformations m, tiName mi == mo ]
 
 -- One generated square, run at the theory's samples.  A transformation whose
