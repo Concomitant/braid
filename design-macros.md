@@ -4899,3 +4899,116 @@ bless until the word runs — so the fold would put two different
 checking stories under one keyword, and deciding how that reads is a
 stage's worth of work rather than a paragraph's. Everything else this
 amendment names is shipped.
+
+---
+
+## Amendment (2026-09-17): the declaration layer — keywords are words
+
+*Stage 8. Direction 3 was decided on 2026-08-29 and written down in one
+bullet; this is what it cost to build, and the two places the bullet was
+not specific enough.*
+
+Stage 0's surface decision reads, verbatim:
+
+> **Declaration layer, direction 3**: fixed name-first surface notation
+> (`def name = body` and kin) over an eventually-open table of
+> declaration words carrying a `=Dict>` manifest — the metalanguage is
+> the language, one resource richer. Forth-style parsing words are ruled
+> out permanently: they break uniform reading and the
+> hygiene-by-representation story; post-parse Code functors only. The
+> keyword-initial surface is kept *deliberately* — it marks "an act on
+> the dictionary" vs a morphism, the phase distinction made visible.
+
+It is built, and the surface did not change by one character. Every
+existing example prints what it printed, save one that counts the words
+in scope and now counts ten more.
+
+### `Dict` holds the declarations, not the module
+
+The bullet says "one resource richer" and does not say what the resource
+carries. Two answers were available and the first is wrong.
+
+The **`Module` record** was the obvious one: it is what a declaration
+ends up in. It holds an `Env`, a `Scheme` and a `Term`, none of which
+has a Braid rep — so handing one to a program would mean reflecting the
+checker's own types, which is bootstrap rung 2 and not a declaration
+layer. Worse, it would make `Dict` a thing a program could *read*,
+and reading is not what a declaration word does.
+
+So `Dict` holds **the declarations so far**: the defs with their
+headers and source, the type lines, the theory/model/functor/
+transformation blocks, the imports, the tables and the program lines the
+declarations did not take. `Dict` is the **write** handle. The **read**
+side already existed and is the reflection words — `declOf`,
+`typeOfWord`, `envOf` read the four tables the checker holds, at the
+point the word runs. Write and read are two constructs because they are
+two directions, and neither wanted the other's rep.
+
+**Discharge is structural, which is `World`'s argument made a second
+time.** A handler is `seed ; … ; unwrap`, and both ends come from the
+`data` machinery a `resource` line drives. `Dict` is declared by
+nothing, so there is no `Dict` and no `unDict`, and the name may not be
+taken by any keyword. The loader discharges it, because the loader is
+the host.
+
+### The grade decides what a declaration line is, not the first token
+
+The bullet says the keyword marks the phase. It does — at the surface.
+At the **other** place a declaration can now be written, a top-level
+line of a program, there is no keyword to read, and the first attempt
+read the line's tokens for a declaration word's name instead. That
+fails at exactly the case the feature is for:
+
+```braid
+def declare = (n -> (n ; bodyFor) (n ; nameFor) ; defW)
+[(acc n -> n ; declare ; acc)] 0 (1 2 3 ; pack) ; fold ; drop
+```
+
+The second line names `defW` nowhere. It is a declaration line because
+`declare` is `=Dict>` and the grade propagates, and **the grade is the
+only thing that knows**. That is what a manifest is for; the keyword is
+the same mark written where an arrow cannot be read.
+
+Three rules follow, each refused by name: such a line must be `• =Dict>
+•` (it is lifted out of main and run above it, so it must leave main's
+stack as it found it); it may not touch the world (it runs before main,
+so its output would arrive before main's — and check-time file reading
+is the loader's, which is what `importW` and `tableW` are); and it
+lands **below** the module's written defs, because the dictionary a
+compile-time word sees is the dictionary so far. The ordering rule,
+again, unchanged.
+
+### Nine of the ten are the keyword's only
+
+`defW` is the one a program may call. The other nine declare things the
+module's own defs are checked *against* — a theory, a model, a type —
+and those are checked above the program that would declare them. Making
+them callable means checking the module in more than one pass, and a
+second pass is a stage's worth of work rather than a paragraph's. It is
+refused by name, with that sentence.
+
+`typeW : TypeRep Str =Dict> •` is the interesting one of the nine. The
+2026-09-16 amendment recorded, twice, that a type-level function on
+`TypeRep` "cannot turn its answer back into a `data` declaration — the
+same missing door B1 hit, from the other side." The door now has a
+word on it. It is bolted, and the bolt is a pass structure rather than
+a missing construct.
+
+### What the table bought, and what it cost
+
+The scanner's ten keyword branches became ten **rows**: a keyword, a
+word, how its line is collected, the shape of its body argument, and
+whether it reads the world. A row is data. Adding a keyword adds no code
+to the scanner, which is what "eventually-open" was asking for.
+
+The argument shapes are **three and closed** — `Code`, `Str`,
+`TypeRep`, all post-parse. That is not a limitation waiting to be
+lifted: a fourth shape is a reader macro under another name, and the
+bullet rules those out permanently. A keyword's word receives what the
+parser already built, which is why a Braid file can be read without
+being run.
+
+The cost was one number. `examples/typerep.braid`'s differential check
+counts the words in scope — 260 before, 270 now — because ten of them
+are new. They have reps and they agree, which is the check doing its
+job.

@@ -17,6 +17,12 @@ writes a `data` declaration, and a `resource` writes a carrier, a
 theory and a `model` of the Doctrine. Both show you what they wrote
 (`:doc`).
 
+Since 2026-09-17 there is a layer **beneath** all of them, and it
+changes nothing you write: each keyword names a **declaration word**,
+and a keyword line is parsed into a call of it (`def f = body` is
+`[body] "f" defW`). The surface is unchanged and the table of words is
+open. See "Beneath the keywords", below.
+
 Cross-references are to `MANUAL.md`.
 
 ---
@@ -842,6 +848,81 @@ loaded into the `Frame` category).
   only words it puts in scope
 table: a table can only be declared when the module is loaded from a
   file, and this one was checked without a file context: table Trades
+```
+
+---
+
+## Beneath the keywords — the declaration words *(2026-09-17)*
+
+**What they are.** Ten ordinary words, one per keyword, each acting on
+the **dictionary**: `Dict`, a resource the loader threads. A keyword
+line is parsed, whole, into a **call** of its word, and the pipeline
+runs the calls in file order against the dictionary. This is stage 0's
+"direction 3" (`design-macros.md`, 2026-08-29) built: a fixed,
+name-first surface over an **open table** of declaration words carrying
+a `=Dict>` manifest. The keyword-initial surface is kept deliberately —
+it marks *an act on the dictionary* against *a morphism*.
+
+| keyword | its word | arrow | the call a line becomes |
+|---|---|---|---|
+| `def` | `defW` | `Code Str =Dict> •` | `def f = body` ≡ `[body] "f" defW` |
+| `type` | `typeW` | `TypeRep Str =Dict> •` | `type P = Int Int` ≡ `⌜Int Int⌝ "P" typeW` |
+| `data` | `dataW` | `TypeRep Str =Dict> •` | `data Box = Int` ≡ `⌜Int⌝ "Box" dataW` |
+| `resource` | `resourceW` | `TypeRep Str =Dict> •` | `resource Log = Str` ≡ `⌜Str⌝ "Log" resourceW` |
+| `theory` | `theoryW` | `Str Str =Dict> •` | the block, and the head |
+| `model` | `modelW` | `Str Str =Dict> •` | the bindings, and the head |
+| `transformation` | `transformationW` | `Str Str =Dict> •` | the components, and the head |
+| `functor` | `functorW` | `Str Str =Dict> •` | the word, and the name |
+| `import` | `importW` | `Str =Dict IO> •` | `import "u.braid"` ≡ `"u.braid" importW` |
+| `table` | `tableW` | `Str Str =Dict IO> •` | the path, and the head |
+
+**The two that read the world say so.** `importW` and `tableW` are
+`=Dict IO>`; the other eight are `=Dict>`. That is the one place IO
+happens before anything is checked — the loader resolves a path and
+reads a file — and the grade is the manifest of exactly that.
+
+**What an argument may be.** Three shapes, and the list is closed:
+**`Code`** (an already-parsed program), **`Str`** (a name, a header, a
+path — text the word reads, never parses) and **`TypeRep`** (an
+already-parsed type). All three are **post-parse**. A word that wanted a
+fourth would be asking for a reader macro, and parsing words are ruled
+out permanently: they break uniform reading and the
+hygiene-by-representation story.
+
+**How a line is parsed into them.** Every declaration line is `KEYWORD
+<head> = <body>`, split at its own first `=`, the body running to the
+end of the line or into the indented block beneath it. The head is the
+`Str`; the body is read at the word's declared shape; the arguments are
+pushed in that order and the word is called postfix. A keyword whose
+line has no `=` (`import`) takes the head alone.
+
+**Callable from a program.** A top-level group is a **declaration line**
+when its **grade** says so — when what it does carries `Dict`. Not when
+it happens to name `defW`: a loop that declares three words names it
+inside a def, and the grade is the only thing that knows. Such a group
+is inferred at `• =Dict> •`, run at check time above main and below the
+module's own defs (the ordering rule — the dictionary a compile-time
+word sees is the dictionary so far), and lifted out of main.
+
+**Examples.** `dictionary.braid` — the arrows printed off the words
+themselves, one declaration written both ways, and three words declared
+in a loop and then used.
+
+**Refusals.**
+
+```text
+`defW` is a declaration word: the keyword `def` is parsed into a call of
+  it (`defW : Code Str =Dict> •`), so a module may not take the name.
+`Dict` is the dictionary's own wire and may not be declared: … there is
+  no `Dict` to seed one with and no `unDict` to open one with — which is
+  what keeps a program from discharging it.
+a DECLARATION LINE is run at check time, above main, so it must take
+  nothing and leave nothing (`• =Dict> •`): …
+a DECLARATION LINE runs at check time, before main, so it may not touch
+  the world: this one is `=Dict IO>` …
+`theoryW` is a declaration word, and a program may not call this one
+  yet: `theory` declares something the module's own defs are checked
+  AGAINST, and they are checked above the program that would declare it.
 ```
 
 ---

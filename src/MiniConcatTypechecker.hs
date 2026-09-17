@@ -125,7 +125,7 @@ ioLabel = "IO"
 ioCarrier :: String
 ioCarrier = ioLabel ++ "@World"
 
--- THE DICTIONARY'S OWN WIRE (stage 8, 2026-09-18).  A declaration is
+-- THE DICTIONARY'S OWN WIRE (stage 8, 2026-09-17).  A declaration is
 -- an ACT ON THE DICTIONARY, and the dictionary is a resource like any
 -- other after 7b: a label naming a functor, with a carrier looked up
 -- from the label's declaration.  `def f = body` is `[body] "f" defW`,
@@ -5203,7 +5203,7 @@ primEnv =
       unzipNTy = Forall [a, b] [] [] [NV "n"] [] []
         (arrPure (SExp (SCons ta (one tb)) nExp SEnd)
                (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
-  in M.fromList
+  in M.fromList $
          -- `_` is the identity: the positional spelling, a wire this
          -- stage does not touch.  `id` is the WORD for the same
          -- morphism and is therefore a prelude def (`def id = _`), not
@@ -5390,7 +5390,12 @@ primEnv =
        , ("unzipN",    unzipNTy)
        , ("dupN",      dupNTy)
        , ("zipN",      zipNTy)
-       ]
+       -- THE DECLARATION WORDS (stage 8).  Ordinary words, with the
+       -- manifest in the arrow: `defW : Code Str =Dict> \8226`.  They
+       -- are prims for the kernel's own reason \8212 they touch the
+       -- implementation, acting on the dictionary the checker holds,
+       -- exactly as `print` touches the world.
+       ] ++ [ (dwWord w, declWordScheme w) | w <- declWordTable ]
 
 --------------------------------------------------------------------------------
 -- 8. Driver: parse + infer + solve
@@ -7402,7 +7407,341 @@ data Module = Module
                                         -- originated it, for `:t!`
   }
 
--- THE DICTIONARY, as a carrier (stage 8, 2026-09-18).  What a module's
+--------------------------------------------------------------------------------
+-- BENEATH THE KEYWORDS: the declaration words (stage 8, 2026-09-17)
+--
+-- Direction 3 (design-macros.md, 2026-08-29): a fixed, name-first
+-- surface over an OPEN TABLE of declaration words, each carrying a
+-- `=Dict>` manifest.  The keyword-initial surface is kept deliberately
+-- — it marks "an act on the dictionary" against "a morphism" — and
+-- parsing words are ruled out permanently, because a reader macro
+-- breaks uniform reading and the hygiene-by-representation story.
+--
+-- So a keyword LINE is parsed, whole, into a CALL of an ordinary word:
+--
+--     def f = body                 ≡   [body] "f" defW
+--     type Pair = Int Int          ≡   ⌜Int Int⌝ "Pair" typeW
+--     import "util.braid"          ≡   "util.braid" importW
+--
+-- and the pipeline runs the calls, in file order, against the `Dict`.
+-- The surface does not change by one character; what changes is that
+-- there is now one table saying what a keyword IS, and a library may
+-- add a row to it.
+--
+-- WHAT SHAPES AN ARGUMENT MAY TAKE.  Three, and the list is closed:
+--
+--   Code     an already-parsed program — a quotation, what `[body]` is
+--   Str      a name, a header, a path — text the word reads, never parses
+--   TypeRep  an already-parsed type — what `typeOfWord` answers with
+--
+-- All three are POST-PARSE.  A keyword word never receives text to
+-- parse, which is exactly the line direction 3 draws: post-parse Code
+-- functors only, parsing words never.  A word that wanted a fourth
+-- shape would be asking for a reader macro under another name.
+--
+-- HOW A LINE IS PARSED INTO THEM.  Every declaration line has the form
+-- `KEYWORD <head> = <body>`, with `<body>` running to the end of the
+-- line or into the indented block beneath it.  The head is the Str; the
+-- body is read at the word's declared shape; the arguments are pushed
+-- in that order and the word is called postfix.  A keyword whose line
+-- has no `=` (`import "f.braid"`) takes the head alone.
+--------------------------------------------------------------------------------
+
+-- The shape of an argument a declaration word takes.
+data DeclArgShape = ShCode | ShStr | ShTy
+  deriving (Eq, Show)
+
+-- ...and an argument, carrying the source the parser read it from.
+data DeclArg = DACode String | DAStr String | DATy String
+  deriving (Eq, Show)
+
+-- How a keyword line collects its body.
+data DeclSpan
+  = SpanLine    -- the line, and nothing under it (`type`, `import`, `table`)
+  | SpanBlock   -- an indented block under the head (`theory`, `model`)
+  | SpanDef     -- either, the way a `def` has both
+  deriving (Eq, Show)
+
+-- ONE ROW OF THE TABLE.  The keyword whose lines call this word, the
+-- word's own name, how its line is collected, the shape of its body
+-- argument (`Nothing`: the line takes no body), and its arrow — written
+-- out, because the arrow is the manifest and a declaration word that
+-- did not say `=Dict>` would be claiming to be a morphism.
+data DeclWord = DeclWord
+  { dwKeyword :: String
+  , dwWord    :: String
+  , dwSpan    :: DeclSpan
+  , dwBody    :: Maybe DeclArgShape
+  , dwIO      :: Bool            -- ...and whether it reads the world
+  }
+
+-- the shapes this word's arguments have, deepest first: the body (when
+-- it has one) under the head, which is the order `[body] "head" defW`
+-- pushes them in
+dwShapes :: DeclWord -> [DeclArgShape]
+dwShapes w = maybe [] (: []) (dwBody w) ++ [ShStr]
+
+-- ...and the arrow it wears, which is the manifest.  Written from the
+-- row rather than beside it, so a word cannot claim a grade it has not
+-- got.
+dwArrow :: DeclWord -> String
+dwArrow w = unwords (map shapeTy (dwShapes w)) ++ " ="
+              ++ unwords (dictLabel : [ ioLabel | dwIO w ]) ++ "> \8226"
+  where
+    shapeTy ShCode = "Code"
+    shapeTy ShStr  = "Str"
+    shapeTy ShTy   = "TypeRep"
+
+-- THE TABLE.  Ten rows, one per keyword, and it is open: `keyword` adds
+-- one (stage 8, commit 4).
+declWordTable :: [DeclWord]
+declWordTable =
+  [ DeclWord "def"            "defW"            SpanDef   (Just ShCode) False
+  , DeclWord "type"           "typeW"           SpanLine  (Just ShTy)   False
+  , DeclWord "data"           "dataW"           SpanLine  (Just ShTy)   False
+  , DeclWord "resource"       "resourceW"       SpanLine  (Just ShTy)   False
+  , DeclWord "theory"         "theoryW"         SpanBlock (Just ShStr)  False
+  , DeclWord "model"          "modelW"          SpanBlock (Just ShStr)  False
+  , DeclWord "transformation" "transformationW" SpanLine  (Just ShStr)  False
+  , DeclWord "functor"        "functorW"        SpanLine  (Just ShStr)  False
+    -- THE TWO THAT READ THE WORLD, and they say so in the grade.  This
+    -- is the one place IO happens before anything is checked: the
+    -- loader resolves a path and reads a file, and `=Dict IO>` is the
+    -- manifest of exactly that (design-macros.md, 2026-09-15 \8212 "a
+    -- declaration word of type `Str =Dict IO> Code`").  Eight of the
+    -- ten are `=Dict>`, so which two touch the world is readable off
+    -- the table rather than off the implementation.
+  , DeclWord "import"         "importW"         SpanLine  Nothing       True
+  , DeclWord "table"          "tableW"          SpanLine  (Just ShStr)  True
+  ]
+
+-- the keywords the table claims, for the scanner
+declKeywords :: [String]
+declKeywords = map dwKeyword declWordTable
+
+declWordFor :: String -> Maybe DeclWord
+declWordFor kw = listToMaybe [ w | w <- declWordTable, dwKeyword w == kw ]
+
+-- ...and by the word's own name, for `:doc defW` and for a program
+-- that calls one
+declWordNamed :: String -> Maybe DeclWord
+declWordNamed n = listToMaybe [ w | w <- declWordTable, dwWord w == n ]
+
+-- Every name the table puts in scope.  They are the compiler's, so a
+-- def may not take one: a dictionary a program could shadow is not a
+-- dictionary.
+declWordNames :: [String]
+declWordNames = map dwWord declWordTable
+
+-- The scheme a declaration word wears in the environment, read off the
+-- table: `defW : Code Str =Dict> \8226`.  There is no second spelling
+-- of it \8212 `dwArrow` renders this same thing for the eye.
+declWordScheme :: DeclWord -> Scheme
+declWordScheme w =
+  Forall [] [] [] [] [] []
+    (Arrow (foldr (SCons . shapeTy) SEnd (dwShapes w)) SEnd
+           (Eff (S.fromList (dictLabel : [ ioLabel | dwIO w ])) Nothing))
+  where
+    shapeTy ShCode = codeTy
+    shapeTy ShStr  = TStr
+    shapeTy ShTy   = typeRepTy
+
+-- THE CHANNEL A DECLARATION WORD WRITES ON.  `print` does not do IO in
+-- `runBuiltin` either: it appends to the log the evaluator carries, and
+-- the driver does the world's half.  The dictionary is the same
+-- arrangement with a different host \8212 the word appends a record, and
+-- the LOADER does the dictionary's half.  The marker is a NUL, which no
+-- source string can carry, so a record is the checker's and not a
+-- program's.
+declLogMark :: Char
+declLogMark = '\0'
+
+declLog :: String -> [String] -> String
+declLog word parts = [declLogMark] ++ intercalate [declLogMark] (word : parts)
+
+-- ...and back.  `Nothing` is an ordinary log line, which is what a
+-- declaration program's `print` leaves.
+declLogParts :: String -> Maybe (String, [String])
+declLogParts (c : rest)
+  | c == declLogMark = case splitOnChar declLogMark rest of
+      (w : ps) -> Just (w, ps)
+      []       -> Nothing
+declLogParts _ = Nothing
+
+-- ONE CALL: which word, its arguments, and the text it was read from.
+-- The raw line rides along because every refusal below re-reads it —
+-- which is how `file:line` survives the change: the call carries the
+-- line it was written on, and the message it raises is the message that
+-- line raised before.
+data DeclCall = DeclCall
+  { dcWord  :: String
+  , dcArgs  :: [DeclArg]     -- in the order the word takes them
+  , dcRaw   :: String        -- the head line, verbatim
+  , dcBlock :: [String]      -- its indented block, verbatim
+  , dcDoc   :: Maybe String
+  , dcLine  :: Int           -- the line the BODY starts on
+  }
+
+-- what the call looks like written out, for `:doc` and the manual
+renderDeclCall :: DeclCall -> String
+renderDeclCall c = unwords (map one (dcArgs c) ++ [dcWord c])
+  where
+    one (DACode b) = "[" ++ unwords (words b) ++ "]"
+    one (DAStr t)  = show t
+    one (DATy t)   = "\8988" ++ unwords (words t) ++ "\8989"
+
+-- Split a declaration line at its own `=`: the head is the Str, the
+-- rest is the body.  The FIRST `=`, which is the rule every keyword
+-- already used — a head has none of its own, and a body's may be its
+-- second (`model Ints in Ring(Int) = add = +` is a head and a body
+-- whose text contains one).
+declSplit :: String -> (String, Maybe String)
+declSplit l = case break (== '=') l of
+  (hd, '=' : body) -> (drop 1 (dropWhile (not . isSpace) hd), Just body)
+  _                -> (drop 1 (dropWhile (not . isSpace) l), Nothing)
+
+-- The arguments of one call, read off its line at the word's shapes.
+declArgsOf :: DeclWord -> String -> String -> [DeclArg]
+declArgsOf w hd body = case dwBody w of
+  Nothing      -> [DAStr (trimS hd)]
+  Just ShCode  -> [DACode body, DAStr (trimS hd)]
+  Just ShTy    -> [DATy body,   DAStr (trimS hd)]
+  Just ShStr   -> [DAStr body,  DAStr (trimS hd)]
+  where trimS = trimSpace
+
+-- RUN ONE DECLARATION WORD against the dictionary.  Each row does
+-- exactly what its keyword's branch of the scanner did before there was
+-- a table, which is what makes the change invisible: the buckets it
+-- writes, the strings it puts in them and the order they end up in are
+-- the same.
+applyDecl :: DeclCall -> Dict -> Either String Dict
+applyDecl c dk = case dcWord c of
+  "importW"         -> Right dk { dkImports = dcRaw c : dkImports dk }
+  "tableW"          -> Right dk { dkTables  = dcRaw c : dkTables dk }
+  w | w `elem` ["typeW", "dataW", "resourceW"] ->
+        Right dk { dkTypes = (dcRaw c, dcDoc c) : dkTypes dk }
+    | w `elem` ["functorW", "transformationW"] ->
+        Right dk { dkBlocks = (dcRaw c, [], dcDoc c) : dkBlocks dk }
+    | w `elem` ["theoryW", "modelW"] ->
+        Right dk { dkBlocks = (dcRaw c, dcBlock c, dcDoc c) : dkBlocks dk }
+  "defW" -> do
+    (name, hdr) <- defHeadOf (dcRaw c)
+    body <- case dcArgs c of
+              (DACode b : _) -> Right b
+              _              -> Left ("internal: defW without a body: "
+                                        ++ dcRaw c)
+    Right dk { dkDefs = (name, hdr, body, dcDoc c, dcLine c) : dkDefs dk }
+  w -> Left ("internal: no declaration word " ++ w)
+
+-- a `def` line's own head: the name and the clauses, re-read from the
+-- line so that the refusal is the line's refusal
+defHeadOf :: String -> Either String (String, DefHdr)
+defHeadOf l =
+  case break (== '=') l of
+    (lhs, '=' : _) ->
+      case words lhs of
+        ("def" : name : hdrWs)
+          | not (isIntLiteral name), not (isFloatLiteral name) -> do
+              hdr <- parseDefHdr l (unwords hdrWs)
+              Right (name, hdr)
+        _ -> Left ("Malformed definition: " ++ l)
+    _ -> Left ("Malformed definition (missing '='): " ++ l)
+
+
+-- What the def fold carries: the environment, the runtime scope, the
+-- names a def may shadow, the defs so far, the docs, the templates, the
+-- K-words and the routing notes.  Named because the declaration program
+-- threads the same thing (stage 8).
+type DefFold = ( Env, RunDefs, [String], [(String, Scheme, Term)]
+               , Map String String, TemplateTable
+               , [(String, String)], [(String, String)] )
+
+-- ONE GROUP OF A MODULE'S DECLARATION PROGRAM (stage 8, 2026-09-17).
+--
+-- The keyword lines are calls of the declaration words and the loader
+-- runs them; this is the same thing written the other way round, by a
+-- program, and it is the same words.  A top-level group is a
+-- DECLARATION LINE when its GRADE SAYS SO \8212 when what it does
+-- carries `Dict`.  Not when it happens to name `defW`: a loop that
+-- declares three words names it inside a def, and the grade is the only
+-- thing that knows.  That is what the manifest is for, and it is the
+-- same mark the keyword-initial surface makes, read off the arrow
+-- rather than off the first token.
+--
+-- A declaration line is inferred at `\8226 =Dict> \8226` \8212 it must
+-- take nothing and leave nothing, or lifting it out of main would
+-- change what main does \8212 and RUN, purely and fuel-bounded, exactly
+-- as a `functor` is run.  Every `defW` it called comes back on the log
+-- and becomes a def through the same `addDef` every written one goes
+-- through, so a programmatic def is checked, routed, labelled and
+-- refused exactly where a written one is.
+--
+-- `Nothing` means "this is not a declaration line", and the group goes
+-- back to main untouched \8212 including a group that does not infer at
+-- all, whose refusal is main's to report, at main's own location.
+declProgramStep
+  :: (DefFold -> (String, DefHdr, String, Maybe String) -> Either String DefFold)
+  -> [DataDecl] -> [Alias] -> [Theory] -> SlotTable -> [(String, String)]
+  -> [String] -> [Transport] -> [BaseInstance] -> [String] -> [String]
+  -> (DefFold, [[(Int, String)]]) -> [(Int, String)]
+  -> Either String (DefFold, [[(Int, String)]])
+declProgramStep addD datas aliases theories slots funcs thNames trans bases
+                tbls resNames (st, mains) grp =
+  case decided of
+    Nothing  -> Right (st, grp : mains)
+    Just act -> (\st' -> (st', mains)) <$> act
+  where
+    (env, run, _, _, _, tmpls, kwords, _) = st
+    lineNo = case grp of ((k, _) : _) -> k; [] -> 0
+    txt    = intercalate "\n" (map snd grp)
+    rctx   = RCtx env datas aliases theories
+    ctx    = ElabCtx env run slots funcs tmpls thNames trans kwords bases []
+                     False Nothing tbls resNames rctx
+    -- the grade decides, and a group that does not even infer is main's
+    decided = case parseProgramFrom (const lineNo) datas txt
+                     >>= \(t0, _) -> elabHeaders ctx t0
+                     >>= \t1 -> (,) t1 <$> inferTermInAt lineNo env t1 of
+      Right (t1, Arrow i o eff) | S.member dictLabel (eLabels eff) ->
+        Just (run1 t1 i o eff)
+      _ -> Nothing
+    run1 t1 i o eff = do
+      case solve [CEqStack i SEnd, CEqStack o SEnd] of
+        Right _ -> Right ()
+        Left _  -> Left $ "a DECLARATION LINE is run at check time, above "
+                       ++ "main, so it must take nothing and leave nothing "
+                       ++ "(`\8226 =" ++ dictLabel ++ "> \8226`): "
+                       ++ trimSpace txt
+      if S.member ioLabel (eLabels eff)
+        then Left $ "a DECLARATION LINE runs at check time, before main, "
+                 ++ "so it may not touch the world: this one is `="
+                 ++ dictLabel ++ " " ++ ioLabel ++ ">`.  Reading a file "
+                 ++ "before anything is checked is the LOADER's, and "
+                 ++ "`import` and `table` are its words (MANUAL \167 8): "
+                 ++ trimSpace txt
+        else Right ()
+      (_, logs) <- runPureEval (evalTerm rctx run emptyVarEnv t1 [])
+      foldM install st [ r | Just r <- map declLogParts logs ]
+    install s ("defW", [nm, body]) =
+      addD s ( nm, noHdr, body
+             , Just ("declared by this module's declaration program: "
+                      ++ "`[\8230] \"" ++ nm ++ "\" defW`, line "
+                      ++ show lineNo) )
+    install _ (w, ps) =
+      Left ("internal: declaration record " ++ w ++ " " ++ show ps)
+
+-- A module's program lines, grouped into LOGICAL lines: a line plus
+-- whatever it left open.  The declaration program is decided per
+-- logical line, because half an atom is not a line.
+logicalLines :: [(Int, String)] -> [[(Int, String)]]
+logicalLines = go 0 []
+  where
+    go _ acc [] = [ reverse acc | not (null acc) ]
+    go d acc (pr@(_, l) : ls)
+      | d' <= 0 && not (lineContinues l) = reverse (pr : acc) : go 0 [] ls
+      | otherwise                        = go d' (pr : acc) ls
+      where d' = d + lineDepth l
+
+-- THE DICTIONARY, as a carrier (stage 8, 2026-09-17).  What a module's
 -- declarations amount to, in the order they were written: the record
 -- every declaration word acts on, and the thing the `Dict` wire stands
 -- for.  `splitDefsIx` reads the source into one of these and the
@@ -7452,16 +7791,28 @@ dictNames dk =
 -- `Dict` is the dictionary's own wire, and a module may not declare
 -- it: that is what makes discharge structural rather than a check.
 dictReserved :: Dict -> Either String ()
-dictReserved dk = case [ n | n <- dictNames dk
-                           , n `elem` [dictLabel, "un" ++ dictLabel] ] of
-  (n : _) -> Left $ "`" ++ n ++ "` is the dictionary's own wire and may "
+dictReserved dk = do
+  -- ...and the declaration words are the compiler's: a keyword line is
+  -- parsed into a call of one, so a module that could shadow one could
+  -- change what `def` means halfway down a file.
+  case [ n | n <- dictNames dk, Just w <- [declWordNamed n] ] of
+    (n : _) -> Left $ "`" ++ n ++ "` is a declaration word: the keyword `"
+                   ++ maybe "?" dwKeyword (declWordNamed n)
+                   ++ "` is parsed into a call of it (`" ++ n ++ " : "
+                   ++ maybe "" dwArrow (declWordNamed n)
+                   ++ "`), so a module may not take the name.  Rename it.  "
+                   ++ "MANUAL \167 8."
+    []      -> Right ()
+  case [ n | n <- dictNames dk
+           , n `elem` [dictLabel, "un" ++ dictLabel] ] of
+   (n : _) -> Left $ "`" ++ n ++ "` is the dictionary's own wire and may "
                  ++ "not be declared: `Dict` is the carrier every "
                  ++ "declaration word acts on (`defW : Code Str =Dict> "
                  ++ "\8226`), it is threaded by the loader, and there is "
                  ++ "no `Dict` to seed one with and no `unDict` to open "
                  ++ "one with \8212 which is what keeps a program from "
                  ++ "discharging it.  Rename it.  MANUAL \167 8."
-  []      -> Right ()
+   []      -> Right ()
 
 -- Split source into `def name = body` lines, `type \8230` declaration
 -- lines, and the main program (all remaining lines, in order, joined
@@ -7501,27 +7852,40 @@ splitDefsIx :: String
                              , [String]
                              , [String]
                              , [(Int, String)] )
-splitDefsIx src = go Nothing (zip [1 ..] (lines src))
+splitDefsIx src = do
+  dk <- dictFromSource src
+  pure ( dkDefs dk, dkTypes dk, dkBlocks dk
+       , dkImports dk, dkTables dk, dkProgram dk )
+
+-- THE SCANNER, AS A RUN OF DECLARATION WORDS (stage 8, 2026-09-17).
+-- Every keyword line is read into a CALL of the word its keyword names
+-- and the call is applied to the dictionary, in file order; every other
+-- line is a line of the program.  The three collection rules — a line,
+-- a line plus its indented block, and `def`'s either — are the table's
+-- `dwSpan` and not a branch of the scanner, which is what makes the
+-- table open: a row is a keyword, a word, a span, a body shape and an
+-- arrow, and a library that adds one adds no code here.
+--
+-- `file:line` survives because nothing about locations moved: a call
+-- carries the line its BODY starts on, exactly as the def bucket
+-- carried it before, and every refusal is raised from the same place
+-- against the same raw line.
+dictFromSource :: String -> Either String Dict
+dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
   where
-    go _ [] = Right ([], [], [], [], [], [])
-    go doc ((lineNo, l) : rest)
+    finish dk = Dict (reverse (dkDefs dk))    (reverse (dkTypes dk))
+                     (reverse (dkBlocks dk))  (reverse (dkImports dk))
+                     (reverse (dkTables dk))  (reverse (dkProgram dk))
+
+    go dk _ [] = Right dk
+    go dk doc ((lineNo, l) : rest)
       | Just d <- docLine l =
-          go (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
-      | ("import" : _) <- words l = do
-          (ds, ts, bs, is, tb, ps) <- go Nothing rest
-          pure (ds, ts, bs, l : is, tb, ps)
-      | ("table" : _) <- words l = do
-          (ds, ts, bs, is, tb, ps) <- go Nothing rest
-          pure (ds, ts, bs, is, l : tb, ps)
-      | (kw : _) <- words l, kw `elem` ["type", "data", "resource"] = do
-          (ds, ts, bs, is, tb, ps) <- go Nothing rest
-          pure (ds, (l, doc) : ts, bs, is, tb, ps)
-      -- `theory` / `model`: a header plus its indented block, raw
-      -- `functor F = word`: a declaration line with no block, so it
-      -- rides the block bucket with an empty body
-      | (kw : _) <- words l, kw `elem` ["functor", "transformation"] = do
-          (ds, ts, bs, is, tb, ps) <- go Nothing rest
-          pure (ds, ts, (l, [], doc) : bs, is, tb, ps)
+          go dk (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
+      -- a LINE: `type`, `data`, `resource`, `transformation`, `functor`,
+      -- `import`, `table`
+      | Just w <- wordOf l, dwSpan w == SpanLine = do
+          dk' <- applyDecl (call w lineNo l [] doc (inlineOf l)) dk
+          go dk' Nothing rest
       -- `rules` was a keyword until 2026-09-13; it is a model now.
       | ("rules" : _) <- words l =
           Left $ "`rules` is gone: a rule set is a PARTIAL MODEL of the "
@@ -7549,20 +7913,24 @@ splitDefsIx src = go Nothing (zip [1 ..] (lines src))
               ++ "`, and `in "
               ++ (case words l of (_ : _ : "=" : i : _) -> i; _ -> "<Model>")
               ++ "` to build one of its morphisms by hand.  MANUAL §8."
-      -- `model Opt : Base = p = q, r = s`, or the same bindings one
-      -- per line in an indented block: BOTH forms, exactly as `def` has
-      -- both.  `spanBlock` returns nothing for the inline form, so one
-      -- branch serves.
-      | (kw : _) <- words l, kw `elem` ["theory", "model"] = do
+      -- a HEAD PLUS ITS BLOCK: `theory`, `model`.  `model Opt in Base =
+      -- p = q, r = s` writes its bindings inline instead, and
+      -- `spanBlock` returns nothing for that form, so one branch serves.
+      | Just w <- wordOf l, dwSpan w == SpanBlock = do
           let (block, rest') = spanBlock 0 rest
+              kw            = head (words l)
           if null block && all isSpace (declInline l)
                && isNothing (baseInstanceName l)
             then Left $ "Empty " ++ kw ++ " body: " ++ l
             else do
-              (ds, ts, bs, is, tb, ps) <- go Nothing rest'
-              pure (ds, ts, (l, map snd block, doc) : bs, is, tb, ps)
-      | ("def" : _) <- words l = do
-          (name, hdr, body) <- parseDefLine l
+              let blk = map snd block
+                  bodyTxt | null blk  = inlineOf l
+                          | otherwise = intercalate "\n" blk
+              dk' <- applyDecl (call w lineNo l blk doc bodyTxt) dk
+              go dk' Nothing rest'
+      -- EITHER, the way `def` has both
+      | Just w <- wordOf l, dwSpan w == SpanDef = do
+          (name, _, body) <- parseDefLine l
           -- a `#` comment on the `=` line is not code: treat a
           -- comment-only body as blank so the block-body form triggers
           if all isSpace (takeWhile (/= '#') body)
@@ -7574,25 +7942,39 @@ splitDefsIx src = go Nothing (zip [1 ..] (lines src))
               if null block
                 then Left $ "Empty definition body: " ++ name
                 else do
-                  (ds, ts, bs, is, tb, ps) <- go Nothing rest'
                   -- a block body starts on the line after the `def`
-                  pure ( (name, hdr, intercalate "\n" (map snd block), doc
-                         , lineNo + 1) : ds, ts, bs, is, tb, ps )
+                  dk' <- applyDecl (call w (lineNo + 1) l [] doc
+                                     (intercalate "\n" (map snd block))) dk
+                  go dk' Nothing rest'
             else do
               -- inline body: it may leave a bracket open, in which case
               -- the following lines belong to it, not to the module
               let (cont, rest') = spanOpen l rest
-              (ds, ts, bs, is, tb, ps) <- go Nothing rest'
               -- an inline body starts on the `def` line itself
-              pure ( (name, hdr, intercalate "\n" (body : map snd cont), doc
-                     , lineNo) : ds, ts, bs, is, tb, ps )
+              dk' <- applyDecl (call w lineNo l [] doc
+                                 (intercalate "\n" (body : map snd cont))) dk
+              go dk' Nothing rest'
       | otherwise = do
           -- a program line may leave a bracket open; the lines that
           -- close it are part of it, so `def`/`type`/`##` inside an open
           -- bracket is code, not a declaration
           let (cont, rest') = spanOpen l rest
-          (ds, ts, bs, is, tb, ps) <- go Nothing rest'
-          pure (ds, ts, bs, is, tb, (lineNo, l) : cont ++ ps)
+          go dk { dkProgram = reverse ((lineNo, l) : cont) ++ dkProgram dk }
+             Nothing rest'
+
+    -- which declaration word this line calls, if any
+    wordOf l = case words l of
+      (kw : _) -> declWordFor kw
+      []       -> Nothing
+
+    -- a head line's own body text, when it has one on the line
+    inlineOf l = maybe "" id (snd (declSplit l))
+
+    -- one call: the word, its arguments read at the word's shapes, and
+    -- the text and the line the refusals will need
+    call w bodyLine raw blk doc bodyTxt =
+      DeclCall (dwWord w) (declArgsOf w (fst (declSplit raw)) bodyTxt)
+               raw blk doc bodyLine
 
     -- what a declaration head writes after its own `=`: the INLINE body
     -- form, which every model has (a theory's slots are one per line)
@@ -9029,15 +9411,15 @@ checkModuleRaw base src = do
       declLines0 = dkBlocks dict
       importLines = dkImports dict
       tableLines = dkTables dict
-      mainLines  = dkProgram dict
+      mainLines0 = dkProgram dict
   -- every generated def is the compiler's own text and reports the def,
   -- not a line (0); a written one reports the line its body starts on
   let defSrcs  = [ (n, h, b, d) | (n, h, b, d, _) <- defSrcs0 ]
       defLine  = \n -> maybe 0 id (lookup n [ (nm, k) | (nm, _, _, _, k) <- defSrcs0 ])
-      mainSrc  = intercalate "\n" (map snd mainLines)
-      mainLine = \k -> case drop (k - 1) mainLines of
-                         ((orig, _) : _) | k >= 1 -> orig
-                         _                        -> 0
+      -- the whole program, for the pass that reads `with F(M)` off the
+      -- source: a family is minted before anything runs, so it must be
+      -- read before the declaration program is told apart from main
+      mainSrc0 = intercalate "\n" (map snd mainLines0)
   -- the loader resolves imports into the source it hands over, so one
   -- reaching here means there was no file to resolve it against
   case importLines of
@@ -9139,7 +9521,7 @@ checkModuleRaw base src = do
                      , a <- headerApps (map inName fams) (hdrNames h) ]
                  ++ [ a | (_, _, b, _) <- defSrcs
                         , a <- modelApps (map inName fams) b ]
-                 ++ modelApps (map inName fams) mainSrc
+                 ++ modelApps (map inName fams) mainSrc0
                  ++ [ a | i <- insts0, (_, b) <- inBindings i
                         , a <- modelApps (map inName fams) b ]
                  ++ [ a | mo <- ownTransformations, n <- [tfFrom mo, tfTo mo]
@@ -9224,15 +9606,32 @@ checkModuleRaw base src = do
       resNames = [ dName d | d <- allDatas, dResource d ]
   -- model bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  (env', runFinal, _, defsRev, docs, tmpls, kwords, routedWhy) <-
-    foldM (addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
-                  ownBases resNames [ (inName i, inScope i) | i <- insts ] allDatas
-                  (RCtx M.empty allDatas allAliases theories))
+  let addDef' = addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
+                       ownBases resNames
+                       [ (inName i, inScope i) | i <- insts ] allDatas
+                       (RCtx M.empty allDatas allAliases theories)
+  st0 <-
+    foldM addDef'
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base, [])
           (baseDefs ++ transDefs ++ resDefs ++ defSrcs ++ instDefs
              ++ [ (n, noHdr, b, d) | (n, b, d) <- transformationDefSrcs ])
+  -- STAGE 8: THE MODULE'S DECLARATION PROGRAM, run here \8212 above
+  -- main, below the defs, which is the dictionary a compile-time word
+  -- sees (the ordering rule).  Every top-level group whose GRADE
+  -- carries `Dict` is one, is run against the dictionary, and is lifted
+  -- out of main; everything else is main, in the order it was written.
+  (stD, mainGroups) <-
+    foldM (declProgramStep addDef' allDatas allAliases theories slotTable
+                           funcs thNames trans ownBases tblTypes resNames)
+          (st0, []) (logicalLines mainLines0)
+  let (env', runFinal, _, defsRev, docs, tmpls, kwords, routedWhy) = stD
+      mainLines = concat (reverse mainGroups)
+      mainSrc   = intercalate "\n" (map snd mainLines)
+      mainLine  = \k -> case drop (k - 1) mainLines of
+                          ((orig, _) : _) | k >= 1 -> orig
+                          _                        -> 0
   -- the generated transport word is checked like any other functor's
   -- word: if a model's slots ever stop composing, the message says so
   -- here
@@ -11523,6 +11922,27 @@ runBuiltin _ _ nm [x, VSum tag bundle]
       Right ([if tag < k then VSum tag (x : bundle) else VSum tag bundle], [])
 runBuiltin _ _ "there" [VSum t bundle]  = Right ([VSum (t + 1) bundle], [])
 runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
+-- THE DECLARATION WORDS, CALLED FROM A PROGRAM (stage 8, 2026-09-17).
+-- The word appends a RECORD to the evaluator's log and the loader does
+-- the dictionary's half, exactly as `print` appends a line and the
+-- driver does the world's half.  `defW` takes the body as Code and
+-- renders it back to source, which is what `unparse` does and what the
+-- def bucket has always held.
+runBuiltin _ _ "defW" [c, VStr nm] = do
+  t <- codeToTermV c
+  Right ([], [declLog "defW" [nm, renderTerm t]])
+-- ...and the nine that a KEYWORD LINE calls and a program does not, yet.
+-- Refused by name, saying what the restriction is: a `theory` declared
+-- from a program would have to be checked before the defs that read it,
+-- and the dictionary the checker reads is read once, above them.
+runBuiltin _ _ w _
+  | Just dw <- declWordNamed w, w /= "defW" = Left $
+      "`" ++ w ++ "` is a declaration word, and a program may not call "
+        ++ "this one yet: `" ++ dwKeyword dw ++ "` declares something the "
+        ++ "module's own defs are checked AGAINST, and they are checked "
+        ++ "above the program that would declare it.  Write the keyword "
+        ++ "line.  `defW` is the one a program may call, because a def is "
+        ++ "checked where it lands (MANUAL \167 8)."
 runBuiltin _ _ name args =
   Left $ "Runtime type error in " ++ name ++ " applied to "
        ++ show args ++ " (unreachable on typechecked programs)"

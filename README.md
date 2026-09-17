@@ -35,6 +35,10 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   a resource word carries the label with no header at all.
 - `Code` as data, with reflection (`getCode`, `typeOfCode`, `declOf`)
   and user-written `Code ⇒ Code` functors.
+- Every keyword is a **declaration word** beneath: `def f = body` is
+  `[body] "f" defW`, and `defW : Code Str =Dict> •` says in its arrow
+  what it does. The table is open, and a program may declare too
+  (`examples/dictionary.braid`).
 - 66 primitives; everything else is in the prelude, in Braid.
 
 ## Install and run
@@ -68,7 +72,7 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1216-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1224-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove

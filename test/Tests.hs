@@ -737,6 +737,17 @@ runFamilyReport (src, wantFams, wantModels) =
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
+    -- STAGE 8: the declaration words, and a def nobody wrote.  A
+    -- top-level group is a DECLARATION LINE when its grade carries
+    -- `Dict`; it is run against the dictionary at check time, above
+    -- main, and the def it declares is checked exactly where a written
+    -- one is — so `sq` has a scheme and main has a type.
+  , ("([dup >> *] >> getCode) \"sq\" >> defW\nsq",  "Int ⇒ Int")
+    -- ...and the GRADE is what decides, not the first token: `declare`
+    -- names `defW` two levels down and the line is a declaration line
+    -- all the same
+  , ("def declare = (n -> ([dup >> +] >> getCode) n >> defW)\n\
+     \\"twice\" >> declare\ntwice",                "Int ⇒ Int")
     -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `with Fwd(Floats)`
     -- APPLIES the family and mints a member; the receipt on the arrow is
     -- the APPLICATION, one label, because one model read the template.
@@ -3696,6 +3707,27 @@ moduleFailTests =
   , (zeroFirstRingMod ++ "transformation Halved in Ints \8658 Halves = halve\n1 ; print",
      "transformation Halved: the square for slot 'add' does not commute \
      \at the theory's samples")
+    -- STAGE 8: a declaration word is the compiler's name, because a
+    -- keyword line is parsed into a call of one.
+  , ("def defW = 1\n1 ; print",
+     "`defW` is a declaration word: the keyword `def` is parsed into a \
+     \call of it")
+  , ("data typeW = Int\n1 ; print",
+     "`typeW` is a declaration word: the keyword `type` is parsed into a \
+     \call of it")
+    -- ...a declaration line runs above main, so it must leave main's
+    -- stack exactly as it found it
+  , ("([dup] ; getCode) \"q\" ; defW ; 1\n2 ; print",
+     "a DECLARATION LINE is run at check time, above main, so it must \
+     \take nothing and leave nothing")
+    -- ...and may not touch the world: check-time IO is the LOADER's
+  , ("\"hi\" ; print ; ([dup] ; getCode) \"q\" ; defW\n2 ; print",
+     "a DECLARATION LINE runs at check time, before main, so it may not \
+     \touch the world")
+    -- ...and of the ten words, `defW` is the one a program may call
+  , ("\"Mon\" \"op : a a ⇒ a\" ; theoryW\n1 ; print",
+     "`theoryW` is a declaration word, and a program may not call this \
+     \one yet")
     -- STAGE 8: `Dict` is the dictionary's own wire, and discharge is
     -- structural — there is no `Dict` and no `unDict` because the
     -- name may not be declared at all, by any keyword.

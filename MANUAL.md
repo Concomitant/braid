@@ -1397,7 +1397,7 @@ that name is now a duplicate declaration rather than a shadow.
 
 Routing itself no longer needs the header at all — see §6.
 
-**`Dict`, the dictionary's own wire** *(2026-09-18)*. A declaration is
+**`Dict`, the dictionary's own wire** *(2026-09-17)*. A declaration is
 an **act on the dictionary**, and the dictionary is a resource like any
 other: a label whose carrier is looked up from its declaration, exactly
 as `Log`'s is `Log ⊗ –` and `IO`'s is `World ⊗ –`. Every declaration
@@ -2640,6 +2640,105 @@ quotation is a **capture**, and abstraction elimination handles it. See
 open stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands, but won't
 display-fold back (the leading-splice match is ambiguous — pin one
 arity if you need the fold).
+
+### Declaration words *(2026-09-17)*
+
+**Beneath every keyword is a word.** A keyword line is parsed, whole,
+into a **call** of an ordinary word acting on the dictionary:
+
+```text
+def f = body              ≡   [body] "f" defW
+type Pair = Int Int       ≡   ⌜Int Int⌝ "Pair" typeW
+import "util.braid"       ≡   "util.braid" importW
+```
+
+and the pipeline runs the calls, in file order, against `Dict`. The
+surface does not change by one character. What changes is that there is
+now one **table** saying what a keyword *is*, and it is open.
+
+| keyword | its word | arrow |
+|---|---|---|
+| `def` | `defW` | `Code Str =Dict> •` |
+| `type` | `typeW` | `TypeRep Str =Dict> •` |
+| `data` | `dataW` | `TypeRep Str =Dict> •` |
+| `resource` | `resourceW` | `TypeRep Str =Dict> •` |
+| `theory` | `theoryW` | `Str Str =Dict> •` |
+| `model` | `modelW` | `Str Str =Dict> •` |
+| `transformation` | `transformationW` | `Str Str =Dict> •` |
+| `functor` | `functorW` | `Str Str =Dict> •` |
+| `import` | `importW` | `Str =Dict IO> •` |
+| `table` | `tableW` | `Str Str =Dict IO> •` |
+
+**The two that read the world say so in the grade.** `importW` and
+`tableW` are `=Dict IO>`; the other eight are `=Dict>`. That is the ONE
+place IO happens before anything is checked — the loader resolves a path
+and reads a file — and the grade is the manifest of exactly that.
+`:t importW` prints it.
+
+**What an argument may be, exactly.** Three shapes, and the list is
+closed:
+
+| shape | what it is | where it comes from |
+|---|---|---|
+| `Code` | an already-parsed program | the parser, for a keyword line; `getCode`, `parse` or a functor's output, for a program |
+| `Str` | a name, a header, a path — text the word *reads*, never parses | a literal, `cat`, `toStr` |
+| `TypeRep` | an already-parsed type | the parser; `typeOfWord`, `typeOfCode` (§12) |
+
+All three are **post-parse**, which is exactly the line direction 3
+draws: post-parse `Code` functors only, parsing words never. A reader
+macro would break uniform reading — you could not read a file without
+running it — and it would make hygiene a discipline rather than a
+property of the representation. A word that wanted a fourth shape would
+be asking for one under another name.
+
+**How a line is parsed into them.** Every declaration line is `KEYWORD
+<head> = <body>`, split at its own first `=`, the body running to the
+end of the line or into the indented block beneath it. The head is the
+`Str`; the body is read at the word's declared shape; the arguments are
+pushed in that order and the word is called postfix. A keyword whose
+line has no `=` (`import "u.braid"`) takes the head alone.
+
+**Locations are untouched.** A call carries the line its *body* starts
+on, exactly as the def bucket carried it before there was a table, and
+every refusal is raised from the same place against the same raw line —
+so `file:line, in def X` says what it always said.
+
+**A program may declare too.** A top-level group is a **declaration
+line** when its **grade** says so — when what it does carries `Dict`:
+
+```braid
+([dup ; *] ; getCode) "square" ; defW      # `def square = dup ; *`
+
+def declare = (n -> (n ; bodyFor) (n ; nameFor) ; defW)
+[(acc n -> n ; declare ; acc)] 0 (1 2 3 ; pack) ; fold ; drop
+```
+
+The second line names `defW` nowhere: it is a declaration line because
+`declare` is `=Dict>` and the grade propagates. That is what a manifest
+is for, and it is the same mark the keyword makes, read off the arrow
+rather than off the first token.
+
+Three rules, each refused by name:
+
+- **It must take nothing and leave nothing** (`• =Dict> •`), because it
+  is lifted out of main and run above it, and otherwise that would
+  change what main does.
+- **It may not touch the world.** It runs at check time, before main, so
+  its output would arrive before anything main prints. Reading a file
+  before anything is checked is the **loader's**, and `import` and
+  `table` are its words.
+- **`defW` is the one of the ten a program may call.** The other nine
+  declare things the module's own defs are checked *against*, and those
+  are checked above the program that would declare them.
+
+**Where a programmatic def lands.** Above main and **below** the
+module's written defs — the dictionary a compile-time word sees is the
+dictionary so far, which is the same ordering rule a `functor` obeys. So
+main may call it and a written `def` may not.
+
+`examples/dictionary.braid` is the whole of this running; `:defs` in a
+session lists the words it declared, and `typeOfWord` answers about them
+like any other.
 
 ### Modules: `import "path.braid"`
 
@@ -3940,6 +4039,24 @@ corrected in place rather than dated one by one.
   write. A label is minted by a scope, never written by hand; a `table`
   puts exactly `loadT` and `headerT` in scope; a slot is reached with
   `with I`.
+- **``` `defW` is a declaration word: the keyword `def` is parsed into a
+  call of it ```** / **``` `Dict` is the dictionary's own wire and may not
+  be declared ```** — the names the **declaration layer** owns (§8). A
+  keyword line becomes a call of its word, so a module that could shadow
+  one could change what `def` means halfway down a file; and `Dict` is
+  the wire every declaration word acts on, with no `Dict` and no
+  `unDict` anywhere, which is what keeps a program from discharging it.
+  Rename yours.
+- **``` a DECLARATION LINE is run at check time, above main, so it must
+  take nothing and leave nothing (`• =Dict> •`) ```** / **``` a
+  DECLARATION LINE runs at check time, before main, so it may not touch
+  the world ```** / **``` `theoryW` is a declaration word, and a program
+  may not call this one yet ```** — the three rules a **program's** own
+  declaration line obeys (§8). It is lifted out of main and run above
+  it, so it must leave main's stack as it found it and may not print
+  before main does; and of the ten words `defW` is the one a program may
+  call, the other nine declaring things the module's defs are checked
+  against. Write the keyword line.
 - **``` `div` has no image under model Mod ```** — an **object-mapped**
   model of `Base` (§8) is a functor whose action on objects is a
   substitution, and a word whose scheme mentions the mapped type must

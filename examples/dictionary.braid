@@ -1,0 +1,119 @@
+# BENEATH THE KEYWORDS: the declaration words.
+#
+# Braid's declaration layer is a fixed, name-first surface — `def name =
+# body` and kin — over an OPEN TABLE of DECLARATION WORDS, each carrying
+# a `=Dict>` manifest.  The keyword is kept deliberately: it marks "an
+# act on the dictionary" as against "a morphism", which is the phase
+# distinction, visible.  What this file shows is the other side of that
+# surface — the words themselves, called by a program.
+#
+# There are no parsing words and there never will be.  A keyword's word
+# receives ALREADY-PARSED arguments — Code, Str, a TypeRep — so a file
+# can be read without being run, and hygiene stays a property of the
+# representation rather than a discipline.
+
+# ---------------------------------------------------------------------
+# 1. The table, read off the words themselves
+# ---------------------------------------------------------------------
+# Every keyword line is parsed, whole, into a CALL of an ordinary word:
+#
+#     def f = body            ≡  [body] "f" defW
+#     type Pair = Int Int     ≡  ⌜Int Int⌝ "Pair" typeW
+#     import "util.braid"     ≡  "util.braid" importW
+#
+# and the ten words are ordinary words, with the manifest in the arrow.
+def showsType = (w -> w ; typeOfWord ; (showType | (s -> s)) ; merge)
+def arrowOf   = (w -> w ; showsType ; (t -> w " : " ; cat ; _ t ; cat))
+
+"-- the declaration words --" ; print
+"defW"   ; arrowOf ; print
+"typeW"  ; arrowOf ; print
+"theoryW" ; arrowOf ; print
+
+# THE TWO THAT READ THE WORLD say so in the grade.  This is the one
+# place IO happens before anything is checked — the loader resolves a
+# path and reads a file — and `=Dict IO>` is the manifest of exactly
+# that.  Eight of the ten are `=Dict>`.
+"importW" ; arrowOf ; print
+"tableW"  ; arrowOf ; print
+
+# ---------------------------------------------------------------------
+# 2. The same declaration, written both ways
+# ---------------------------------------------------------------------
+def square = dup ; *
+
+# ...and the call the line above is parsed into, written out.  `[body]`
+# is a typed quotation in SOURCE and the word takes `Code`, so a program
+# supplies the erasure the way it supplies any Code — `getCode`.
+([dup ; *] ; getCode) "squared" ; defW
+
+"-- one declaration, two spellings --" ; print
+5 ; square  ; print                              # 25
+5 ; squared ; print                              # 25, the same word
+
+# WHERE IT LANDS.  A declaration line runs above main and BELOW the
+# module's written defs, because that is the dictionary a compile-time
+# word sees: the one so far.  So `squared` is a word main may call, and
+# a written `def` above it may not — `Unknown primitive: squared` — for
+# the same reason a `functor` must be runnable before its first use.
+
+# ---------------------------------------------------------------------
+# 3. PROGRAMMATIC DECLARATION: a loop that defines words
+# ---------------------------------------------------------------------
+# A top-level line is a DECLARATION LINE when its GRADE says so — when
+# what it does carries `Dict`.  Not when it happens to name `defW`: the
+# loop below names it three levels down, inside `declare`, and the grade
+# is the only thing that knows.  That is what a manifest is for.
+def orNil   = ((c -> c) | drop ; nil) ; merge
+def nameFor = (n -> "add" (n ; toStr) ; cat)
+def bodyFor = (n -> "_ " (n ; toStr) ; cat ; _ " ; +" ; cat ; parse ; orNil)
+def declare = (n -> (n ; bodyFor) (n ; nameFor) ; defW)
+
+[(acc n -> n ; declare ; acc)] 0 (1 2 3 ; pack) ; fold ; drop
+
+"-- three words nobody wrote --" ; print
+10 ; add1 ; print                                # 11
+10 ; add2 ; print                                # 12
+10 ; add3 ; print                                # 13
+
+# They are DEFS, not a trick: the checker has them, with schemes, and
+# `:defs` lists them in a session.  Here the reflection words say the
+# same thing — which is the read side of the dictionary, the declaration
+# words being the write side.
+"-- and the checker has them --" ; print
+"add1" ; arrowOf ; print
+"add2" ; arrowOf ; print
+
+# ---------------------------------------------------------------------
+# 4. What a declaration line may and may not be
+# ---------------------------------------------------------------------
+# A declaration line runs at CHECK TIME, above main and below the defs —
+# the dictionary a compile-time word sees is the dictionary so far.  So:
+#
+#   * it must take nothing and leave nothing (`• =Dict> •`), because
+#     lifting it out of main would otherwise change what main does:
+#
+#       ([dup] ; getCode) "q" ; defW ; 1
+#         a DECLARATION LINE is run at check time, above main, so it
+#         must take nothing and leave nothing (`• =Dict> •`)
+#
+#   * it may not touch the world.  Reading a file before anything is
+#     checked is the LOADER's, and `import` and `table` are its words:
+#
+#       "hello" ; print ; ([dup] ; getCode) "q" ; defW
+#         a DECLARATION LINE runs at check time, before main, so it may
+#         not touch the world: this one is `=Dict IO>`
+#
+#   * and of the ten words, `defW` is the one a program may call.  The
+#     other nine declare things the module's own defs are checked
+#     AGAINST, and those are checked above the program that would
+#     declare them:
+#
+#       "Mon" "op : a a ⇒ a" ; theoryW
+#         `theoryW` is a declaration word, and a program may not call
+#         this one yet … Write the keyword line.
+#
+# `Dict` itself is a resource the loader threads, and a program cannot
+# discharge it — there is no `Dict` to seed one with and no `unDict` to
+# open one with, because the name may not be declared at all.  `:doc
+# Dict` says so.
