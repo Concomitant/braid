@@ -2668,6 +2668,8 @@ now one **table** saying what a keyword *is*, and it is open.
 | `functor` | `functorW` | `Str Str =Dict> •` |
 | `import` | `importW` | `Str =Dict IO> •` |
 | `table` | `tableW` | `Str Str =Dict IO> •` |
+| `keyword` | `keywordW` | `Str Str =Dict> •` |
+| *(none, until bound)* | `testW` | `Code Str =Dict> •` |
 
 **The two that read the world say so in the grade.** `importW` and
 `tableW` are `=Dict IO>`; the other eight are `=Dict>`. That is the ONE
@@ -2730,6 +2732,43 @@ Three rules, each refused by name:
 - **`defW` is the one of the ten a program may call.** The other nine
   declare things the module's own defs are checked *against*, and those
   are checked above the program that would declare them.
+
+**The table is open** — `keyword <name> = <a declaration word>`. From
+that line on, `<name> x = …` is a declaration, collected the way a `def`
+is (either an inline body or an indented block) and parsed into `[body]
+"x" <word>`:
+
+```braid
+keyword test = testW
+test squareIs25 = (5 ; square) (25) ; eq? ; verdict
+```
+
+`testW` is a declaration word the kernel ships with **no keyword of its
+own**, which is what makes the binding worth having: it registers a
+**check**, and a check runs at module start beside the laws and must
+answer `true`. A check that is not `• ⇒ Bool` is refused at the
+declaration, the same courtesy a law gets.
+
+**And the word may be the module's own.** A declaration word is any word
+at `Code Str =Dict> •`:
+
+```braid
+def twiceW = (c n -> c n ; defW ; (c c ; append) (n ; _ "Twice" ; cat) ; defW)
+keyword double = twiceW
+double bump = _ 1 ; +          # declares `bump` and `bumpTwice`
+```
+
+A keyword line for a bound word becomes a **declaration line**, run with
+the module's own declaration program in file order — which is why the
+word may be one the module writes. `keyword` refuses a name the language
+already uses: *`keyword def` is refused: def is already a keyword of the
+language, and a keyword names one declaration word.*
+
+**A keyword word takes already-parsed arguments, and that is all it may
+take.** A bound keyword's line is `<keyword> <name> = <body>` — a `Str`
+and a `Code`, in that order, pushed and the word called postfix. There
+is no form in which a keyword word receives the line's TEXT, because
+that word would be a parsing word, and those are refused permanently.
 
 **Where a programmatic def lands.** Above main and **below** the
 module's written defs — the dictionary a compile-time word sees is the

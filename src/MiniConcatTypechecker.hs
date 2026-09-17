@@ -3007,6 +3007,15 @@ lawDefName :: String -> String -> String
 lawDefName inst lawNm = inst ++ "@law@" ++ lawNm
 
 -- a generated law def, and the (model, law) it came from
+-- A REGISTERED CHECK (stage 8).  `test squares = \8230` becomes a def
+-- in the compiler's `@` namespace, which source may not write, and
+-- `runModule` runs it at module start exactly as it runs a law.
+testDefName :: String -> String
+testDefName n = "test@" ++ n
+
+testParts :: String -> Maybe String
+testParts = stripPrefix "test@"
+
 lawParts :: String -> Maybe (String, String)
 lawParts n = case breakOn "@law@" n of
   Just (i, l) -> Just (i, l)
@@ -6524,6 +6533,18 @@ elabScope env rs body = do
 -- A law is a program that must be runnable on nothing and answer yes:
 -- `• ⇒ Bool`.  Checked here so a malformed law is a declaration error
 -- rather than a mystery at module start.
+checkTestType :: Env -> String -> Either String ()
+checkTestType env n = do
+  sc <- maybe (Left $ "internal: missing test def " ++ n) Right (M.lookup n env)
+  let Arrow i o _ = runInfer0 (instantiate sc)
+      boolTy = TSum (RCons SEnd (RCons SEnd RNil))
+  case solve [CEqStack i SEnd, CEqStack o (SCons boolTy SEnd)] of
+    Right _ -> Right ()
+    Left _  ->
+      Left $ "test '" ++ fromMaybe n (testParts n) ++ "' must be a program "
+          ++ "with type `\8226 \8658 Bool`, but is "
+          ++ show (normalizeArrow (runInfer0 (instantiate sc)))
+
 checkLawType :: Env -> String -> Either String ()
 checkLawType env n = do
   sc <- maybe (Left $ "internal: missing law def " ++ n) Right (M.lookup n env)
@@ -7513,14 +7534,35 @@ declWordTable =
     -- the table rather than off the implementation.
   , DeclWord "import"         "importW"         SpanLine  Nothing       True
   , DeclWord "table"          "tableW"          SpanLine  (Just ShStr)  True
+    -- THE ROW THAT OPENS THE TABLE.  `keyword test = testW` binds a
+    -- keyword name to a declaration word, and from that line on `test
+    -- \8230 = \8230` is a declaration.  It is itself a declaration line,
+    -- so it is a row like the others.
+  , DeclWord "keyword"        "keywordW"        SpanLine  (Just ShStr)  False
+    -- ...and one word with NO keyword of its own until a module binds
+    -- one, which is what makes the binding worth having.  `testW`
+    -- registers a runnable check; it is the kernel's only because
+    -- running one at module start is the kernel's, and a word a module
+    -- WRITES (`def benchW = \8230 ; defW`, at `Code Str =Dict> \8226`)
+    -- binds to a keyword exactly the same way.
+  , DeclWord ""               "testW"           SpanDef   (Just ShCode) False
   ]
+
+-- what a keyword a module BOUND collects and takes: a `def`'s own
+-- shape, `<keyword> <name> = <body>`, with the body as Code.  One
+-- shape, because a second would be a second surface.
+boundWordRow :: String -> String -> DeclWord
+boundWordRow kw w = case declWordNamed w of
+  Just row -> row { dwKeyword = kw }
+  Nothing  -> DeclWord kw w SpanDef (Just ShCode) False
 
 -- the keywords the table claims, for the scanner
 declKeywords :: [String]
-declKeywords = map dwKeyword declWordTable
+declKeywords = filter (not . null) (map dwKeyword declWordTable)
 
 declWordFor :: String -> Maybe DeclWord
-declWordFor kw = listToMaybe [ w | w <- declWordTable, dwKeyword w == kw ]
+declWordFor kw =
+  listToMaybe [ w | not (null kw), w <- declWordTable, dwKeyword w == kw ]
 
 -- ...and by the word's own name, for `:doc defW` and for a program
 -- that calls one
@@ -7624,6 +7666,18 @@ applyDecl c dk = case dcWord c of
         Right dk { dkBlocks = (dcRaw c, [], dcDoc c) : dkBlocks dk }
     | w `elem` ["theoryW", "modelW"] ->
         Right dk { dkBlocks = (dcRaw c, dcBlock c, dcDoc c) : dkBlocks dk }
+  -- THE OPEN HALF.  `keyword test = testW` names a declaration word,
+  -- and the scanner reads the table it just changed.
+  "keywordW" -> case dcArgs c of
+    [DAStr body, DAStr kwRaw]
+      | [kw] <- words kwRaw, [w] <- words body ->
+          if kw `elem` declKeywords
+            then Left $ "`keyword " ++ kw ++ "` is refused: " ++ kw
+                     ++ " is already a keyword of the language, and a "
+                     ++ "keyword names one declaration word.  Pick another "
+                     ++ "name."
+            else Right dk { dkKeywords = (kw, w) : dkKeywords dk }
+    _ -> Left kwMalformed
   "defW" -> do
     (name, hdr) <- defHeadOf (dcRaw c)
     body <- case dcArgs c of
@@ -7631,7 +7685,20 @@ applyDecl c dk = case dcWord c of
               _              -> Left ("internal: defW without a body: "
                                         ++ dcRaw c)
     Right dk { dkDefs = (name, hdr, body, dcDoc c, dcLine c) : dkDefs dk }
-  w -> Left ("internal: no declaration word " ++ w)
+  -- A WORD A KEYWORD WAS BOUND TO.  It cannot run here \8212 it may be
+  -- a word this module writes \8212 so the line becomes a CALL, kept in
+  -- file order and run with the module's declaration program.
+  w -> case dcArgs c of
+    [DACode body, DAStr nm] ->
+      Right dk { dkCalls = (dcLine c, callSrc body nm w) : dkCalls dk }
+    _ -> Left ("a keyword's line is `<keyword> <name> = <body>`: "
+                 ++ trimSpace (dcRaw c))
+  where
+    kwMalformed = "Malformed keyword declaration (want `keyword <name> = "
+                    ++ "<a declaration word>`): " ++ trimSpace (dcRaw c)
+    -- `[body] "name" word`, as the program it is
+    callSrc body nm w =
+      "([" ++ body ++ "] ; getCode) " ++ show nm ++ " ; " ++ w
 
 -- a `def` line's own head: the name and the clauses, re-read from the
 -- line so that the refusal is the line's refusal
@@ -7721,6 +7788,11 @@ declProgramStep addD datas aliases theories slots funcs thNames trans bases
         else Right ()
       (_, logs) <- runPureEval (evalTerm rctx run emptyVarEnv t1 [])
       foldM install st [ r | Just r <- map declLogParts logs ]
+    install s ("testW", [nm, body]) =
+      addD s ( testDefName nm, noHdr, body
+             , Just ("a `test` registered by this module \8212 it runs at "
+                      ++ "module start, beside the laws, and must answer "
+                      ++ "`true`") )
     install s ("defW", [nm, body]) =
       addD s ( nm, noHdr, body
              , Just ("declared by this module's declaration program: "
@@ -7728,6 +7800,15 @@ declProgramStep addD datas aliases theories slots funcs thNames trans bases
                       ++ show lineNo) )
     install _ (w, ps) =
       Left ("internal: declaration record " ++ w ++ " " ++ show ps)
+
+-- Two streams of logical lines, merged by the line they start on.
+mergeByLine :: [[(Int, String)]] -> [[(Int, String)]] -> [[(Int, String)]]
+mergeByLine [] bs = bs
+mergeByLine as [] = as
+mergeByLine as@(a : as') bs@(b : bs')
+  | lineOf a <= lineOf b = a : mergeByLine as' bs
+  | otherwise            = b : mergeByLine as bs'
+  where lineOf g = case g of ((k, _) : _) -> k; [] -> 0
 
 -- A module's program lines, grouped into LOGICAL lines: a line plus
 -- whatever it left open.  The declaration program is decided per
@@ -7760,10 +7841,19 @@ data Dict = Dict
   , dkImports  :: [String]        -- ^ `import` lines, raw for the loader
   , dkTables   :: [String]        -- ^ `table` lines, raw for the loader
   , dkProgram  :: [(Int, String)] -- ^ every line the declarations left
+  , dkKeywords :: [(String, String)]
+    -- ^ THE OPEN HALF (stage 8): keyword -> the declaration word it
+    -- names, as `keyword test = testW` bound it.  A line whose first
+    -- word is one of these is a declaration from there on.
+  , dkCalls    :: [(Int, String)]
+    -- ^ ...and the calls those lines make, as programs, to be run with
+    -- the module's declaration program: `[body] "name" testW`.  They
+    -- wait because a word a module WROTE cannot run until the module's
+    -- defs are checked.
   }
 
 emptyDict :: Dict
-emptyDict = Dict [] [] [] [] [] []
+emptyDict = Dict [] [] [] [] [] [] [] []
 
 -- ...and the module's own declarations read into one.  This is the
 -- only place the six buckets are assembled, so the checker below reads
@@ -7773,7 +7863,7 @@ dictOf :: ( [(String, DefHdr, String, Maybe String, Int)]
           , [(String, [String], Maybe String)]
           , [String], [String], [(Int, String)] )
        -> Dict
-dictOf (ds, ts, bs, is, tb, ps) = Dict ds ts bs is tb ps
+dictOf (ds, ts, bs, is, tb, ps) = Dict ds ts bs is tb ps [] []
 
 -- Every name this dictionary declares, for the checks that are about
 -- names and not about kinds.  A type line's name may carry parameters
@@ -7876,6 +7966,7 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
     finish dk = Dict (reverse (dkDefs dk))    (reverse (dkTypes dk))
                      (reverse (dkBlocks dk))  (reverse (dkImports dk))
                      (reverse (dkTables dk))  (reverse (dkProgram dk))
+                     (reverse (dkKeywords dk)) (reverse (dkCalls dk))
 
     go dk _ [] = Right dk
     go dk doc ((lineNo, l) : rest)
@@ -7883,7 +7974,7 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
           go dk (Just (maybe d (\p -> p ++ " " ++ d) doc)) rest
       -- a LINE: `type`, `data`, `resource`, `transformation`, `functor`,
       -- `import`, `table`
-      | Just w <- wordOf l, dwSpan w == SpanLine = do
+      | Just w <- wordOf dk l, dwSpan w == SpanLine = do
           dk' <- applyDecl (call w lineNo l [] doc (inlineOf l)) dk
           go dk' Nothing rest
       -- `rules` was a keyword until 2026-09-13; it is a model now.
@@ -7916,7 +8007,7 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
       -- a HEAD PLUS ITS BLOCK: `theory`, `model`.  `model Opt in Base =
       -- p = q, r = s` writes its bindings inline instead, and
       -- `spanBlock` returns nothing for that form, so one branch serves.
-      | Just w <- wordOf l, dwSpan w == SpanBlock = do
+      | Just w <- wordOf dk l, dwSpan w == SpanBlock = do
           let (block, rest') = spanBlock 0 rest
               kw            = head (words l)
           if null block && all isSpace (declInline l)
@@ -7929,8 +8020,8 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
               dk' <- applyDecl (call w lineNo l blk doc bodyTxt) dk
               go dk' Nothing rest'
       -- EITHER, the way `def` has both
-      | Just w <- wordOf l, dwSpan w == SpanDef = do
-          (name, _, body) <- parseDefLine l
+      | Just w <- wordOf dk l, dwSpan w == SpanDef = do
+          (name, body) <- defOrKeywordLine w l
           -- a `#` comment on the `=` line is not code: treat a
           -- comment-only body as blank so the block-body form triggers
           if all isSpace (takeWhile (/= '#') body)
@@ -7962,13 +8053,27 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
           go dk { dkProgram = reverse ((lineNo, l) : cont) ++ dkProgram dk }
              Nothing rest'
 
-    -- which declaration word this line calls, if any
-    wordOf l = case words l of
-      (kw : _) -> declWordFor kw
-      []       -> Nothing
+    -- Which declaration word this line calls, if any: the language's
+    -- own table first, then the keywords THIS MODULE has bound so far.
+    -- "so far" is the whole of the openness: a `keyword` line changes
+    -- what the lines below it mean and nothing above it.
+    wordOf dk l = case words l of
+      (kw : _) -> case declWordFor kw of
+        Just w  -> Just w
+        Nothing -> boundWordRow kw <$> lookup kw (dkKeywords dk)
+      [] -> Nothing
 
     -- a head line's own body text, when it has one on the line
     inlineOf l = maybe "" id (snd (declSplit l))
+
+    -- `def`'s own head refuses a name that is a literal; a bound
+    -- keyword's head is a name and nothing else
+    defOrKeywordLine w l
+      | dwWord w == "defW" = (\(n, _, b) -> (n, b)) <$> parseDefLine l
+      | otherwise = case declSplit l of
+          (hd, Just body) | [n] <- words hd -> Right (n, body)
+          _ -> Left ("a keyword's line is `" ++ dwKeyword w
+                       ++ " <name> = <body>`: " ++ trimSpace l)
 
     -- one call: the word, its arguments read at the word's shapes, and
     -- the text and the line the refusals will need
@@ -9403,7 +9508,7 @@ checkModuleRaw base src = do
       shadow0  = mbShadow base
       aliases0 = mbAliases base
       datas0   = mbDatas base
-  dict <- dictOf <$> splitDefsIx src
+  dict <- dictFromSource src
   -- the dictionary's own wire is not a name a module may take
   dictReserved dict
   let defSrcs0   = dkDefs dict
@@ -9622,10 +9727,14 @@ checkModuleRaw base src = do
   -- sees (the ordering rule).  Every top-level group whose GRADE
   -- carries `Dict` is one, is run against the dictionary, and is lifted
   -- out of main; everything else is main, in the order it was written.
+  -- the calls a bound keyword's lines made ride WITH the program's own
+  -- declaration lines, merged by the line they were written on, so that
+  -- file order is file order whichever way a declaration was spelled
   (stD, mainGroups) <-
     foldM (declProgramStep addDef' allDatas allAliases theories slotTable
                            funcs thNames trans ownBases tblTypes resNames)
-          (st0, []) (logicalLines mainLines0)
+          (st0, [])
+          (mergeByLine [ [c] | c <- dkCalls dict ] (logicalLines mainLines0))
   let (env', runFinal, _, defsRev, docs, tmpls, kwords, routedWhy) = stD
       mainLines = concat (reverse mainGroups)
       mainSrc   = intercalate "\n" (map snd mainLines)
@@ -9645,6 +9754,10 @@ checkModuleRaw base src = do
   mapM_ (checkBaseInstance env' allDatas tmpls (map thName theories)
            [ (thName th, map fst (thSlots th)) | th <- theories ])
         ownBases0
+  -- a registered check is a program with type `\8226 \8658 Bool`, and a
+  -- malformed one is a declaration error rather than a mystery at
+  -- module start \8212 the same courtesy a law gets
+  mapM_ (checkTestType env') [ n | (n, _, _) <- defsRev, isJust (testParts n) ]
   mapM_ (checkLawType env') [ n | (n, _, _, _) <- instDefs, isJust (lawParts n) ]
   mapM_ (checkLawType env')
         [ n | (n, _, _) <- transformationDefSrcs, isJust (squareParts n) ]
@@ -11931,6 +12044,11 @@ runBuiltin _ _ "merge" [VSum _ bundle]  = Right (bundle, [])
 runBuiltin _ _ "defW" [c, VStr nm] = do
   t <- codeToTermV c
   Right ([], [declLog "defW" [nm, renderTerm t]])
+-- ...and the one that has no keyword until a module binds it: it
+-- registers a CHECK, which runs at module start beside the laws.
+runBuiltin _ _ "testW" [c, VStr nm] = do
+  t <- codeToTermV c
+  Right ([], [declLog "testW" [nm, renderTerm t]])
 -- ...and the nine that a KEYWORD LINE calls and a program does not, yet.
 -- Refused by name, saying what the restriction is: a `theory` declared
 -- from a program would have to be checked before the defs that read it,
@@ -12695,6 +12813,12 @@ runModuleAt lm src = runExceptT $ do
   mapM_ (runSquare m) [ (n, t) | (n, _, t) <- modDefs m
                                , Just (mo, sl) <- [squareParts n]
                                , sampledSquare m mo sl ]
+  -- ...and every CHECK a `test` keyword registered (stage 8).  Beside
+  -- the laws, for the same reason: a claim a module makes about itself
+  -- is worth as much as the moment it is decided, and that moment is
+  -- before anything prints.
+  mapM_ (runTest m) [ (n, t) | (n, _, t) <- modDefs m
+                             , isJust (testParts n) ]
   case modMain m of
     Nothing -> pure ([], [])
     Just (term, arr@(Arrow i o _))
@@ -12726,6 +12850,16 @@ runLaw m (n, t) = do
                               \that member's own evidence, and this is the \
                               \first one that named it)"
                          else "")
+
+-- One registered check, run at module start.  Anything but `true` is
+-- a module error naming the test.
+runTest :: Module -> (String, Term) -> ExceptT String IO ()
+runTest m (n, t) = do
+  (out, _) <- evalTerm (moduleRCtx m) (moduleRunDefs m) M.empty t []
+  case out of
+    [VSum 0 []] -> pure ()
+    _ -> throwError $ "test '" ++ fromMaybe n (testParts n) ++ "' fails: a "
+                   ++ "`test` runs at module start and must answer `true`"
 
 -- Was this square left to the samples?  A transformation the module does not
 -- know about (there is none) is sampled, which is what the check did

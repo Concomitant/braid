@@ -4994,9 +4994,49 @@ same missing door B1 hit, from the other side." The door now has a
 word on it. It is bolted, and the bolt is a pass structure rather than
 a missing construct.
 
+### The open half, and the smallest spelling for it
+
+`keyword <name> = <a declaration word>`. One line, one new keyword, and
+it is itself a declaration line — a row of the table like the others,
+`keywordW : Str Str =Dict> •`.
+
+It names the word **by name** rather than taking it as a value, which is
+the deviation from the stage-0 sketch's `Str Fn… =Dict> •`. The reason
+is arity: the rows have one argument or two (`importW` takes the head
+alone), so no single `Fn⟨…⟩` type covers the table, and a clause that
+could only be written for some rows is worse than a name. `functor F =
+word` names a word for exactly the same reason, and this is the same
+spelling.
+
+**A keyword word receives ALREADY-PARSED arguments, and there is no form
+in which it receives text.** A bound keyword's line is `<keyword> <name>
+= <body>` — a `Str` and a `Code`, pushed in that order and the word
+called postfix — collected the way a `def` is, inline or as an indented
+block. One shape, because a second would be a second surface; and no
+shape that hands over the line, because that word would be a parsing
+word.
+
+**The word may be the module's own**, which is where the openness stops
+being a table of the kernel's names. Any word at `Code Str =Dict> •`
+binds:
+
+```braid
+def twiceW = (c n -> c n ; defW ; (c c ; append) (n ; _ "Twice" ; cat) ; defW)
+keyword double = twiceW
+double bump = _ 1 ; +          # declares `bump` and `bumpTwice`
+```
+
+That works because a bound keyword's line becomes a **declaration
+line**, merged by the line it was written on with the module's own
+declaration program and run there — so the word it calls has been
+checked by then. `testW`, the kernel's one word with no keyword until a
+module binds one, registers a check that runs at module start beside the
+laws; it is the kernel's only because *running* one at module start is,
+and a word a module writes binds exactly the same way.
+
 ### What the table bought, and what it cost
 
-The scanner's ten keyword branches became ten **rows**: a keyword, a
+The scanner's ten keyword branches became **rows**: a keyword, a
 word, how its line is collected, the shape of its body argument, and
 whether it reads the world. A row is data. Adding a keyword adds no code
 to the scanner, which is what "eventually-open" was asking for.
@@ -5009,6 +5049,6 @@ parser already built, which is why a Braid file can be read without
 being run.
 
 The cost was one number. `examples/typerep.braid`'s differential check
-counts the words in scope — 260 before, 270 now — because ten of them
-are new. They have reps and they agree, which is the check doing its
+counts the words in scope — 260 before, 272 now — because twelve of
+them are new. They have reps and they agree, which is the check doing its
 job.

@@ -748,6 +748,12 @@ moduleTypeTests =
     -- all the same
   , ("def declare = (n -> ([dup >> +] >> getCode) n >> defW)\n\
      \\"twice\" >> declare\ntwice",                "Int ⇒ Int")
+    -- ...and the table is OPEN: a keyword may name a word the MODULE
+    -- wrote, at `Code Str =Dict> •`, and from that line on it declares
+  , ("def twiceW = (c n -> c n >> defW >> (c c >> append) \
+     \(n >> _ \"Twice\" >> cat) >> defW)\n\
+     \keyword double = twiceW\ndouble bump = _ 1 >> +\nbumpTwice",
+     "Int ⇒ Int")
     -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `with Fwd(Floats)`
     -- APPLIES the family and mints a member; the receipt on the arrow is
     -- the APPLICATION, one label, because one model read the template.
@@ -3707,6 +3713,22 @@ moduleFailTests =
   , (zeroFirstRingMod ++ "transformation Halved in Ints \8658 Halves = halve\n1 ; print",
      "transformation Halved: the square for slot 'add' does not commute \
      \at the theory's samples")
+    -- STAGE 8: THE TABLE IS OPEN.  `keyword test = testW` binds a
+    -- keyword to a declaration word, and a `test` runs at module start
+    -- beside the laws.
+  , ("keyword test = testW\ndef square = dup ; *\n\
+     \test wrong = (5 ; square) (26) ; eq? ; verdict\n1 ; print",
+     "test 'wrong' fails: a `test` runs at module start and must answer \
+     \`true`")
+  , ("keyword test = testW\ntest wrong = 5\n1 ; print",
+     "test 'wrong' must be a program with type `• ⇒ Bool`, but is • ⇒ Int")
+    -- ...and a keyword names ONE declaration word, so it may not take
+    -- a name the language already uses
+  , ("keyword def = testW\n1 ; print",
+     "`keyword def` is refused: def is already a keyword of the language")
+  , ("keyword bad = testW extra\n1 ; print",
+     "Malformed keyword declaration (want `keyword <name> = <a \
+     \declaration word>`)")
     -- STAGE 8: a declaration word is the compiler's name, because a
     -- keyword line is parsed into a call of one.
   , ("def defW = 1\n1 ; print",

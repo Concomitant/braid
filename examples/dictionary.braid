@@ -85,7 +85,56 @@ def declare = (n -> (n ; bodyFor) (n ; nameFor) ; defW)
 "add2" ; arrowOf ; print
 
 # ---------------------------------------------------------------------
-# 4. What a declaration line may and may not be
+# 4. THE TABLE IS OPEN: a keyword a library adds
+# ---------------------------------------------------------------------
+# `keyword <name> = <a declaration word>` binds a keyword to a word, and
+# from that line on `<name> x = …` is a declaration.  It is itself a
+# declaration line, so it is a row of the table like the others.
+#
+# `testW` is a declaration word the kernel ships with NO keyword of its
+# own — which is what makes the binding worth having.  It registers a
+# runnable check, and a check runs at module start, beside the laws: a
+# claim a module makes about itself is worth as much as the moment it is
+# decided, and that moment is before anything prints.
+keyword test = testW
+
+test squareIs25 = (5 ; square) (25) ; eq? ; verdict
+test addsUp     = (2 3 ; +) (5)    ; eq? ; verdict
+
+"-- both checks already ran --" ; print
+
+# A check that answers `false` is a module error, named:
+#
+#   test wrong = (5 ; square) (26) ; eq? ; verdict
+#     test 'wrong' fails: a `test` runs at module start and must answer
+#     `true`
+#
+# ...and one that is not `• ⇒ Bool` is refused at the declaration, the
+# same courtesy a law gets:
+#
+#   test wrong = 5
+#     test 'wrong' must be a program with type `• ⇒ Bool`, but is • ⇒ Int
+
+# AND THE WORD MAY BE THE MODULE'S OWN.  A declaration word is any word
+# at `Code Str =Dict> •`; here is one written in Braid, which declares
+# the word it is given AND the word composed with itself.
+def twiceW = (c n -> c n ; defW ; (c c ; append) (n ; _ "Twice" ; cat) ; defW)
+keyword double = twiceW
+
+double bump = _ 1 ; +
+
+"-- one keyword line, two words --" ; print
+2 ; bump      ; print                            # 3
+2 ; bumpTwice ; print                            # 4, the word composed with itself
+
+# `keyword` refuses to redefine one of the language's own:
+#
+#   keyword def = testW
+#     `keyword def` is refused: def is already a keyword of the
+#     language, and a keyword names one declaration word.
+
+# ---------------------------------------------------------------------
+# 5. What a declaration line may and may not be
 # ---------------------------------------------------------------------
 # A declaration line runs at CHECK TIME, above main and below the defs —
 # the dictionary a compile-time word sees is the dictionary so far.  So:

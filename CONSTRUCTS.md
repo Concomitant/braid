@@ -875,6 +875,8 @@ it marks *an act on the dictionary* against *a morphism*.
 | `functor` | `functorW` | `Str Str =Dict> •` | the word, and the name |
 | `import` | `importW` | `Str =Dict IO> •` | `import "u.braid"` ≡ `"u.braid" importW` |
 | `table` | `tableW` | `Str Str =Dict IO> •` | the path, and the head |
+| `keyword` | `keywordW` | `Str Str =Dict> •` | `keyword test = testW` ≡ `"testW" "test" keywordW` |
+| *(none, until bound)* | `testW` | `Code Str =Dict> •` | a registered check, run at module start |
 
 **The two that read the world say so.** `importW` and `tableW` are
 `=Dict IO>`; the other eight are `=Dict>`. That is the one place IO
@@ -904,9 +906,19 @@ is inferred at `• =Dict> •`, run at check time above main and below the
 module's own defs (the ordering rule — the dictionary a compile-time
 word sees is the dictionary so far), and lifted out of main.
 
+**The table is open.** `keyword <name> = <a declaration word>` binds a
+keyword to a word, and from that line on `<name> x = …` is a
+declaration, collected the way a `def` is and parsed into `[body] "x"
+<word>`. The word may be one the **module writes** — any word at `Code
+Str =Dict> •` — because a bound keyword's line becomes a declaration
+line, run with the module's own declaration program in file order.
+`testW` is the kernel's one word with no keyword of its own: it
+registers a **check**, run at module start beside the laws.
+
 **Examples.** `dictionary.braid` — the arrows printed off the words
-themselves, one declaration written both ways, and three words declared
-in a loop and then used.
+themselves, one declaration written both ways, three words declared in a
+loop and then used, `keyword test = testW` with two checks, and a
+declaration word written in Braid bound to a keyword of its own.
 
 **Refusals.**
 
@@ -923,6 +935,12 @@ a DECLARATION LINE runs at check time, before main, so it may not touch
 `theoryW` is a declaration word, and a program may not call this one
   yet: `theory` declares something the module's own defs are checked
   AGAINST, and they are checked above the program that would declare it.
+`keyword def` is refused: def is already a keyword of the language, and
+  a keyword names one declaration word.  Pick another name.
+Malformed keyword declaration (want `keyword <name> = <a declaration
+  word>`): …
+test 'wrong' fails: a `test` runs at module start and must answer `true`
+test 'wrong' must be a program with type `• ⇒ Bool`, but is • ⇒ Int
 ```
 
 ---
