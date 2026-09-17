@@ -10,7 +10,7 @@ import Data.Set (Set)
 import Data.Maybe (fromMaybe, isNothing, isJust, fromJust, catMaybes, listToMaybe)
 import Data.List (nub, intercalate, elemIndex, isPrefixOf, isSuffixOf,
                   isInfixOf,
-                  stripPrefix, partition, dropWhileEnd, (\\))
+                  stripPrefix, partition, dropWhileEnd, sortOn, (\\))
 import Control.Monad.State
 import Control.Monad.Except (ExceptT, runExceptT, throwError, liftEither,
                              MonadError, catchError)
@@ -5926,6 +5926,66 @@ renameWordsT tbl = go
     go (OpenAbs sl h b) = OpenAbs sl h (go b)
     go t                = t
 
+-- INFERRED ROUTING (stage 7b, 2026-09-17).
+--
+-- A def is ROUTED for a resource when the scheme of an atom in its
+-- body -- read from the PREFIX SCOPE, fixed before this def is touched
+-- -- carries that resource as its deepest wire on BOTH sides.  The
+-- wire is then padded under every other stage exactly as if `with E`
+-- had been written, the def's arrow becomes `E \931 \8658 E \931\8242`, and its
+-- CALLERS are routed the same way, transitively, until the wire meets
+-- an INSTALL SITE (a written seed) or a HANDLER (a discharge).  A
+-- resource word originates its label at the leaf, exactly as the four
+-- io prims do, and the label propagates by row unification as every
+-- label does.
+--
+-- INVARIANT FIVE is untouched.  This reads the schemes of CALLEES in
+-- the prefix scope -- as good as written, the same licence `typeOfCode`
+-- and the 5c\189 strength routing already have -- and never the manifest
+-- of the def being elaborated.
+--
+-- Two guards, both about not routing a wire that is already placed:
+--
+--   * THE CONSTRUCTOR EXCEPTION (syntactic, two atoms).  A body that
+--     names `E` or `unE` is handling the wire itself -- an install site
+--     or a handler -- so padding would add a second wire beside the one
+--     it holds.  This is what keeps the handler idiom working
+--     unchanged: `collectLog` seeds, `note` rolls, and neither is
+--     routed.
+--   * ALONE IN ITS STAGE.  The atom must BE the stage, which is the
+--     one shape the routing pass can place (`elabScope`'s
+--     one-resource-operation rule).  A stage that writes its own `_`
+--     and `...` around the atom is threading BY HAND and says so --
+--     `examples/resources.braid`'s `scoreByHand` and `_ bump ...` are
+--     exactly that, and they keep the types they have.  (This guard is
+--     not in design-7b.md \167 4i as written; it is what makes "routed
+--     exactly as if `with E` were written" true of the cases where
+--     `with E` would have worked, and leaves hand-threading alone.)
+--
+-- `with E` stays legal, is exactly what this does -- routing is
+-- idempotent -- and is the explicit OVERRIDE for the one rare edge: a
+-- def that receives the carrier as a VALUE through a binder, without
+-- naming the constructors, and also calls a resource word.  Inference
+-- would route it and it would fail loudly with two `E` wires; the
+-- header says what is meant.  Never silent: the carrier is nominal, a
+-- `Str` is never a `Log`, and a missing install stays *you forgot to
+-- install*.
+inferRouting :: Env -> [String] -> Term -> Maybe (String, [String])
+inferRouting env resources body =
+  case sortOn (negate . length . snd) candidates of
+    (c : _) -> Just c
+    []      -> Nothing
+  where
+    named = primsIn body
+    candidates =
+      [ (n, run)
+      | (_, [Prim n]) <- spineLines body
+      , Just (Forall _ _ _ _ _ _ (Arrow i o _)) <- [M.lookup n env]
+      , let run = leadingRes resources i
+      , not (null run)
+      , run == leadingRes resources o
+      , and [ c `notElem` named | r <- run, c <- [r, "un" ++ r] ] ]
+
 -- THE RESOURCE MODEL'S FUSED EVALUATOR (stage 7b restates this).
 --
 -- `with Log Counter` is transport into the models `resource Log` and
@@ -6822,6 +6882,10 @@ data Module = Module
   , modBases     :: [BaseInstance]      -- `model Name in Base`
   , modTransformations :: [TransformationInfo]  -- `transformation Name`,
                                                 -- with its verdicts
+  , modRouted   :: [(String, String)]   -- defs INFERRED routing routed
+                                        -- (stage 7b), and why: the
+                                        -- resource and the atom that
+                                        -- originated it, for `:t!`
   }
 
 -- Split source into `def name = body` lines, `type …` declaration
@@ -8357,13 +8421,13 @@ checkModuleRaw base src = do
       resNames = [ dName d | d <- allDatas, dResource d ]
   -- model bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  (env', runFinal, _, defsRev, docs, tmpls, kwords) <-
+  (env', runFinal, _, defsRev, docs, tmpls, kwords, routedWhy) <-
     foldM (addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
                   ownBases resNames [ (inName i, inScope i) | i <- insts ] allDatas
                   (RCtx M.empty allDatas allAliases theories))
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
-           mbTemplates base, mbKWords base)
+           mbTemplates base, mbKWords base, [])
           (baseDefs ++ transDefs ++ resDefs ++ defSrcs ++ instDefs
              ++ [ (n, noHdr, b, d) | (n, b, d) <- transformationDefSrcs ])
   -- the generated transport word is checked like any other functor's
@@ -8401,7 +8465,7 @@ checkModuleRaw base src = do
   -- own lists are built latest-first, which is exactly the match order
   pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
                 theories insts ownFams funcs tmpls ownTrans kwords ownBases
-                transformationInfos)
+                transformationInfos (reverse routedWhy))
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
@@ -8469,7 +8533,8 @@ checkModuleRaw base src = do
                , ownAl, dd : ownDt, docs'' )
     addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans bases
            resources instScopes datas refl
-           (env, run, shadow, acc, docs, tmpls, kws) (name, hdr, bodySrc, doc) =
+           (env, run, shadow, acc, docs, tmpls, kws, routed)
+           (name, hdr, bodySrc, doc) =
       -- ATTRIBUTION, ONCE (2026-09-15).  Everything a def's own check
       -- can refuse — the parse, the destructuring rewrite, the `\`
       -- continuation, `in`'s target, the `with` elaborator, the
@@ -8506,7 +8571,16 @@ checkModuleRaw base src = do
           -- the model of `in`'s theory that this header applies, if any
           instOf  = [ n | t <- maybe [] pure inTh, n <- dhWith hdr
                         , Just (t', _) <- [lookup n slotTable], t' == t ]
-          applied = case dhWith hdr of
+          -- INFERRED ROUTING (stage 7b).  A def that CALLS a resource
+          -- word is routed for that resource with no header at all;
+          -- `with E` is the explicit, idempotent override, so a header
+          -- that already names a resource wins outright and nothing is
+          -- added beside it.
+          routing
+            | any (`elem` resources) (dhWith hdr) = Nothing
+            | otherwise = inferRouting (M.delete name env) resources body0
+          withNs  = dhWith hdr ++ maybe [] snd routing
+          applied = case withNs of
             [] -> id
             ns -> With (if null instOf then Transporting else Instantiating) ns
       case (inTh, instOf) of
@@ -8517,7 +8591,7 @@ checkModuleRaw base src = do
           -- templates live in, exactly as defs do.
           pure ( env, run, shadow, acc
                , maybe docs (\d -> M.insert name d docs) doc
-               , (name, (th, applied body0)) : tmpls, kws )
+               , (name, (th, applied body0)) : tmpls, kws, routed )
         _ -> do
           -- `in M` — a HAND-BUILT morphism of the category M presents,
           -- written in M's vocabulary.  The clause APPLIES NOTHING: it
@@ -8629,7 +8703,12 @@ checkModuleRaw base src = do
                , filter (/= name) shadow
                , (name, sc, term) : acc
                , maybe docs (\d -> M.insert name d docs) doc
-               , tmpls, kws2 )
+               , tmpls, kws2
+               , case routing of
+                   Just (a, run') ->
+                     (name, "routed for " ++ unwords run'
+                              ++ ": calls `" ++ a ++ "`") : routed
+                   Nothing -> routed )
       where
         inDef e = case transformationNameParts name of
           Just (mo, sl) ->

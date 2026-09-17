@@ -74,6 +74,9 @@ data ReplState = ReplState
   , rsModels   :: [Instance]  -- ...and the models, members included
   , rsTransformations :: [TransformationInfo]
                          -- transformations it imported, with their verdicts
+  , rsRouted   :: [(String, String)]    -- defs INFERRED routing routed
+                                        -- (stage 7b), and why -- `:t!`
+                                        -- says so
     -- a session cannot DECLARE a theory, a model or a functor, but
     -- `:import` can bring them in, and then `with` must know them
   }
@@ -86,7 +89,7 @@ initialState =
             (modDatas preludeModule)
             (modDocs preludeModule)
             [] SEnd [] [] [] [] (modTheories preludeModule) [] [] [] []
-            [] [] []
+            [] [] [] []
 
 repl :: IO ()
 repl = do
@@ -146,7 +149,14 @@ loop st = do
             ms -> mapM_ (putStrLn . renderTransformation) ms
           loop st
         l | ":t! " `isPrefixOf` l -> do
-              liftIO (typeOfWith show st (drop 4 l))
+              liftIO $ do
+                typeOfWith show st (drop 4 l)
+                -- INFERRED ROUTING says why, where the raw arrow is
+                -- what you asked for: the resource the def was routed
+                -- for, and the atom that originated it (stage 7b).
+                case lookup (trim (drop 4 l)) (rsRouted st) of
+                  Just why -> putStrLn ("  " ++ why)
+                  Nothing  -> pure ()
               loop st
           | ":t " `isPrefixOf` l -> do
               liftIO (typeOfWith (showArrowA (dispOf st)) st (drop 3 l))
@@ -415,6 +425,10 @@ importLine st arg =
                                      ++ [ mi | mi <- rsTransformations st
                                              , tiName mi `notElem`
                                                  map tiName (modTransformations m) ]
+                    , rsRouted   = modRouted m
+                                     ++ [ r | r <- rsRouted st
+                                            , fst r `notElem`
+                                                map fst (modRouted m) ]
                     }
               putStrLn $ "imported " ++ path ++ "   ("
                        ++ intercalate ", " (filter (not . null)
@@ -622,6 +636,10 @@ handleLine st line =
                   -- a session def written under `with K` is a K-word from
                   -- here on, exactly as it would be in a file
                 , rsKWords   = modKWords m
+                  -- ...and one INFERRED ROUTING routed says so to `:t!`
+                , rsRouted   = modRouted m
+                                 ++ [ r | r <- rsRouted st
+                                        , fst r `notElem` map fst (modRouted m) ]
                 }
             _ -> report "internal: expected exactly one definition"
 

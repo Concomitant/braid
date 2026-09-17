@@ -1155,6 +1155,49 @@ moduleTypeTests =
     -- even when the body never touches one
   , ("resource Log = Str\ndef f with Log = dup\nf",
      "a0 ρ0 =Log> a0 a0 ρ0")
+    -- STAGE 7b commit 5: INFERRED ROUTING.  A def that CALLS a
+    -- resource word is routed for it with no header: the resource word
+    -- originates its label at the leaf, exactly as the four io prims
+    -- do, and it propagates by row unification as every label does.
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\n\
+     \def f = \"x\" >> note\nf",
+     "ρ0 =Log> ρ0")
+    -- ...and `with Log` on the same def is exactly what inference did.
+    -- Routing is idempotent, so the header is the EXPLICIT FORM rather
+    -- than a second mechanism.
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\n\
+     \def f with Log = \"x\" >> note\nf",
+     "ρ0 =Log> ρ0")
+    -- inference routes for what the CALLEE threads and nothing else
+  , ("resource Log = Str\nresource Counter = Int\n\
+     \def bump = unCounter >> 1 ... >> + >> Counter\n\
+     \def h = dup >> * >> bump\nh",
+     "Int ρ0 =Counter> Int ρ0")
+    -- ...and the header OVERRIDES: it names the scope, inference only
+    -- proposes one
+  , ("resource Log = Str\nresource Counter = Int\n\
+     \def bump = unCounter >> 1 ... >> + >> Counter\n\
+     \def h with Log Counter = dup >> * >> bump\nh",
+     "Int ρ0 =Log Counter> Int ρ0")
+    -- HAND THREADING IS LEFT ALONE.  A stage that writes its own `_`
+    -- and `...` around the resource word is threading by hand and says
+    -- so, which is what keeps `examples/resources.braid`'s
+    -- `scoreByHand` the program it was written as.  Routing it would
+    -- REFUSE it ("a stage may contain at most one resource operation,
+    -- and it must be alone"), so this test is that it still checks;
+    -- the type it prints is the display fold, which fires on the
+    -- shared prefix and never needed a scope.
+  , ("resource Log = Str\nresource Counter = Int\n\
+     \def bump = unCounter >> 1 ... >> + >> Counter\n\
+     \def note = unLog _ >> cat >> Log\n\
+     \def byHand =\n\
+     \    _ _ (dup ; *) ...\n\
+     \    _ bump ...\n\
+     \    _ _ \"scored \" ...\n\
+     \    swap ...\n\
+     \    _ note ...\n\
+     \    swap ...\nbyHand",
+     "Int ρ0 =Log Counter> Int ρ0")
     -- `with` scopes COMPOSE.  A word threading exactly the scope's
     -- resources is already shaped like the stack, so it needs no
     -- routing and is callable from a scope over the same resources.
@@ -1585,6 +1628,32 @@ evalTests =
     -- self-reference rule.  The zero tangent is `0.0 ; lit` and not a
     -- `zero` slot: the theory already names its zero, and `addUnit`
     -- already pins it.
+    -- STAGE 7b commit 5: a CHAIN of header-less defs, routed
+    -- transitively until the wire meets the install site the main
+    -- program writes.
+  , ("resource Log = Str\n\
+     \def note  = unLog _ ; cat ; Log\n\
+     \def one   = \"a \" ; note\n\
+     \def two   = one ; one\n\
+     \def three = two ; \"z \" ; note\n\
+     \(\"\" ; Log) ; three ; unLog ; print",
+     ["a a z "], "")
+    -- ...and the HANDLER IDIOM is unchanged: `collected` seeds and
+    -- unwraps, so it names the constructors and is never auto-routed,
+    -- and the def it handles needs no header either.
+  , ("resource Counter = Int\n\
+     \theory Collector(e, a) =\n\
+     \    seed   : \8226 \8658 e\n\
+     \    unwrap : e \8658 a\n\
+     \model Counts in Collector(Counter, Int) =\n\
+     \    seed   = 0 ; Counter\n\
+     \    unwrap = unCounter\n\
+     \def collected in Collector = (f -> [f (seed) ... ; ev ; unwrap ...])\n\
+     \def bump = unCounter ; 1 ... ; + ; Counter\n\
+     \def collectCount with Counts = collected\n\
+     \def tick = dup ; * ; bump\n\
+     \[tick] ; collectCount ; _ 7 ; ev\nprint print",
+     ["1", "49"], "")
   , (famSrc ++ "def l with Fwd(Floats) = lit\n3.0 ; l ; unDual ; print ... ; print",
      ["3.0", "0.0"], "")
     -- SECOND DERIVATIVES, by applying the family to a member of itself.
@@ -3342,6 +3411,14 @@ moduleFailTests =
   , ("resource Log = Str\ndef bad in Log = dup\n1 ; print",
      "`in Log` names a resource, and a resource is threaded through a \
      \body.  Write `with Log`.")
+    -- STAGE 7b commit 5: the one rare edge INFERRED ROUTING has, and
+    -- it is LOUD.  A def that receives the carrier as a VALUE and also
+    -- calls a resource word gets routed, and then holds two `Log`
+    -- wires — one routed beneath it, one handed to it.  The carrier is
+    -- nominal, so nothing is silent: a `Str` is never a `Log`.
+  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+     \def mk = (s -> s ; Log)\ndef use = mk ; note\n1 ; print",
+     "in def use: Cannot unify types: Log vs Str")
     -- a template shares the def namespace
   , (tmplMod ++ "def fold1 = dup\n1 ; print", "Duplicate definition: fold1")
     -- STAGE 5b/5c½: MODELS OF `Base`.  `q` may stand wherever `p`

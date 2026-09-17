@@ -785,6 +785,55 @@ the elaboration, never an input to it: the elaborator places the wires
 at statically known offsets (resources ride deepest, in `with` order),
 and the ordinary type checker verifies the result.
 
+*Amendment (2026-09-17): **the header is optional — routing is
+inferred.*** A def is routed for a resource when the scheme of an atom
+in its body, **alone in its stage**, carries that resource as its
+deepest wire on both sides. The wire is then padded under every other
+stage exactly as if `with E` had been written, and the def's **callers**
+are routed the same way, transitively, until the wire meets an
+**install site** (a written seed) or a **handler** (a discharge). A
+resource word originates its label at the leaf, exactly as the four io
+prims originate `IO`, and the label propagates by composition like every
+other.
+
+```braid
+def note = unLog _ ; cat ; Log
+def f    = "x" ; note              # f : ρ0 =Log> ρ0 — no header
+```
+
+`with E` on a resource **stays legal and is exactly what inference
+does** — routing is idempotent, so the header is the *explicit form*
+rather than a second mechanism — and it is the **override**: it names
+the scope, where inference only proposes one. `def h with Log Counter =
+dup ; * ; bump` is routed over both even though only `bump` threads
+anything.
+
+Two things are never auto-routed. A body that names the carrier's
+constructor or un-constructor (`Log` / `unLog`) is **handling the wire
+itself** — an install site or a handler — so padding would put a second
+wire beside the one it holds; that is what keeps `collectLog` and
+`note` working. And a stage that writes **its own `_` and `...`** around
+the resource word is threading **by hand** and says so: `scoreByHand`
+above and `def tick = _ bump ...` keep exactly the types they had.
+
+The one rare edge is loud, never silent: a def that receives the
+carrier as a **value** and also calls a resource word ends up holding
+two `E` wires and is refused by name, because the carrier is nominal
+and a `Str` is never a `Log`. A missing install stays *you forgot to
+install*.
+
+`:t!` says when a def was routed by inference, and why:
+
+```text
+braid> :t! f
+f : Log ρ0 ⇒ Log ρ0
+  routed for Log: calls `note`
+```
+
+Invariant five is untouched: routing reads the schemes of **callees**
+in the prefix scope — fixed before this def is touched, as good as
+written — and never the manifest of the def being elaborated.
+
 **`with` asserts its claim.** The incoming wires must really be those
 resources, even when the body never touches one:
 
