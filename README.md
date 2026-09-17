@@ -26,7 +26,7 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   width transports as itself — products stay flat.
 - `Code` as data, with reflection (`getCode`, `typeOfCode`, `declOf`)
   and user-written `Code ⇒ Code` functors.
-- 65 primitives; everything else is in the prelude, in Braid.
+- 66 primitives; everything else is in the prelude, in Braid.
 
 ## Install and run
 
@@ -59,7 +59,7 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1156-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1166-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove

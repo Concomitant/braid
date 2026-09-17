@@ -374,6 +374,20 @@ Type formers:
   when you want one (`examples/autodiff.braid` does).
 - **`•`** — the empty stack; the terminal object. Constants are points
   `• ⇒ A`; `forget : ρ ⇒ •` is the unique map to it.
+
+  **Rendering a stack is a word, not a class** *(2026-09-17)*.
+  `showStack : ρ0 ⇒ Str` (§9) takes the whole segment and returns the
+  wires deepest-first, space separated, each one as `toStr` renders it
+  — the REPL's own `:s` printer, said once. It is a **renderer, not a
+  class**: there is no hook, no dispatch and no way to make a declared
+  type print differently through it, and the same is true of `toStr`.
+  A `Show` doctrine, if there is ever one, is a `theory` with a model
+  per type and it is not this. `showStack` consumes and is open-tailed on
+  `forget`'s convention — the whole segment as the final atom of its
+  stage, the empty segment anywhere else — so nothing new was needed
+  for it. A binder aims it at part of a stack (`dup ; _ (b -> b ;
+  unBox ; showStack)`), which is what `examples/lifting.braid` logs
+  with.
 - **Products** are juxtaposition: `Int Str` is two wires. There is no
   *built-in* pair type — the stack is the pair — but you can declare
   one (`data Pair(a, b) = (a b)`), and `Box(...)` carries a whole stack
@@ -2385,7 +2399,8 @@ one term with two spellings. Derived-but-primitive-looking words
 `lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
-**There are 60 primitives** *(2026-09-14)*. A word keeps its place here
+**There are 66 primitives** *(2026-09-17: `showStack`, 65 → 66; the
+count had said 60 since 2026-09-14 and was stale)*. A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), the open
@@ -2437,6 +2452,7 @@ Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 | `floor` | `Float ⇒ Int` — the only way down; the mathematical floor (`-2.7 ; floor` is `-3`) |
 | `cat` | `Str Str ⇒ Str` |
 | `toStr` | `a0 ⇒ Str` |
+| `showStack` | `ρ0 ⇒ Str` — the whole segment, deepest wire first, space separated, each wire as `toStr` renders it and as the REPL's `:s` prints it. A RENDERER, NOT A CLASS: nothing hooks a user-defined rendering into it. Consuming and open-tailed on `forget`'s convention: the whole segment as the final atom of its stage, the empty one anywhere else. A binder aims it at part of a stack — `dup ; _ (b -> b ; unBox ; showStack)` *(2026-09-17)* |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
 | `asFloat?` | `Str ⇒ (Float \| Str)` — reads exactly the SOURCE notation for a Float literal (optional `-`, digits, point, digits), which is also what the display prints, so `toStr ; asFloat?` is the identity on every finite Float *(2026-09-14)* |
 | `split` | `Str Str ⇒ List(Str)` — `s sep ; split`: n+1 pieces for n occurrences, so pieces and separators rebuild the original exactly, empty pieces included. An empty separator cuts nothing *(2026-09-14)* |

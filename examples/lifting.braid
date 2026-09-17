@@ -64,14 +64,14 @@ unLog >> print                                     # 100 — the log
 # The hom-object's two arguments are STACKS, so `Logged(ρ, σ)` is the
 # logged version of a program of ANY width — `Lifting` never declared a
 # strength and now does not need one.  Inside, the two stacks ride in a
-# `Box`, and THAT is where this file pays for the move: the wrapper
-# logs its input with `toStr`, and `toStr` is a word about ONE WIRE.
-# Braid has no renderer for a whole stack — `dup` copies a wire, `pack`
-# wants a homogeneous bundle — so a logger over stacks logs the BOX,
-# and a box renders as the one-alternative sum it is: `alt1(100)`
-# rather than `100`.  Writing that down is more use than pretending
-# otherwise; a `Show` for stacks is the thing that would fix it, and
-# nothing in stage 7a ships one.
+# `Box`, and THAT is where this file used to pay for the move: the
+# wrapper logs its input with `toStr`, and `toStr` is a word about ONE
+# WIRE, so a logger over stacks logged the BOX and a box renders as the
+# one-alternative sum it is (`alt1(100)` rather than `100`).
+# `showStack` is the renderer for a whole stack (stage 7b), and a BINDER
+# is what aims it: `(b -> b >> unBox >> showStack)` takes exactly one
+# box, unrolls it and renders what was inside — the binder closes the
+# arity that `showStack`, which wants the whole segment, would not.
 data Logged(a..., b...) = Fn⟨Log Box(a) =Log> Log Box(b)⟩
 
 theory Lifting(k(..., ...)) in Doctrine =
@@ -81,7 +81,10 @@ theory Lifting(k(..., ...)) in Doctrine =
 
 # `embed` IS `logged`, one `Logged` wrapper later. The other two are the
 # plumbing the transport does for you: written once, here, per model.
-def logArr  = (f -> [unBox >> f ... >> ev >> Box] >> logged >> Logged)
+def logStack = (f -> [with Log = dup >> (b -> b >> unBox >> showStack) >> note >> " " >> note >> f ... >> ev])
+#   `logged` for a function over a BOXED stack: the same body, with the
+#   stack's own renderer aimed by a binder instead of `toStr`
+def logArr  = (f -> [unBox >> f ... >> ev >> Box] >> logStack >> Logged)
 def logThen = (f g -> [(l x -> f >> unLogged >> _ l >> _ _ x >> ev >> (m y -> g >> unLogged >> _ m >> _ _ y >> ev))] >> Logged)
 def logRun  = _ _ Box >> (f l x -> f >> unLogged >> _ l >> _ _ x >> ev) >> _ unBox
 #   logArr : Fn⟨ρ ⇒ σ⟩ ⇒ Logged(ρ, σ)
@@ -113,4 +116,4 @@ def piped with Notes = celsius >> triple
 def report in Notes = piped >> _ ("" >> Log) >> _ _ 100 >> runP
 
 report >> _ print                                  # 636 — 212 tripled
-unLog >> print                                     # alt1(100) alt1(212) — the log
+unLog >> print                                     # 100 212 — the log

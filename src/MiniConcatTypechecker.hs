@@ -4947,6 +4947,19 @@ primEnv =
        , ("cat",       Forall [] [] [] [] [] []
            (arrPure (SCons TStr (one TStr)) (one TStr)))
        , ("toStr",     Forall [a] [] [] [] [] [] (arrPure (one ta) (one TStr)))
+         -- a RENDERER for a whole stack, not a class: `showStack` is the
+         -- REPL's own `:s` printer as a word, so what a program prints
+         -- of its stack and what a session shows of one are the same
+         -- convention.  Consuming and open-tailed (`ρ0 ⇒ Str`), so the
+         -- open-tailed convention already says where it may stand: it
+         -- takes the whole segment as the final atom of its stage and
+         -- is closed to the empty one anywhere else, exactly as
+         -- `forget` is.  A binder (`(b -> b >> unBox >> showStack)`)
+         -- is what aims it at part of a stack.  It does NOT compose
+         -- into user-defined
+         -- rendering — `toStr` is the per-wire word, and there is no
+         -- class for either of them.
+       , ("showStack", Forall [] [rho] [] [] [] [] (arrPure (STail rho) (one TStr)))
        , ("asInt?",    Forall [] [] [] [] [] []
            (arrPure (one TStr)
                   (one (TSum (RCons (one TInt)
@@ -8793,6 +8806,22 @@ primDocs = M.fromList
       , "closed eliminators (`case2`, `merge`, `otherwise`) finish the job"
       , "once the row is closed.  `>=>` is `[q, alt2]` — a CLOSED"
       , "copairing, not an instance of this." ])
+  , ("showStack", unlines
+      [ "a RENDERER for a whole stack: `showStack : ρ0 ⇒ Str`, the"
+      , "wires deepest-first, space separated, each one rendered exactly"
+      , "as `toStr` renders it and as the REPL's `:s` prints it — one"
+      , "convention, said once."
+      , "It CONSUMES the segment and is open-tailed, so it takes the"
+      , "whole segment as the FINAL atom of its stage and is closed to"
+      , "the empty one anywhere else — `forget`'s convention exactly."
+      , "To render part of a stack,"
+      , "close the arity with a binder — `dup >> (b -> b >> unBox >>"
+      , "showStack)` logs the contents of a box and leaves the box"
+      , "standing."
+      , "It is a RENDERER, NOT A CLASS: there is no way to hook a"
+      , "user-defined rendering into it, and `toStr` is the per-wire"
+      , "word with the same property.  A `Show` doctrine, if there is"
+      , "ever one, is a theory with a model per type and not this." ])
   , ("ev", unlines
       [ "the exponential's COUNIT: evaluation.  `ev` is the only way to"
       , "consume an `Fn`, and it is not derivable — naming a value never"
@@ -9867,6 +9896,14 @@ evalTerm env defs vars term st =
           if isFinal
             then pure ([], [], [])
             else pure ([], stk, [])
+    -- showStack: the segment as the REPL renders it, deepest wire
+    -- first, space separated.  The same `show` per value that `toStr`
+    -- uses and that `:s` prints, so one convention serves all three.
+    applyAtom isFinal (Prim "showStack") stk
+      | not (M.member "showStack" vars), not (M.member "showStack" defs) =
+          if isFinal
+            then pure ([VStr (unwords (map show stk))], [], [])
+            else pure ([VStr ""], stk, [])
     -- #fix: tie the knot — the compiler's own word, emitted by `with
     -- Recursive` and by nothing else.  The quoted body is handed a self-reference
     -- DEEPEST and then its own arguments.  The knot is a DefEntry whose

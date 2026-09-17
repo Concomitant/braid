@@ -555,6 +555,16 @@ passTests =
   , ("toStr",         "a0 ⇒ Str")
   , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
+    -- STAGE 7b commit 1: a RENDERER for a whole stack, not a class.
+    -- Consuming and open-tailed, so the final-atom rule already says
+    -- where it may stand and nothing new was needed for it.
+  , ("showStack",     "ρ0 ⇒ Str")
+  , ("dup >> _ (b -> b >> showStack)", "a0 ⇒ a0 Str")
+    -- and in a NON-final position it is closed to the empty segment,
+    -- exactly as `forget` is: an open-tailed prim never steals wires
+    -- from the atom beside it.
+  , ("showStack drop", "a0 ⇒ Str")
+  , ("forget drop",    "a0 ⇒ •")
     -- STAGE 5a½: `fix` is the word that may run unbounded, so it MINTS
     -- the `Recursive` label the way `print` mints IO.  `loop` is a prelude
     -- def built on it (2026-09-12) and is checked with the prelude.
@@ -3656,6 +3666,17 @@ pureEvalTests =
   [ ("arithmetic",   1000, "1 2 >> +",            Right "3")
   , ("quote/ev",  1000, "[dup >> *] >> _ 5 >> ev", Right "25")
   , ("list library", 1000, "(1 2 3 >> pack) >> [+] 0 ... >> fold", Right "6")
+    -- showStack (stage 7b): the REPL's own stack printer as a word.
+  , ("showStack empty",  1000, "showStack", Right "")
+  , ("showStack one",    1000, "42 >> showStack", Right "42")
+  , ("showStack three",  1000, "1 2 3 >> showStack", Right "1 2 3")
+  , ("showStack mixed",  1000, "1 \"a\" .red >> showStack", Right "1 a .red")
+    -- aimed by a binder: the box is rendered by its CONTENTS, and the
+    -- wire beneath it is untouched -- `examples/lifting.braid`'s logger
+  , ("showStack in a box", 1000,
+     "1 2 >> Box >> (b -> b >> unBox >> showStack)", Right "1 2")
+  , ("showStack under a wire", 1000,
+     "9 1 2 >> _ Box >> _ (b -> b >> unBox >> showStack)", Right "9 1 2")
     -- `print` is NOT an IO edge: it accumulates into the returned log,
     -- so it stays pure here (its io GRADE is what keeps it out of a
     -- functor).  The real edges are readLine/readFile/writeFile, and
