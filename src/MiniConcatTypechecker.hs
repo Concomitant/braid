@@ -7569,12 +7569,6 @@ declWordFor kw =
 declWordNamed :: String -> Maybe DeclWord
 declWordNamed n = listToMaybe [ w | w <- declWordTable, dwWord w == n ]
 
--- Every name the table puts in scope.  They are the compiler's, so a
--- def may not take one: a dictionary a program could shadow is not a
--- dictionary.
-declWordNames :: [String]
-declWordNames = map dwWord declWordTable
-
 -- The scheme a declaration word wears in the environment, read off the
 -- table: `defW : Code Str =Dict> \8226`.  There is no second spelling
 -- of it \8212 `dwArrow` renders this same thing for the eye.
@@ -7623,14 +7617,6 @@ data DeclCall = DeclCall
   , dcDoc   :: Maybe String
   , dcLine  :: Int           -- the line the BODY starts on
   }
-
--- what the call looks like written out, for `:doc` and the manual
-renderDeclCall :: DeclCall -> String
-renderDeclCall c = unwords (map one (dcArgs c) ++ [dcWord c])
-  where
-    one (DACode b) = "[" ++ unwords (words b) ++ "]"
-    one (DAStr t)  = show t
-    one (DATy t)   = "\8988" ++ unwords (words t) ++ "\8989"
 
 -- Split a declaration line at its own `=`: the head is the Str, the
 -- rest is the body.  The FIRST `=`, which is the rule every keyword
@@ -7854,16 +7840,6 @@ data Dict = Dict
 
 emptyDict :: Dict
 emptyDict = Dict [] [] [] [] [] [] [] []
-
--- ...and the module's own declarations read into one.  This is the
--- only place the six buckets are assembled, so the checker below reads
--- a dictionary rather than a tuple.
-dictOf :: ( [(String, DefHdr, String, Maybe String, Int)]
-          , [(String, Maybe String)]
-          , [(String, [String], Maybe String)]
-          , [String], [String], [(Int, String)] )
-       -> Dict
-dictOf (ds, ts, bs, is, tb, ps) = Dict ds ts bs is tb ps [] []
 
 -- Every name this dictionary declares, for the checks that are about
 -- names and not about kinds.  A type line's name may carry parameters
