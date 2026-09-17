@@ -206,7 +206,12 @@ baseOf st =
 -- resources whose wires fold onto the arrow as `=Name>`
 dispOf :: ReplState -> Disp
 dispOf st = Disp (rsAliases st)
-                 ([ (dName d, dName d) | d <- rsDatas st, dResource d ]
+                 -- `IO`'s carrier is ABSTRACT and the elaborator never
+                 -- writes it, so this row never folds anything; it is
+                 -- here because the table is every carriered label,
+                 -- and `IO` is one of them (stage 7b).
+                 ((ioLabel, ioCarrier)
+                  : [ (dName d, dName d) | d <- rsDatas st, dResource d ]
                   ++ [ (tpName m, tpCarrier m) | m <- rsTrans st ])
 
 -- ...and what the REFLECTION words read in a session (2026-09-16): the

@@ -934,6 +934,11 @@ moduleTypeTests =
   , ("print",     "a0 =IO> •")
   , ("readLine",  "• =IO> (Str | Str)")
   , ("readFile",  "Str =IO> (Str | Str)")
+    -- ...and they are UNCHANGED by stage 7b, which gave `IO` a carrier
+    -- in the STATEMENT (an abstract, linear `World`) and nothing in
+    -- the mechanism: there is exactly one `World`, it is ambient, so
+    -- the whiskering map is the identity and the wire is never written.
+  , ("writeFile", "Str Str =IO> (• | Str)")
   , ("evalAs",    "Fn⟨ρ0 ⇒ ρ1⟩ Code ρ0 ⇒ (ρ1 | Str ρ0)")
     -- `box` defers the RUN, and that costs the result's TYPE: what the
     -- boxed code returns is discovered when it runs, so the hit track is
@@ -3408,6 +3413,14 @@ moduleFailTests =
      "is the compiler's spelling of a slot")
   , ("resource Log = Str\ndef q = Log@then\n1 ; print",
      "is the compiler's spelling of a slot")
+    -- STAGE 7b commit 7: `IO` is a carriered label like any other, and
+    -- its carrier is an ABSTRACT, LINEAR `World` the elaborator never
+    -- writes.  Discharge is impossible STRUCTURALLY rather than by a
+    -- check: nothing declares `World`, so there is no `World` and no
+    -- `unWorld` to build a handler out of, and the name it does have
+    -- is in the compiler's `@` namespace.
+  , ("data W = IO@World\n1 ; print", "Unknown type name: IO@World")
+  , ("def w = IO@World\n1 ; print", "is the compiler's spelling")
     -- the carrier is a `data` line the compiler wrote, so a written
     -- declaration of that name is the ordinary duplicate refusal
   , ("resource Log = Str\ndata Log@k = Int\n1 ; print",

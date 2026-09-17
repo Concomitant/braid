@@ -24,6 +24,9 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   category: circuits, data frames, probability as a Markov category.
   The Doctrine's hom-object ranges over whole STACKS, so a stage of any
   width transports as itself — products stay flat.
+- `resource`: a threaded wire, and a model of the Doctrine. `with R`
+  is transport into it; the routing is inferred, so a word that calls
+  a resource word carries the label with no header at all.
 - `Code` as data, with reflection (`getCode`, `typeOfCode`, `declOf`)
   and user-written `Code ⇒ Code` functors.
 - 66 primitives; everything else is in the prelude, in Braid.
@@ -59,11 +62,14 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1188-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1191-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove
-that others do), handlers, and a linear world for `IO`.
+that others do), a handler *construct* (a handler is an ordinary word —
+`examples/resources.braid` writes one), and a `World` wire you can
+name: `IO`'s carrier is declared abstract and linear, but there is one
+of it, it is ambient, and the elaborator never writes it.
 
 The documentation needs a cleanup pass. It was written stage by stage
 and uses terms it never defines for a reader (`spine`, `stage`,

@@ -193,6 +193,22 @@ routed code used to complain about a wire the user never wrote
 *Cannot unify effects: Log vs pure*, and either shape carries the hint
 that names the fix — **you forgot to install** (§14).
 
+*And `IO` stops being an exception in the statement.* Every label names
+a functor, and the functor's carrier is looked up from the label's own
+declaration: a resource's is `R ⊗ –`, a carrier-less label's is the
+identity on homs, and `IO`'s is `World ⊗ –` for an **abstract, linear
+`World`**. That is the whole change — the table above has no exceptional
+row any more, and nothing else moves. There is exactly **one** `World`
+and it is ambient, so every representative in the fibre is determined,
+the whiskering map is the **identity**, the elaborator never writes the
+wire, and the four io prims stay marked. It is Clean's `*World` and
+GHC's `State# RealWorld` with the wire erased because it is a singleton.
+Discharge is impossible **structurally** rather than by a check: a
+handler is `seed ; … ; unwrap`, and those come from the `data` machinery
+a `resource` drives — `World` is not declared by `resource`, so there is
+no `World` and no `unWorld` to write one with, and the name it does have
+is in the compiler's `@` namespace. `print : a0 =IO> •`, unchanged.
+
 **And every `with` leaves a receipt.** A scope (§6, §12) elaborates the
 code under it — rewriting it, routing it, renaming it — and mints its
 own name onto the manifest of what it elaborated, so the arrow records
@@ -273,15 +289,16 @@ The built-in labels, then:
 
 | label | minted by | carrier | says |
 |---|---|---|---|
-| `IO` | the four io prims (`print`, `readLine`, `readFile`, `writeFile`) | the world, untouchable | touched the world |
+| `IO` | the four io prims (`print`, `readLine`, `readFile`, `writeFile`) | an abstract, linear `World` — one of it, ambient, never written | touched the world |
 | `Recursive` | `with Recursive` on a `def` (§8) | none | may recurse without bound |
 | `F` (any functor) | `with F` on a `functor` (§12) | none | was rewritten by `F` |
-| `R` (any resource) | `with R` on a `resource` (§8) | a wire of type `R` | threads the `R` wire |
+| `R` (any resource) | `with R` on a `resource` (§8), **or inferred routing** | a wire of type `R` | threads the `R` wire |
 | `M` (any model with a carrier) | `with M` on a `model` whose theory has a hom-object (§8) | the hom-object `K(a, b)` | was built in the category `M` presents |
 | `F(M)` (a family applied) | `with F(M)` on a `model F(T(a))` (§8) | the member's own carrier | was read by the model `F(M)` |
 
 One mechanism, six readings; union along composition for all of them,
-and every difference is in the carrier column. An applied family mints
+and every difference is in the carrier column — `IO` included since
+2026-09-17, which is what took the last exception out of this table. An applied family mints
 **one** label, the whole application: one model read the template, and
 its argument never saw it.
 
@@ -506,9 +523,14 @@ Type formers:
   number. Everything else the declaration generates is named
   `Trades@…`, the compiler's spelling, which source may not write.
 - **Resources**: `resource Name = <stack>` (§8) — a `data` declaration
-  under another keyword. One nominal wire, carrying its contents boxed,
-  meant to be threaded rather than consumed; a run of them shared by
-  both sides of an arrow folds onto the arrow as `=Log Counter>` (§3).
+  under another keyword, **and a model of the Doctrine** *(2026-09-17)*.
+  One nominal wire, carrying its contents boxed, meant to be threaded
+  rather than consumed; a run of them shared by both sides of an arrow
+  folds onto the arrow as `=Log Counter>` (§3). `with R` is transport
+  into the model the declaration generates, and the routing pass is
+  that model's **fused** evaluator — the fibre `C(R ⊗ Σ, R ⊗ Θ)` is
+  representable, so `embed [s] ; compose` normalises to the `_`-padding
+  the elaborator already wrote.
 - **Exponents**: `A^n` (input `Int^3`, `R^n`; display `Int³`, `ℝⁿ`) — a
   segment repeated n times. `n` is erased at runtime; concrete
   exponents expand away. See §13 and `design-exponents.md`.
@@ -736,7 +758,7 @@ the body is exactly as written.
 |---|---|---|---|
 | `with Inst` | a model of theory T | T's vocabulary (slot names) | renamed to Inst's words — *into* the base |
 | `with Opt` | a model of `Base` | the base | its generators renamed to their images — base to base |
-| `with R` | a resource | the base | routed: `R ⊗ –`, wires written *out* of the base |
+| `with R` | a resource | the base | routed: `R ⊗ –`, wires written *out* of the base. **Transport into the model `resource R` generates, in fused form**, and the header is optional — routing is inferred (below) |
 | `with F` | a functor | the base | rewritten by F's `Code ⇒ Code` word, *out* of the base |
 | `with M` | a model whose theory has a hom-object | the base | **transported**: every stage is embedded, `;` is the composition, *out* of the base |
 | `in T` | a theory | T's vocabulary | nothing — the def is a **template** over T |
@@ -1334,6 +1356,45 @@ def bump = unCounter ; 1 ... ; + ; Counter      # • =Counter> •
 Threading a resource by hand is `_` and `...` like anything else; `with`
 (§6) writes that padding. See `examples/resources.braid` and
 `design-effects.md`.
+
+*Amendment (2026-09-17): **a resource is a model of the Doctrine**, and
+the declaration generates it.* Beside `R`/`unR` it writes three more
+declarations, in the compiler's `@` namespace and therefore unwritable
+in source:
+
+```braid
+data  R@k(a..., b...) = Fn⟨R a ⇒ R b⟩
+theory R@t(k(..., ...)) in Doctrine =
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+model R in R@t(R@k) = compose = R@then, embed = R@arr
+```
+
+`:doc R` prints all three — sugar you cannot read is a feature, not a
+desugaring — and `:defs` hides them, as it hides every other `@` name.
+The carrier is Power–Robinson's **state construction**, `K_R(Σ, Θ) =
+C(R ⊗ Σ, R ⊗ Θ)`, and it is **representable**: the hom-object is an
+object of the base, so fibre composition *is* base composition of
+representatives. That is what makes `with R` **transport in fused
+form** — `embed [s] ; compose` normalises to `_ s ...`, which is
+exactly what the routing pass already wrote, so nothing elaborates
+differently and `examples/metered.braid` still burns seven units.
+
+The theory declares `compose` and `embed` **only**, and that is forced
+rather than lazy. `observe : k(Int, Int) ⇒ Int` would have to *run* a
+resource program, which needs a **seed**, and seeds live at the install
+site with no declared defaults — a generated `observe` would be
+`mempty`-conjuring by another name. The happy consequence is that no
+inherited law runs: every Doctrine law names `observe` or `sample`, so
+the `inherited` filter keeps none. The category laws hold by
+construction (`embed` is padding, `compose` is `;`).
+
+Two things follow. `in R` is still refused — a representable fibre's
+carrier is *cancelled*, so no def ever holds one; write `with R`. And
+the model takes the resource's own name, so a `functor` or a `model` of
+that name is now a duplicate declaration rather than a shadow.
+
+Routing itself no longer needs the header at all — see §6.
 
 **`theory` / `model`** — named slots, models, and laws that run.
 Both are **block** declarations: a header line ending in `=`, then
@@ -3115,7 +3176,7 @@ per use:
 | functor | what it is | checked by |
 |---|---|---|
 | a quotation transformer `Fn⟨a ⇒ b⟩ ⇒ Fn⟨…⟩` (`lift`, `logged`, `compose`) | level 1: never leaves the typed world | ordinary inference, at the def |
-| `with E` for a resource `E` | tensoring, `E ⋉ –` — and a binder's parameter block is the same functor, `P ⋉ –` (§12 above) | the elaborator's routing |
+| `with E` for a resource `E` (or the routing inferred without one) | tensoring, `E ⊗ –` — the model `resource E` generates, transported in fused form; and a binder's parameter block is the same functor, `P ⋉ –` (§12 above) | the elaborator's routing, which is that model's evaluator |
 | `interpose [η]` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `interpose` itself, by subsumption |
 | `with Inst` for a model | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
 | a model of `Base`, `model Opt in Base = p = q, …` | a typed generator image, applied atomwise | `subsumes`, once per binding at the declaration (§8) |
@@ -3959,7 +4020,11 @@ corrected in place rather than dated one by one.
   written under `with Log Counter` is callable under `with Log Counter`,
   and without it a multi-resource word could be written with `with` and
   then never called from one. Both limits are the elaborator's,
-  not the type system's — by hand, `_`/`...` still do anything.
+  not the type system's — by hand, `_`/`...` still do anything, and
+  since 2026-09-17 writing them is also how you tell inference to leave
+  a stage alone: routing is inferred for a resource word that is
+  **alone in its stage**, so a stage with its own `_` and `...` around
+  the word is threading by hand and is never auto-routed (§6).
 - **In the REPL, `with` is a session-wide scope.** A file's `with` takes
   the rest of the block as its body; a session has no rest yet, so a
   bare `with Log Counter` line opens a scope over every LATER line and
@@ -4193,7 +4258,14 @@ trade `theory` makes everywhere, and it is deliberate.
   — the io grade, `resource` declarations, `with`, and
   theories/models with runnable laws — have shipped**, including the
   amendment that flipped the resource wires from the top of the stack
-  to the bottom. Only stage 5 (the linear `World`) is position only.
+  to the bottom. Stage 5's **mark** shipped 2026-09-17 (`with R` mints,
+  and routing is inferred), and so did the `World` **statement** —
+  `IO`'s carrier is declared abstract and linear; only the explicit and
+  split zoom levels, a `World` wire you can name, are position only.
+  The 2026-09-17 amendment records it.
+- `design-7b.md` — stage 7b in full: a resource is a model of the
+  Doctrine, labels carry their carriers, and routing is transport at a
+  representable fibre.
 - `design-macros.md` — elaboration as a library: functors over `Code`,
   the five invariants, the fibration picture and the functors known to
   type, the manifest stated once, and the 2026-09-09 amendment

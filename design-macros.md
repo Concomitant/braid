@@ -4639,3 +4639,74 @@ joined it, and they agree.
 What is still not reflected is a `model`, a `transformation`, a
 `functor` and a resource's routing: each needs a rep of its own, and
 none of them is a function of the declaration alone.
+
+---
+
+## Amendment (2026-09-17): resources are models; routing by inference
+
+"The manifest, stated once" wrote down four rows, one table, every
+difference in the carrier column, and said a resource's functor is
+`E ⊗ –` — Power & Robinson's state construction. The checker did not
+agree: `resource` was `data` under another keyword, `with R` minted no
+label, and the routing pass and the transport pass did the same job
+twice in two vocabularies. Stage 7b makes the table true.
+
+**A resource is a model of the Doctrine.** `resource R = Ty` generates
+three declarations beside `R`/`unR` — the carrier
+`data R@k(a..., b...) = Fn⟨R a ⇒ R b⟩`, the theory `R@t in Doctrine`
+declaring `compose` and `embed` only, and `model R in R@t(R@k)` — in
+the compiler's `@` namespace, visible through `:doc R`. The theory
+declares two slots and not four because `observe` would have to *run* a
+resource program, which needs a seed, and seeds are install-site only;
+a generated `observe` would be `mempty`-conjuring by another name. The
+happy consequence is that no inherited law runs, since every Doctrine
+law names `observe` or `sample`.
+
+**`with R` is transport, in FUSED form.** The fibre `K_R(Σ, Θ) =
+C(R ⊗ Σ, R ⊗ Θ)` is representable — the hom-object is an object of the
+base — so fibre composition *is* base composition of representatives
+and `embed [s] ; compose` has a normal form, `_^k s ...`. That is
+character for character what the routing pass already emitted. Running
+the unfused transport would build and immediately destroy an `R@k`
+wrapper at every stage, changing every reflected program. So the
+routing pass is not deleted; it is **restated** as the fused evaluator
+of the resource model, and what goes is the idea that routing is a
+separate kind of scope. Everything the scope does that transport does
+not — the claim assertion, the one-resource-op stage, the whole-scope
+word, the two refusals — is the part that is about the carrier
+**segment** rather than about the functor, and the segment is an
+ordered object the grade cannot hold.
+
+**The receipt is `with@R`, and it does NOT get a stage.** Every `with`
+mints; a functor's receipt is prepended as a stage of its own, and a
+resource scope's cannot be, because the scope already emits exactly one
+stage — the claim `unR ; R` — and `examples/metered.braid` counts
+stages by burning fuel. The receipt is composed into the claim's own
+atom: `with@R ; unR ; R`, one stage, one unit, the label on it.
+
+**Routing is INFERRED.** A def is routed for a resource when the scheme
+of an atom in its body, alone in its stage, carries that resource as
+its deepest wire on both sides; callers are routed transitively until
+the wire meets an install site or a handler. `with R` stays as the
+explicit, idempotent override.
+
+**Invariant five, amended by one sentence.** *Routing may read the
+schemes of callees in the prefix scope — fixed before the current def
+is touched, as good as written, the same licence `typeOfCode` and the
+5c½ strength routing use; it never reads the manifest of the def being
+elaborated.* Elaboration still runs between parse and inference, and
+what it reads is a finished table rather than the answer to the
+question it is part of.
+
+**One label mechanism.** Every label names a functor and the functor's
+carrier is looked up from the label's own declaration: `Log`'s is
+`Log ⊗ –`, `Notes`' is `Logged(ρ, σ)`, `Metered`'s is nothing, and
+`IO`'s is `World ⊗ –` for an abstract linear `World` there is exactly
+one of. The display fold reads the carrier off the **stack**, not off
+the set — a carriered label's display position is its carrier's
+position, because the carrier segment is ordered and the grade is not —
+and `arrowBetween` subtracts the folded names from the sorted set
+before appending them in carrier order, which also fixed a label and
+its own carrier printing the name twice (`=R R>`).
+
+Full note: `design-7b.md`.

@@ -99,6 +99,32 @@ type EffSub = (EffRow, EffRow)
 ioLabel :: String
 ioLabel = "IO"
 
+-- `IO`'S CARRIER (stage 7b, 2026-09-17).  Every label names a functor,
+-- and the functor's carrier is looked up from the label's own
+-- declaration: `Log`'s is `Log \8855 -`, a carrier-less label's is the
+-- identity on homs, and `IO`'s is `World \8855 -` for an abstract linear
+-- `World`.  So `IO` stops being an EXCEPTION in the statement -- it is
+-- a label like the others, with its difference in the carrier column
+-- rather than in a branch of the checker.
+--
+-- It stays a shortcut in the IMPLEMENTATION, and this says so plainly
+-- rather than claiming more.  There is exactly ONE `World` and it is
+-- ambient, so every representative in the fibre `C(World \8855 \931,
+-- World \8855 \920)` is determined and the whiskering map is the IDENTITY:
+-- the elaborator never writes the wire, routing for it is a no-op, and
+-- the four io prims stay marked.  That is Clean's `*World` and GHC's
+-- `State# RealWorld` with the wire erased because it is a singleton
+-- (design-7b.md \167 4b, reading b2).
+--
+-- DISCHARGE IS IMPOSSIBLE STRUCTURALLY, not by a check: a handler is
+-- `seed ; \8230 ; unwrap`, and those come from the `data` machinery a
+-- `resource` declaration drives.  `World` is not declared by
+-- `resource` -- it is not declared at all -- so there is no `World`
+-- and no `unWorld` to write one with.  The name lives in the
+-- compiler's `@` namespace, which source may not write either.
+ioCarrier :: String
+ioCarrier = ioLabel ++ "@World"
+
 -- The second built-in label (2026-09-09; renamed and made a MARKER
 -- 2026-09-14).  `Recursive` is the name of a scope — `with Recursive`
 -- puts a def's own name in scope in its body — and, like every other
@@ -11115,10 +11141,12 @@ arrowOfRepV (VSum 6 [iv, ov, lsV, VSym tl]) = do
 arrowOfRepV v = Left ("this type rep is not an ARROW: " ++ show v)
 
 -- the display context the reflection words render in: the module's own
--- aliases and resources, exactly as the REPL builds it
+-- aliases and carriered labels, exactly as the REPL builds it
 dispOfRCtx :: RCtx -> Disp
 dispOfRCtx ctx =
-  Disp (rcAliases ctx) [ (dName d, dName d) | d <- rcDatas ctx, dResource d ]
+  Disp (rcAliases ctx)
+       ((ioLabel, ioCarrier)
+        : [ (dName d, dName d) | d <- rcDatas ctx, dResource d ])
 
 -- `showType` — the REPL's own display, from the rep.  An arrow rep
 -- renders as an arrow, a stack-position rep as the stack it stands in,

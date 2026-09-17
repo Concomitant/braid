@@ -12,7 +12,10 @@ definition form** (`def`), and **two header clauses** that say what a
 definition is and what is applied to it (`in`, `with`). Everything
 else — templates, hand-built morphisms, families, receipts, the
 Doctrine — is one of those read a particular way, and this document
-says which.
+says which. Two of the six are **sugar over the others**: a `table`
+writes a `data` declaration, and a `resource` writes a carrier, a
+theory and a `model` of the Doctrine. Both show you what they wrote
+(`:doc`).
 
 Cross-references are to `MANUAL.md`.
 
@@ -443,7 +446,8 @@ the `…Out` observations that call an exit); `prob.braid` (`bothFlipE`,
 `in Same` names a functor, and a functor is applied to a body, not
   inhabited by one.  Write `with Same`.
 `in Log` names a resource, and a resource is threaded through a body.
-  Write `with Log`.
+  Write `with Log`.  (Asked before the model the declaration generates:
+  a representable fibre's carrier is cancelled, so no def holds one.)
 `in Nope` names nothing declared at this point.  `in` takes a THEORY …
   or a MODEL WITH A CARRIER …
 `in Funcs`: bad neither builds one of Funcs's carriers — `• ⇒ Arr(a, b)`
@@ -612,7 +616,7 @@ wiring:
 | a **model** of a base theory | its slot names replace the theory's | `=X>` | `def total with IntSum = fold1` (`theories.braid`) |
 | an **applied family** `F(M)` | the member is minted and reads the body | `=F(M)>` (one label) | `def polyD with Fwd(Floats) = poly` (`autodiff.braid`) |
 | a model of **`Base`** | its generators are renamed to their images, through quotes and rows | `=X>` | `def poly with Opt = …` (`optimizer.braid`) |
-| a **resource** | the wire is routed deepest and every stage is padded | `=R>` | `def score with Log Counter = …` (`resources.braid`) |
+| a **resource** | **transport into the model `resource R` generates, in fused form**: the wire is routed deepest and every stage is padded, which is what `embed [s] ; compose` normalises to at a representable fibre. The header is **optional** — routing is inferred | `=R>`, on the claim's own stage rather than a new one | `def score with Log Counter = …` (`resources.braid`) |
 | a **functor** | the routed, renamed body goes to its `Code ⇒ Code` word as `Code`, and what comes back is spliced | `=F>`, plus the word's own labels | `def poly with Fuel Metered = …` (`metered.braid`) |
 | **`Recursive`** | the def's own name goes into scope in its own body and the knot is tied (innermost, before every other scope) | `=Recursive>` | `def fac with Recursive = …` (`recursion.braid`) |
 | a **model with a carrier**, no `in` | **transport**: stage ↦ `embed`, `;` ↦ `compose` | `=X>` | `def easy with Circuits = add1 ; dbl` (`circuits.braid`) |
@@ -624,6 +628,20 @@ the environment available for arities and resource signatures. The node
 never reaches inference. `with` **asserts** a resource claim — the
 incoming wires must really be those resources, even when the body never
 touches one.
+
+**Routing needs no clause.** A def is routed for a resource when the
+scheme of an atom in its body, **alone in its stage**, carries that
+resource as its deepest wire on both sides — read from the prefix
+scope, which is fixed before the def is touched, so invariant five is
+untouched. Callers are routed the same way, transitively, until the
+wire meets an **install site** (a written seed) or a **handler** (a
+discharge). `with R` stays legal, is exactly what inference does
+(routing is idempotent), and is the **override**: it names the scope
+where inference only proposes one. Two things are never auto-routed — a
+body that names the carrier's constructor or un-constructor (`Log` /
+`unLog`) is handling the wire itself, and a stage that writes its own
+`_` and `...` around the resource word is threading by hand and says
+so. `:t!` prints why a def was routed.
 
 **Refusals.**
 
@@ -817,7 +835,7 @@ construct of its own (`cellsFor`, the prelude; `examples/frame.braid`).
 
 | not reflected | why |
 |---|---|
-| `model`, `transformation`, `functor`, `resource`'s routing | nothing has asked; each needs a rep of its own and none of them is a function of the *declaration* alone |
+| `model`, `transformation`, `functor`, `resource`'s routing (and the model it generates) | nothing has asked; each needs a rep of its own and none of them is a function of the *declaration* alone |
 | a template (`def f in T`) | it has no type until a model reads it, so `typeOfWord` has nothing to answer |
 
 **The width tier has its own sort** *(2026-09-16)*. `Aⁿ` is a stack

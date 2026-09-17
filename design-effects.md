@@ -888,8 +888,84 @@ grade inferred.
    **SHIPPED 2026-08-26** — see "Stages 2 and 4 as shipped" above. The
    frame a pure stage gets is `lift`, which shipped as an ordinary
    prelude word; the elaborator writes its `_`s directly.
-5. Resource mark + linear `World` + explicit/split levels. **NOT
-   shipped** — the one stage still position only.
+5. Resource mark + linear `World` + explicit/split levels. **The mark
+   and the `World` STATEMENT shipped 2026-09-17 (stage 7b); the
+   explicit and split levels are still position only** — see the
+   amendment below.
 Each stage independently useful; 1–2 were small; 4 was the big
 ergonomic payoff, and was cheap because 2 made the wires nominal; 3
 rode in on 4's `use`; 5 unlocks the power tier.
+
+---
+
+## Amendment (2026-09-17) — stage 7b: the mark, the model, and `IO`'s carrier
+
+Stage 5's first two items shipped. Three things changed, and three
+statements this note and the plan had made are now either true or
+struck.
+
+**1. `with R` MINTS, so a resource is a mark.** Until now `with R`
+minted nothing: `def f with R = dup ; *` had a *pure* manifest, and the
+`=R>` you saw was a display fold over the stack's leading resource
+wires — it fired with no `with` in sight. The scope mints now, and the
+receipt rides **inside the claim's own stage** (`with@R ; unR ; R`)
+rather than in a stage of its own, because a resource scope already
+emits exactly one stage and `examples/metered.braid` counts stages by
+burning fuel. The display is unchanged: the fold stays prefix-driven
+and `arrowBetween` subtracts the folded carriers from the sorted label
+set before appending them in carrier order, so `=Log Counter>` is still
+in `with` order. What the mark buys is the **error** — a written pure
+expectation meeting routed code now says *Cannot unify effects: Log vs
+pure*, and a hint names the fix: **you forgot to install**.
+
+**2. Routing is INFERRED.** A def is routed for a resource when the
+scheme of an atom in its body, alone in its stage, carries that
+resource as its deepest wire on both sides; callers are routed
+transitively until the wire meets an install site or a handler. A
+resource word originates its label at the leaf exactly as the four io
+prims do. `with R` stays legal, is idempotent with what inference does,
+and is the override. Two guards keep the old programs: a body naming
+`R`/`unR` is handling the wire itself and is never auto-routed, and a
+stage that writes its own `_`/`...` around the resource word is
+threading **by hand** and is left alone — `scoreByHand` in
+`examples/resources.braid` still checks, unchanged.
+
+**3. `IO`'s carrier is an abstract linear `World`.** The label table's
+`IO` row stops being an exception *in the statement*: every label names
+a functor and the functor's carrier comes from the label's own
+declaration, `IO`'s being `World ⊗ –`. In the **mechanism** nothing
+moves, and this note says so plainly rather than claiming more. There
+is exactly one `World`, it is ambient, so every representative in the
+fibre `C(World ⊗ Σ, World ⊗ Θ)` is determined, the whiskering map is
+the identity, the elaborator never writes the wire, and the four io
+prims stay marked — Clean's `*World` and GHC's `State# RealWorld` with
+the wire erased because it is a singleton. Discharge is impossible
+**structurally**: a handler is `seed ; … ; unwrap`, and nothing
+declares `World`, so there is no constructor to write one with.
+Linearity needs no mark until the explicit level exists; when it does,
+the design above already has it (an internal must-copy mark on
+`dup`/`drop`/`forget`/ignored binder params, one unification failure,
+no syntax). The **explicit** and **split** zoom levels — a nameable
+`World`, per-resource wires — remain position only.
+
+**What was struck.** The plan's stage-7 follow-on said *"resources move
+out of the stack type into the row"*. It cannot be squared with the
+same section's "every fibre is representable … fibre composition IS
+base composition of representatives": a representable fibre's
+hom-object **is** an object of the base, so the carrier is a wire. What
+moved into the row is the **label**, which then names the carrier. The
+concrete cost of moving the wire is `interpose`'s `subsumesShape`,
+which compares wires and leaves the manifest free — it is why `burn
+...` fits after every routed stage and not into an unrouted one, and
+why `examples/metered.braid`'s last two lines print what they print.
+The plan's *"traversals get ε"* bullet was struck as already shipped:
+`[toStr >> print >> 1] id ... >> map : List(a0) =IO> List(Int)` — `map`
+displays pure only because the `⊆` constraints are hidden.
+
+**The limits are unchanged.** One resource operation per stage, alone;
+no operation over a strict subset of the scope. Both still want a
+solved permutation rather than a fixed `_`-prefix. Stage 7b gave them a
+name — the fibre map `K_L → K_M` composed with the symmetry of the
+carrier segment — and did not lift them.
+
+Full note: `design-7b.md`.
