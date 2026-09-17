@@ -1111,6 +1111,22 @@ moduleTypeTests =
     -- the roll/unroll doors do not fold (no suffix on the input side)
   , ("resource Log = Str\nLog",   "Str ⇒ Log")
   , ("resource Log = Str\nunLog", "Log ⇒ Str")
+    -- STAGE 7b commit 2: ONE carrier table, so a label and a resource
+    -- of the SAME NAME print the name once.  Before 7b the folded
+    -- carriers were appended to the whole sorted label set and
+    -- `unWeird` read `Fn⟨Int =R R> Int⟩` — the name twice, once as a
+    -- label and once as its own carrier.
+  , ("resource R = Int\ndata Weird = Fn⟨R Int =R> R Int⟩\nunWeird",
+     "Weird ⇒ Fn⟨Int =R> Int⟩")
+    -- ...and the ORDER is pinned while we are here: labels sorted,
+    -- then the folded carriers in CARRIER order (the order they sit in
+    -- on the stack), which is what keeps `=Log Counter>` in `with`
+    -- order rather than alphabetical.
+  , ("resource R = Int\ndata Weird2 = Fn⟨R Int =Alpha R> R Int⟩\nunWeird2",
+     "Weird2 ⇒ Fn⟨Int =Alpha R> Int⟩")
+  , ("resource Log = Str\nresource Counter = Int\n\
+     \data W3 = Fn⟨Log Counter Int =IO> Log Counter Int⟩\nunW3",
+     "W3 ⇒ Fn⟨Int =IO Log Counter> Int⟩")
     -- STAGE 4: `with` opens an ambient scope and the elaborator writes
     -- every `_`/`...` — the body below contains none.
   , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f with Log Counter = dup >> * >> bump\nf",
@@ -3575,8 +3591,10 @@ runModuleType (src, expected) =
               Just $ show src ++ ": expected " ++ expected
                    ++ ", got " ++ rendered
           where rendered = showArrowA (Disp (modAliases m)
-                                   [ dName d | d <- modDatas m, dResource d ]
-                                   [ (tpName md, tpCarrier md) | md <- modTrans m ])
+                                   ([ (dName d, dName d)
+                                    | d <- modDatas m, dResource d ]
+                                    ++ [ (tpName md, tpCarrier md)
+                                       | md <- modTrans m ]))
                             (normalizeArrow arr)
 
 runEval :: (String, [String], String) -> IO (Maybe String)

@@ -188,8 +188,9 @@ baseOf st =
 -- the REPL's display context: structural aliases, and the nominal
 -- resources whose wires fold onto the arrow as `=Name>`
 dispOf :: ReplState -> Disp
-dispOf st = Disp (rsAliases st) [ dName d | d <- rsDatas st, dResource d ]
-                 [ (tpName m, tpCarrier m) | m <- rsTrans st ]
+dispOf st = Disp (rsAliases st)
+                 ([ (dName d, dName d) | d <- rsDatas st, dResource d ]
+                  ++ [ (tpName m, tpCarrier m) | m <- rsTrans st ])
 
 -- ...and what the REFLECTION words read in a session (2026-09-16): the
 -- same four tables, so `:type`, `declOf` and `typeOfCode` all answer

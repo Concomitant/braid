@@ -4231,16 +4231,25 @@ bestAlias aliases t =
     minimumOn _ [] = error "bestAlias: impossible"
 
 -- What the type printer folds names back on: structural aliases, and
--- the nominal resource names — which fold onto the arrow rather than
--- onto a wire, so they cannot ride in the alias list.
-data Disp = Disp { dispAliases :: [Alias], dispResources :: [String]
-                 , dispModes :: [(String, String)] }  -- model -> its carrier
+-- the carriered labels — which fold onto the ARROW rather than onto a
+-- wire, so they cannot ride in the alias list.
+--
+-- ONE CARRIER TABLE (2026-09-17, stage 7b).  Every carriered label,
+-- paired with the type constructor its carrier is built from: a
+-- resource's carrier is a nullary wire of its own name (`Log`), a
+-- category model's is the hom-object (`Logged`).  Until 7b these were
+-- two fields and two fold clauses, which is why a label named `R` and
+-- a resource named `R` printed the name twice (`=R R>`).  A carrier is
+-- a carrier; where it SITS is the only difference, and the stack says
+-- that, not the table.
+data Disp = Disp { dispAliases  :: [Alias]
+                 , dispCarriers :: [(String, String)] }  -- label -> its carrier
 
 noDisp :: Disp
-noDisp = Disp [] [] []
+noDisp = Disp [] []
 
 aliasDisp :: [Alias] -> Disp
-aliasDisp as = Disp as [] []
+aliasDisp as = Disp as []
 
 showTyA :: Disp -> Ty -> String
 showTyA as t =
@@ -4304,9 +4313,17 @@ resPrefix rs ts =
 -- threaded resources are the same thing said two ways (the set of
 -- resource wires the def touches), so one arrow carries both; with no
 -- resources it degrades to the plain glyph.
+--
+-- The folded names are SUBTRACTED from the sorted set and appended in
+-- CARRIER ORDER (2026-09-17): a carriered label's display position is
+-- its carrier's position, because the carrier segment is an ordered
+-- object and the grade is not.  That is what keeps `=Log Counter>` in
+-- `with` order once the label is minted (stage 7b commit 6), and it is
+-- what stops a label and its own carrier printing the name twice.
 arrowBetween :: EffRow -> [String] -> String
 arrowBetween e [] = arrowGlyph e
-arrowBetween e ns = " =" ++ unwords (S.toList (eLabels e) ++ ns) ++ "> "
+arrowBetween e ns =
+  " =" ++ unwords (S.toList (eLabels e S.\\ S.fromList ns) ++ ns) ++ "> "
 
 showArrowA :: Disp -> Arrow -> String
 -- THE CARRIER FOLD.  A carrier is what its label adds to the objects, so a
@@ -4318,14 +4335,14 @@ showArrowA :: Disp -> Arrow -> String
 -- scope) stay unfolded, which is how you see that `;` there is not
 -- composition in K.
 showArrowA as (Arrow SEnd (SCons (TData c [a, b]) SEnd) e)
-  | any (\(k, cn) -> cn == c && k `S.member` eLabels e) (dispModes as)
+  | any (\(k, cn) -> cn == c && k `S.member` eLabels e) (dispCarriers as)
   = showStackA as a ++ arrowGlyph e ++ showStackA as b
 showArrowA as (Arrow s1 s2 e)
-  -- a resource PREFIX shared by both sides is what "threaded through"
+  -- a carrier PREFIX shared by both sides is what "threaded through"
   -- means, so that is exactly when the name is earned.  Works on open
-  -- stacks: the resources are at the bottom, the tail is far away.
-  | r1 <- leadingRes (dispResources as) s1
-  , r2 <- leadingRes (dispResources as) s2
+  -- stacks: the carriers are at the bottom, the tail is far away.
+  | r1 <- leadingCarriers (dispCarriers as) s1
+  , r2 <- leadingCarriers (dispCarriers as) s2
   , not (null r1), r1 == r2
   = showStackA as (dropWires (length r1) s1)
       ++ arrowBetween e r1
@@ -5232,6 +5249,16 @@ normalizeArrow arr =
 leadingRes :: [String] -> SType -> [String]
 leadingRes rs (SCons (TData n []) r) | n `elem` rs = n : leadingRes rs r
 leadingRes _  _                                    = []
+
+-- ...and the same run read through the display's carrier table, as the
+-- LABELS those wires carry.  A hom-object carrier never matches here —
+-- it takes two stack arguments and it is the whole arrow, not a wire
+-- beneath one — so the two fold clauses partition the cases without
+-- overlapping.
+leadingCarriers :: [(String, String)] -> SType -> [String]
+leadingCarriers tbl (SCons (TData n []) r)
+  | (l : _) <- [ k | (k, cn) <- tbl, cn == n ] = l : leadingCarriers tbl r
+leadingCarriers _ _                            = []
 
 elabHeadersTop :: Env -> Term -> Either String Term
 elabHeadersTop env = elabHeaders (elabCtx0 env [])
@@ -10746,7 +10773,7 @@ arrowOfRepV v = Left ("this type rep is not an ARROW: " ++ show v)
 -- aliases and resources, exactly as the REPL builds it
 dispOfRCtx :: RCtx -> Disp
 dispOfRCtx ctx =
-  Disp (rcAliases ctx) [ dName d | d <- rcDatas ctx, dResource d ] []
+  Disp (rcAliases ctx) [ (dName d, dName d) | d <- rcDatas ctx, dResource d ]
 
 -- `showType` — the REPL's own display, from the rep.  An arrow rep
 -- renders as an arrow, a stack-position rep as the stack it stands in,
