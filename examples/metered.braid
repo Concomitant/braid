@@ -19,7 +19,9 @@ def poly with Fuel Metered =
 
 # Every stage of the ELABORATED program burns one unit: six stages of
 # arithmetic (each `;` is a cut) and the claim stage `with Fuel` writes
-# first — see what the functor saw:
+# first — see what the functor saw.  The scope's RECEIPT (`with@Fuel`,
+# the label it mints) rides INSIDE that claim rather than in a stage of
+# its own, which is exactly why the count is seven and not eight.
 "-- the metered wiring --" ; print
 [with Fuel = dup ; * ; dup ; + ; _ 1 ; +] ; getCode ; metered ; unparse ; print
 

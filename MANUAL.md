@@ -172,6 +172,27 @@ exactly, and a resource anywhere but the bottom prints as an ordinary
 wire (`_ bump ... : a0 Counter ρ0 ⇒ a0 Counter ρ0`). Threading them by
 hand is `_`/`...` as usual; `with` (§6) writes that padding for you.
 
+*Amendment (2026-09-17): **a resource really is minted now.*** Until
+stage 7b the table below said `R` was *minted by `with R`* and it was
+not: the `=R>` was the display fold alone, and it fired with no `with`
+in sight. It is minted now — a routed scope puts `R` on the manifest of
+everything it elaborated, exactly as every other `with` does — and the
+receipt rides **inside the claim's own stage** (`with@R ; unR ; R`)
+rather than in a stage of its own, so a scope still elaborates to the
+number of stages it always did. The fold stays **prefix-driven**: it
+reads the carrier off the stack, subtracts the folded names from the
+sorted label set and appends them in **carrier order**, which is why
+`=Log Counter>` is in `with` order rather than alphabetical and why a
+label and a resource of the same name print the name once. A resource
+that is threaded by hand still folds with no label present — the label
+is a *consistency* requirement where it appears, never a precondition.
+
+What the mint buys is the **error**. A written pure expectation meeting
+routed code used to complain about a wire the user never wrote
+(*Cannot unify stacks: Log Int vs Int*); it now says
+*Cannot unify effects: Log vs pure*, and either shape carries the hint
+that names the fix — **you forgot to install** (§14).
+
 **And every `with` leaves a receipt.** A scope (§6, §12) elaborates the
 code under it — rewriting it, routing it, renaming it — and mints its
 own name onto the manifest of what it elaborated, so the arrow records
@@ -3490,7 +3511,7 @@ the line of the text that was handed over (`line 3, in def f: …`);
 with only one line of it there is nothing to name and nothing is said.
 A stage carried onto the next line by `\`, `;` or `>>` reports the line
 it **started** on, which is the only honest answer for a stage that
-spans lines. Six shapes also carry a one-line **hint** naming the rule
+spans lines. Seven shapes also carry a one-line **hint** naming the rule
 and the fix; each fires only on something the checker can see in the
 source, and says "usually" where it is a guess. They are marked ✦ below.
 
@@ -3540,7 +3561,13 @@ corrected in place rather than dated one by one.
   names the fix, and there are two of them: *write `=L>` on that arrow*
   (you meant it) or *keep this code label-free* (you did not). Two
   written manifests inside a `Fn⟨…⟩` are unified rather than ordered —
-  a `Fn` type is invariant in its arrow (§3).
+  a `Fn` type is invariant in its arrow (§3). ✦ When one of the
+  labels is a **resource** the module declares, the hint says the other
+  thing instead — **you forgot to install**: seed the wire at the call
+  site (`("" ; Log)`) or wrap the program in a handler that seeds and
+  unwraps, rather than writing the label. It fires on the wire shape
+  (`Cannot unify types: Int vs Log`) too, which is where a missing
+  install more often lands, because the carrier stays a wire.
 - **`Occurs check failed[ on stack | on exponent | on effect | on sum
   row]: v in T`** — the only solution is an infinite type. ✦ Under
   `with Recursive`, with the variable inside a sum, the hint says what it

@@ -508,7 +508,8 @@ locFor lm src msg =
 
 hintFor :: [String] -> Maybe Int -> String -> Maybe String
 hintFor ls mn msg =
-  listToMaybe (catMaybes [rowArm, knotRow, residual, closedGroup, newStage])
+  listToMaybe (catMaybes [ rowArm, knotRow, residual, closedGroup, newStage
+                         , forgotInstall ])
   where
     at k | k >= 1, k <= length ls = Just (ls !! (k - 1))
          | otherwise              = Nothing
@@ -581,6 +582,34 @@ hintFor ls mn msg =
                    \carry the stage on, or write `;` at either end to \
                    \compose (MANUAL \167\&4)."
         else Nothing
+
+    -- 6. A RESOURCE THAT WAS NEVER INSTALLED (2026-09-17).  Since
+    -- stage 7b `with R` -- and inferred routing -- MINTS `R`, and the
+    -- carrier stays a WIRE riding deepest, so a missing install lands
+    -- two ways: a row that carries `R` where a written one does not,
+    -- and a wire that is an `R` where a plain one was expected.
+    -- Either way the fix is not to write the label -- it is to INSTALL
+    -- the resource, or to discharge it with a handler.  *You forgot to
+    -- install.*  Fires only when the module DECLARES the resource the
+    -- message names, which is the syntactic shape this hint is allowed.
+    forgotInstall = do
+      r <- listToMaybe [ n | n <- declaredRes, n `elem` msgWords ]
+      if "Cannot unify" `isInfixOf` msg
+        then Just ("`" ++ r ++ "` is a resource, so the code on one side "
+                ++ "of this was ROUTED for it and says so.  The fix is "
+                ++ "usually to INSTALL the wire rather than to write the "
+                ++ "label: seed it at the call site (`(\"\" ; " ++ r
+                ++ ")`), or wrap the program in a handler that seeds and "
+                ++ "unwraps (MANUAL \167\&14).")
+        else Nothing
+
+    declaredRes = [ takeWhile (/= '(') n
+                  | l <- ls, ("resource" : n : _) <- [words (lineCode l)] ]
+
+    -- the message's IDENTIFIER-LIKE words, so a resource name matches
+    -- as a name and not as a substring of a longer one
+    msgWords = words (map (\c -> if isAlphaNum c || c == '_' then c else ' ')
+                          msg)
 
     -- `in def X: …` — the def a refusal is inside, if it says so
     defNameOf m = do
@@ -6006,7 +6035,18 @@ elabScope env rs body = do
   -- nothing else.  Without this a body that never touches a resource
   -- would leave its wires unconstrained, and the scope would be padding
   -- rather than a statement.
-  let assert = [ (0, [ Seq 0 (Prim ("un" ++ r)) (Prim r) | r <- rs ]
+  -- THE MINT, ON THE CLAIM (stage 7b commit 6).  `with R` puts `R` on
+  -- the manifest of everything it elaborated, exactly as every other
+  -- `with` does — but the receipt must NOT be a stage of its own.
+  -- `elabHeaders` prepends `with@F` as a STAGE for a functor, and a
+  -- resource scope already emits one: this claim.  A second stage
+  -- would make `examples/metered.braid` burn eight units instead of
+  -- seven, because that file counts stages by burning fuel.  So the
+  -- receipt is composed INTO the claim's own atom: one stage, one
+  -- unit, and the label is on it.
+  let assert = [ (0, [ Seq 0 (Prim (receiptName r))
+                             (Seq 0 (Prim ("un" ++ r)) (Prim r))
+                     | r <- rs ]
                       ++ [Prim "pass"]) | not (null rs) ]
   pure (chainLines (assert ++ concat stages))
   where

@@ -1168,6 +1168,14 @@ moduleTypeTests =
   , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\n\
      \def f with Log = \"x\" >> note\nf",
      "ρ0 =Log> ρ0")
+    -- STAGE 7b commit 6: the scope MINTS, so the label is on the
+    -- arrow and the display order survives -- labels sorted, then the
+    -- folded carriers in carrier (`with`) order.
+  , ("resource Fuel = Int\ndef burn = unFuel ; _ 1 ; - ; Fuel\n\
+     \def metered = ([burn ...] ; getCode) ... ; interpose\n\
+     \functor Metered = metered\n\
+     \def poly with Fuel Metered = dup ; *\npoly",
+     "Int ρ0 =Metered Fuel> Int ρ0")
     -- inference routes for what the CALLEE threads and nothing else
   , ("resource Log = Str\nresource Counter = Int\n\
      \def bump = unCounter >> 1 ... >> + >> Counter\n\
@@ -1617,9 +1625,12 @@ evalTests =
     -- `compose` is nothing at all, which is the routing pass
     -- unchanged.  `examples/metered.braid` counts stages by burning
     -- fuel, so any change here is a changed burn count.
+    -- Commit 6 put the scope's RECEIPT inside the claim's own atom
+    -- rather than in a stage of its own, which is why `with@Fuel`
+    -- appears here and the stage count does not.
   [ ("resource Fuel = Int\n\
      \[with Fuel = dup ; * ; _ 1 ; +] ; getCode ; unparse ; print",
-     ["(unFuel >> Fuel) pass >> _ dup pass >> _ * pass \
+     ["(with@Fuel >> unFuel >> Fuel) pass >> _ dup pass >> _ * pass \
       \>> _ _ 1 pass >> _ + pass"], "")
     -- A FAMILY'S SLOT BODY NAMES THE PARAMETER'S SLOT (2026-09-15).
     -- `lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)` — every theory name in
@@ -3411,6 +3422,23 @@ moduleFailTests =
   , ("resource Log = Str\ndef bad in Log = dup\n1 ; print",
      "`in Log` names a resource, and a resource is threaded through a \
      \body.  Write `with Log`.")
+    -- STAGE 7b commit 6: THE BEST ERROR IN THE SYSTEM.  The scope
+    -- mints, so a WRITTEN pure expectation meeting routed code is
+    -- refused on the ROW, by name, rather than by a shape complaint
+    -- about a wire the user never wrote.
+  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+     \def f = \"x\" ; note\n\
+     \data Keeper = Fn⟨Log Int ⇒ Log Int⟩\n[f] ; Keeper ; print",
+     "Cannot unify effects: Log vs pure")
+    -- ...and either way the hint says what to do about it: you forgot
+    -- to install
+  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+     \def f = \"x\" ; note\n\
+     \data Keeper = Fn⟨Log Int ⇒ Log Int⟩\n[f] ; Keeper ; print",
+     "`Log` is a resource, so the code on one side of this was ROUTED")
+  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+     \def f = \"x\" ; note\n7 ; f ; print",
+     "seed it at the call site")
     -- STAGE 7b commit 5: the one rare edge INFERRED ROUTING has, and
     -- it is LOUD.  A def that receives the carrier as a VALUE and also
     -- calls a resource word gets routed, and then holds two `Log`
