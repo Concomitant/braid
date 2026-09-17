@@ -82,6 +82,19 @@ runExample name = do
 -- (example file, transformation, the rendering `:transformations` prints)
 transformationVerdictTests :: [(String, String, String)]
 transformationVerdictTests =
+    -- STAGE 7c: reduction is a ring homomorphism, and the two halves of
+    -- the verdict say which part of that is a PROOF.  `Mods@sample` is
+    -- literally `7 ; reduce`, so the sample squares normalize outright;
+    -- the four operation squares are true only by the arithmetic of
+    -- `mod`, which `sameCode` treats as an uninterpreted word.
+    ( "modular.braid", "Reduce"
+    , unlines' [ "Reduce in Ints \8658 Mods"
+               , "  sample   proved"
+               , "  sample2  proved"
+               , "  add      sampled (2 points; differ in the free category)"
+               , "  mul      sampled (2 points; differ in the free category)"
+               , "  neg      sampled (1 point; differ in the free category)"
+               , "  zero     sampled (differ in the free category)" ] ) :
     -- a hom-object carrier pins its own `Fn` to a whole STACK per side
     -- since 2026-09-16, so the two squares that APPLY the witness stop
     -- at `ev` of an open wire and go to the samples; the two that only
@@ -1412,6 +1425,16 @@ moduleTypeTests =
     -- the generated word is an ordinary `Code ⇒ Code`, for `[Opt]`
   , ("def twice = dup >> +\ndef double = 2 _ >> *\n\
      \model Opt in Base = twice = double\nOpt", "Code ⇒ Code")
+    -- STAGE 7c: the RECEIPT of an object-mapped model, and the fact
+    -- that applying it twice is the identity the second time — after
+    -- the first pass no generator mentions `Int`, so the functor has
+    -- nothing to do and the label set (a set) unions to one.
+  , (objMod ++ "def poly = (x -> (x x ; *) (x 3 ; *) ; + ; 2 ... ; +)\n\
+     \def polyMod with Mod = poly\ndef polyModMod with Mod = polyMod\n\
+     \polyModMod", "Mod7 =Mod> Mod7")
+    -- ...and a word whose scheme never mentions the mapped type passes
+    -- through UNTOUCHED: the functor is the identity off `Int`
+  , (objMod ++ "def rot with Mod = swap\nrot", "a0 a1 =Mod> a1 a0")
   ]
 
 -- TEMPLATES (stage 5a).  A def whose `with` names a THEORY is a body
@@ -2743,6 +2766,40 @@ evalTests =
      \[narrow] [two >> +] >> lift2 >> _ \"the original ran\" >> ev >> print",
      ["2"], "")
 
+    -- STAGE 7c: AN OBJECT MAP.  `model Mod in Base(Int ↦ Mod7 via
+    -- reduce)` is a functor whose action on objects is the substitution
+    -- `Int := Mod7`; the table gives the images, `via` gives the image
+    -- of the LITERAL FAMILY, and a def with neither is UNFOLDED.
+    -- p(x) = x² + 3x + 2 at 5 is 42, and 42 = 6*7 + 0.
+  , (objMod ++ "def poly = (x -> (x x ; *) (x 3 ; *) ; + ; 2 ... ; +)\n\
+     \def polyMod with Mod = poly\n\
+     \5 ; poly ; print\n5 ; reduce ; polyMod ; unMod7 ; print",
+     ["42", "0"], "")
+    -- TRANSITIVE UNFOLDING: `cubic` calls `cube` calls `sq`, none of
+    -- them named by the table, and all three are transported.  At 2:
+    -- 8 + 6 + 2 = 16, and 16 = 2*7 + 2.
+  , (objMod ++ "def sq = dup ; *\ndef cube = (x -> (x ; sq) x ; *)\n\
+     \def cubic = (x -> (x ; cube) (x 3 ; *) ; + ; 2 ... ; +)\n\
+     \def cubicMod with Mod = cubic\n\
+     \2 ; reduce ; cubicMod ; unMod7 ; print", ["2"], "")
+    -- THE LITERAL FAMILY really is mapped: under a floor-halving object
+    -- map `3` is 1 and `2` is 1, so p(4) is 16 + 4 + 1 and not 30
+  , ("data Half = Int\ndef halve = (x -> x 2 ; div ; Half)\n\
+     \def addH = (Half(a) Half(b) -> a b ; + ; Half)\n\
+     \def mulH = (Half(a) Half(b) -> a b ; * ; Half)\n\
+     \model Halve in Base(Int \8614 Half via halve) = + = addH, * = mulH\n\
+     \def poly = (x -> (x x ; *) (x 3 ; *) ; + ; 2 ... ; +)\n\
+     \def polyHalf with Halve = poly\n\
+     \9 ; halve ; polyHalf ; unHalf ; print", ["21"], "")
+    -- CONJUGATION: with `via c, r` the table may be EMPTY and the model
+    -- is still total — `Meters : Int ⇒ Meters` becomes `Meters ; toMm`
+    -- and `unMeters : Meters ⇒ Int` becomes `toM ; unMeters`, so a def
+    -- written over metres runs over millimetres.  3 m doubled is 6 m.
+  , (conjMod ++ "def stretch = (Meters(m) -> m 2 ; * ; Meters)\n\
+     \def run = 3 ; Meters ; stretch\n\
+     \def runMm with Milli = run\n\
+     \run ; unMeters ; print\nrunMm ; unMm ; print", ["6", "6000"], "")
+
     -- STAGE 5b: `sameCodeC`.  Code has already been through abstraction
     -- elimination, so it DECIDES what `sameCode` refuses for carrying a
     -- binder — `[(x -> x x)]` and `[dup]` are the same morphism.
@@ -2936,6 +2993,42 @@ declSrc =
   "data Trade = (sym: Str, px: Float, qty: Int)\ndef fieldsOf = (d -> d ; unDecl ; ((n p b f -> f) | (n p b -> nil) | (n p s l -> nil)) ; mergeDecl)\ndef altOf = (d -> d ; unDecl ; ((n p b f -> b ; firstAlt) | (n p b -> nil) | (n p s l -> nil)) ; mergeDecl)\n"
 
 -- a rule set over four interchangeable words, reused by the 5b tests
+-- STAGE 7c: an OBJECT-MAPPED model of `Base`.  The head carries a
+-- third clause, `Base(A ↦ B via c)`, and the model is then a functor
+-- whose action on OBJECTS is the substitution `A := B`.
+objMod :: String
+objMod =
+  "data Mod7 = Int\ndef reduce = (x -> x 7 ; mod ; Mod7)\n\
+  \def addM = (Mod7(a) Mod7(b) -> a b ; + ; reduce)\n\
+  \def mulM = (Mod7(a) Mod7(b) -> a b ; * ; reduce)\n\
+  \model Mod in Base(Int \8614 Mod7 via reduce) = + = addM, * = mulM\n"
+
+-- ...and one with a RETRACTION, whose table is empty because every
+-- generator is derived by conjugation.
+conjMod :: String
+conjMod =
+  "data Meters = Int\ndata Mm = Int\n\
+  \def toMm = (Meters(m) -> m 1000 ; * ; Mm)\n\
+  \def toM = (Mm(x) -> x 1000 ; div ; Meters)\n\
+  \model Milli in Base(Meters \8614 Mm via toMm, toM) =\n"
+
+-- the ring theory `examples/modular.braid` states, and the halving
+-- model that types under it and is not a homomorphism
+halfRingMod :: String
+halfRingMod =
+  "data Half = Int\ndef halve = (x -> x 2 ; div ; Half)\n\
+  \def addH = (Half(a) Half(b) -> a b ; + ; Half)\n\
+  \def mulH = (Half(a) Half(b) -> a b ; * ; Half)\n\
+  \def negH = (Half(a) -> 0 a ; - ; Half)\n\
+  \def negInt = (x -> 0 x ; -)\n\
+  \theory Ring(a) =\n\
+  \    sample : \8226 \8658 a\n    add : a a \8658 a\n\
+  \    mul : a a \8658 a\n    neg : a \8658 a\n\
+  \model Ints in Ring(Int) =\n    sample = 7\n    add = +\n\
+  \    mul = *\n    neg = negInt\n\
+  \model Halves in Ring(Half) =\n    sample = 7 ; halve\n    add = addH\n\
+  \    mul = mulH\n    neg = negH\n"
+
 ruleMod :: String
 ruleMod =
   "def dupInt = dup >> _ _ 0 >> _ +\ndef twice = dup >> +\ndef double = 2 _ >> *\n\
@@ -3507,6 +3600,68 @@ moduleFailTests =
   , ("model Bad in Base =\n1 >> print", "model Bad in Base: no bindings")
   , ("model Bad in Base = dup = swap, dup = drop\n1 >> print",
      "two bindings give `dup` an image")
+
+    -- STAGE 7c: THE OBJECT MAP.  The refusal is TYPE-DIRECTED — a word
+    -- whose scheme mentions the mapped type and has neither an image
+    -- nor a body is refused BY NAME, where the scope is written.
+  , (objMod ++ "def bad with Mod = 2 ... ; div\n1 ; print",
+     "`div` has no image under model Mod: Mod maps Int \8614 Mod7, and \
+     \`div : Int Int \8658 Int` mentions Int")
+  , (objMod ++ "def bad with Mod = 2 ... ; div\n1 ; print",
+     "Add `div = \8230` to `model Mod`, declare a retraction (`via \
+     \reduce, r` with `r : Mod7 \8658 Int`) so it is derived by \
+     \conjugation, or do not call it here.")
+  , (objMod ++ "def bad with Mod = 3 ... ; lt? ; (drop drop | drop drop) ; merge\n\
+     \1 ; print",
+     "`lt?` has no image under model Mod")
+    -- ...and the image itself is blessed at the SUBSTITUTED arrow: `+`
+    -- under `Int \8614 Mod7` is `Mod7 Mod7 \8658 Mod7`, so an Int image is
+    -- refused exactly as a narrower one is
+  , ("data Mod7 = Int\ndef reduce = (x -> x 7 ; mod ; Mod7)\n\
+     \model Bad in Base(Int \8614 Mod7 via reduce) = + = +\n1 ; print",
+     "model Bad in Base: `+ = +` is refused: + is used at Mod7 Mod7 \8658 \
+     \Mod7 but + is Int Int \8658 Int")
+    -- `via` types the image of the LITERAL FAMILY, and is checked once
+  , ("data Mod7 = Int\n\
+     \model Bad in Base(Int \8614 Mod7 via dup) = + = +\n1 ; print",
+     "`via dup` is refused: dup is a0 \8658 a0 a0 but the image of the \
+     \literal family at Int \8614 Mod7 is Int \8658 Mod7")
+    -- ...and so is the retraction beside it
+  , ("data Mod7 = Int\ndef reduce = (x -> x 7 ; mod ; Mod7)\n\
+     \model Bad in Base(Int \8614 Mod7 via reduce, reduce) = + = +\n1 ; print",
+     "is refused: reduce is Int \8658 Mod7 but a RETRACTION of reduce is \
+     \Mod7 \8658 Int")
+    -- the SOURCE of an object map is nominal: the map is the
+    -- substitution `A := B`, and a parameterized source would make it a
+    -- type-level function
+  , ("data Box7(a) = a\ndef f = (x -> x)\n\
+     \model Bad in Base(Box7(Int) \8614 Int via f) = dup = dup\n1 ; print",
+     "is not a NOMINAL type: an object map's source is a base type or a \
+     \`data`/`type` name of arity zero")
+    -- the identity object map is the one every model already has
+  , ("def f = (x -> x)\nmodel Bad in Base(Int \8614 Int via f) = dup = dup\n1 ; print",
+     "is the identity object map, which every model already has: drop \
+     \the clause")
+    -- `via` is not optional: without it the map has no value on values
+  , ("data Mod7 = Int\nmodel Bad in Base(Int \8614 Mod7) = dup = dup\n1 ; print",
+     "an object map needs `via`")
+    -- AN OBJECT MAP IS A `Base` MODEL'S CLAUSE.  A model of a theory
+    -- already maps objects, by instantiating the theory's parameters.
+  , ("data Mod7 = Int\ndef reduce = (x -> x 7 ; mod ; Mod7)\n\
+     \theory Mon(a) =\n    op : a a \8658 a\n\
+     \model Bad in Mon(Int)(Int \8614 Mod7 via reduce) =\n    op = +\n1 ; print",
+     "is an OBJECT MAP, and an object map is a `Base` model's clause")
+    -- WITHOUT a retraction an empty table reinterprets nothing; WITH
+    -- one it is a complete model, so only the first is refused
+  , ("data Mod7 = Int\ndef reduce = (x -> x 7 ; mod ; Mod7)\n\
+     \model Bad in Base(Int \8614 Mod7 via reduce) =\n1 ; print",
+     "model Bad in Base: no bindings")
+    -- AN OBJECT MAP TYPES; A HOMOMORPHISM IS A FURTHER CLAIM.  Floor
+    -- halving is a perfectly good object map and not a ring map:
+    -- \8970(7+7)/2\8971 = 7 but \8970 7/2\8971 + \8970 7/2\8971 = 6.
+  , (halfRingMod ++ "transformation Halved in Ints \8658 Halves = halve\n1 ; print",
+     "transformation Halved: the square for slot 'add' does not commute \
+     \at the theory's samples")
     -- STAGE 5c½: `in` names a theory or a model with a carrier, and
     -- nothing else.  Each other kind is refused by kind, with the word
     -- to write.

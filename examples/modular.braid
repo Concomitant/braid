@@ -1,0 +1,293 @@
+# AN OBJECT MAP: a model that changes the TYPES, not just the words.
+#
+# A model is one construct — a presentation interpreted in a category,
+# given by an OBJECT MAP and an image for each generator — and until
+# now every model in Braid carried the identity object map and wrote
+# only the images.  `model Opt in Base = dupInt = dup` renames
+# generators; the wires keep their types.  This file writes the other
+# half.
+#
+#     model Mod in Base(Int ↦ Mod7 via reduce) = + = …, * = …
+#
+# `Int ↦ Mod7` is the map on OBJECTS: the substitution `Int := Mod7`,
+# applied structurally — under `List`, under a data type's arguments,
+# through an `Fn` arrow, along a stack.  It is a substitution and not a
+# type-level function, which is why it is principal: substitution
+# commutes with unification, so a transported program has a principal
+# type for the same reason the original did.
+#
+# `via reduce` is the image of the LITERAL FAMILY.  Every literal of
+# the mapped type is a generator — there are infinitely many of them
+# and none of them is a word — so a table cannot name them and the head
+# does: under `with Mod`, `3` becomes `3 ; reduce`.
+#
+# Everything else is the table, and the table may name ANY WORD, because
+# `Base`'s generators are every word in scope.  What makes this a stage
+# rather than a bigger table is the third rule: a word that MENTIONS the
+# mapped type and has no image is UNFOLDED — F(def) = F(body) —
+# transitively, and cached.  A word whose type never mentions `Int` is
+# left exactly as it was, because the functor is the identity off `Int`.
+
+# ---------------------------------------------------------------------
+# 1. The carrier, and the map on values
+# ---------------------------------------------------------------------
+# `Mod7` is Z/7 by canonical representatives: the nominal type says
+# which Ints are meant, and `reduce` is the map that means them.
+data Mod7 = Int
+
+def reduce = (x -> x 7 ; mod ; Mod7)
+
+# `mod` is Euclidean here, so the representative is always in 0..6 —
+# including for a negative argument (-3 mod 7 = 4).
+-3 7 ; mod ; print                                    # 4
+
+# The three ring operations on representatives.  Each is written ONCE,
+# and used twice below: as the image of a generator under the object
+# map, and as a slot of a model of the ring theory.
+# ...and a renderer for the verdicts below: a `Bool` read as a word.
+def says = ("true" | "false") ; merge
+
+def addM = (Mod7(a) Mod7(b) -> a b ; + ; reduce)
+def mulM = (Mod7(a) Mod7(b) -> a b ; * ; reduce)
+def subM = (Mod7(a) Mod7(b) -> a b ; - ; reduce)
+def negM = (Mod7(a) -> 0 a ; - ; reduce)
+
+# ---------------------------------------------------------------------
+# 2. The model
+# ---------------------------------------------------------------------
+# Wiring goes to wiring: `dup`, `swap`, `drop` and `_` have nothing to
+# declare, because their schemes never mention `Int`.  Only the words
+# that do appear in the table.
+model Mod in Base(Int ↦ Mod7 via reduce) =
+    + = addM
+    * = mulM
+    - = subM
+
+# ---------------------------------------------------------------------
+# 3. One polynomial, two rings
+# ---------------------------------------------------------------------
+#   p(x) = x² + 3x + 2
+def poly = (x -> (x x ; *) (x 3 ; *) ; + ; 2 ... ; +)
+def polyMod with Mod = poly
+
+"-- p(x) = x^2 + 3x + 2 --" ; print
+5 ; poly ; print                                      # 25 + 15 + 2 = 42
+5 ; reduce ; polyMod ; unMod7 ; print                 # 42 = 6*7 + 0, so 0
+9 ; poly ; print                                      # 81 + 27 + 2 = 110
+9 ; reduce ; polyMod ; unMod7 ; print                 # 110 = 15*7 + 5, so 5
+
+# THE LITERALS WENT THROUGH `reduce` TOO, and here that changed nothing
+# because 3 and 2 are already canonical.  Section 7 is the case where it
+# changes everything.  By hand at x = 9: reduce 9 = 2, and
+# 2*2 = 4, 2*3 = 6, 4 + 6 = 10 = 3, 3 + 2 = 5.
+
+#   polyMod : Mod7 =Mod> Mod7 — the RECEIPT, one label per model,
+#   exactly as a family's application leaves one.
+
+# APPLYING IT TWICE IS THE IDENTITY THE SECOND TIME.  After `with Mod`
+# there is no `Int` left in the type, so no generator mentions the
+# mapped object and the functor has nothing to do.  The label set is
+# idempotent for the same reason a set is.
+def polyModMod with Mod = polyMod
+9 ; reduce ; polyModMod ; unMod7 ; print              # 5, and one `=Mod>`
+
+# ---------------------------------------------------------------------
+# 4. Transitive unfolding
+# ---------------------------------------------------------------------
+# `poly` is not a generator with an image: it is a DEF, so the functor
+# enters it.  So is everything `poly` calls.  Each is transported once
+# and cached as a generated word `Mod@<def>`, which is the compiler's
+# spelling (`:doc Mod@cube` shows it; `:defs` does not list it, because
+# you cannot name it).
+def sq    = dup ; *
+def cube  = (x -> (x ; sq) x ; *)
+def cubic = (x -> (x ; cube) (x 3 ; *) ; + ; 2 ... ; +)
+def cubicMod with Mod = cubic
+
+"-- q(x) = x^3 + 3x + 2, through three defs --" ; print
+2 ; cubic ; print                                     # 8 + 6 + 2 = 16
+2 ; reduce ; cubicMod ; unMod7 ; print                # 16 mod 7 = 2
+
+# ---------------------------------------------------------------------
+# 5. What is REFUSED, and by name
+# ---------------------------------------------------------------------
+# The refusal is TYPE-DIRECTED.  A word passes through untouched when
+# its scheme does not mention `Int`; a word that mentions `Int` and has
+# neither an image nor a body is refused where the scope is written,
+# naming the word and the fix.  Uncomment either to see it:
+#
+#   def bad with Mod = 2 ... ; div
+#     `div` has no image under model Mod: Mod maps Int ↦ Mod7, and
+#     `div : Int Int ⇒ Int` mentions Int — so the functor has nothing
+#     to send it to.  Add `div = …` to `model Mod`, declare a
+#     retraction (`via reduce, r` with `r : Mod7 ⇒ Int`) so it is
+#     derived by conjugation, or do not call it here.
+#
+#   def bad with Mod = 3 ... ; lt? ; (drop drop | drop drop) ; merge
+#     `lt?` has no image under model Mod: … `lt? : Int Int ⇒ (Int Int
+#     | Int Int)` mentions Int …
+#
+# Both are RIGHT to be refused: Z/7 is not an ordered ring and it is
+# not a field of characteristic zero, so neither `div` nor `lt?` has a
+# well-defined image.  The checker does not know that; it knows that a
+# functor with no value on a generator is not a functor, which is the
+# same refusal for a better reason.
+
+# ---------------------------------------------------------------------
+# 6. Reduction as a RING HOMOMORPHISM — the claim, and its audit
+# ---------------------------------------------------------------------
+# An object map makes `reduce` a functor on the AMBIENT presentation.
+# That it is a homomorphism of RINGS is a further and stronger claim,
+# and `transformation` is where it is made and checked — square by
+# square, one per generator, exactly as for any two models of a theory.
+# `sample` is declared FIRST among the slots that build an `a` out of
+# nothing, because that is the one a sampled square reaches for: the
+# evidence a theory offers is read in declaration order, so the theory
+# says which value its audits run at by writing it first.
+theory Ring(a) =
+    sample  : • ⇒ a
+    sample2 : • ⇒ a
+    add     : a a ⇒ a
+    mul     : a a ⇒ a
+    neg     : a ⇒ a
+    zero    : • ⇒ a
+    law addComm = (sample sample2 ; add) (sample2 sample ; add) ; eq? ; verdict
+    law mulComm = (sample sample2 ; mul) (sample2 sample ; mul) ; eq? ; verdict
+    law distrib = ((sample sample2 ; add) sample2 ; mul) ((sample sample2 ; mul) (sample2 sample2 ; mul) ; add) ; eq? ; verdict
+    law negAdd  = (sample (sample ; neg) ; add) zero ; eq? ; verdict
+
+def negInt = (x -> 0 x ; -)
+
+model Ints in Ring(Int) =
+    sample  = 7
+    sample2 = 10
+    add     = +
+    mul     = *
+    neg     = negInt
+    zero    = 0
+
+model Mods in Ring(Mod7) =
+    sample  = 7 ; reduce
+    sample2 = 10 ; reduce
+    add     = addM
+    mul     = mulM
+    neg     = negM
+    zero    = 0 ; Mod7
+
+transformation Reduce in Ints ⇒ Mods = reduce
+#   `:transformations` reports every square:
+#
+#     sample   proved        sample2  proved
+#     add      sampled       mul      sampled
+#     neg      sampled       zero     sampled
+#
+#   The two sample squares are PROVED because `reduce` of the Int one
+#   IS the Mod7 one, as free programs — `Mods@sample` is literally
+#   `7 ; reduce`.  The other four are SAMPLED: they are true only by the
+#   arithmetic of `mod`, and `sameCode` treats `+`, `*` and `mod` as
+#   uninterpreted words.  That is the same honest boundary
+#   `optimizer.braid` §3 and `laws.braid` draw.
+
+"-- reduce is a ring homomorphism --" ; print
+#   reduce(7 + 10) = reduce 17 = 3, and reduce 7 + reduce 10 = 0 + 3 = 3
+(7 10 ; + ; reduce) (7 10 ; reduce reduce ; addM) ; eq? ; verdict ; says ; print   # true
+#   reduce(7 * 10) = reduce 70 = 0, and reduce 7 * reduce 10 = 0 * 3 = 0
+(7 10 ; * ; reduce) (7 10 ; reduce reduce ; mulM) ; eq? ; verdict ; says ; print   # true
+
+# ---------------------------------------------------------------------
+# 7. THE CONTRAST: an object map that is NOT a homomorphism
+# ---------------------------------------------------------------------
+# Floor-halving is a perfectly good object map — every generator it
+# names has an image at the substituted type, so `with Halve` elaborates
+# and runs.  It is NOT a ring homomorphism, and nothing in the object
+# map could have said so.
+data Half = Int
+def halve = (x -> x 2 ; div ; Half)
+def addH  = (Half(a) Half(b) -> a b ; + ; Half)
+def mulH  = (Half(a) Half(b) -> a b ; * ; Half)
+def subH  = (Half(a) Half(b) -> a b ; - ; Half)
+def negH  = (Half(a) -> 0 a ; - ; Half)
+
+model Halve in Base(Int ↦ Half via halve) =
+    + = addH
+    * = mulH
+    - = subH
+
+def polyHalf with Halve = poly
+
+"-- the same polynomial, halved --" ; print
+9 ; halve ; unHalf ; print                            # 9 div 2 = 4
+
+# READ THE ANSWER CAREFULLY.  It is NOT p(4) = 30: the LITERALS were
+# transported too, so `3` is ⌊3/2⌋ = 1 and `2` is ⌊2/2⌋ = 1, and what
+# runs is 4*4 + 4*1 + 1 = 21.  That is what a functor does — it maps
+# every generator, and a literal is a generator — and it is the clearest
+# possible sign that `with Halve` is a reinterpretation of the whole
+# program and not a change of representation.
+9 ; halve ; polyHalf ; unHalf ; print                 # 16 + 4 + 1 = 21
+
+model Halves in Ring(Half) =
+    sample  = 7 ; halve
+    sample2 = 10 ; halve
+    add     = addH
+    mul     = mulH
+    neg     = negH
+    zero    = 0 ; Half
+
+# ...and the claim, refused at the FIRST square that is false.
+# Uncomment to see it:
+#
+#   transformation Halved in Ints ⇒ Halves = halve
+#     transformation Halved: the square for slot 'add' does not commute
+#     at the theory's samples — a transformation between models is a
+#     homomorphism, slot by slot.
+#
+# By hand, at the theory's own sample 7:  ⌊(7+7)/2⌋ = 7, but
+# ⌊7/2⌋ + ⌊7/2⌋ = 3 + 3 = 6.  The object map typed; the homomorphism
+# did not hold; and the two are checked by two different declarations,
+# which is the whole point of having both.
+(7 7 ; + ; halve ; unHalf) (7 7 ; halve halve ; addH ; unHalf) ; eq? ; verdict ; says ; print   # false
+
+# ---------------------------------------------------------------------
+# 8. A NOMINAL source, a retraction, and the conjugated table
+# ---------------------------------------------------------------------
+# `A` need not be a base type.  When it is a `data` name there are no
+# literals of it at all, so `via c` is not the literal family's image —
+# it is the map on values, and it earns its keep the other way: declare
+# a RETRACTION beside it and every generator the table does not name is
+# DERIVED by conjugation, one `r` per `A` input wire and one `c` per `A`
+# output wire.
+data Meters = Int
+data Mm     = Int
+
+def toMm = (Meters(m) -> m 1000 ; * ; Mm)
+def toM  = (Mm(x) -> x 1000 ; div ; Meters)
+
+# An EMPTY table, and a complete model: with a retraction there is
+# nothing left to write.
+model Milli in Base(Meters ↦ Mm via toMm, toM) =
+
+def stretch = (Meters(m) -> m 2 ; * ; Meters)
+def start   = 3 ; Meters
+def run     = start ; stretch
+def runMm with Milli = run
+
+"-- metres, then the same program in millimetres --" ; print
+run   ; unMeters ; print                              # 3 m, doubled = 6
+runMm ; unMm     ; print                              # 6000
+
+# What was derived, and how.  `Meters : Int ⇒ Meters` is a generator
+# with an `A` on its OUTPUT, so its image is `Meters ; toMm`;
+# `unMeters : Meters ⇒ Int` has one on its INPUT, so its image is
+# `toM ; unMeters`.  `stretch` is a def, so it is unfolded around them,
+# and `Milli@stretch : Mm ⇒ Mm` is the conjugate the two together make.
+#
+# `:doc Milli` says what is PROVED and what is not.  Here the retraction
+# law `toMm ; toM = id` is TRUE — (m·1000) div 1000 = m for every Int m
+# — and `sameCode` does not decide it, because `*` and `div` are
+# uninterpreted words in the free category.  So `Milli` is recorded as a
+# DIALECT: the conjugated words are what the declaration says they are,
+# on the author's word.  That is the same line `optimizer.braid` draws
+# between an optimizer (images PROVABLY equal to their generators) and a
+# reinterpretation, and it is drawn here by the same procedure.
+(3 ; Meters ; toMm ; toM ; unMeters) (3) ; eq? ; verdict ; says ; print   # true, by hand

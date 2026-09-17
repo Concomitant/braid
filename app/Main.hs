@@ -277,7 +277,7 @@ renderDef st name =
 
 docOf :: ReplState -> String -> IO ()
 docOf st name
-  | M.member name (rsEnv st) || isAlias =
+  | M.member name (rsEnv st) || isAlias || isObjModel =
       case M.lookup name (rsDocs st) of
         Just d  -> putStrLn ("## " ++ d) >> putStrLn renderTypeLine
                      >> generated >> verdicts
@@ -300,6 +300,12 @@ docOf st name
       | otherwise = pure ()
     isAlias = any ((== name) . aName) (rsAliases st)
               || any ((== name) . dName) (rsDatas st)
+    -- AN OBJECT-MAPPED MODEL OF `Base` DECLARES NO WORD (stage 7c) —
+    -- its action on a literal is not a rename, so there is no `Code ⇒
+    -- Code` table — and it is still a declaration `:doc` must answer
+    -- about.
+    isObjModel = any (\b -> inName b == name && not (null (inObjMap b)))
+                     (rsBases st)
     renderTypeLine =
       case [ d | d <- rsDatas st, dName d == name ] of
         (d : _) -> renderData st { rsDocs = M.empty } d
@@ -309,7 +315,11 @@ docOf st name
             Nothing ->
               case [ al | al <- rsAliases st, aName al == name ] of
                 (al : _) -> renderAlias st { rsDocs = M.empty } al
-                []       -> name
+                [] | isObjModel ->
+                       "model " ++ name ++ " in Base — applied with `with "
+                         ++ name ++ "`, and no word: an object-mapped model "
+                         ++ "is an elaboration-time functor"
+                   | otherwise -> name
 
 
 renderStackTy :: ReplState -> String
@@ -497,7 +507,7 @@ handleLine st line
                , not (any (\d -> dName d == n && dResource d) (rsDatas st))
                , n `notElem` map fst (rsSlots st)
                , n `notElem` map fst (rsFuncs st)
-               , n `notElem` map fst (rsBases st) ] of
+               , n `notElem` map inName (rsBases st) ] of
         (n : _) -> Just n
         []      -> Nothing
 

@@ -2791,6 +2791,79 @@ data Theory = Theory
                                      -- D's shape, and D's laws are T's
   } deriving (Eq, Show)
 
+-- THE OBJECT MAP (stage 7c, 2026-09-17).  A model is a presentation
+-- interpreted in a category, given by an OBJECT MAP and an image for
+-- each generator; until now every model carried the identity object map
+-- and only the images were written.  `model Mod in Base(Int ↦ Mod7 via
+-- reduce)` writes the other half: the map is the SUBSTITUTION `A := B`,
+-- applied structurally — under `List`, a data type's arguments, an
+-- `Fn` arrow, a stack — and it is principal for the same reason a
+-- family's carrier is, because substitution commutes with unification
+-- and there is no type-level function anywhere.
+--
+-- `via c` is the image of the LITERAL FAMILY: every literal of type A
+-- becomes `lit ; c`, which is the one generator class a table cannot
+-- name (there are infinitely many of them and none of them is a word).
+-- `, r` is a RETRACTION `B ⇒ A` with `c ; r = id_A`; where it is given,
+-- every generator the table does not name is DERIVED by conjugation.
+data ObjMap = ObjMap
+  { omFrom :: Ty            -- A: a base type, or a nullary `data` name
+  , omTo   :: Ty            -- B: any type
+  , omVia  :: String        -- c : A ⇒ B
+  , omBack :: Maybe String  -- r : B ⇒ A, if a retraction was declared
+  } deriving (Eq, Show)
+
+-- How the object map READS, for a message: `Int ↦ Mod7 via reduce`.
+showObjMap :: ObjMap -> String
+showObjMap om = show (omFrom om) ++ " ↦ " ++ show (omTo om)
+             ++ " via " ++ omVia om
+             ++ maybe "" (", " ++) (omBack om)
+
+-- ...and the substitution itself, structural and total.  Nothing here
+-- is a type-level function: `A := B` under every constructor the type
+-- language has, so `List(Int)` is `List(Mod7)` and `Fn⟨Int ⇒ Int⟩` is
+-- `Fn⟨Mod7 ⇒ Mod7⟩` with no rule of their own.
+objTy :: ObjMap -> Ty -> Ty
+objTy om t | t == omFrom om = omTo om
+objTy om (TFn arr)     = TFn (objArrow om arr)
+objTy om (TSum row)    = TSum (objRow om row)
+objTy om (TData n as)  = TData n (map (objStack om) as)
+objTy _  t             = t
+
+objStack :: ObjMap -> SType -> SType
+objStack _  SEnd          = SEnd
+objStack _  v@(STail _)   = v
+objStack om (SCons t r)   = SCons (objTy om t) (objStack om r)
+objStack om (SExp b e r)  = SExp (objStack om b) e (objStack om r)
+
+objRow :: ObjMap -> SumRow -> SumRow
+objRow _  RNil          = RNil
+objRow _  v@(RTail _)   = v
+objRow om (RCons st r)  = RCons (objStack om st) (objRow om r)
+
+objArrow :: ObjMap -> Arrow -> Arrow
+objArrow om (Arrow i o e) = Arrow (objStack om i) (objStack om o) e
+
+-- Does an arrow MENTION A?  This is the whole of the type-directed
+-- refusal: a word whose scheme does not name A is left alone (the
+-- functor is the identity off A), and one that does needs an image, a
+-- body to unfold, or a conjugation.
+mentionsTy :: Ty -> Arrow -> Bool
+mentionsTy a (Arrow i o _) = inS i || inS o
+  where
+    inS SEnd         = False
+    inS (STail _)    = False
+    inS (SCons t r)  = inT t || inS r
+    inS (SExp b _ r) = inS b || inS r
+    inT t | t == a   = True
+    inT (TFn arr)    = mentionsTy a arr
+    inT (TSum row)   = inR row
+    inT (TData _ as) = any inS as
+    inT _            = False
+    inR RNil         = False
+    inR (RTail _)    = False
+    inR (RCons st r) = inS st || inR r
+
 -- A MODEL fills a theory's slots.  Each binding becomes an ordinary
 -- def named `Inst#slot`, so resolution is a renaming at elaboration —
 -- once per scope, never a dictionary per call.
@@ -2805,12 +2878,13 @@ data Instance = Instance
       -- FAMILY — a functor Mod(Smooth) → Mod(Smooth) — and this list is
       -- its parameters.  Empty for every ordinary model, which is what
       -- makes the clause optional rather than a second kind of head.
-  , inObjMap   :: [(String, String)]
-      -- ...and the OBJECT MAP clause, the head's third (not built).  A
+  , inObjMap   :: [ObjMap]
+      -- ...and the OBJECT MAP clause, the head's third (stage 7c).  A
       -- model is a presentation interpreted in a category: an object map
-      -- and an image for each generator.  Today's models are the
-      -- identity-object-map case and carry `[]` here; the field is on the
-      -- record so the clause can arrive without reshaping the head.
+      -- and an image for each generator.  A model that carries `[]` here
+      -- is the identity-object-map case — every model before 2026-09-17,
+      -- and every model of a theory still, because an object map is a
+      -- `Base` model's clause.
   , inScope    :: [String]
       -- The models whose slot names this model's BODIES are written in.
       -- Ordinary model: `[]`, meaning its own (a slot body may call a
@@ -3362,38 +3436,93 @@ splitTopCommas = go 0 ""
       | otherwise                   = go d (c : acc) cs
     blankStr = all isSpace
 
-parseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
-              -> [String] -> Either String Instance
-parseInstance aliases dataSigs theories header body = do
-  (nm, ps, th, args) <- parseHead
-  -- BOTH body forms, exactly as `def` has both: the bindings after the
-  -- head's own `=`, separated by top-level commas, and/or one per
-  -- indented line.  Balanced brackets make the comma exact, so `mul =
-  -- dup ; *` is one binding whose body composes (2026-09-16).
-  let inline = [ r | r <- splitTopCommas
-                         (drop 1 (dropWhile (/= '=') (takeWhile (/= '#') header)))
-                   , not (blank r) ]
-  binds <- mapM parseBind (inline ++ filter (not . blank) body)
-  pure (Instance nm th args binds ps [] [])
+-- The arrow of the OBJECT MAP.  One glyph, and it is not `⇒`: `⇒` is
+-- the arrow of every WRITTEN TYPE in Braid, and an object map is not a
+-- type — it is a function on objects.  `↦` is the mathematician's
+-- spelling for exactly that, the lexer already admits it as an ordinary
+-- identity character, and nothing else in the language claims it.
+mapsTo :: String
+mapsTo = "↦"
+
+-- `A ↦ B via c`, or `A ↦ B via c, r` — the object map clause, parsed
+-- off the head's own text.  `A` is a NOMINAL name: a base type, or a
+-- `data`/`type` name of arity zero.  Anything else would need the map
+-- to be a type-level FUNCTION (what is `List(a) ↦ …` at an unknown
+-- `a`?), and the whole reason substitution is principal is that it is
+-- not one.
+parseObjMap :: [Alias] -> [(String, [TyParam])] -> String -> String
+            -> Either String ObjMap
+parseObjMap aliases dataSigs nm src = do
+  (lhs, rhs) <- case splitOnStr mapsTo src of
+    [l, r] -> Right (l, r)
+    _      -> Left $ here ++ "an object map is written `A " ++ mapsTo
+                  ++ " B via c` (and `, r` for a retraction), not: "
+                  ++ trimSpace src
+  (bsrc, csrc) <- case breakWord "via" rhs of
+    Just p  -> Right p
+    Nothing -> Left $ here ++ "an object map needs `via`: `A " ++ mapsTo
+                   ++ " B via c` names the image of the LITERAL FAMILY, "
+                   ++ "the one generator class a table cannot name"
+  a <- parseTyBody aliases dataSigs [] lhs
+  b <- parseTyBody aliases dataSigs [] bsrc
+  case a of
+    TData _ (_ : _) -> Left (nominalErr lhs)
+    TFn _           -> Left (nominalErr lhs)
+    TSum _          -> Left (nominalErr lhs)
+    TVarTy _        -> Left (nominalErr lhs)
+    TFin _          -> Left (nominalErr lhs)
+    _               -> Right ()
+  if a == b
+    then Left $ here ++ "`" ++ show a ++ " " ++ mapsTo ++ " " ++ show b
+             ++ "` is the identity object map, which every model already "
+             ++ "has: drop the clause"
+    else Right ()
+  case [ w | w <- splitTopCommas csrc, not (all isSpace w) ] of
+    [c] | [c'] <- words c -> Right (ObjMap a b c' Nothing)
+    [c, r] | [c'] <- words c, [r'] <- words r ->
+      Right (ObjMap a b c' (Just r'))
+    _ -> Left $ here ++ "`via` names the image of the literal family, and "
+             ++ "optionally a RETRACTION beside it: `via c` or `via c, r` "
+             ++ "— one word each, not: " ++ trimSpace csrc
   where
-    blank l = all isSpace (takeWhile (/= '#') l)
-    -- An argument is a full type EXPRESSION, not a bare name: a
-    -- theory's carrier is routinely parameterized
-    -- (`Pipeline(Circuit(Int, Int))`), and scraping identifiers out of
-    -- the token stream read that as three separate arguments.  Split
-    -- the source on top-level commas and hand each piece to the
-    -- ordinary type parser, which already knows every type form.
-    -- THE HEAD IS A SEQUENCE OF CLAUSES, and each after the name is
-    -- optional: a PARAMETER LIST (`(Smooth(a, _))` — this model is a
-    -- family), then `in Theory`, then the theory's ARGUMENTS.  The third
-    -- optional clause, an OBJECT MAP, is not built; when it arrives it
-    -- rides beside the arguments (`inObjMap`) and nothing here moves.
-    --
-    -- `in` and not `:` since 2026-09-16: a model's head says which
-    -- theory it interprets, which is membership in Mod(T) — and `:`
-    -- types a SLOT and nothing else.
-    parseHead = do
-      let hdr = takeWhile (/= '=') header
+    here = "model " ++ nm ++ ": "
+    nominalErr l = here ++ "`" ++ trimSpace l ++ "` is not a NOMINAL type: "
+                ++ "an object map's source is a base type or a `data`/`type` "
+                ++ "name of arity zero, because the map is the substitution "
+                ++ "`A := B` and a parameterized source would make it a "
+                ++ "type-level function"
+
+-- split on a standalone word at paren depth zero: `Mm via toMm` is
+-- (`Mm`, `toMm`), and a type named `viability` is left alone
+breakWord :: String -> String -> Maybe (String, String)
+breakWord w = go (0 :: Int) ""
+  where
+    go _ _   [] = Nothing
+    go d acc cs@(c : rest)
+      | d == 0, Just r <- atWord cs = Just (reverse acc, r)
+      | c == '(' || c == '⟨'   = go (d + 1) (c : acc) rest
+      | c == ')' || c == '⟩'   = go (d - 1) (c : acc) rest
+      | otherwise                  = go d (c : acc) rest
+    atWord cs = case stripPrefix w (dropWhile isSpace cs) of
+      Just r@(c : _) | isSpace c, cs /= dropWhile isSpace cs -> Just r
+      _                                                     -> Nothing
+
+-- THE MODEL HEAD, ONE GRAMMAR (stage 7c, 2026-09-17).
+--
+--   model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ]
+--
+-- Three optional clauses around one required one, and every kind of
+-- model Braid has is a SETTING of them: a plain model writes the
+-- arguments, a family writes the parameter, a `Base` model writes
+-- neither, an object-mapped `Base` model writes the third.  The two
+-- parenthesized clauses after the theory are told apart by CONTENT and
+-- not by position: a group containing `↦` is the object map, and any
+-- other group is the theory's arguments.  There is nothing to
+-- disambiguate, because a type expression never contains `↦`.
+parseModelHead :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
+               -> Either String (String, [ModelParam], String, [InstArg], [ObjMap])
+parseModelHead aliases dataSigs theories header = do
+      let hdr = takeWhile (/= '=') (takeWhile (/= '#') header)
       after0 <- case stripWord "model" (dropWhile isSpace hdr) of
         Just r  -> Right r
         Nothing -> Left $ "Malformed model declaration: " ++ header
@@ -3411,23 +3540,45 @@ parseInstance aliases dataSigs theories header body = do
         _           -> Right ()
       case dropWhile isSpace after2 of
         rhs0 | Just rhs <- stripWord "in" (dropWhile isSpace rhs0)
-             , not (null nm) ->
-          case break (== '(') (dropWhile isSpace rhs) of
-            (th, "")        | [t] <- words th ->
-              (,,,) nm ps t <$> args nm ps t []
-            (th, _ : inner) | [t] <- words th ->
-              (,,,) nm ps t <$> args nm ps t (splitTopCommas inner)
-            _ -> Left $ "Malformed model head: " ++ header
+             , not (null nm) -> do
+          let (th, afterTh) = span (\c -> not (isSpace c) && c /= '(')
+                                   (dropWhile isSpace rhs)
+          grps <- groups (dropWhile isSpace afterTh)
+          if null th then Left ("Malformed model head: " ++ header)
+                     else Right ()
+          let oms  = [ g | g <- grps, mapsTo `isInfixOf` g ]
+              asrc = [ g | g <- grps, not (mapsTo `isInfixOf` g) ]
+          case asrc of
+            (_ : _ : _) -> Left $ "model " ++ nm ++ ": a head names its "
+                               ++ "theory's arguments ONCE: `model " ++ nm
+                               ++ " in " ++ th ++ "(…)`"
+            _ -> Right ()
+          case oms of
+            (_ : _ : _) -> Left $ "model " ++ nm ++ ": a head carries ONE "
+                               ++ "object map — a model sends each object to "
+                               ++ "one thing, and two clauses would be two "
+                               ++ "functors"
+            _ -> Right ()
+          om <- mapM (parseObjMap aliases dataSigs nm) oms
+          args nm ps th (concatMap splitTopCommas asrc)
+            >>= \as -> Right (nm, ps, th, as, om)
         (':' : _) -> Left $ "`:` types a slot and nothing else since "
                          ++ "2026-09-16: a model's head says which theory "
                          ++ "it interprets, which is MEMBERSHIP — write "
                          ++ "`model " ++ nm ++ " in <Theory>(…)` "
                          ++ "(MANUAL §8)"
         _ -> Left $ "Malformed model declaration: " ++ header
+  where
+    -- successive parenthesized clauses, in the order they were written
+    groups s0 = case dropWhile isSpace s0 of
+      ""        -> Right []
+      ('(' : r) -> do (g, r') <- balanced r
+                      (g :) <$> groups r'
+      _         -> Left $ "Malformed model head: " ++ header
 
-    stripWord w s = case splitAt (length w) s of
-      (p, r@(c : _)) | p == w, isSpace c -> Just r
-      _                                  -> Nothing
+    stripWord w s0 = case splitAt (length w) s0 of
+      (pre, r@(c : _)) | pre == w, isSpace c -> Just r
+      _                                      -> Nothing
 
     -- the text up to the `)` that closes an already-opened `(`
     balanced = go (0 :: Int) ""
@@ -3440,7 +3591,7 @@ parseInstance aliases dataSigs theories header body = do
           | otherwise = go d (c : acc) cs
 
     -- like `splitTopCommas`, but over text that is already unwrapped
-    splitTopCommas' s = splitTopCommas (s ++ ")")
+    splitTopCommas' s0 = splitTopCommas (s0 ++ ")")
 
     -- `Smooth(a, _)` — the parameter's THEORY and the names it gives
     -- that theory's arguments, so the head can write its own.  There is
@@ -3540,6 +3691,35 @@ parseInstance aliases dataSigs theories header body = do
       " (it is a transparent `type` alias; a constructor parameter needs "
       ++ "a `data` declaration, which is nominal)"
     conHint _ = ""
+
+parseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
+              -> [String] -> Either String Instance
+parseInstance aliases dataSigs theories header body = do
+  (nm, ps, th, args, om) <- parseModelHead aliases dataSigs theories header
+  -- AN OBJECT MAP IS A `Base` MODEL'S CLAUSE (stage 7c).  A model of a
+  -- theory already has an object map — the theory's parameters,
+  -- instantiated at this model's arguments — and a second one at a
+  -- mapped type would be a functor into a category whose objects nobody
+  -- has named.  Refused for now, and recorded as the open question.
+  case om of
+    (o : _) | th /= baseTheoryName ->
+      Left $ "model " ++ nm ++ ": `" ++ showObjMap o ++ "` is an OBJECT "
+          ++ "MAP, and an object map is a `Base` model's clause — a model "
+          ++ "of theory " ++ th ++ " already maps objects by instantiating "
+          ++ th ++ "'s parameters at its own arguments.  Write `model "
+          ++ nm ++ " in Base(" ++ showObjMap o ++ ")`, or drop the clause."
+    _ -> Right ()
+  -- BOTH body forms, exactly as `def` has both: the bindings after the
+  -- head's own `=`, separated by top-level commas, and/or one per
+  -- indented line.  Balanced brackets make the comma exact, so `mul =
+  -- dup ; *` is one binding whose body composes (2026-09-16).
+  let inline = [ r | r <- splitTopCommas
+                         (drop 1 (dropWhile (/= '=') (takeWhile (/= '#') header)))
+                   , not (blankL r) ]
+  binds <- mapM parseBind (inline ++ filter (not . blankL) body)
+  pure (Instance nm th args binds ps om [])
+  where
+    blankL l = all isSpace (takeWhile (/= '#') l)
     parseBind l =
       case break (== '=') l of
         (lhs, '=' : rhs)
@@ -5452,7 +5632,16 @@ noSelfToTieErr =
 -- named maps to itself.  So the table is the bindings, and `with Opt` is
 -- the same renaming `with Inst` performs — with the image a word that
 -- already exists, so no slot def is generated.
-type BaseInstance = (String, [(String, String)])
+-- ONE RECORD FOR EVERY MODEL (stage 7c).  A model of `Base` is an
+-- `Instance` like every other: its theory is the ambient presentation,
+-- its arguments are none, its bindings are the table, and `inObjMap`
+-- carries the object map when one was written.  The separate list it
+-- lives in says only that its theory is not one anybody declared.
+type BaseInstance = Instance
+
+-- the base model of this name a scope names, if any
+lookupBase :: String -> [BaseInstance] -> Maybe BaseInstance
+lookupBase n bs = listToMaybe [ b | b <- bs, inName b == n ]
 
 -- What a `with` scope needs to know about a model: the THEORY it
 -- models, and the slot names that rename to it.  The theory is what
@@ -5680,7 +5869,7 @@ elabHeaders ctx t0 = do
                 , recLabel `elem` ecThs ctx
                   || isJust (lookup recLabel (ecFuncs ctx))
                   || isJust (lookup recLabel (ecSlots ctx))
-                  || isJust (lookup recLabel (ecBases ctx)) ] of
+                  || isJust (lookupBase recLabel (ecBases ctx)) ] of
         (_ : _) -> Left $ "`" ++ recLabel ++ "` is the built-in recursion "
                        ++ "marker (MANUAL §8), so `with " ++ recLabel
                        ++ "` cannot name your declaration: rename it"
@@ -5738,13 +5927,12 @@ elabHeaders ctx t0 = do
       -- the spine: it maps generators of the ambient presentation to
       -- their images, and every generator it does not name maps to
       -- itself.  Same phase as `with <model>`, because it is one.
-      let bs   = [ (n, tbl) | n <- ns
-                            , Just tbl <- [lookup n (ecBases ctx)] ]
+      let bs   = [ b | n <- ns, Just b <- [lookupBase n (ecBases ctx)] ]
           fs   = [ (n, w) | n <- ns, n `notElem` mns
-                          , isNothing (lookup n (ecBases ctx))
+                          , isNothing (lookupBase n (ecBases ctx))
                           , Just w <- [lookup n (ecFuncs ctx)] ]
           rest = [ n | n <- ns
-                     , isNothing (lookup n (ecBases ctx))
+                     , isNothing (lookupBase n (ecBases ctx))
                      , n `elem` mns || isNothing (lookup n (ecFuncs ctx)) ]
           -- A RESOURCE IS ROUTED, even though it also names the model
           -- its declaration generates (stage 7b): `with Log` threads
@@ -5757,13 +5945,25 @@ elabHeaders ctx t0 = do
                            else maybe (Right n) (\(_, sl) -> Left (n, sl))
                                       (lookup n (ecSlots ctx))
                        | n <- rest ]
-          b'' = foldr (\tbl t -> renameWordsT tbl t)
-                      (foldr (\(i, sl) t -> renameSlotsT i sl t) b' is)
-                      (map snd bs)
+          b0' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' is
       -- the RESOURCES, transported into the models their declarations
       -- generated, as one group: `elabScope` is those models' fused
       -- evaluator (`runTransport`'s first clause is the k = 1 case of
       -- exactly this call).
+      -- A MODEL OF `Base` REWRITES THE AMBIENT PRESENTATION, and an
+      -- OBJECT-MAPPED one rewrites the types under it too: the images
+      -- it names are inlined, a literal of the mapped type is composed
+      -- with `via`, a word that mentions the type and has a body is
+      -- UNFOLDED (cached as `M@def`), one with a retraction is
+      -- conjugated, and a word that mentions it with none of the three
+      -- is refused by name.  A word whose scheme never mentions the
+      -- type passes through untouched: the functor is the identity off
+      -- A, which is what makes `with M` twice the identity the second
+      -- time.
+      b'' <- foldM (\t i -> if null (inObjMap i)
+                              then Right (renameWordsT (baseWordTable i) t)
+                              else objTransportT ctx i t)
+                   b0' bs
       routed0 <- case rs of
                    [] -> pure b''
                    _  -> elabScope (ecEnv ctx) rs b''
@@ -5795,7 +5995,8 @@ elabHeaders ctx t0 = do
           -- model's own component (`ecSelf`): the `with I` wrapping a
           -- slot body resolves names, it does not apply the model to
           -- itself, and a slot's declared arrow carries no label.
-          mine  = [ n | n <- map fst is ++ map fst bs, n `notElem` ecSelf ctx ]
+          mine  = [ n | n <- map fst is ++ map inName bs
+                      , n `notElem` ecSelf ctx ]
           -- `with Recursive` mints like every other scope: the knot it
           -- tied carries the label too, and a set unions to one.
           marks = nub ([ receiptName recLabel | length ns /= length ns0 ]
@@ -5907,7 +6108,7 @@ inTarget thNames trans slots funcs bases resources n
       Left $ pre ++ "names a model of " ++ th ++ " in the base: it has no "
           ++ "carrier to build \8212 write `with " ++ n ++ "`, or `in " ++ th
           ++ "` for a template."
-  | isJust (lookup n bases) =
+  | isJust (lookupBase n bases) =
       Left $ pre ++ "names a model of Base — a rewriting of the "
           ++ "ambient presentation, which is applied, not inhabited.  "
           ++ "Write `with " ++ n ++ "`."
@@ -5980,6 +6181,159 @@ renameWordsT tbl = go
     go (In ns b)        = In ns (go b)
     go (OpenAbs sl h b) = OpenAbs sl h (go b)
     go t                = t
+
+-- OBJECT-MAPPED TRANSPORT (stage 7c, 2026-09-17).
+--
+-- `with Mod` for `model Mod in Base(Int ↦ Mod7 via reduce)` is the
+-- action of a functor whose object map is not the identity, so it is
+-- not a renaming: every atom is asked what the functor does to it, and
+-- there are exactly five answers.
+--
+--   1. THE TABLE.  A generator the model names goes to its image, and
+--      the image is a PROGRAM, inlined here and re-inferred where it
+--      lands (so each use gets its own principal type, exactly as a
+--      template's expansion does).
+--   2. A LITERAL of the mapped type goes to `lit ; c`.  The literal
+--      family is the one class of generator a table cannot name —
+--      there are infinitely many and none of them is a word — which is
+--      why `via` is part of the head and not a row of the table.
+--   3. A WORD WHOSE SCHEME NEVER MENTIONS A passes through untouched.
+--      The functor is the identity off A; this is the type-directed
+--      part, and it is what makes `with M` twice the identity the
+--      second time (there is no A left to map) and `with M` then
+--      `with N` compose.
+--   4. A WORD THAT MENTIONS A AND HAS A BODY is UNFOLDED: F(def) =
+--      F(body), cached once per def per model as `M@def`.  This is the
+--      piece of machinery beyond a table check, and it is why this is
+--      a stage: a def called under the scope is transported too, and
+--      so is everything it calls.  `fix` transports as structure —
+--      the normalizer already enters quotations — so a `Recursive` def
+--      comes along with no case of its own.
+--   5. A WORD THAT MENTIONS A WITH NEITHER, under a declared
+--      RETRACTION, is DERIVED BY CONJUGATION: one `r` per A input
+--      wire, one `c` per A output wire.  With no retraction it is
+--      REFUSED BY NAME, with the fix.
+objTransportT :: ElabCtx -> Instance -> Term -> Either String Term
+objTransportT ctx inst = go []
+  where
+    om    = head (inObjMap inst)
+    nm    = inName inst
+    datas = rcDatas (ecRefl ctx)
+    -- a `data` declaration's artifacts are GENERATORS, not defs: their
+    -- bodies are the compiler's own wiring and unfolding them would
+    -- transport the representation rather than the word.  They take an
+    -- image, a conjugation or a refusal like any other generator.
+    arts  = concatMap (map fst . fst . dataDeclArtifacts) datas
+    here  = baseHere nm
+
+    go bound (Prim n)
+      | n `elem` bound                          = Right (Prim n)
+      | Just img <- lookup n (inBindings inst)   = imageTerm here datas img
+      | isLitOfA n                               =
+          Right (Seq 0 (Prim n) (Prim (omVia om)))
+      | otherwise = case M.lookup n (ecEnv ctx) of
+          Nothing -> Right (Prim n)      -- a binder, an injection, a receipt
+          Just sc ->
+            let arr = runInfer0 (instantiate sc) in
+            if not (mentionsTy (omFrom om) arr) then Right (Prim n)
+            else if n `notElem` arts && M.member n (ecRun ctx)
+              then Right (Prim (slotDefName nm n))
+              else case omBack om of
+                Just r  -> conjugate n r arr
+                Nothing -> Left (noImage n arr)
+    go bound (Seq k a b)      = Seq k <$> go bound a <*> go bound b
+    go bound (Tensor ts)      = Tensor <$> mapM (go bound) ts
+    go bound (Quote t)        = Quote <$> go bound t
+    go bound (Alts cs r)      = Alts <$> mapM (go bound) cs <*> pure r
+    go bound (With ap ns b)   = With ap ns <$> go bound b
+    go bound (In ns b)        = In ns <$> go bound b
+    go bound (OpenAbs sl h b) =
+      OpenAbs sl h <$> go ([ x | Just x <- sl ] ++ bound) b
+
+    isLitOfA n = case omFrom om of
+      TInt   -> isIntLiteral n
+      TFloat -> isFloatLiteral n
+      TStr   -> isStrLiteral n
+      TSym   -> isSymLiteral n
+      _      -> False        -- a NOMINAL A has no literals at all
+
+    -- `r … r ; g ; c … c`: the functor's value on a generator it was
+    -- not given, read off the generator's own arrow.  Note what it is
+    -- NOT: `r ; c` is only an idempotent unless `c` is an iso, so a
+    -- conjugated word sees B only through `c`'s image.
+    conjugate n r (Arrow i o _) = do
+      ins  <- maybe (Left (openErr n)) Right (closedWires i)
+      outs <- maybe (Left (openErr n)) Right (closedWires o)
+      let pre  = stage [ if t == omFrom om then r        else "_" | t <- ins ]
+          post = stage [ if t == omFrom om then omVia om else "_" | t <- outs ]
+      Right (foldr1 (Seq 0) (pre ++ [Prim n] ++ post))
+
+    stage ws
+      | all (== "_") ws = []
+      | [w] <- ws       = [Prim w]
+      | otherwise       = [Tensor (map Prim ws)]
+
+    mapLine = show (omFrom om) ++ " " ++ mapsTo ++ " " ++ show (omTo om)
+
+    openErr n = here ++ "`" ++ n ++ "` cannot be derived by conjugation: "
+             ++ "its arrow is open, and there is no way to write one `"
+             ++ fromMaybe "r" (omBack om) ++ "` per " ++ show (omFrom om)
+             ++ " wire under a stack nobody has counted.  Give `" ++ n
+             ++ "` an image."
+
+    noImage n arr = "`" ++ n ++ "` has no image under model " ++ nm ++ ": "
+                 ++ nm ++ " maps " ++ mapLine ++ ", and `" ++ n ++ " : "
+                 ++ show (normalizeArrow arr) ++ "` mentions "
+                 ++ show (omFrom om) ++ " — so the functor has nothing to "
+                 ++ "send it to.  Add `" ++ n ++ " = …` to `model " ++ nm
+                 ++ "`, declare a retraction (`via " ++ omVia om
+                 ++ ", r` with `r : " ++ show (omTo om) ++ " ⇒ "
+                 ++ show (omFrom om)
+                 ++ "`) so it is derived by conjugation, or do not call it "
+                 ++ "here."
+
+-- THE UNFOLDINGS A TRANSPORTED TERM ASKED FOR, deepest first.
+--
+-- `M@def` is a generated WORD, minted once per def per model and
+-- installed beside the def whose scope asked for it — which is what
+-- makes the unfolding a CACHE rather than an inlining: `M@poly` is one
+-- word in `:defs`, with one type, however many times it is called.
+-- The closure terminates because a def is not in scope in its own body
+-- (5a½), so the call graph a body reaches is a DAG.
+objGenDefs :: ElabCtx -> Term -> Either String [(String, Term)]
+objGenDefs ctx t0 = snd <$> foldM want ([], []) (calls t0)
+  where
+    objs  = [ b | b <- ecBases ctx, not (null (inObjMap b)) ]
+    calls t = [ (b, f) | n <- nub (primsIn t), b <- objs
+                       , Just f <- [stripPrefix (inName b ++ "@") n] ]
+    want acc@(seen, made) (b, f)
+      | g `elem` seen || M.member g (ecEnv ctx) = Right acc
+      | otherwise = do
+          e <- maybe (Left (baseHere (inName b) ++ "`" ++ f
+                         ++ "` has a scheme but no body to unfold"))
+                     Right (M.lookup f (ecRun ctx))
+          body <- objTransportT ctx b (deBody e)
+          (seen', made') <- foldM want (g : seen, made) (calls body)
+          Right (seen', made' ++ [(g, body)])
+      where g = slotDefName (inName b) f
+
+-- ...and each of them checked and entered exactly as a def is: its
+-- own principal type, its own runtime entry, its own `:doc` line.
+objGenEntries :: Env -> RunDefs -> Map String String -> [(String, Term)]
+              -> Either String ( Env, RunDefs, Map String String
+                               , [(String, Scheme, Term)] )
+objGenEntries env0 run0 docs0 = foldM step (env0, run0, docs0, [])
+  where
+    step (e, r, d, acc) (gname, gterm) = do
+      (garr, gsubs) <- inferTermSubAt 0 e gterm
+      let gsc     = generalizeWith e gsubs garr
+          (mn, f) = break (== '@') gname
+      Right ( M.insert gname gsc e
+            , extendRunDefs r [(gname, arityOf gsc, openOf gsc, gterm)]
+            , M.insert gname ("the image of `" ++ drop 1 f
+                               ++ "` under model " ++ mn
+                               ++ " \8212 F(def) = F(body), unfolded once") d
+            , acc ++ [(gname, gsc, gterm)] )
 
 -- INFERRED ROUTING (stage 7b, 2026-09-17).
 --
@@ -7177,7 +7531,8 @@ declReprTy = TData "Decl" []
 baseInstanceName :: String -> Maybe String
 baseInstanceName header =
   case words (takeWhile (/= '=') (takeWhile (/= '#') header)) of
-    ["model", nm, "in", t] | t == baseTheoryName -> Just nm
+    ("model" : nm : "in" : t : _)
+      | takeWhile (/= '(') t == baseTheoryName -> Just nm
     _ -> Nothing
 
 -- The ambient presentation.  Reserved: a user may not declare it,
@@ -7188,30 +7543,75 @@ baseTheoryName = "Base"
 
 -- `model Nm in Base = p = q, …` plus any indented `p = q` lines —
 -- BOTH forms, exactly as every other model body has both.
-parseBaseInstance :: String -> [String]
-                  -> Either String (String, [(String, String)])
-parseBaseInstance header body = do
-  nm <- maybe (Left $ "Malformed model head (want `model Name in Base "
-                   ++ "= p = q, …`): " ++ dropWhile isSpace header)
-              Right (baseInstanceName header)
-  let inline = drop 1 (dropWhile (/= '=') (uncomment header))
-      pieces = [ r | r <- splitOnChar ',' inline ++ map uncomment body
+parseBaseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
+                  -> [String] -> Either String Instance
+parseBaseInstance aliases dataSigs theories header body = do
+  nm0 <- maybe (Left $ "Malformed model head (want `model Name in Base "
+                    ++ "= p = q, …`): " ++ dropWhile isSpace header)
+               Right (baseInstanceName header)
+  (nm, ps, _, _, om) <- parseModelHead aliases dataSigs theories header
+  case ps of
+    (_ : _) -> Left $ baseHere nm0 ++ "a model of `Base` takes no model "
+                   ++ "PARAMETER: `Base`'s generators are every word in "
+                   ++ "scope, so there is no theory for an argument to "
+                   ++ "model"
+    []      -> Right ()
+  let inline = [ r | r <- splitTopCommas (drop 1 (dropWhile (/= '=')
+                                                  (uncomment header)))
                    , not (all isSpace r) ]
-  case pieces of
-    [] -> Left $ baseHere nm ++ "no bindings: write `model " ++ nm
+      pieces = inline ++ [ r | r <- map uncomment body, not (all isSpace r) ]
+  -- A RETRACTION MAKES THE EMPTY TABLE TOTAL (stage 7c): with `via c, r`
+  -- every generator the table does not name is DERIVED by conjugation,
+  -- so a model with no bindings at all is a complete one and says
+  -- something.  Without a retraction there is nothing to derive from,
+  -- and a table that names no generator reinterprets nothing.
+  case (pieces, [ () | o <- om, isJust (omBack o) ]) of
+    ([], []) -> Left $ baseHere nm ++ "no bindings: write `model " ++ nm
               ++ " in Base = p = q`, or one `p = q` per indented line (a "
               ++ "partial model names only the generators it "
               ++ "reinterprets — but it must name one)"
-    _  -> Right ()
-  rs <- mapM (parseOneBinding nm) pieces
+    _        -> Right ()
+  -- THE TWO SHAPES OF AN IMAGE, and the reason there are two.  A model
+  -- of `Base` with the identity object map also declares a `Code ⇒ Code`
+  -- WORD (`[Opt]`, `lift2 [Opt]`), and Code carries names: so its
+  -- bindings are one WORD to one word.  An object-mapped model declares
+  -- no such word — its action on a literal is not a rename and its
+  -- action on a def is an unfolding, neither of which a rewrite table
+  -- can hold — so its images are ordinary PROGRAMS, inlined at each use
+  -- and blessed once at the declaration.
+  rs <- mapM (if null om then parseOneBinding nm else parseOneImage nm) pieces
   case [ p | (p, _) <- rs, length [ () | (p', _) <- rs, p' == p ] > 1 ] of
     (p : _) -> Left $ baseHere nm ++ "two bindings give `" ++ p
                    ++ "` an image, and a model sends each generator to "
                    ++ "one thing"
     []      -> Right ()
-  pure (nm, rs)
+  pure (Instance nm baseTheoryName [] rs [] om [])
   where
     uncomment = takeWhile (/= '#')
+
+-- An object-mapped model's image is a PROGRAM; only the generator on
+-- the left has to be one word, because that is the name being sent.
+parseOneImage :: String -> String -> Either String (String, String)
+parseOneImage nm piece
+  | (_, '=' : r) <- break (== '=') piece, secondBinding r =
+      Left (baseHere nm ++ separatorErr "bindings")
+parseOneImage nm piece =
+  case break (== '=') piece of
+    (l, '=' : r)
+      | [p] <- words l, not (all isSpace r) -> Right (p, r)
+      | [_] <- words l -> Left $ baseHere nm ++ "`" ++ trimSpace piece
+                              ++ "` has no image: a binding reads `g = <program>`"
+      | otherwise -> Left $ baseHere nm ++ "`" ++ trimSpace piece
+                         ++ "` — a binding names ONE generator on the left "
+                         ++ "(the image on the right is a program)"
+    _ -> Left $ baseHere nm ++ "`" ++ trimSpace piece
+             ++ "` is missing `=` (a binding reads `p = q`)"
+
+-- The one-word table a model of `Base` with the identity object map
+-- keeps: it is what the generated `Code ⇒ Code` word rewrites with, and
+-- what `with Opt` renames through.
+baseWordTable :: Instance -> [(String, String)]
+baseWordTable i = [ (p, w) | (p, q) <- inBindings i, w <- take 1 (words q) ]
 
 baseHere :: String -> String
 baseHere nm = "model " ++ nm ++ " in Base: "
@@ -7287,25 +7687,83 @@ baseInstDefSrc rs =
 -- `subsumes` does), and require q's scheme to cover it.  Grades ride
 -- along by the semilattice order — a pure `q` under an io `p` passes
 -- because ∅ is the bottom — so no separate effect rule is needed.
-checkBaseInstance :: Env -> TemplateTable -> [String] -> [(String, [String])]
-                  -> (String, [(String, String)]) -> Either String ()
-checkBaseInstance env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
+checkBaseInstance :: Env -> [DataDecl] -> TemplateTable -> [String]
+                  -> [(String, [String])] -> Instance -> Either String ()
+checkBaseInstance env datas tmpls thNames slotsOf inst = do
+    mapM_ viaWord (inObjMap inst)
+    mapM_ one (inBindings inst)
   where
+    setNm = inName inst
+    om0   = listToMaybe (inObjMap inst)
+    -- THE IMAGE OF THE LITERAL FAMILY, and the retraction beside it.
+    -- `c : A ⇒ B` is checked as a written expectation, like any image;
+    -- `r : B ⇒ A` the other way.  They are checked HERE and not at a
+    -- use, because there is no use — a literal has no name to refuse.
+    viaWord om = do
+      scC <- wordScheme (omVia om)
+      let wantC = arrPure (one1 (omFrom om)) (one1 (omTo om))
+      case subsumes scC wantC of
+        Right () -> Right ()
+        Left e -> Left $ here ++ "`via " ++ omVia om ++ "` is refused: "
+              ++ omVia om ++ " is "
+              ++ show (normalizeArrow (runInfer0 (instantiate scC)))
+              ++ " but the image of the literal family at "
+              ++ show (omFrom om) ++ " " ++ mapsTo ++ " " ++ show (omTo om)
+              ++ " is " ++ show wantC ++ " (" ++ e ++ ")"
+      case omBack om of
+        Nothing -> Right ()
+        Just r -> do
+          scR <- wordScheme r
+          let wantR = arrPure (one1 (omTo om)) (one1 (omFrom om))
+          case subsumes scR wantR of
+            Right () -> Right ()
+            Left e -> Left $ here ++ "`via " ++ omVia om ++ ", " ++ r
+                  ++ "` is refused: " ++ r ++ " is "
+                  ++ show (normalizeArrow (runInfer0 (instantiate scR)))
+                  ++ " but a RETRACTION of " ++ omVia om ++ " is "
+                  ++ show wantR ++ " (" ++ e ++ ")"
+    one1 t = SCons t SEnd
+
+    -- ONE BLESSING, TWO SHAPES.  With the identity object map the image
+    -- is a word and its own scheme is compared; with an object map the
+    -- image is a program, inferred here, and the generator's arrow is
+    -- compared AFTER the substitution — `+ : Int Int ⇒ Int` under
+    -- `Int ↦ Mod7` is `Mod7 Mod7 ⇒ Mod7`, and nothing about the check
+    -- changes but the arrow it is made against.
     one (p, q) = do
       scP <- wordScheme p
-      scQ <- wordScheme q
-      let arrP = runInfer0 (instantiate scP)
-          arrQ = runInfer0 (instantiate scQ)
+      let arrP0 = runInfer0 (instantiate scP)
+          arrP  = maybe arrP0 (`objArrow` arrP0) om0
+      (scQ, arrQ) <- imageScheme q
       case subsumes scQ arrP of
         Right () -> Right ()
         Left e   ->
-          Left $ here ++ "`" ++ p ++ " = " ++ q ++ "` is refused: " ++ p
+          Left $ here ++ "`" ++ p ++ " = " ++ trimSpace q
+              ++ "` is refused: " ++ p
               ++ " is used at " ++ show (normalizeArrow arrP) ++ " but "
-              ++ q ++ " is " ++ show (normalizeArrow arrQ) ++ " (" ++ e
-              ++ ").  A binding may only GENERALIZE — the image's scheme "
-              ++ "must be at least as general as the generator's type, or "
-              ++ "a program that typed before the reinterpretation would "
-              ++ "not type after it."
+              ++ trimSpace q ++ " is " ++ show (normalizeArrow arrQ)
+              ++ " (" ++ e ++ ").  A binding may only GENERALIZE — the "
+              ++ "image's scheme must be at least as general as the "
+              ++ "generator's type, or a program that typed before the "
+              ++ "reinterpretation would not type after it."
+
+    -- the image, as something with a scheme: a WORD's own, or a
+    -- program's, inferred once here and re-inferred at each use (which
+    -- is what gives every use its own principal type, exactly as a
+    -- template's expansion does)
+    imageScheme q
+      | Nothing <- om0, [w] <- words q = do
+          sc <- wordScheme w
+          Right (sc, runInfer0 (instantiate sc))
+      | otherwise = do
+          t <- imageTerm here datas q
+          (arr, subs) <- inferTermInScope t
+          Right (generalizeWith env subs arr, arr)
+
+    inferTermInScope t = do
+      (arr, subs) <- inferTermSubAt 0 env t
+      Right (arr, subs)
+
     here = baseHere setNm
     wordScheme n
       | '@' `elem` n =
@@ -7330,6 +7788,93 @@ checkBaseInstance env tmpls thNames slotsOf (setNm, rs) = mapM_ one rs
                      ++ "binding names two words, and both must already "
                      ++ "be in scope)")
                 Right (M.lookup n env)
+
+-- WHAT AN OBJECT-MAPPED MODEL SAYS ABOUT ITSELF (stage 7c).
+--
+-- The head, the table, and a VERDICT on each law the declaration
+-- states.  Two laws can be stated here and neither has a theory behind
+-- it, because `Base` has no samples: the retraction (`c ; r = id_A`)
+-- and, for an image given to a word that HAS a body, `image =
+-- F(body)`.  `sameCode` decides both where it reaches — a free-category
+-- proof, for every input — and where it does not, the binding is
+-- accepted and the model is recorded as a DIALECT.  That is the same
+-- line `examples/optimizer.braid` §2 draws between an optimizer and a
+-- reinterpretation, and the only honest one available: refusing would
+-- rule out every image whose truth is arithmetic, which is all of them.
+objModelDoc :: ElabCtx -> Instance -> Either String (String, String)
+objModelDoc ctx inst = do
+    laws <- mapM imageLaw (inBindings inst)
+    pure (nm, headLine ++ retr ++ concat laws ++ coda)
+  where
+    om    = head (inObjMap inst)
+    nm    = inName inst
+    env   = ecEnv ctx
+    run   = ecRun ctx
+    datas = rcDatas (ecRefl ctx)
+    arts  = concatMap (map fst . fst . dataDeclArtifacts) datas
+    headLine = "model " ++ nm ++ " in Base(" ++ showObjMap om ++ ") — "
+            ++ (case inBindings inst of
+                  [] -> "no bindings: every generator is derived"
+                  bs -> intercalate ", " [ p ++ " = " ++ trimSpace q
+                                         | (p, q) <- bs ])
+            ++ ".  "
+    decides a b = case sameProgram env run run a b of
+                    Right True -> True
+                    _          -> False
+    retr = case omBack om of
+      Nothing -> "No retraction, so every generator that mentions "
+              ++ show (omFrom om) ++ " needs an image of its own.  "
+      Just r
+        | decides (Seq 0 (Prim (omVia om)) (Prim r)) (Prim "id") ->
+            "The retraction law `" ++ omVia om ++ " ; " ++ r
+            ++ " = id` is PROVED (`sameCode`), so every generator the "
+            ++ "table does not name is derived by conjugation.  "
+        | otherwise ->
+            "The retraction law `" ++ omVia om ++ " ; " ++ r
+            ++ " = id` is UNCHECKED — `sameCode` does not decide it — "
+            ++ "so " ++ nm ++ " is a DIALECT: the conjugated words are what "
+            ++ "the declaration says they are, on the author’s word.  "
+    imageLaw (g, q)
+      | g `elem` arts = Right ""
+      | otherwise = case M.lookup g run of
+          Nothing -> Right ""     -- a prim: no body, so no law to state
+          Just e  -> do
+            img <- imageTerm (baseHere nm) datas q
+            Right $ case objTransportT ctx inst (deBody e) of
+              Right fb | decides img fb ->
+                "The image of `" ++ g ++ "` is PROVED equal to F(its body) "
+                ++ "(`sameCode`).  "
+              _ ->
+                "The image of `" ++ g ++ "` is a DIALECT: `sameCode` does "
+                ++ "not decide `image = F(its body)`, so the binding stands "
+                ++ "unchecked.  "
+    coda = "An object-mapped model declares no `Code ⇒ Code` word: its "
+        ++ "action on a literal is not a rename and its action on a def is "
+        ++ "an unfolding, and a rewrite table holds neither."
+
+-- An image PROGRAM, parsed.  It is base code: the vocabulary it is
+-- written in is the one the model is reinterpreting, not the model's
+-- own, so it applies nothing and declares nothing.
+imageTerm :: String -> [DataDecl] -> String -> Either String Term
+imageTerm here datas q = do
+  (t, _) <- first (\e -> here ++ e) (parseProgramFrom (const 0) datas q)
+  scan t
+  pure t
+  where
+    scan (With _ ns _) = Left $ here ++ "`with " ++ unwords ns
+                             ++ "` inside an image: an image is base code, "
+                             ++ "written in the vocabulary the model "
+                             ++ "reinterprets.  Name a def that carries the "
+                             ++ "clause instead."
+    scan (In ns _)     = Left $ here ++ "`in " ++ unwords ns
+                             ++ "` inside an image: an image is a program, "
+                             ++ "and only a def says what it is a morphism of"
+    scan (Seq _ a b)   = scan a >> scan b
+    scan (Tensor ts)   = mapM_ scan ts
+    scan (Quote t)     = scan t
+    scan (Alts cs _)   = mapM_ scan cs
+    scan (OpenAbs _ _ b) = scan b
+    scan _             = Right ()
 
 -- `functor Name = word` — a declaration line, no block.
 parseFunctorLine :: String -> Either String (String, String)
@@ -8392,7 +8937,7 @@ checkModuleRaw base src = do
   -- is an ordinary quote and `lift2 [Opt]` lifts it at runtime); the
   -- scope itself is the renaming every `with Inst` performs, receipt
   -- included.
-  ownBases0 <- sequence [ parseBaseInstance h b
+  ownBases0 <- sequence [ parseBaseInstance allAliases sigs theories h b
                         | (h, b, _) <- declLines, take 5 h == "model"
                         , isJust (baseInstanceName h) ]
   -- EVERY MEMBER OF A FAMILY THE MODULE ASKS FOR.  `with Fwd(Floats)`
@@ -8428,11 +8973,11 @@ checkModuleRaw base src = do
   let trans = ownTrans ++ mbTrans base
       funcs = ownFuncs ++ mbFuncs base
       -- one namespace for every name a `with` header may carry
-      useNames = map fst funcs ++ map fst ownBases
+      useNames = map fst funcs ++ map inName ownBases
                  ++ [ inName i | i <- insts ] ++ map tfName ownTransformations
   case [ n | (n, i) <- zip useNames [0 :: Int ..]
            , n `elem` take i useNames ] of
-    (n : _) | n `elem` map fst ownBases || n `elem` map inName insts ->
+    (n : _) | n `elem` map inName ownBases || n `elem` map inName insts ->
       Left $ "Duplicate model declaration: " ++ n ++ " (a functor and a "
           ++ "model share one namespace — each declares a name a `with` "
           ++ "clause may carry)"
@@ -8479,11 +9024,16 @@ checkModuleRaw base src = do
       -- machinery wrote: `Log : Str \8658 Log` IS the entry to `Log`'s
       -- category, and a second def of that name would be a duplicate.
       resDefs = concatMap resModelDefs ownRes
-      baseDefs = [ ( nm, noHdr, baseInstDefSrc rs
-                   , Just ("model " ++ nm ++ " in Base — "
+      -- ...and ONLY a model with the identity object map gets one.  An
+      -- object-mapped model's action on a literal is not a rename and
+      -- its action on a def is an unfolding, so there is no rewrite
+      -- table for `rewrite` to hold: it is an elaboration-time functor
+      -- and says so (`:doc`).
+      baseDefs = [ ( inName i, noHdr, baseInstDefSrc (baseWordTable i)
+                   , Just ("model " ++ inName i ++ " in Base — "
                             ++ intercalate ", " [ p ++ " = " ++ q
-                                                | (p, q) <- rs ]) )
-                 | (nm, rs) <- ownBases0 ]
+                                                | (p, q) <- baseWordTable i ]) )
+                 | i <- ownBases0, null (inObjMap i) ]
       resNames = [ dName d | d <- allDatas, dResource d ]
   -- model bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
@@ -8506,7 +9056,7 @@ checkModuleRaw base src = do
   -- Every binding is blessed ONCE, here, over the finished environment
   -- — so a model of `Base` may name a word declared anywhere in the
   -- module, exactly as a model slot may.
-  mapM_ (checkBaseInstance env' tmpls (map thName theories)
+  mapM_ (checkBaseInstance env' allDatas tmpls (map thName theories)
            [ (thName th, map fst (thSlots th)) | th <- theories ])
         ownBases0
   mapM_ (checkLawType env') [ n | (n, _, _, _) <- instDefs, isJust (lawParts n) ]
@@ -8516,20 +9066,35 @@ checkModuleRaw base src = do
   -- verdicts are kept on the module, so nothing decides them twice
   transformationInfos <- sequence [ checkTransformation env' runFinal theories insts mo sqs
                          | (mo, (_, sqs)) <- zip ownTransformations transformationParts ]
-  mainPart <-
+  let topCtx = ElabCtx env' runFinal slotTable funcs tmpls
+                        thNames trans kwords ownBases []
+                        False Nothing tblTypes resNames
+                        (RCtx M.empty allDatas allAliases theories)
+  -- WHAT AN OBJECT-MAPPED MODEL SAYS ABOUT ITSELF (stage 7c): the head,
+  -- the table, and the verdict on each law the declaration states — the
+  -- retraction, and `image = F(body)` wherever an image was given to a
+  -- word that HAS a body.  `sameCode` decides them where it reaches;
+  -- where it does not the model stands as a DIALECT and the doc says
+  -- so, which is the optimizer/dialect line this file already draws.
+  objDocs <- mapM (objModelDoc topCtx)
+                  [ i | i <- ownBases0, not (null (inObjMap i)) ]
+  (mainPart, envM, defsM, docsM) <-
     if all isSpace mainSrc
-      then pure Nothing
+      then pure (Nothing, env', reverse defsRev, docs)
       else do
         (term0, mainStart) <- parseProgramFrom mainLine allDatas mainSrc
-        term1 <- elabHeaders (ElabCtx env' runFinal slotTable funcs tmpls
-                                      thNames trans kwords ownBases []
-                                      False Nothing tblTypes resNames
-                                      (RCtx M.empty allDatas allAliases theories))
-                             term0
-        arr <- inferTermInAt mainStart env' term1
-        pure (Just (term1, arr))
+        term1 <- elabHeaders topCtx term0
+        gens  <- objGenDefs topCtx term1
+        -- the RunDefs `objGenEntries` threads is the SCOPE each
+        -- unfolding is checked in and nothing else: the module's own
+        -- runtime scope is rebuilt from its defs (`buildRunDefs`), and
+        -- the entries are on that list.
+        (eG, _, dG, entries) <- objGenEntries env' runFinal docs gens
+        arr <- inferTermInAt mainStart eG term1
+        pure (Just (term1, arr), eG, reverse defsRev ++ entries, dG)
   -- own lists are built latest-first, which is exactly the match order
-  pure (Module env' (reverse defsRev) ownAliases ownDatas docs mainPart
+  pure (Module envM defsM ownAliases ownDatas
+                (foldr (uncurry M.insert) docsM objDocs) mainPart
                 theories insts ownFams funcs tmpls ownTrans kwords ownBases
                 transformationInfos (reverse routedWhy))
   where
@@ -8710,12 +9275,11 @@ checkModuleRaw base src = do
           -- "is in the image of F".  Membership is carried by the TYPE
           -- (checked below) and by the K-word table, and nothing else:
           -- only a `with` mints, and every `with` does.
-          term0' <- elabHeaders
-                      (ElabCtx env1 run slotTable funcs tmpls
-                               thNames trans kws bases self
-                               ('@' `elem` name || name `elem` tblGen)
-                               (Just name) tblTypes resources refl)
-                      termH
+          let ectx = ElabCtx env1 run slotTable funcs tmpls
+                              thNames trans kws bases self
+                              ('@' `elem` name || name `elem` tblGen)
+                              (Just name) tblTypes resources refl
+          term0' <- elabHeaders ectx termH
           -- `in M` resolves M's slot names, and does it AFTER the walk
           -- above, which is the walk that keeps `@` out of source.
           let term = case asc of
@@ -8731,7 +9295,15 @@ checkModuleRaw base src = do
           if "recurse" `elem` mentions && not (M.member "recurse" env1)
             then Left (selfReferenceError name True)
             else Right ()
-          (arr, dsubs) <- inferTermSubAt bodyStart env1 term
+          -- THE UNFOLDINGS AN OBJECT-MAPPED SCOPE ASKED FOR (stage
+          -- 7c), installed BESIDE this def and before it: `M@poly` is
+          -- an ordinary word from here on, with its own type and its
+          -- own line in `:defs`, and every later scope that asks for
+          -- the same unfolding finds it already made.
+          gens <- objGenDefs ectx term
+          (envG, runG, docsG, gentries) <- objGenEntries env1 run docs gens
+          let accG = reverse gentries ++ acc
+          (arr, dsubs) <- inferTermSubAt bodyStart envG term
           -- `in M` classifies BY SHAPE.  A def that builds one carrier
           -- out of nothing is a morphism of M and joins the K-word
           -- table; one that does not is a base word written in M's
@@ -8763,12 +9335,12 @@ checkModuleRaw base src = do
                   , isKWordShape m (normalizeArrow arr) ->
                       (name, tpName m) : kws'
                 _ -> kws'
-          let sc = generalizeWith env1 dsubs arr
-          pure ( M.insert name sc env
-               , extendRunDefs run [(name, arityOf sc, openOf sc, term)]
+          let sc = generalizeWith envG dsubs arr
+          pure ( M.insert name sc envG
+               , extendRunDefs runG [(name, arityOf sc, openOf sc, term)]
                , filter (/= name) shadow
-               , (name, sc, term) : acc
-               , maybe docs (\d -> M.insert name d docs) doc
+               , (name, sc, term) : accG
+               , maybe docsG (\d -> M.insert name d docsG) doc
                , tmpls, kws2
                , case routing of
                    Just (a, run') ->
