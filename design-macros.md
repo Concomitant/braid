@@ -4710,3 +4710,192 @@ before appending them in carrier order, which also fixed a label and
 its own carrier printing the name twice (`=R R>`).
 
 Full note: `design-7b.md`.
+
+---
+
+## Amendment (2026-09-17): the object map, and one model head
+
+Stage 7c. A model has always been *a presentation interpreted in a
+category, given by an object map and an image for each generator* — and
+until now Braid wrote only the images. The object map was there in
+every kind of model, unwritten: the identity for a model of `Base`, the
+theory's parameters instantiated at the arguments for a plain model,
+the identity on base types for a Doctrine model, a substitution driven
+by the parameter for a family. `inObjMap` had been a field of the
+head's record since 2026-09-15, empty, with a comment saying the clause
+could arrive without reshaping the head. It has arrived, and it did
+not.
+
+```braid
+model Mod in Base(Int ↦ Mod7 via reduce) = + = addM, * = mulM, - = subM
+```
+
+**The map is a SUBSTITUTION.** `A := B`, applied structurally — under
+`List`, under a data type's arguments, through an `Fn` arrow, along a
+stack. Not a type-level function, and that is the whole argument for
+this shape: substitution commutes with unification, so a transported
+program has a principal type for exactly the reason the original did,
+and there is nothing to solve. The same argument that made a family's
+carrier a substitution (2026-09-15) makes this one one. The source is
+therefore **nominal** and of arity zero: `List(a) ↦ …` at an unknown
+`a` is a function, and is refused.
+
+**The glyph is `↦`, and it is not `⇒`.** `⇒` is the arrow of every
+written TYPE in Braid — a slot's signature, an `Fn`'s insides, a
+transformation's hom-set. An object map is not a type; it is a function
+on objects, and `↦` is the mathematician's spelling for exactly that.
+The lexer already admitted it as an ordinary identity character and
+nothing else in the language claims it, so one spelling per thing cost
+nothing here.
+
+**`via c` is the image of the LITERAL FAMILY.** This is the piece that
+makes an object map a different construct from a bigger table rather
+than a convenience. The literals of a base type are generators —
+infinitely many of them, and not one of them is a word — so no table
+can name them and the head must. Under `with Mod`, `3` is `3 ; reduce`.
+The consequence is visible in `examples/modular.braid` §7: under a
+floor-halving map, `p(x) = x² + 3x + 2` at 4 computes 16 + 4 + 1 and
+not 30, because `3` is `⌊3/2⌋` and `2` is `⌊2/2⌋`. That is what a
+functor on a presentation does, and a reader who expected a change of
+representation learns the difference in one line.
+
+For a **nominal** `A` there are no literals at all, and the honest
+answer is not to make `via` optional. `c` is then the map on *values*,
+which is what conjugation coerces with, and it is still what makes the
+head a map rather than a claim about types with nothing behind it on
+values. The constructor of a nominal `A` is a generator like any other:
+it takes an image, or a conjugation, or a refusal.
+
+**ANY WORD may appear in the table**, because `Base`'s generators are
+every word in scope; each image is blessed once by the same `subsumes`,
+at the generator's own arrow **with the substitution applied**. Images
+here are PROGRAMS rather than single words, and the reason is the old
+one read the other way: a model of `Base` with the identity map also
+declares a `Code ⇒ Code` word and Code carries names, so its bindings
+must be names. An object-mapped model declares **no such word** — its
+action on a literal is not a rename and its action on a def is an
+unfolding, and a rewrite table holds neither — so the constraint lifts
+and the images are ordinary programs, inlined at each use and
+re-inferred where they land.
+
+**THE REFUSAL IS TYPE-DIRECTED**, and this is the part that makes the
+construct usable at all. A word whose scheme does not mention `A`
+passes through untouched: the functor is the identity off `A`, so
+wiring goes to wiring with nothing to declare, and `print`, `eq?`,
+`map` and every other polymorphic word are simply not the model's
+business. A word that *does* mention `A` and has no image and no body
+is refused BY NAME, where the scope is written, with the three fixes.
+Two consequences fall out rather than being arranged: `with M` twice is
+the identity the second time (after one pass no type mentions `A`), and
+`with M` then `with N` for `N : B ↦ C` composes.
+
+**TRANSITIVE UNFOLDING is the machinery beyond a table check**, and it
+is why this is a stage rather than an afternoon. A def called under the
+scope is not a generator with an image; it is a def, so the functor
+enters it — `F(def) = F(body)` — and so on through everything it calls.
+Each is minted once per def per model as a generated word `M@def`: a
+CACHE, one word with one type however many times it is called, not an
+inlining. `fix` transports as structure, because the walk enters
+quotations and a functor of the doctrine preserves the fixpoint, so a
+def written under `with Recursive` comes along with no case of its own.
+The closure terminates because a def is not in scope in its own body
+(5a½), which makes the call graph a DAG — the same invariant that pays
+for `sameCode` and for inferred routing pays here.
+
+**Retraction and conjugation.** `via c, r` declares `r : B ⇒ A` with
+`c ; r = id_A`, and every generator the table does not name is then
+DERIVED: one `r` per `A` input wire, one `c` per `A` output wire, read
+off the generator's own arrow. A retraction makes the **empty table
+total**, so `model Milli in Base(Meters ↦ Mm via toMm, toM) =` with no
+bindings at all is a complete model and says something. What it does
+not say: `r ; c` is only an idempotent unless `c` is an iso, so a
+conjugated word sees `B` only through `c`'s image. The example prints a
+program written over metres running over millimetres, and nothing in
+between was written twice.
+
+**Two laws, and the dialect line.** A declaration like this states laws
+`Base` has no samples to run: the retraction, and `image = F(body)` for
+an image given to a word that has a body. `sameCode` decides both where
+it reaches — a proof in the free category, for every input — and where
+it does not, the binding stands and the model is recorded as a
+**DIALECT** in `:doc M`. This is not a new policy: it is the line
+`examples/optimizer.braid` §2 has drawn since 2026-09-13 between an
+optimizer (images provably equal to their generators) and a
+reinterpretation. Refusing instead would rule out every image whose
+truth is arithmetic, which is all of them — `reduce(x + y) = reduce x ⊕
+reduce y` is true and `sameCode` treats `+` and `mod` as uninterpreted.
+The verdict is recorded rather than assumed, which is the whole
+difference between a claim you can audit and one you must trust.
+
+**AN OBJECT MAP IS NOT A HOMOMORPHISM**, and the example says so twice
+in one file. `model Mod in Base(Int ↦ Mod7 via reduce)` makes reduction
+a functor on the *ambient presentation*: it types, it runs, and it says
+nothing about rings. That `reduce` is a **ring** homomorphism is a
+further and stronger claim, and `transformation Reduce in Ints ⇒ Mods`
+is where it is made and audited square by square. The contrast is
+floor-halving: a perfectly good object map — every generator it names
+has an image at the substituted type — whose transformation is REFUSED
+at the `add` square, because ⌊(7+7)/2⌋ = 7 and ⌊7/2⌋ + ⌊7/2⌋ = 6. Two
+declarations, two questions, and the language keeps them apart.
+
+### One model head
+
+The second half of the stage is a statement rather than a feature, and
+the parser was made to match it:
+
+```text
+model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ] = BINDINGS
+```
+
+One required clause and three optional ones, read by one function
+(`parseModelHead`) into one record (`Instance`). A model of `Base` is
+now an `Instance` like every other — its theory is the ambient
+presentation, its arguments are none — which retired the separate
+tuple `BaseInstance` had been since stage 5b.
+
+The two parenthesized clauses after the theory are told apart by
+**CONTENT, not position**: a group containing `↦` is the object map.
+There is nothing to disambiguate, because a type expression never
+contains `↦`, and a reader never has to remember an order. That is the
+same move the head made for the parameter clause in 2026-09-15 — the
+clause is recognized by what it says, and every clause is optional.
+
+The five kinds of model are then five **settings** of one declaration,
+and `CONSTRUCTS.md` says so in a table: identity map + partial table
+(`Base`), theory parameters at the arguments (plain), identity on base
+types with `embed` total (Doctrine), substitution driven by the
+parameter (family), substitution written down (object-mapped). A
+`resource` is a sixth *reading* of the Doctrine row, not a sixth row.
+
+**What is refused, and why.** An object map on a model of a theory:
+such a model already maps objects, by instantiating its theory's
+parameters at its own arguments, and a second map at a mapped type
+would be a functor into a category whose objects nobody has named. It
+may well mean something — a model of `Ring(Mod7)` *is* the image of a
+model of `Ring(Int)` under an object map, and saying so in the head
+rather than by writing two models is exactly the kind of compression
+this stage is about — but nothing has asked for it, and a clause that
+is accepted before anyone knows what it means is worse than one that is
+refused by name. Recorded, refused, and the question stays open. A
+model parameter on a model of `Base` is refused for a flatter reason:
+`Base` has no theory for an argument to model.
+
+### What stays open
+
+One thing, and it is stage 8's: **`functor` is not folded into
+`model`**. A `functor F = word` is a rewriting of the ambient
+presentation in exactly the sense a model of `Base` is — the difference
+is that its table is *computed*, by a `Code ⇒ Code` word, rather than
+written. Folded in it would read
+
+```braid
+model Traced in Base = <a Code ⇒ Code image>
+```
+
+with a program where the table goes, and `:doc` saying which of the two
+a given model is. The reason not to do it here is that a computed image
+cannot be blessed by `subsumes` at a declaration — there is nothing to
+bless until the word runs — so the fold would put two different
+checking stories under one keyword, and deciding how that reads is a
+stage's worth of work rather than a paragraph's. Everything else this
+amendment names is shipped.

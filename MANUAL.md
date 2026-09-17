@@ -758,6 +758,7 @@ the body is exactly as written.
 |---|---|---|---|
 | `with Inst` | a model of theory T | T's vocabulary (slot names) | renamed to Inst's words — *into* the base |
 | `with Opt` | a model of `Base` | the base | its generators renamed to their images — base to base |
+| `with Mod` | a model of `Base` **with an object map** | the base | reinterpreted at another type: literals through `via`, generators to their images, defs unfolded — base to base, but the arrow changes (§8) |
 | `with R` | a resource | the base | routed: `R ⊗ –`, wires written *out* of the base. **Transport into the model `resource R` generates, in fused form**, and the header is optional — routing is inferred (below) |
 | `with F` | a functor | the base | rewritten by F's `Code ⇒ Code` word, *out* of the base |
 | `with M` | a model whose theory has a hom-object | the base | **transported**: every stage is embedded, `;` is the composition, *out* of the base |
@@ -1413,9 +1414,37 @@ exact). Writing one is refused by name:
 
 One rule for models, transformations and theories alike. Theory parameters are kinded: a bare
 name is one wire, `...` a stack, and `k(..., ...)` a type **constructor**
-whose arguments are kinded one by one (below). A **model** head may carry a parameter of its own — `model
-Fwd(Smooth(a, _)) in Smooth(Dual(a), a)` — and is then a *family*,
-applied by `with Fwd(Floats)` (below).
+whose arguments are kinded one by one (below).
+
+**THE MODEL HEAD IS ONE GRAMMAR** *(2026-09-17)*, and every kind of
+model is a setting of it:
+
+```text
+model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ] = BINDINGS
+```
+
+Three optional clauses around one required one. `( PARAM )` names the
+theory an argument model must model, and makes this head a **family**
+(`model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)`, applied by `with
+Fwd(Floats)`). `( ARGS )` are the theory's arguments. `( A ↦ B via c )`
+is the **object map** (below). The two parenthesized clauses after the
+theory are told apart by **content and not by position** — a group
+containing `↦` is the object map, and there is nothing to disambiguate
+because a type expression never contains `↦`.
+
+| the head | the model it declares |
+|---|---|
+| `model IntSum in Monoid(Int)` | a plain model: object map = the theory's parameters at this model's arguments |
+| `model Circuits in Arrow(Circuit)` | a Doctrine model: identity on base types, with `embed` total |
+| `model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)` | a family: object map = a substitution driven by the parameter |
+| `model Opt in Base` | a model of the ambient presentation: identity object map, partial table |
+| `model Mod in Base(Int ↦ Mod7 via reduce)` | ...the same, with a **written** object map |
+
+They are one record (`Instance`) and one parser (`parseModelHead`).
+Combinations that mean nothing are refused by name — an object map on a
+model of a theory is *an object map is a `Base` model's clause*, because
+such a model already maps objects; a model parameter on a model of
+`Base` is refused because `Base` has no theory for an argument to model.
 
 ```braid
 theory Monoid(a) =
@@ -1954,6 +1983,165 @@ by hand, which is exactly why `lift2`'s fallback exists.
 words, a model of `Base`, the two bindings `sameCode` can prove and
 the two it honestly cannot, the receipt on the arrow, the laws as
 theories, and image membership.
+
+### A model with an OBJECT MAP — `model Mod in Base(Int ↦ Mod7 via reduce)` *(2026-09-17)*
+
+A model is **a presentation interpreted in a category, given by an
+object map and an image for each generator**, and everything above
+carried the *identity* object map: `with Opt` renames words and the
+wires keep their types. The head's third clause writes the other half.
+
+```braid
+data Mod7 = Int
+def reduce = (x -> x 7 ; mod ; Mod7)
+
+model Mod in Base(Int ↦ Mod7 via reduce) =
+    + = addM
+    * = mulM
+    - = subM
+```
+
+**The map.** `Int ↦ Mod7` is the **substitution** `Int := Mod7`,
+applied structurally — under `List`, under a data type's arguments,
+through an `Fn` arrow, along a stack. It is a substitution and *not* a
+type-level function, which is the whole reason it is principal:
+substitution commutes with unification, so a transported program has a
+principal type for the same reason the original did. `↦` is the glyph,
+and it is deliberately not `⇒`: `⇒` is the arrow of every **written
+type**, and an object map is not a type but a function on objects.
+
+The source `A` is a **nominal** name — a base type, or a `data`/`type`
+name of arity zero. A parameterized source would make the map a
+type-level function (what is `List(a) ↦ …` at an unknown `a`?), and it
+is refused.
+
+**`via c` is the image of the LITERAL FAMILY.** Every literal of the
+mapped type is a generator; there are infinitely many of them and none
+of them is a word, so a table cannot name them and the head does. Under
+`with Mod`, `3` elaborates to `3 ; reduce`. This is not a detail: in
+`examples/modular.braid` §7 a floor-halving map sends `3` to `1` and
+the transported polynomial computes something the untransported one
+never did, which is exactly what a functor on the whole presentation
+means.
+
+When `A` is **nominal** there are no literals of it at all, and `c` is
+then the map on *values* — what the conjugation below coerces with. It
+is still required, and still checked at `A ⇒ B`: an object map with no
+way from `A` to `B` is not one.
+
+**The table.** Each image is checked by subsumption at the generator's
+scheme **with the substitution applied** — `+ : Int Int ⇒ Int` is
+checked at `Mod7 Mod7 ⇒ Mod7` — by the same `subsumes` that blesses
+every other binding, so an image may only generalize. Any word may
+appear, because `Base`'s generators are every word in scope.
+
+Images here are **programs**, not single words, and the reason is the
+same one that makes them single words above: a model of `Base` with the
+identity map also declares a `Code ⇒ Code` word, and `Code` carries
+names. An object-mapped model declares **no such word** — its action on
+a literal is not a rename and its action on a def is an unfolding, and a
+rewrite table holds neither — so its images are ordinary programs,
+inlined at each use and re-inferred where they land (each use gets its
+own principal type, exactly as a template's expansion does). An image
+applies nothing: `with` and `in` inside one are refused.
+
+**The refusal is TYPE-DIRECTED.** At `with M`, each atom gets one of
+five answers:
+
+| the atom | what happens |
+|---|---|
+| a generator the table names | its image, inlined |
+| a **literal** of `A` | `lit ; c` |
+| a word whose scheme **never mentions `A`** | **unchanged** — the functor is the identity off `A`, and wiring (`dup`, `swap`, `drop`, `_`) is always in this row |
+| a word that mentions `A` and **has a body** | **UNFOLDED**: `F(def) = F(body)`, transitively |
+| a word that mentions `A` with neither | conjugated (below), or **refused by name** |
+
+The third row is what makes `with M` twice the identity the second
+time — after one pass there is no `A` left in any type, so nothing
+mentions the mapped object — and what makes `with M` then `with N`
+(for `N` mapping `B ↦ C`) compose.
+
+The fifth is the refusal, where the scope is written:
+
+```text
+`div` has no image under model Mod: Mod maps Int ↦ Mod7, and
+`div : Int Int ⇒ Int` mentions Int — so the functor has nothing to
+send it to.  Add `div = …` to `model Mod`, declare a retraction
+(`via reduce, r` with `r : Mod7 ⇒ Int`) so it is derived by
+conjugation, or do not call it here.
+```
+
+`div` and `lt?` are *right* to be refused at Z/7 — it is neither
+ordered nor of characteristic zero — but the checker does not know
+that. It knows that a functor with no value on a generator is not a
+functor, which is the same refusal for a better reason.
+
+**Transitive unfolding.** A def called under the scope is transported
+too, and so is everything *it* calls. Each is minted once per def per
+model as a generated word `M@def` — a cache, not an inlining: one word,
+one type, however many times it is called. `:defs` does not list it
+(`@` is the compiler's character and you cannot name it); `:doc M@poly`
+shows it. `fix` transports as **structure** — a functor of the doctrine
+preserves the fixpoint, and the walk enters quotations — so a def
+written under `with Recursive` comes along with no case of its own.
+
+**Retraction and conjugation.** `via c, r` declares a retraction
+`r : B ⇒ A` with `c ; r = id_A`. Where one is given, every generator the
+table does not name is **derived by conjugation**: one `r` per `A` input
+wire, one `c` per `A` output wire, read off the generator's own arrow
+(an open arrow has no wires to count, and says so). Table entries
+override. A retraction makes the **empty table total**, so this is a
+complete model:
+
+```braid
+model Milli in Base(Meters ↦ Mm via toMm, toM) =
+```
+
+`Meters : Int ⇒ Meters` becomes `Meters ; toMm`, `unMeters : Meters ⇒
+Int` becomes `toM ; unMeters`, and a def written over metres runs over
+millimetres. Note what conjugation is *not*: `r ; c` is only an
+idempotent unless `c` is an iso, so a conjugated word sees `B` only
+through `c`'s image.
+
+**Two laws, and who decides them.** A declaration like this states laws
+`Base` has no samples to run: the retraction (`c ; r = id_A`) and, for
+an image given to a word that **has** a body, `image = F(body)`.
+`sameCode` (§12) decides both where it reaches — a proof in the free
+category, for every input — and where it does not, the binding stands
+and the model is recorded as a **DIALECT**. `:doc M` says which:
+
+```text
+## model Mod in Base(Int ↦ Mod7 via reduce) — + = addM, * = mulM, - = subM.
+   No retraction, so every generator that mentions Int needs an image of
+   its own.  An object-mapped model declares no `Code ⇒ Code` word …
+```
+
+That is the optimizer/dialect line of the previous section, drawn by
+the same procedure. Refusing instead would rule out every image whose
+truth is arithmetic, which is all of them.
+
+**The receipt** is one label per model, `=Mod>`, as for a family's
+application — on the def whose header named the model. The unfoldings
+are its internals and carry none: a receipt is minted by a scope, and
+nobody wrote one around `M@poly`.
+
+**Map-out only is refused.** There is no `model M in Base(A ↦ B)`
+without `via`, because the literals of `A` would have no image and the
+map would be a claim about types with nothing behind it on values.
+
+`examples/modular.braid` is the worked example: Z/7 by canonical
+representatives, one polynomial run over two rings, `div` and `lt?`
+refused by name, `transformation Reduce in Ints ⇒ Mods` audited square
+by square, floor-halving as the contrast (a perfectly good object map
+whose `transformation` is refused at the `add` square), and a nominal
+source with a retraction and an empty table.
+
+**An object map is a `Base` model's clause.** A model of a theory
+already maps objects — by instantiating the theory's parameters at its
+own arguments — and a second map at a mapped type would be a functor
+into a category whose objects nobody has named. Refused for now, with
+the clause to write instead; whether it means anything is the one
+question this stage leaves open (`design-macros.md`, 2026-09-17).
 
 **A model whose theory joins the DOCTRINE transports** *(2026-09-13;
 it was a shape rule for half a day, and the `mode` keyword before
@@ -2881,6 +3069,17 @@ a ; op : a a ⇒ a` names generators and their types, and laws that run.
 Nothing is dispatched and nothing is inferred: a theory is a
 vocabulary with a signature.
 
+**1¼. A model may map the OBJECTS too** *(2026-09-17)*. `model Mod in
+Base(Int ↦ Mod7 via reduce)` is a functor on the ambient presentation
+whose action on objects is the substitution `Int := Mod7`; `via` gives
+the literal family its image, the table gives the generators theirs, a
+def with neither is **unfolded** (`F(def) = F(body)`, cached as
+`M@def`), and a word that mentions the mapped type with none of the
+three is refused by name. `examples/modular.braid` runs one polynomial
+over `Int` and over Z/7 without writing it twice, and — in the same
+file — shows that this is *not* the same claim as being a ring
+homomorphism, which is what `transformation` is for.
+
 **1½. A model may be built out of another model** *(2026-09-15)*.
 `model Fwd(Smooth(a, g)) in Smooth(Dual(a), a)` is a **family** — a
 functor Mod(Smooth) → Mod(Smooth) — and `with Fwd(Floats)` applies it,
@@ -3180,6 +3379,7 @@ per use:
 | `interpose [η]` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `interpose` itself, by subsumption |
 | `with Inst` for a model | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
 | a model of `Base`, `model Opt in Base = p = q, …` | a typed generator image, applied atomwise | `subsumes`, once per binding at the declaration (§8) |
+| an **object-mapped** model of `Base`, `model Mod in Base(Int ↦ Mod7 via reduce)` | the same, with the OBJECT half written: a substitution on types, `via` on literals, unfolding on defs — so it changes the arrow and not just the words | `subsumes` at the generator's arrow **with the substitution applied**, once per binding; and a word that mentions the mapped type with no image is refused by name at the scope (§8) |
 | a **transport** `with Circuits` on a model whose theory is declared `in Doctrine` | a model applied to COMPOSITION: a stage ↦ the embedding, `;` ↦ the composition | `checkInstance` on the slots, once, plus the doctrine's claim checked at the `theory` line (§8) |
 | `lift2 [m]` on any `Code ⇒ Code` `m` | the runtime lift | per program, at run time; never fails — it falls back |
 
@@ -3686,6 +3886,24 @@ corrected in place rather than dated one by one.
   write. A label is minted by a scope, never written by hand; a `table`
   puts exactly `loadT` and `headerT` in scope; a slot is reached with
   `with I`.
+- **``` `div` has no image under model Mod ```** — an **object-mapped**
+  model of `Base` (§8) is a functor whose action on objects is a
+  substitution, and a word whose scheme mentions the mapped type must
+  have an image, a body to unfold, or a retraction to be conjugated
+  with. The message names the word, its arrow, the map, and the three
+  fixes. A word whose scheme does not mention the type is never in this
+  message: the functor is the identity off it.
+- **``` model M in Base: `+ = +` is refused: + is used at Mod7 Mod7 ⇒
+  Mod7 but + is Int Int ⇒ Int ```** — the same subsumption every
+  binding gets, at the generator's arrow **with the object map
+  applied**. And **``` `via dup` is refused ```**, the image of the
+  literal family checked at `A ⇒ B`; **``` a RETRACTION of c ```**,
+  checked the other way.
+- **``` `List(Int)` is not a NOMINAL type ```**, **``` is the identity
+  object map, which every model already has ```**, **``` an object map
+  needs `via` ```**, **``` is an OBJECT MAP, and an object map is a
+  `Base` model's clause ```** — the four ways a head's object-map
+  clause can say nothing (§8).
 - **`main requires a nonempty input stack: …`** — the main program is
   run on nothing, so it may not ask for a wire.
 
@@ -4117,6 +4335,7 @@ made of*, not by how exotic it feels.
 | a swappable **interface with laws** | `theory` + `model` | models selected by name, audited by running the laws |
 | one body over **every** model of a theory | a `def` headed `in <theory>` (a *template*) | expanded and re-inferred per model — its own principal type each time |
 | a model built **out of another model** | `model F(T(a)) in T(C(a))` — a *family*, applied by `with F(M)` | a functor Mod(T) → Mod(T); the carrier is a substitution, and `with F(F(M))` iterates |
+| the **same program at another type** | `model M in Base(A ↦ B via c)` — an *object map* | a functor on the ambient presentation: literals go through `c`, defs are unfolded, and a word with no image is refused by name |
 | a category of **processes** | `data` + your own composition word | then present it as a `theory` if it has laws |
 
 Worked examples, in that order: `lifting.braid` first (every functor
@@ -4133,7 +4352,22 @@ constructor parameter and audited against two models),
 model of the same doctrine — row programs lifted by `with Frame`, the
 `data` declaration's field words as the columns, §12) and
 `prob.braid` (a third: probability as a **Markov category**, where the
-model is what makes copying stop being natural).
+model is what makes copying stop being natural), and
+`modular.braid` (an **object map**: one polynomial, read over `Int` and
+over Z/7, with `div` and `lt?` refused by name because Z/7 has no image
+for them).
+
+**An object map is not a homomorphism** *(2026-09-17)* — and
+`examples/modular.braid` is the file that says so twice. `model Mod in
+Base(Int ↦ Mod7 via reduce)` makes reduction a functor on the *ambient
+presentation*: it types, it runs, and it says nothing about rings.
+That `reduce` is a **ring** homomorphism is a further and stronger
+claim, made by `transformation Reduce in Ints ⇒ Mods` and audited
+square by square. The contrast is in the same file: floor-halving is a
+perfectly good object map — every generator it names has an image at
+the substituted type — and its transformation is **refused at the `add`
+square**, because ⌊(7+7)/2⌋ = 7 and ⌊7/2⌋ + ⌊7/2⌋ = 6. Two
+declarations, two different questions, and you need both.
 
 **Differentiation is a model** *(2026-09-14)* — the worked example
 that ties every row of the table together, and the one to read after
@@ -4282,4 +4516,5 @@ trade `theory` makes everywhere, and it is deliberate.
   `registrar.braid` (most of the language in forty lines), then
   `ladder.braid`, `cuts.braid`, `stream.braid`, `arrows.braid`,
   `functors.braid`, `resources.braid`, `theories.braid` (theories,
-  models, and laws that run), `gla.braid`.
+  models, and laws that run), `modular.braid` (a model that maps the
+  TYPES: one polynomial over `Int` and over Z/7), `gla.braid`.

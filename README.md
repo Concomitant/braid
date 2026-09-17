@@ -20,6 +20,12 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 - `theory`, `model`, `transformation`: a theory presents operations
   and laws; a model interprets it; a transformation is checked
   slot by slot, proved where a normalizer can and sampled otherwise.
+- One model head, with optional clauses: a model may take a model
+  parameter (a family), and it may carry an **object map** —
+  `model Mod in Base(Int ↦ Mod7 via reduce)` reinterprets a program at
+  another type, mapping literals through `via`, unfolding the defs it
+  meets, and refusing by name any word it has no image for
+  (`examples/modular.braid`).
 - Models of the Doctrine transport whole programs into another
   category: circuits, data frames, probability as a Markov category.
   The Doctrine's hom-object ranges over whole STACKS, so a stage of any

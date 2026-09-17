@@ -7546,12 +7546,12 @@ baseTheoryName = "Base"
 parseBaseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
                   -> [String] -> Either String Instance
 parseBaseInstance aliases dataSigs theories header body = do
-  nm0 <- maybe (Left $ "Malformed model head (want `model Name in Base "
-                    ++ "= p = q, …`): " ++ dropWhile isSpace header)
-               Right (baseInstanceName header)
+  () <- maybe (Left $ "Malformed model head (want `model Name in Base "
+                   ++ "= p = q, …`): " ++ dropWhile isSpace header)
+              (const (Right ())) (baseInstanceName header)
   (nm, ps, _, _, om) <- parseModelHead aliases dataSigs theories header
   case ps of
-    (_ : _) -> Left $ baseHere nm0 ++ "a model of `Base` takes no model "
+    (_ : _) -> Left $ baseHere nm ++ "a model of `Base` takes no model "
                    ++ "PARAMETER: `Base`'s generators are every word in "
                    ++ "scope, so there is no theory for an argument to "
                    ++ "model"

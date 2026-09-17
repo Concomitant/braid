@@ -28,6 +28,7 @@ Cross-references are to `MANUAL.md`.
 | `theory T(…)` | a presentation: named slots with signatures, and laws | nothing | nothing | `parseTheory` (heads, slot signatures, kinds); `checkExtends` if it is `in Doctrine` | `theories`, `build`, `circuits`, `autodiff`, `prob`, `frame`, `lifting`, `reified`, `resources`, `payroll`, `optimizer`, `distributive`, `transformations` |
 | `model M in T(args)` | an interpretation of `T` — a functor out of the category `T` presents | nothing | nothing | `parseInstance`, `declaredSlots` + `checkInstance` (subsumption, per slot); `transportOf` (its shape); the theory's laws **run** at module start | every file with a `theory` |
 | `model M in Base` | a rewriting of the *ambient* presentation | nothing | nothing | `parseBaseInstance`, `checkBaseInstance` (each image must have the generator's own scheme) | `optimizer` |
+| `model M in Base(A ↦ B via c[, r])` | the same, with an **object map**: the substitution `A := B`, `c` on the literals of `A`, `r` for conjugation | nothing | nothing | `parseModelHead` (the clause), `checkBaseInstance` (each image at the generator's arrow with the substitution applied), `objTransportT` (the five answers), `objGenDefs` (the unfoldings) | `modular` |
 | `model F(T(binders)) in T′(args)` | a **family** — a functor Mod(T) → Mod(T′) | nothing (it is applied by `with F(M)`) | nothing | `parseInstance` (the parameter clause); `familyInstances` mints each member by substitution; each member is then an ordinary model | `autodiff` |
 | `transformation N in A ⇒ B = w, …` | a natural transformation between two models of one theory | nothing | nothing | `transformationDefs` (types of the squares); `checkTransformation` (`sameCode` first, the theory's samples second) | `transformations`, `autodiff`, `prob` |
 | `functor F = word` | a `Code ⇒ Code` word, usable as a scope | nothing | nothing | `checkFunctorWord` at the first `with F` (Code ⇒ Code, pure, defined) | `traced`, `metered`, `optimizer` |
@@ -120,9 +121,21 @@ theory T: `in Doctrine` declares nothing: Doctrine's operations are …
 ## `model`
 
 A **model** interprets a theory: a functor out of the category the
-theory presents, given by an image for each generator. Four kinds, one
-declaration form, and §"the same thing said four ways" below says why
-they are one thing.
+theory presents, given by an **object map** and an image for each
+generator. Five kinds, one declaration form, and §"the same thing said
+five ways" below says why they are one thing.
+
+**The head, in full.** One grammar, three optional clauses:
+
+```text
+model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ] = BINDINGS
+```
+
+`( PARAM )` makes this a **family**; `( ARGS )` are the theory's
+arguments; `( A ↦ B via c )` is the **object map**. The two groups after
+the theory are told apart by CONTENT — a group containing `↦` is the
+object map — so there is nothing to disambiguate and no position to
+remember. One parser (`parseModelHead`), one record (`Instance`).
 
 ### Plain model — `model M in T(args)`
 
@@ -239,6 +252,72 @@ model Bad in Base: Mon is a theory, not a word
 model Bad in Base: two bindings give `p` an image, and a model sends
   each generator to one thing
 `;` composes; separate bindings with `,` or a newline
+```
+
+### Model of `Base` with an OBJECT MAP — `model Mod in Base(Int ↦ Mod7 via reduce)`
+
+**What it is.** The same model with the *other half* written. A model
+is a presentation interpreted in a category, given by an object map and
+an image for each generator; every kind above carries the identity
+object map, and this one writes a real one — the **substitution**
+`A := B`, applied structurally (under `List`, a data type's arguments,
+an `Fn` arrow, a stack). It is a substitution and not a type-level
+function, which is why it is principal.
+
+**Syntax.** `model M in Base(A ↦ B via c)` or `… via c, r`, then the
+table. `↦` is the glyph and it is not `⇒`: `⇒` is the arrow of every
+written TYPE, and an object map is a function on objects. `A` is a
+nominal name — a base type or a `data`/`type` name of arity zero.
+`via c` is the image of the LITERAL FAMILY (`c : A ⇒ B`); `, r` is a
+retraction (`r : B ⇒ A`). Images here are **programs**, not single
+words, because this model declares no `Code ⇒ Code` table for them to
+be names in.
+
+**What the checker does.** Each image is blessed once by `subsumes` at
+the generator's own arrow **with the substitution applied** (`+ : Int
+Int ⇒ Int` is checked at `Mod7 Mod7 ⇒ Mod7`); `via` and the retraction
+are checked at `A ⇒ B` and `B ⇒ A`. `:doc M` carries a verdict on each
+law the declaration states — the retraction (`c ; r = id_A`) and
+`image = F(body)` for an image given to a word that has a body —
+decided by `sameCode` where it reaches and recorded as a **dialect**
+where it does not.
+
+**What `with` does to it.** Five answers, one per atom: the table's
+image, `lit ; c` for a literal of `A`, **unchanged** for a word whose
+scheme never mentions `A`, **unfolded** (`F(def) = F(body)`, cached as
+`M@def`) for a word that mentions `A` and has a body, and conjugated
+(`r … ; g ; … c`) or **refused by name** for one with neither. Mints
+`=M>` on the def whose header named it; the unfoldings are its
+internals and carry none.
+
+**Examples.** `modular.braid` (Z/7 by canonical representatives, one
+polynomial over two rings, floor-halving as the contrast, and a nominal
+source with a retraction and an empty table).
+
+**Refusals.**
+
+```text
+`div` has no image under model Mod: Mod maps Int ↦ Mod7, and `div :
+  Int Int ⇒ Int` mentions Int — so the functor has nothing to send it
+  to.  Add `div = …` to `model Mod`, declare a retraction (`via
+  reduce, r` with `r : Mod7 ⇒ Int`) so it is derived by conjugation,
+  or do not call it here.
+model Bad in Base: `+ = +` is refused: + is used at Mod7 Mod7 ⇒ Mod7
+  but + is Int Int ⇒ Int
+model Bad in Base: `via dup` is refused: dup is a0 ⇒ a0 a0 but the
+  image of the literal family at Int ↦ Mod7 is Int ⇒ Mod7
+model Bad: `Box7(Int)` is not a NOMINAL type: an object map's source is
+  a base type or a `data`/`type` name of arity zero, because the map is
+  the substitution `A := B` …
+model Bad: `Int ↦ Int` is the identity object map, which every model
+  already has: drop the clause
+model Bad: an object map needs `via`: `A ↦ B via c` names the image of
+  the LITERAL FAMILY, the one generator class a table cannot name
+model Bad: `Int ↦ Mod7 via reduce` is an OBJECT MAP, and an object map
+  is a `Base` model's clause …
+model Bad in Base: a model of `Base` takes no model PARAMETER …
+model M in Base: `g` cannot be derived by conjugation: its arrow is
+  open …
 ```
 
 ### Model of a Doctrine theory — a category model
@@ -864,25 +943,50 @@ gain (`design-macros.md`, 2026-09-16).
 
 ---
 
-## The same thing said four ways
+## The same thing said five ways
 
 A model is **a presentation interpreted in a category, given by an
-object map and an image for each generator.** The four kinds are four
-readings of that one sentence:
+object map and an image for each generator.** That is the general form,
+and it is one declaration:
+
+```text
+model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ] = BINDINGS
+```
+
+The five kinds are five **settings** of it:
 
 | kind | object map | generator images |
 |---|---|---|
 | `model Opt in Base = dupInt = dup, …` | the **identity** | a table, **partial** — every generator it does not name maps to itself |
 | a plain model (`model IntSum in Monoid(Int)`) | the theory's parameters, instantiated at this model's arguments | one program per slot, total over the theory's generators |
 | a Doctrine model (`model Circuits in Arrow(Circuit)`) | the identity on base types, with `embed` **total** — every base program has an image | the theory's slots, and `;` goes to `compose` |
-| a family (`model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)`) | a type-level **substitution**, `a ↦ Dual(a)` | written over the **parameter's** words, not the base's |
+| a family (`model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)`) | a type-level **substitution**, `a ↦ Dual(a)`, driven by the parameter | written over the **parameter's** words, not the base's |
+| an object-mapped model (`model Mod in Base(Int ↦ Mod7 via reduce)`) *(2026-09-17)* | a type-level **substitution**, `A ↦ B`, written down; `via c` on the literal family | a table over any word in scope, **partial** — a word that does not mention `A` maps to itself, one that does is unfolded, conjugated, or refused |
 
-A written **object map** is the first row's map made explicit, and the
-head already has a clause reserved for it (`inObjMap`, empty today):
-`model FwdAD in Base(Float ↦ Dual)`. When it arrives, all four are one
-declaration read four ways and nothing that exists has to move.
+A `resource` is a sixth reading of the third row, not a sixth row: its
+declaration *generates* a Doctrine model whose carrier is
+`Fn⟨E ρ ⇒ E σ⟩`, and everything downstream treats it as one.
 
----
+The last row is the one that was missing, and writing it cost no move:
+`inObjMap` was already a field of the head's record, the arguments and
+the object map ride beside each other in the same grammar, and nothing
+that existed had to move. What it *added* is the machinery a written
+object map needs and a renaming does not — an image for the literal
+family, and transitive unfolding, because `F(def) = F(body)` is not a
+table lookup.
+
+**What is not folded in yet.** `functor F = word` is still its own
+declaration. It is a model of `Base` in the same sense — a rewriting of
+the ambient presentation — except that its table is *computed*, by a
+`Code ⇒ Code` word, rather than written. Folded in, it would read
+
+```braid
+model Traced in Base = <a Code ⇒ Code image>
+```
+
+with the image a program rather than a table, and `:doc` saying which.
+That is stage 8's question, not this one's (`design-macros.md`,
+2026-09-17).
 
 ## What is NOT a construct, and why
 
