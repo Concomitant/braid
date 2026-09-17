@@ -4514,6 +4514,11 @@ trade `theory` makes everywhere, and it is deliberate.
 - `design-7b.md` — stage 7b in full: a resource is a model of the
   Doctrine, labels carry their carriers, and routing is transport at a
   representable fibre.
+- `design-8.md` — a PROPOSAL, not a record: the surface after `functor`
+  and `resource` fold into `model`, with the before/after for every
+  example, the migration counted, what `:doc` would have to say, and
+  why `import` and `table` stay keywords (they act on files, not on a
+  theory). Nothing in it is built.
 - `design-macros.md` — elaboration as a library: functors over `Code`,
   the five invariants, the fibration picture and the functors known to
   type, the manifest stated once, and the 2026-09-09 amendment
