@@ -378,7 +378,8 @@ Type formers:
   *built-in* pair type — the stack is the pair — but you can declare
   one (`data Pair(a, b) = (a b)`), and `Box(...)` carries a whole stack
   as a single wire, which is how multi-wire aggregates go inside a
-  `List` (§8).
+  `List` (§8). **Products stay flat**: since 2026-09-16 not even the
+  Doctrine's hom-object nests them (§8).
 - **Sums**: `(Δ₁ | … | Δₙ [| σ])` — one wire carrying alternative
   *stacks*. Rigid nesting: `(A | (B | C))` never flattens.
   `Bool = (• | •)`, `Maybe(...) = (... | •)` are prelude aliases.
@@ -998,7 +999,7 @@ deliberately thin: the row form on the right is always available.
 
 *Amendment (2026-09-16): `over` and `use` are gone, and every head now
 reads the same way. A def is `def NAME [in T] [with M …] = body`; a
-theory extending another is `theory Arrow(k(_, _)) in Doctrine`; a
+theory extending another is `theory Arrow(k(..., ...)) in Doctrine`; a
 model's head says which theory it interprets, `model Floats in
 Smooth(Float, Float)`, and a family's drops its dead parameter name,
 `model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)`; a transformation names
@@ -1129,6 +1130,23 @@ data Bad(...)   = (... Int)    # rejected: '...' must be last in its stack
 type L = List(Int Str)         # rejected: List's cell takes one wire
 ```
 
+**Named stack parameters** *(2026-09-16)*. A parameter written with a
+trailing `...` is a stack **with a name**, and there may be several,
+anywhere in the list:
+
+```braid
+data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
+data Bad(a..., b...)     = a b     # rejected: the stack parameter 'a'
+                                   # must be the last thing in its stack
+```
+
+The body spells each by its name. The one-at-most, must-come-last rule
+above is the **anonymous** `...`'s — it is spelled `...` in the body, and
+one spelling names one thing — while a named stack parameter is held to
+the same law where it belongs, in the **body**: a stack variable sits in
+tail position or it is a splice, and a splice is unspellable. This is
+what lets a hom-object range over whole stacks (§8).
+
 **Row parameters** *(2026-09-12)* say "at least these alternatives,
 maybe more" in a written type — the `σ` that inference has always
 minted, given a spelling. `---` is the last alternative of a row, never
@@ -1249,8 +1267,8 @@ exact). Writing one is refused by name:
 ```
 
 One rule for models, transformations and theories alike. Theory parameters are kinded: a bare
-name is one wire, `...` a stack, and `k(_, _)` a type **constructor**
-(below). A **model** head may carry a parameter of its own — `model
+name is one wire, `...` a stack, and `k(..., ...)` a type **constructor**
+whose arguments are kinded one by one (below). A **model** head may carry a parameter of its own — `model
 Fwd(Smooth(a, _)) in Smooth(Dual(a), a)` — and is then a *family*,
 applied by `with Fwd(Floats)` (below).
 
@@ -1305,20 +1323,22 @@ generalized a slot's arrow and `checkInstance` already compared bodies
 to it by **subsumption**, so the variables only had to survive the
 parser.
 
-**Constructor parameters** (2026-09-09). A theory parameter may be a
-type constructor, written with its arity visible as underscores —
-`theory Arrow(k(_, _))`. The kind must be visible because the two bare
-readings are already taken (a name is a wire, `...` is a stack), and a
-kind that is invisible is a kind that is guessed. Slots then apply it:
+**Constructor parameters** (2026-09-09; kinded per argument
+2026-09-16). A theory parameter may be a type constructor, written with
+its arity visible as one mark per argument — `_` for a wire, `...` for a
+whole stack, so `theory Arrow(k(..., ...))` and `theory Prob(k(..., ...),
+d(_))`. The kind must be visible because the two bare readings are
+already taken (a name is a wire, `...` is a stack), and a kind that is
+invisible is a kind that is guessed. Slots then apply it, and a
+lowercase name standing in a `...` position **is a stack variable** —
+the kind is declared once, at the head, and read off here:
 
 ```braid
-data Circuit(a, b) = Fn⟨a =Recursive> b Circuit(a, b)⟩
-data Pair(a, b) = a b
+data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
 
-theory Arrow(k(_, _)) =
+theory Arrow(k(..., ...)) =
     arrP    : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     thenP   : k(a, b) k(b, c) =Recursive> k(a, c)
-    firstP  : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
     …
 
 model Circuits in Arrow(Circuit) =
@@ -1337,20 +1357,18 @@ ordinary types:
 braid> with Circuits
 ambient: with Circuits   (:clear or a bare `with` to leave)
 braid> :t arrP
-arrP : Fn⟨a0 ⇒ a1⟩ =Recursive> Circuit(a0, a1)
+arrP : Fn⟨ρ0 ⇒ ρ1⟩ =Recursive> Circuit(ρ0, ρ1)
 braid> :t thenP
-thenP : Circuit(a0, a1) Circuit(a1, a2) =Recursive> Circuit(a0, a2)
-braid> :t firstP
-firstP : Circuit(a0, a1) =Recursive> Circuit(Pair(a0, a2), Pair(a1, a2))
+thenP : Circuit(ρ0, ρ1) Circuit(ρ1, ρ2) =Recursive> Circuit(ρ0, ρ2)
 braid> with Funcs
 ambient: with Funcs   (:clear or a bare `with` to leave)
-braid> :t firstP
-firstP : Arr(a0, a1) ⇒ Arr(Pair(a0, a2), Pair(a1, a2))
+braid> :t thenP
+thenP : Arr(ρ0, ρ1) Arr(ρ1, ρ2) ⇒ Arr(ρ0, ρ2)
 ```
 
 The slots carry `=Recursive>` because the `Circuit` model builds every
 circuit under `with Recursive`; the function model does not, and a pure body under
-a `=Recursive>` slot passes by absorption — which is why `Funcs`'s `firstP`
+a `=Recursive>` slot passes by absorption — which is why `Funcs`'s `thenP`
 comes back bare. A slot declares the *most* a model may do, as ever.
 What `arrP` does **not** ask for is a recursive *argument*: composition
 joins (§3), so a knot-built embedding takes an ordinary
@@ -1362,7 +1380,7 @@ own spelling for the generated def is `Circuits@arrP`, and writing an
 `@` yourself is an elaboration error (§12).
 
 
-Four things are refused, each naming what is wrong:
+Five things are refused, each naming what is wrong:
 
 ```text
 theory T(k(_, _)) =  op : k ⇒ k
@@ -1379,6 +1397,11 @@ model Bad in Arrow(Nope)
 model Bad in Arrow(One)          # data One(a) = a
   model Bad in theory Arrow declares 'k' with arity 2, but One takes
   1 argument(s)
+
+model Bad in Arrow(T)            # theory Arrow(k(..., ...)), data T(a, b)
+  model Bad: T cannot fill the constructor parameter 'k' — theory Arrow
+  declares it at k(..., ...), so T's parameters must be declared `...`
+  (a stack) where that says `...`
 ```
 
 `Fn` cannot fill a constructor parameter: it is built in and takes an
@@ -1386,7 +1409,7 @@ arrow rather than wires, and the refusal says so and suggests the
 one-line wrapper (`data Arr(a, b) = Fn⟨a ⇒ b⟩`) that makes plain
 functions a model. `examples/circuits.braid` declares the Arrow
 interface once and audits both models — circuits and functions —
-against five runnable laws.
+against the doctrine's five runnable laws.
 
 **A model is audited, three ways**, each with its own message:
 
@@ -1621,15 +1644,15 @@ Never both — transporting a template would embed the expansion's own
 writable at all:
 
 ```braid
-def second in Prob = (c -> (([swapP] ; embed) (c ; first) ; compose) ; _ ([swapP] ; embed) ; compose)
-def secondE in Prob with Enum = second      # instantiated, not transported
+def bothFlip in Prob = ([swap] ; embed) (flip ; under) ; compose ; …
+def bothFlipE in Prob with Enum = bothFlip   # instantiated, not transported
 ```
 
 The two readings are **different programs with different types**, and
 both are legal. Under `Enum` (`examples/prob.braid`):
 
 ```text
-def a with Enum = half ; flip ; dup      # a0 =Enum Recursive> Pair(Bool, Bool)
+def a with Enum = half ; flip ; dup      # a0 =Enum Recursive> Bool Bool
 def b in Enum   = flip ; dup             # • =Recursive> Kern(Float, Bool) Kern(Float, Bool)
 ```
 
@@ -1789,26 +1812,27 @@ theories, and image membership.
 
 **A model whose theory joins the DOCTRINE transports** *(2026-09-13;
 it was a shape rule for half a day, and the `mode` keyword before
-that)*. The prelude declares one theory every module sees:
+that; the hom-object went over STACKS 2026-09-16)*. The prelude declares
+one theory every module sees:
 
 ```braid
-theory Doctrine(k(_, _), p(_, _)) =
+theory Doctrine(k(..., ...)) =
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
-    first   : k(a, b) ⇒ k(p(a, c), p(b, c))
     observe : k(Int, Int) ⇒ Int
     sample  : • ⇒ k(Int, Int)
-    law leftId … rightId … assoc … embedFunctor …
-        firstFst … firstEmbed … firstCompose
+    law leftId … rightId … assoc … embedFunctor … embedWide
 ```
 
-A theory **joins** it by declaring its operations, at its signatures:
+`k(..., ...)` is the hom-object and its two arguments are **stacks**, so
+`a`, `b` and `c` above name whole sides of a diagram and not single
+wires. A theory **joins** it by declaring its operations, at its
+signatures:
 
 ```braid
-theory Arrow(k(_, _)) in Doctrine =
+theory Arrow(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     compose : k(a, b) k(b, c) =Recursive> k(a, c)
-    first   : k(a, b) =Recursive> k(Pair(a, c), Pair(b, c))
     observe : k(Int, Int) =Recursive> Int
     sample  : • =Recursive> k(Int, Int)
 
@@ -1840,19 +1864,28 @@ written pure; `Arrow`'s are `=Recursive>` because circuits are built
 under `with Recursive`. Only the *stacks* are checked against the doctrine — a grade
 says what a model may do, and the doctrine does not bound it.
 
-**The pairing is a parameter, and a parameter names two things.** In a
-signature `p(_, _)` is a type; in a law, capitalized, `P` and `unP` are
-its constructor and unroller, and a model's argument substitutes both.
-That is what lets the doctrine state a law about `first` without
-knowing which pairing you chose.
+**There is no pairing, and no strength** *(2026-09-16)*. Until that date
+the Doctrine had a second constructor parameter `p(_, _)` and a slot
+`first : k(a, b) ⇒ k(p(a, c), p(b, c))`, and three of its laws were about
+that slot. Both existed for one reason: a hom-object that named one
+WIRE per side could not hold a wide stage, so the stage had to be
+*packed*. Products in Braid are flat — the stack is the product — and
+the hom-object was the one place they nested. Over stacks a stage of
+any width embeds as **itself**, so the packing, the parameter that named
+it, the `data Pair` every model file declared to BE it, and the routing
+pass that wrote it out are all gone together. `embedWide` is the law
+that replaces the three: `embed [f] ; embed [g] = embed [f ; g]` at a
+stage that is one wire in and two out, and at one that **whiskers** —
+`(_ 1 ; +) _`, a stage on the deepest wire with one riding above. The
+whiskering happens in the BASE, inside the quotation, before `embed`
+sees it, so there is nothing left for a strength law to say.
 
-**The three levels are what the theory declared.**
+**The two levels are what the theory declared.**
 
 | declared | it licenses |
 |---|---|
-| `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` … `in Half` and compose by hand.* |
-| `+ embed` | `with M` transports stages that are one wire in, one wire out. A wider stage is refused naming `first`. |
-| `+ first` | any stage transports; see the routing below. |
+| `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
+| `+ embed` | `with M` transports **any** stage, at the width it is written. |
 
 Slots that are not the doctrine's are classified exactly as 5c read
 them: a slot taking the carrier and returning base is an **exit**
@@ -1862,8 +1895,8 @@ alone). Identity is `embed [pass]` and needs no slot.
 
 **The laws are the doctrine's, and they run.** A model is audited
 against every inherited law it can *state* — every slot the law names
-is one its theory declared. `Arrow` above takes all five slots, so all
-seven laws run, for `Circuits` and for `Funcs`, and again for
+is one its theory declared. `Arrow` above takes all four slots, so all
+five laws run, for `Circuits` and for `Funcs`, and again for
 `Reified` in `examples/reified.braid`. A theory that takes `compose`
 and `embed` and no evidence — `Vault`, the sealed category — runs
 none, which is the honest reading of *sealed*: nothing can be observed
@@ -1872,45 +1905,55 @@ leaving it, the audit included. They are sampled laws (`observe` at
 in §12 and in `examples/circuits.braid`'s closing comment.
 
 This is not Braid inventing a doctrine. It is the **base's own**
-structure — a Freyd category, Hughes' `arr`/`>>>`/`first` (Atkey,
+structure — a Freyd category, Hughes' `arr`/`>>>` (Atkey,
 *What is a categorical model of arrows?*; READING) — written down as
 an ordinary theory, so that "a target must have the structure the
 source has" is *declared and checked* rather than assumed. That is
 what a functor is.
 
-**The routing discipline.** A hom-object `k(a, b)` names **one** wire
-on each side, so a transported spine is one carrier wire whose object
-is the base stack *packed* with the pairing `P` that `first` names —
-read off `first`'s declared type; nothing is built in. A stage
-of `k` wires in and `j` out is embedded as
-
-```text
-embed [unP … ; stage ; P …]      -- k−1 unpackings, j−1 packings
-```
-
-and then whiskered by `first` once per wire riding **above** it:
-that is resource routing's `_`-padding with `first` in place of `_`.
-`...` is exactly what the strength becomes — `add1 ...` acts on the
-deepest wire and the rest rides along, which is `first`. The widths
-come from each stage's own arrow in the prefix scope: an *arity*, the
-same mechanical read of a written signature the `in` check makes. A
-one-wire stage emits `embed [stage]` and nothing else, so a scope that
-worked before is compiled identically. So:
+**There is no routing discipline** *(2026-09-16)*. A hom-object
+`k(ρ, σ)` names a whole **stack** on each side, so a transported spine
+is one carrier wire whose two objects are the base stacks themselves.
+Every stage becomes `embed [stage]`, whatever it covers, and every `;`
+becomes `compose`:
 
 ```braid
 def sq with Circuits = dup ; *             # Int =Circuits Recursive> Int
-#   with@Circuits >> [dup >> Pair] >> Circuits@embed
-#              >> _ [unPair >> *] >> _ Circuits@embed >> Circuits@compose
+#   with@Circuits >> [dup] >> Circuits@embed
+#              >> _ [*] >> _ Circuits@embed >> Circuits@compose
 ```
 
-**Not admitted: a stack-shaped embedding.** `Fn⟨... ⇒ ...⟩ ⇒ k(..., ...)`
-would let a wide stage embed with no packing at all, and a data type's
-arguments *are* stacks internally, so it is representable. It is left
-out because a hom-object's arguments are wires everywhere else in the
-language — `checkKWordShape`, the display fold `a =M> b`, and the
-strength's own type all say one wire per side — and because the pairing
-is Hughes' own answer to the same question. Revisit it when a flagship
-wants a category over whole stacks.
+Nothing reads an arity, nothing packs, nothing whiskers. The base
+already makes every stage cover the stack it is handed — that is what
+`_` and `...` are for (§4) — so the base's own widths ride through the
+functor untouched, and a stage that does not cover its stack gets the
+base's own refusal rather than a second one from the elaborator. A
+stage with no input wire is ordinary too: `k(•, Int)` is a hom-object
+between stacks, and `•` is a stack.
+
+Until this date the paragraph above described `embed [unP … ; stage ;
+P …]` whiskered by `first` once per wire riding above — sixty-nine
+lines of elaborator, all of it there because the carrier was one wire.
+
+**A model may still declare a strength, and one does.** A base stage
+whiskers in the base, but a **generator** does not: an entry slot like
+`examples/prob.braid`'s `flip : • ⇒ k(Float, Bool)` is a carrier at a
+fixed width, and nothing in the base can widen a carrier. A Markov
+category is exactly a theory with such generators, so `Prob` declares
+the widening itself, as an ordinary slot of its own:
+
+```braid
+under : k(a, b) =Recursive> k(c a, c b)
+```
+
+One wire `c` rides **under** the kernel's domain. There is no pairing
+in that signature and nothing to unpack: over stacks the strength is
+whiskering, and whiskering is concatenation. `c` is a wire rather than a
+stack because a stack variable can only sit in tail position — `c a` is
+spellable and `a c` is a splice — which is the rule every declaration in
+the language obeys (§5). `under` is not a doctrine slot, so it is
+available under `in M` and ignored by transport, exactly like any other
+slot the doctrine does not name.
 
 **`in M`: a morphism built by hand** *(2026-09-13)*. `with M`
 transports a base program into the category; some morphisms of the
@@ -1965,12 +2008,13 @@ ordinary base word and Braid has no export lists, so a model seals the
 
 Errors, at the `theory` line, the `model` line or the `with`: *slot
 `compose` is … but Doctrine declares it …*; *`in Doctrine` declares
-nothing*; *theory `T`'s constructor parameter `k` has arity 3, and
-Doctrine declares the hom-object `k(_, _)`*; *Duplicate model
+nothing*; *theory `T`'s constructor parameter `k` is `k(_, _)`, and
+Doctrine declares the hom-object `k(..., ...)`*; *Duplicate model
 declaration*; *a header may name at most one category*; and, inside a
-scope, *`observe` leaves `Circuits`*, *`f` is a word of `Other`, so it
-builds a carrier rather than being a program `embed` could embed*, and
-the width refusals above.
+scope, *`observe` leaves `Circuits`* and *`f` is a word of `Other`, so
+it builds a carrier rather than being a program `embed` could embed*.
+A stage that does not cover the stack it is handed is refused by
+inference, in the base's own words, because that is what it is.
 
 **`transformation Len in ListMonoid ⇒ IntSum = len`** *(2026-09-13,
 shipped; spelled `morphism` until 2026-09-14, and `:` in place of `in`
@@ -2012,11 +2056,15 @@ The declaration generates the squares and **decides** them, one of two
 ways:
 
 - **Proved** by `sameCode`, for every input and every interpretation of
-  the words — which reaches as far as the normalizer does. A category
-  whose carrier is a hom-object pins its own `Fn⟨a ⇒ b⟩` to one wire
-  per side, so an internal functor's squares (`compose`, `embed`,
-  `first`, and the exits) are proved outright: see `Forget` in
-  `examples/transformations.braid`.
+  the words — which reaches as far as the normalizer does. A square
+  that only passes the witness through is proved outright: `embed` and
+  `sample` in `Forget`, in `examples/transformations.braid`. One that
+  *applies* the witness is not, because a hom-object over stacks pins
+  its `Fn⟨ρ ⇒ σ⟩` to a whole stack per side and `ev` of an open wire has
+  no closed arity — which is where `compose` and `observe` go to the
+  samples, and it is the same wall `Len` stands at. Before 2026-09-16
+  the hom-object named one wire per side and all five proved; that is
+  what flat products cost, said out loud.
 - **Sampled**, at the theory's own evidence, when it is not: `sample`
   supplies the inputs, an exit observes a result that is a carrier (a
   carrier cannot be compared), `eq?` decides, and the check runs at
@@ -2071,9 +2119,10 @@ consequences, both worth knowing before declaring one:
 
 **A square the normalizer PROVED is not sampled again** *(2026-09-14)*.
 The sampled law is generated before the verdict is in, so a proved
-square used to run one too — harmlessly, until the exit change gave
-`first` (whose output is the hom-object at a *pairing*, which no exit
-fits) a law that weighed two carriers. Proof outranks evidence.
+square used to run one too — harmlessly, until the exit change gave a
+strength slot (whose output is the hom-object at a *wider* pair of
+stacks, which no exit fits) a law that weighed two carriers. Proof
+outranks evidence.
 
 **`:transformations`** lists every transformation in scope — own and
 imported —
@@ -2166,8 +2215,10 @@ an audited model — what the theory declares is what the models owe.
 
 **When both models are models of a theory extending `Doctrine`** they
 are internal categories, and a transformation between them is an
-**internal functor**: the squares for `compose`, `embed` and `first` are
-exactly functoriality. `examples/transformations.braid` has one — a
+**internal functor**: the squares for `compose` and `embed` are exactly
+functoriality — preserves composition, preserves the image of the base.
+There is no strength square, because the Doctrine has no strength.
+`examples/transformations.braid` has one — a
 function that carries its name, and the functor that forgets the name.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
@@ -2771,12 +2822,16 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 ```
 
 `Frame` models the same `Doctrine` `Circuits` does. Its hom-object
-`Col(a, b)` is a **function between columns**, `embed` is `map`,
-`compose` is composition, and `first` is **unzip / map / zip** — the
-strength is literally *the other columns ride past*, which is what
-carries the two-wire stage `px qty`. So the model's laws are `map`'s
-functor laws, and the doctrine's seven run over them before the file
-prints anything.
+`Col(ρ, σ)` is a **function between columns** — a row program of any
+width, because the arguments are whole stacks — `embed` is `map` and
+`compose` is composition. "The other columns ride past" is what the
+base's own `...` already means, so the two-wire stage `px qty` carries
+with no strength to say it again. The model's laws are `map`'s functor
+laws, and the doctrine's five run over them before the file prints
+anything. The row store inside is a `List(Box(ρ))`, one list of boxed
+rows: a *stack of lists* is the non-injective column store — three
+columns of ten and ten columns of three are the same stack of Ints —
+and it must not enter the type.
 
 **The columns are the field words.** `sym`, `px` and `qty` are the
 projections the `data` declaration generated (§5) — ordinary
@@ -2797,8 +2852,8 @@ division of labour is not a convention; it is what the model is.
 `List(row)` with an implicit positional index `0 … n−1`, which is
 `Fin(n) ⇒ row` stored tabulated and flat (§13). The implicit index is
 what makes `map` index-preserving and `zip` meaningful; making it
-explicit would want a key type in the hom-object, and `k(_, _)` takes
-two.
+explicit would want a key type in the hom-object, and `k(..., ...)`
+takes two.
 
 **The one thing the doctrine cannot carry** is a *filter written as a
 row program*: `row ⇒ (row | •)` transports a SUM, and the Doctrine has
@@ -2844,8 +2899,12 @@ name for, and `report` runs at 0.
 category — `compose` is bind with the weights multiplied, exact),
 `Sampler` (a seed threaded as a `resource`, a 48-bit LCG written in
 Braid, so every printed count is reproducible), `Nondet` (the support
-— a weight is a bit). The doctrine's seven arrow laws run for all
-three, at *stochastic* evidence, before the file prints.
+— a weight is a bit). The doctrine's five category laws run for all
+three, at *stochastic* evidence, before the file prints. `Prob` also
+declares a strength of its **own**, `under : k(a, b) ⇒ k(c a, c b)`,
+because a Markov category's generators are carriers at a fixed width
+and nothing in the base can widen a carrier; there is no pairing in it,
+because over stacks whiskering is concatenation.
 
 **And what it refuses.** `transformation Expect in Enum ⇒ anything` is
 not declarable and the reason is mathematics, not machinery:
@@ -2855,7 +2914,7 @@ second, one-carrier theory in the same file (`theory Convex(m)`, the
 fair mixture) with `transformation Expect in Mixtures ⇒ Means` checked
 at four squares. `Sampler ⇒ Enum` has no component at all — a sample
 is not a function of the distribution. `Support : Enum ⇒ Nondet` is
-mathematically a homomorphism and is *still* refused, at the `first`
+mathematically a homomorphism and is *still* refused, at the `under`
 square, for a reason worth knowing: a component must be generic in the
 hom-object's arguments, so it can never **run** the carrier, and the
 two sides are then closures that only the normalizer could weigh. See
@@ -3197,15 +3256,18 @@ They are **prims** (§9), not declarations: they read the checker's own
 tables, which is exactly the criterion the kernel uses (`README`).
 
 **The rep.** `data TypeRep` mirrors the checker's `Ty`, `SType`,
-`EffRow` and `Arrow` in seven alternatives — a base type by name, a
+`EffRow` and `Arrow` in **nine** alternatives — a base type by name, a
 type **variable** by name, a declared type at its argument stacks, `Fn`
 around an arrow, a sum (its alternatives and the row tail), a stack's
-**open end**, and an **arrow** (in, out, the grade's labels, the effect
-tail). A stack is `type StackRep = List(TypeRep)`, front wire first;
-only the open-end alternative is not a wire, and it stands last in a
-stack and nowhere else. `foldTypeRep` is the seven-way eliminator, and
-`baseOf`, `wire?`, `stackWidth` and `firstAlt` (the prelude) are the
-small vocabulary written on it.
+**open end**, an **arrow** (in, out, the grade's labels, the effect
+tail), a repeated closed **segment** with its width (`Aⁿ`), and **`Fin`**
+at a width. A stack is `type StackRep = List(TypeRep)`, front wire
+first; the open end and the repeated segment are the two alternatives
+that are **not wires** — each stands in a stack and nowhere else, the
+open end last and the segment for however many wires its width says.
+`foldTypeRep` is the nine-way eliminator, and `baseOf`, `wire?`,
+`stackWidth`, `widthOf` and `firstAlt` (the prelude) are the small
+vocabulary written on it.
 
 **Equality is `eq?` — after normalization.** `typeOfWord` normalizes
 before it answers (`normalizeArrow`: variables become `a0`, `ρ0`, `σ0`,
@@ -3214,10 +3276,26 @@ exactly when their reps are `eq?`. A rep you assembled by hand carries
 no such guarantee: `eq?` on an unnormalized rep compares variable
 *names*, which is a different question.
 
-**What has no rep.** A bundle exponent (`Intⁿ`) and `Fin(n)` ride the
-**miss track**, with the reason: a width is a second sort — an exponent
-is not a type — and a rep that flattened it would make two different
-types equal. `typeOfWord "pack"` misses; `:t pack` still prints.
+**The width tier** *(2026-09-16)*. A width is a **second sort** — an
+exponent is not a type — so it has a rep of its own rather than a
+`TypeRep` alternative:
+
+```text
+data WidthRep = (Int | Sym Int)      lit k | var n at offset k
+```
+
+`Aⁿ` is a **stack segment** repeated `n` times, which is why its rep
+stands in a `StackRep` beside the open end and `wire?` says false for
+it; `Fin(n)` *is* a wire and carries the same `WidthRep`. The rule the
+rep must not break is one sentence: **never flatten a variable width
+into a type.** A concrete width may reflect expanded, because the
+checker itself expands it (`sexp` leaves no `Aⁿ` for `Int³` — it *is*
+three wires); a variable one comes back with its variable and its
+offset, so `typeOfWord "weaken"` is `Fin(n0) ⇒ Fin(n0+1)` and not
+`Fin(n0) ⇒ Fin(n0)`. `typeOfWord "pack"`, `"zipN"`, `"mapN"`,
+`"checkedAt"` and `"indicesN"` all answer now; nothing in the prelude
+misses for want of a rep, and the differential check
+(`typeOfWord w` = `typeOfCode [w]`) went from 182 words to 210.
 
 **What is not admitted, on its own merits.** There is no
 `∀a. a ⇒ TypeRep`. Nothing above takes a **wire** and answers its type:
@@ -3717,19 +3795,21 @@ corrected in place rather than dated one by one.
   *(Amended 2026-09-15: the refusal used to say the theory declares
   **no** exit, which is false of a theory that declares one the slot's
   result does not FIT. `examples/prob.braid` is that case —
-  `observe : k(Int, Int) ⇒ Int` is an exit, and `first` leaves the
-  hom-object at a **pairing**, which it does not reach — and a second
-  exit at the pairing cannot help, because the square *that* exit would
-  need is fed by the theory's first entry, whose object is `Int`. The
-  message now says `no exit whose input FITS this slot's result`. The
-  general shape, which is the standing limit: a transformation's
-  component is generic in the hom-object's arguments, so it can never
-  **run** the carrier; a square between two function-carrier models is
-  therefore decidable only when the normalizer proves it, which needs
-  the component to pass the witness through untouched —
-  `transformations.braid`'s `Forget : Names ⇒ Funcs` drops a `Str`
-  field and proves all five, and a component that *transforms* the
-  witness is out of reach.)* Two riders came out of the same investigation and are worth
+  `observe : k(Int, Int) ⇒ Int` is an exit, and its own strength
+  `under` leaves the hom-object at a **wider pair of stacks**, which
+  that exit does not reach — and a second exit there cannot help,
+  because the square *that* exit would need is fed by the theory's
+  first entry, whose object is one `Int` wire. The message now says
+  `no exit whose input FITS this slot's result`. The general shape,
+  which is the standing limit: a transformation's component is generic
+  in the hom-object's arguments, so it can never **run** the carrier; a
+  square between two function-carrier models is therefore decidable
+  only when the normalizer proves it, which needs the component to pass
+  the witness through untouched — `transformations.braid`'s
+  `Forget : Names ⇒ Funcs` drops a `Str` field, and proves the two
+  squares that only pass the witness on. A component that *transforms*
+  the witness is out of reach, and since 2026-09-16 so is a square that
+  *applies* one: a hom-object over stacks makes that `ev` open.)* Two riders came out of the same investigation and are worth
   keeping:
   - **`sameCode` says `false`, not a refusal, for "spelled
     differently"** — two quotations that build the same function out of
@@ -3890,7 +3970,7 @@ function, game rules as lifted moves), then `examples/tree.braid` and
 flow that is all ordinary defs), `theories.braid` (theories and
 models), `circuits.braid` (a stream transducer — a genuinely
 different category — as data plus a composition word plus
-`theory Arrow(k(_, _))`, the Arrow interface stated once over a
+`theory Arrow(k(..., ...))`, the Arrow interface stated once over a
 constructor parameter and audited against two models),
 `autodiff.braid` (below), `frame.braid` (a data frame as a second
 model of the same doctrine — row programs lifted by `with Frame`, the
@@ -3941,13 +4021,16 @@ that shipped.
 **Probability is a model** *(2026-09-15)* — and it is the example that
 says what the `theory`/`model` row of the table *buys*, because the
 thing it buys is a distinction the language cannot otherwise draw.
-`examples/prob.braid` declares `theory Prob(k(_, _), d(_)) in
-Doctrine` — the doctrine's three structure slots, plus `flip`,
-`uniform` and `condition` as **entries** (`• ⇒ k(_, _)`: a
-distribution is a kernel, since there is no `k(•, b)`) and `report` as
-an **exit** whose result is a constructor parameter. Three models
-(exact enumeration, a threaded seed, the support), the doctrine's seven
-laws over each, and then the two Markov axioms stated as programs: copy
+`examples/prob.braid` declares `theory Prob(k(..., ...), d(...)) in
+Doctrine` — the doctrine's two structure slots and its evidence, a
+strength of its own (`under : k(a, b) ⇒ k(c a, c b)`, because a
+generator is a carrier at a fixed width), plus `flip`, `uniform` and
+`condition` as **entries** (`• ⇒ k(…, …)`: a distribution is written as
+the kernel it is, the bias arriving on the wire the kernel consumes)
+and `report` as an **exit** whose result is a constructor parameter.
+Three models (exact enumeration, a threaded seed, the support), the
+doctrine's five laws over each, and then the two Markov axioms stated
+as programs: copy
 is **not** natural, which is the law that must *fail* and is shown
 failing by running both sides; discard **is** natural, stated at the
 mass, which `condition` is exactly what breaks (an affine category, not
@@ -3987,7 +4070,8 @@ nondeterminism is `List`, reader is a `resource` you only read. Only IO
 is irreducible, and it is a *grade* on the existing arrow (`=IO>`), not an
 arrow of its own. `examples/arrows.braid` shows that `Control.Arrow`'s
 whole interface — `arr`, `>>>`, `first`, `***`, `&&&`, `|||`, `app` —
-is already the syntax rather than a library.
+is already the syntax rather than a library: `first f` is `f _`, which
+is why the Doctrine needs no slot for it.
 
 **The trade, stated once.** Because models are selected by name and
 nothing is inferred or dispatched, you cannot write code generic over

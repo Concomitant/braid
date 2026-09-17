@@ -35,12 +35,17 @@ def say = ((t -> t ; showType) | (e -> e)) ; merge
 #   type, reached two ways.
 
 "" ; print
-"-- and what has no rep, with the reason --" ; print
-("pack : " ("pack" ; typeOfWord ; say) ; cat) ; print
-#   a bundle exponent is a WIDTH, not a type.  A rep that flattened it
-#   would make two different types equal, which is the one thing a rep
-#   must never do — so it rides the miss track and `:t pack` still
-#   prints.
+"-- and the WIDTH tier, which has a rep of its own (2026-09-16) --" ; print
+("pack : " ("pack" ; typeOfWord ; say) ; cat) ; print       # a0ⁿ⁰ ⇒ List(a0)
+#   `Aⁿ` is a stack SEGMENT repeated n times, so its rep stands in a
+#   STACK beside the open end rather than being a wire, and the width
+#   beside it is a `WidthRep` — a literal, or a variable at an offset.
+#   A width is its own sort, and keeping it one is what stops two
+#   different types from becoming equal: a CONCRETE width reflects
+#   expanded, because the checker itself expands it (`Int³` IS three
+#   wires), and a VARIABLE width is never flattened.  `weaken` proves
+#   the offset survives.
+("weaken : " ("weaken" ; typeOfWord ; say) ; cat) ; print   # Fin(n0) ⇒ Fin(n0+1)
 
 # ---------------------------------------------------------------------
 # 1. DIAGRAM CUTS — what runs beside what
@@ -82,7 +87,8 @@ def relabCut =
 def arrWidths =
     [(s -> 0 0 ; Box)] [(s -> 0 0 ; Box)] [(nm as -> 0 0 ; Box)] [(x -> 0 0 ; Box)] \
     [(as tl -> 0 0 ; Box)] [(s -> 0 0 ; Box)] \
-    [(i o ls tl -> (i ; stackWidth) (o ; stackWidth) ; Box)] ... ; foldTypeRep
+    [(i o ls tl -> (i ; stackWidth) (o ; stackWidth) ; Box)] \
+    [(b w -> 0 0 ; Box)] [(w -> 0 0 ; Box)] ... ; foldTypeRep
 
 def atomArity =
     a -> ((a ; single) ; single) ; typeOfCode
@@ -187,13 +193,16 @@ def colsOf with Recursive =
         | (x -> t ; listOf) \
         | (as tl -> t ; listOf) \
         | (s -> t ; listOf) \
-        | (i o ls tl -> t ; listOf) ) ; mergeTypeRep
+        | (i o ls tl -> t ; listOf) \
+        | (b w -> t ; listOf) \
+        | (w -> t ; listOf) ) ; mergeTypeRep
 
 ## the OUTPUT side of an arrow rep, and its first wire — how a word's
 ## result type is got at without any type syntax in the term
 def arrOut =
     [(s -> nil)] [(s -> nil)] [(nm as -> nil)] [(x -> nil)] \
-    [(as tl -> nil)] [(s -> nil)] [(i o ls tl -> o)] ... ; foldTypeRep
+    [(as tl -> nil)] [(s -> nil)] [(i o ls tl -> o)] \
+    [(b w -> nil)] [(w -> nil)] ... ; foldTypeRep
 def noRep   = .none ; alt1 ; TypeRep
 def headRep = (l -> l ; unList ; (noRep | (x r -> x)) ; merge)
 def resultOf =
@@ -237,8 +246,9 @@ def anInt = (x -> x 1 ; +)
 #      checks
 #
 # Only rung 1 is claimed.  It is the honest first one, and the rep was
-# designed to carry the rest of the climb: structural, total except for
-# the width tier, normalizing, and with `eq?` for equality.
+# designed to carry the rest of the climb: structural, TOTAL — the
+# width tier joined it on 2026-09-16 — normalizing, and with `eq?` for
+# equality.
 
 def sameShown =
     e ->

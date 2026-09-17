@@ -8708,20 +8708,24 @@ preludeSrc = unlines
     -- at something.  The vocabulary below is the small library that
     -- makes a rep readable; `cellsFor` is the first DERIVING customer
     -- (MANUAL §12, examples/typerep.braid).
-  , "## a reflected TYPE: the checker's Ty, SType, EffRow and Arrow as data.  Seven alternatives -- a base type by name; a type VARIABLE by name; a declared type at its argument STACKS; Fn around an arrow; a sum (its alternatives, and the row tail, `.\8226` when closed); a stack's OPEN END; and an ARROW (in, out, the grade's labels, the effect tail).  Only `tail` is not a wire: it stands last in a stack and nowhere else.  Equality is `eq?` on reps the reflection words BUILT -- they normalize first (MANUAL 12); a rep assembled by hand compares variable names."
-  , "data TypeRep = (Sym | Sym | Sym List(List(TypeRep)) | TypeRep | List(List(TypeRep)) Sym | Sym | List(TypeRep) List(TypeRep) List(Sym) Sym)"
+  , "## a WIDTH, as data: a literal, or a variable at an offset (`n+1` is what `weaken` leaves).  A width is its own SORT -- `A\8319` is a stack SEGMENT repeated n times and `Fin(n)` is an index into one -- so it has its own rep and cannot stand where a type stands."
+  , "data WidthRep = (Int | Sym Int)"
+  , "## a reflected TYPE: the checker's Ty, SType, EffRow and Arrow as data.  Nine alternatives -- a base type by name; a type VARIABLE by name; a declared type at its argument STACKS; Fn around an arrow; a sum (its alternatives, and the row tail, `.\8226` when closed); a stack's OPEN END; an ARROW (in, out, the grade's labels, the effect tail); a repeated closed SEGMENT and its width (`A\8319`); and `Fin` at a width.  `tail` and `rep` are not wires: each stands in a stack and nowhere else, and `rep` stands for however many wires its width says.  Equality is `eq?` on reps the reflection words BUILT -- they normalize first, widths included (MANUAL 12); a rep assembled by hand compares variable names."
+  , "data TypeRep = (Sym | Sym | Sym List(List(TypeRep)) | TypeRep | List(List(TypeRep)) Sym | Sym | List(TypeRep) List(TypeRep) List(Sym) Sym | List(TypeRep) WidthRep | WidthRep)"
   , "## a stack of wires as a type rep: front wire first, an open end last"
   , "type StackRep = List(TypeRep)"
   , "## a reflected DECLARATION: a `data` (name, parameters, body, FIELD NAMES), a `type` (name, parameters, body) or a `theory` (name, parameters, slots, law names).  A parameter is (name, kind, arity): the kind is .wire .stack .row .width or .con, and the arity counts a constructor's underscores."
   , "data Decl = (Sym List(Box(Sym Sym Int)) TypeRep List(Sym) | Sym List(Box(Sym Sym Int)) TypeRep | Sym List(Box(Sym Sym Int)) List(Box(Sym TypeRep)) List(Sym))"
   , "## the name of a BASE type rep (.Int .Float .Str .Sym), or .none"
-  , "def baseOf = [(s -> s)] [(s -> .none)] [(n as -> .none)] [(a -> .none)] [(as t -> .none)] [(s -> .none)] [(i o ls t -> .none)] ... >> foldTypeRep"
-  , "## is this rep a WIRE, rather than a stack's open end?"
-  , "def wire? = [(s -> true)] [(s -> true)] [(n as -> true)] [(a -> true)] [(as t -> true)] [(s -> false)] [(i o ls t -> true)] ... >> foldTypeRep"
-  , "## the closed width of a stack rep: its wires, an open end not counted"
+  , "def baseOf = [(s -> s)] [(s -> .none)] [(n as -> .none)] [(a -> .none)] [(as t -> .none)] [(s -> .none)] [(i o ls t -> .none)] [(b w -> .none)] [(w -> .none)] ... >> foldTypeRep"
+  , "## is this rep a WIRE, rather than a stack's open end or a repeated segment?"
+  , "def wire? = [(s -> true)] [(s -> true)] [(n as -> true)] [(a -> true)] [(as t -> true)] [(s -> false)] [(i o ls t -> true)] [(b w -> false)] [(w -> true)] ... >> foldTypeRep"
+  , "## the closed width of a stack rep: its wires, an open end and a repeated segment not counted (neither is a KNOWN number of wires)"
   , "def stackWidth = [(n x -> (x >> wire?) (n 1 >> +) n >> select)] 0 ... >> fold"
+  , "## the WIDTH a rep carries, or .none: a repeated segment's and a Fin's are the same sort"
+  , "def widthOf = [(s -> nil)] [(s -> nil)] [(n as -> nil)] [(a -> nil)] [(as t -> nil)] [(s -> nil)] [(i o ls t -> nil)] [(b w -> w >> single)] [(w -> w >> single)] ... >> foldTypeRep"
   , "## the FIRST alternative of a type rep, as a stack -- nil unless it is a sum"
-  , "def firstAlt = [(s -> nil)] [(s -> nil)] [(n as -> nil)] [(a -> nil)] [(as t -> as >> unList >> (nil | (x r -> x)) >> merge)] [(s -> nil)] [(i o ls t -> nil)] ... >> foldTypeRep"
+  , "def firstAlt = [(s -> nil)] [(s -> nil)] [(n as -> nil)] [(a -> nil)] [(as t -> as >> unList >> (nil | (x r -> x)) >> merge)] [(s -> nil)] [(i o ls t -> nil)] [(b w -> nil)] [(w -> nil)] ... >> foldTypeRep"
   , "## does this rep stand for Str?"
   , "def strRep? = (t -> (t >> baseOf >> symStr) \"Str\" >> equals)"
   , "## one column of a row printer, as SOURCE: `(r ; name)`, with `; toStr` unless the field is already a Str"
@@ -10553,7 +10557,7 @@ codeToTermV stagesV = do
 -- their reps are `eq?`.  A rep assembled any other way carries no such
 -- guarantee: `eq?` on unnormalized reps compares variable NAMES.
 --
--- The seven alternatives of `data TypeRep`, by tag:
+-- The nine alternatives of `data TypeRep`, by tag:
 --   0 base   .Int .Float .Str .Sym
 --   1 var    a type variable, by name
 --   2 data   Name, and one stack per argument
@@ -10561,7 +10565,22 @@ codeToTermV stagesV = do
 --   4 sum    the alternatives, and the row tail (`.•` when closed)
 --   5 tail   a stack's open end ρ — only ever LAST in a stack
 --   6 arrow  Γ, Δ, the labels, and the effect tail (`.•` when closed)
+--   7 rep    a closed SEGMENT repeated a width: `Aⁿ`, `(A B)ⁿ`
+--   8 fin    `Fin(n)`, an index into a bundle of that width
 -- A stack is `List(TypeRep)` (`type StackRep`), front wire first.
+--
+-- WIDTHS (2026-09-16).  `Aⁿ` is a STACK SEGMENT repeated n times — not
+-- a wire — so `rep` stands in a stack beside `tail` and `wire?` says
+-- false for it.  `Fin(n)` IS a wire, and carries the same width.  The
+-- width tier is a second sort and keeps its own rep, `WidthRep`: a
+-- literal, or a variable at an offset (`weaken : Fin(n) ⇒ Fin(n+1)`
+-- needs the offset, so the rep says it rather than losing it).
+--
+-- THE RULE A WIDTH REP MUST NOT BREAK: never flatten a VARIABLE width
+-- into a type.  A concrete one may reflect expanded, because the
+-- checker itself expands it (`sexp`: `Int³` IS three wires and there is
+-- no `SExp` left to reflect); a variable one must come back with its
+-- variable, or `a0ⁿ⁰` and `a0ᵐ⁰` would be the same type.
 
 -- the one sym that is not a name: the closed end of a row, of an effect
 -- row, or the absence of a tail.  `•` is unwritable as a word, so it
@@ -10572,15 +10591,19 @@ closedSym = VSym ".•"
 symOf :: String -> Value
 symOf n = VSym ('.' : n)
 
--- The width tier is a SECOND SORT — an `Exp` is not a type, and `Fin`'s
--- bound is an `Exp` — so neither has a rep.  Flattening them would make
--- two different types equal, which is exactly what a rep must not do.
-noRepErr :: String -> String
-noRepErr what =
-  "no type rep for " ++ what ++ ": a bundle exponent is a WIDTH, not a "
-    ++ "type, and a rep that dropped it would make two different types "
-    ++ "equal.  Read this type with `:t`, or ask for the type of a word "
-    ++ "that does not mention a bundle."
+-- A WIDTH, as data.  The checker's `Exp` is an offset plus an optional
+-- variable, and the rep says exactly that: `lit k`, or `var n k` for
+-- `n+k`.  It is its own type because a width is its own SORT — writing
+-- it as a `TypeRep` alternative would let a width stand where a type
+-- stands, which is the confusion the tier exists to prevent.
+reprWidthV :: Exp -> Value
+reprWidthV (Exp k Nothing)       = VSum 0 [VInt k]
+reprWidthV (Exp k (Just (NV n))) = VSum 1 [symOf n, VInt k]
+
+expOfRepV :: Value -> Either String Exp
+expOfRepV (VSum 0 [VInt k])         = Right (Exp k Nothing)
+expOfRepV (VSum 1 [VSym n, VInt k]) = Right (Exp k (Just (NV (drop 1 n))))
+expOfRepV v = Left ("this is not a width rep: " ++ show v)
 
 reprTyV :: Ty -> Either String Value
 reprTyV TInt             = Right (VSum 0 [VSym ".Int"])
@@ -10595,7 +10618,7 @@ reprTyV (TFn arr)        = (\a -> VSum 3 [a]) <$> reprArrowV arr
 reprTyV (TSum row)       = do
   (alts, tl) <- reprRowV row
   Right (VSum 4 [encodeListV alts, tl])
-reprTyV t@(TFin _)       = Left (noRepErr (show t))
+reprTyV (TFin e)         = Right (VSum 8 [reprWidthV e])
 
 reprStackV :: SType -> Either String Value
 reprStackV st = encodeListV <$> go st
@@ -10603,7 +10626,11 @@ reprStackV st = encodeListV <$> go st
     go SEnd             = Right []
     go (STail (SV n))   = Right [VSum 5 [symOf n]]
     go (SCons t r)      = (:) <$> reprTyV t <*> go r
-    go (SExp b e _)     = Left (noRepErr (showExpAt b e))
+    -- a repeated segment is a STACK ITEM, not a wire: the base is a
+    -- closed stack, the width rides beside it, and the rest follows
+    go (SExp b e r)     = do
+      bv <- reprStackV b
+      (VSum 7 [bv, reprWidthV e] :) <$> go r
 
 reprRowV :: SumRow -> Either String ([Value], Value)
 reprRowV RNil            = Right ([], closedSym)
@@ -10643,6 +10670,7 @@ tyOfRepV (VSum 2 [VSym s, asV]) = do
   as <- decodeListV asV >>= mapM stackOfRepV
   Right (TData (drop 1 s) as)
 tyOfRepV (VSum 3 [a]) = TFn <$> arrowOfRepV a
+tyOfRepV (VSum 8 [w]) = TFin <$> expOfRepV w
 tyOfRepV (VSum 4 [altsV, VSym tl]) = do
   alts <- decodeListV altsV >>= mapM stackOfRepV
   let end | tl == ".•" = RNil
@@ -10658,6 +10686,10 @@ stackOfRepV v = decodeListV v >>= go
     go (VSum 5 [VSym s] : _)   =
       Left ("a stack's open end " ++ drop 1 s ++ " is its LAST item, and \
             \this rep puts wires after it")
+    go (VSum 7 [bv, w] : ts)   = do
+      b <- stackOfRepV bv
+      e <- expOfRepV w
+      sexp b e <$> go ts
     go (t : ts)                = SCons <$> tyOfRepV t <*> go ts
 
 arrowOfRepV :: Value -> Either String Arrow
@@ -10686,6 +10718,8 @@ showTypeV :: RCtx -> Value -> Either String String
 showTypeV ctx v@(VSum 6 _) = showArrowA d <$> arrowOfRepV v
   where d = dispOfRCtx ctx
 showTypeV ctx v@(VSum 5 _) = showStackA d <$> stackOfRepV (encodeListV [v])
+  where d = dispOfRCtx ctx
+showTypeV ctx v@(VSum 7 _) = showStackA d <$> stackOfRepV (encodeListV [v])
   where d = dispOfRCtx ctx
 showTypeV ctx v            = showTyA (dispOfRCtx ctx) <$> tyOfRepV v
 

@@ -4414,3 +4414,228 @@ the group produced **no** wires and the stage silently shifted. The fix
 is to put `f e ; ev` at the head of its own stage and bind the result —
 which is what every prelude word that calls a quoted predicate already
 does. Worth a line in §14 the next time that section is touched.
+
+---
+
+## Amendment (2026-09-16): hom-objects over stacks
+
+*Decided and shipped in stage 7a. What follows is the reason a slot, a
+parameter and a whole elaborator pass went away together, and what one
+model kept.*
+
+### Three warts, one cause
+
+Reading `examples/circuits.braid`, `examples/frame.braid`,
+`examples/reified.braid`, `examples/prob.braid` and
+`examples/transformations.braid` side by side, three things were ugly
+in exactly the same way:
+
+1. **`data Pair(a, b) = a b`, declared in five files.** A product type
+   in a language whose products are the stack. Nothing used it as data;
+   it existed to be packed with.
+2. **The Doctrine's second parameter, `p(_, _)`.** A constructor
+   parameter whose only job was to let the doctrine *name* the pairing
+   a model chose, so that `first : k(a, b) ⇒ k(p(a, c), p(b, c))` could
+   be stated and three laws written about it. It also had to carry its
+   own capitalized constructor words `P` and `unP` into a law's scope —
+   a second mechanism, for one parameter.
+3. **The routing pass.** A stage of `k` wires in and `j` out was
+   elaborated to `embed [unP … ; stage ; P …]` and then whiskered by
+   `first` once per wire riding above, with the widths read off each
+   stage's own arrow in the prefix scope. Sixty-nine lines of
+   `runTransport`, an arity read that no other pass needed, and four
+   refusals about widths.
+
+The cause is one sentence. **The stack is Braid's only product and it is
+flat**; a `data` declaration is THE way a product goes on a wire, and
+`Box(ρ)` is the anonymous case. The hom-object `k(a, b)` was the one
+place in the language where products *nested*, because it named one
+WIRE per side — so a three-wire stack had to become `Pair(a, Pair(b,
+c))` and `first` had to unpack a level at a time.
+
+Stage 5c½ parked the alternative as "a carrier over whole stacks is
+representable (`TData` holds stacks) and would delete both the packing
+and `first`", filed as *alternatives, not layers*. Flat products pick
+that alternative.
+
+### The decision
+
+`theory Doctrine(k(..., ...))`, with two structure slots:
+
+```braid
+compose : k(a, b) k(b, c) ⇒ k(a, c)
+embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)
+```
+
+`a`, `b` and `c` are **stacks**. A theory's constructor parameter is now
+kinded one argument at a time — `_` a wire, `...` a stack — so
+`k(..., ...)` is the hom-object and `d(_)` is still the parameterized
+exit `examples/prob.braid` wants. A `data` declaration may name several
+stack parameters, `data Circuit(a..., b...)`, and the "a stack variable
+sits in tail position" law moves from the parameter list to the body,
+which is where it was always really enforced.
+
+Transport is then: every stage becomes `embed [stage]`, whatever it
+covers, and every `;` becomes `compose`. The base already makes each
+stage cover the stack it is handed — that is what `_` and `...` are for
+— so the base's own widths ride through the functor untouched. Nothing
+reads an arity; nothing packs; nothing whiskers.
+
+### Does the strength survive anywhere, and why
+
+**Not in the Doctrine.** The question that decided it was whether
+`embed [f ...]` is available to every model, `Circuits` included — a
+circuit being a stateful box rather than a function. It is, and for a
+reason that is not about the model at all: the whiskering happens in the
+BASE, inside the quotation, *before* `embed` is applied. `embed` is
+handed a program on a wider stack and has nothing to commute with. Every
+model's `embed` is a function of a `Fn⟨ρ ⇒ σ⟩`, and `ρ` and `σ` are
+whatever the stage was written at. So `first` is not needed by
+`Circuits`, `Funcs`, `Frame`, `Reified`, `Sealed`, `Notes` or `Names` —
+all seven lost it and none of them noticed.
+
+**In `Prob`, yes — and it declares its own.** A base stage whiskers in
+the base; a **generator** does not. `flip : • ⇒ k(Float, Bool)` is an
+*entry*: a carrier at a fixed width, built by the model, not the image
+of any base program. Nothing in the base can widen a carrier, and a
+Markov category is exactly a theory whose generators are carriers —
+`flip ⊗ flip` is the statement the whole file turns on. So `Prob`
+declares the widening as an ordinary slot of its own:
+
+```braid
+under : k(a, b) =Recursive> k(c a, c b)
+```
+
+One wire `c` rides **under** the kernel's domain. There is no pairing in
+that signature and nothing to unpack: over stacks the strength is
+whiskering and whiskering is concatenation. `c` is a wire rather than a
+stack because `c a` is spellable and `a c` is a splice. `under` is not a
+doctrine slot, so it is available under `in Prob` and ignored by
+transport — which is exactly how it was used before, through `second`
+and `bothFlip`, except that `second` has no second spelling any more:
+acting on the wire above one riding below IS `under`.
+
+The honest general statement: **the Doctrine has no strength; a theory
+whose generators are carriers declares one, and over stacks it needs no
+pairing to say it.**
+
+### What got deleted
+
+- the slot `first`, the parameter `p(_, _)`, and the laws `firstFst`,
+  `firstEmbed`, `firstCompose` (replaced by one, `embedWide`, which says
+  `embed [f] ; embed [g] = embed [f ; g]` at a stage that is one wire in
+  and two out and at one that whiskers)
+- `instanceConWords` and the `P`/`unP` constructor-word mechanism
+- `runTransport`'s arity read, packing, whiskering loop and width
+  bookkeeping: 130 lines to 61
+- four refusals — *takes no wire*, *leaves no wire*, *takes k wires but
+  the scope is running w wide*, and *is not one wire in and one wire out
+  … transports through `first`*. A stage that does not cover its stack
+  now gets the base's own refusal, which is what it is; and a stage that
+  takes no wire is simply legal, because `k(•, Int)` is a hom-object
+  between stacks and `•` is a stack
+- `data Pair` from five example files
+- the level table's third row
+
+### The `Frame` carrier, and a note worth keeping
+
+`Col(ρ, σ)` is `Fn⟨List(Box(ρ)) =Recursive> List(Box(σ))⟩`: **one list of
+boxed rows**, not a stack of lists. The distinction is the whole reason
+the type is written that way — a stack of lists is the column store, and
+it is *non-injective*: three columns of ten and ten columns of three are
+the same stack of `Int` lists, so the width is not recoverable and the
+type would be a lie. A `TypeRep` word could derive the column-store
+representation from the row type later, which is where that belongs;
+the carrier says the honest thing now.
+
+### What it cost, recorded
+
+Two prices, both paid in public.
+
+*Two transformation squares stopped being proved.* `Forget : Names ⇒
+Funcs` used to prove all five of its squares, because a hom-object that
+pinned its `Fn⟨a ⇒ b⟩` to one wire per side gave the normalizer a closed
+arity for the `ev` inside `compose`. Over stacks the witness is
+`Fn⟨ρ ⇒ σ⟩` with `ρ` open, and `ev` of an open wire has no closed
+arity — so `compose` and `observe` go to the theory's samples, which is
+the same wall `Len` has always stood at. `embed` and `sample` still
+prove. What would buy the other two back is a normalizer that reads a
+stack's width from the type at the splice; that is a stage of its own,
+and it is not this one.
+
+*A logger cannot render a stack.* `examples/lifting.braid`'s `Notes`
+logs its input with `toStr`, and `toStr` is a word about ONE WIRE.
+Braid has no renderer for a whole stack — `dup` copies a wire, `pack`
+wants a homogeneous bundle — so a logger over stacks logs the `Box`, and
+a box renders as the one-alternative sum it is. The file's log line went
+from `100 212` to `alt1(100) alt1(212)`, and the file says why. A `Show`
+for stacks is the thing that would fix it; nothing in stage 7a ships one.
+
+---
+
+## Amendment (2026-09-16): widths in the rep
+
+*Shipped with stage 7a's second half. The reflected-types amendment
+above recorded that a bundle exponent and `Fin(n)` "ride the miss track,
+with the reason". The reason is still right; the conclusion was not.*
+
+### What was wrong with missing
+
+A width is a **second sort** — an exponent is not a type — and a rep
+that flattened `Aⁿ` into `A` would make two different types equal. That
+argument says a width must not be *reflected as a type*. It does not say
+it must not be reflected at all, and the difference matters: with `pack`,
+`zipN`, `mapN`, `checkedAt`, `indicesN`, `at`, `weaken` and `unzipN` all
+missing, `typeOfWord` was not total on the prelude, the differential
+check (`typeOfWord w` = `typeOfCode [w]`) skipped them, and rung 2 of the
+bootstrap — a Braid checker written on `TypeRep` — could not have typed
+the very words that make bundles work.
+
+### The design
+
+Two alternatives join `TypeRep`, and neither is a wire-shaped lie:
+
+```text
+7  rep   List(TypeRep) WidthRep    a closed SEGMENT repeated a width
+8  fin   WidthRep                  Fin(n), an index into such a bundle
+```
+
+`Aⁿ` is a **stack segment**, not a wire, so tag 7 stands in a `StackRep`
+beside the open end (tag 5) and `wire?` says false for it — which keeps
+`stackWidth` honest, since a repeated segment is no more a *known* number
+of wires than an open tail is. `Fin(n)` genuinely is a wire, so tag 8 is
+one.
+
+The width itself is its own type:
+
+```text
+data WidthRep = (Int | Sym Int)     lit k | var n at offset k
+```
+
+The offset is not decoration: `weaken : Fin(n) ⇒ Fin(n+1)` is in the
+prelude, so a rep without it would have to lie about `weaken` or drop it.
+The checker's own `Exp` is exactly an offset plus an optional variable,
+and the rep says that and nothing more.
+
+### The rule
+
+**Never flatten a variable width into a type.** A *concrete* width may
+reflect expanded, because the checker expands it first — `sexp`
+canonicalizes `Int³` into three real wires and there is no `SExp` left to
+reflect, so a rep that shows three wires is not lossy, it is accurate. A
+*variable* width comes back with its variable and its offset, or `a0ⁿ⁰`
+and `a0ᵐ⁰` would be the same type, which is the one thing a rep must
+never allow. Normalization needed nothing new: `normalizeArrow` has
+renumbered width variables to `n0`, `n1`, … since they existed.
+
+### What it bought
+
+`showType` round-trips every prelude word: `typeOfWord "pack"` renders
+`a0ⁿ⁰ ⇒ List(a0)`, byte for byte what `:t pack` prints, because the
+display was always the REPL's own. The differential check over the
+prelude went from **182 words to 210** — the exponent and index words
+joined it, and they agree.
+
+What is still not reflected is a `model`, a `transformation`, a
+`functor` and a resource's routing: each needs a rep of its own, and
+none of them is a function of the declaration alone.

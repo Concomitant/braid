@@ -55,9 +55,14 @@ theory NAME [ ( params ) ] [ in DOCTRINE ] =
 ```
 
 Parameters are **kinded by how they are written**: a bare name is one
-wire (`Monoid(a)`), `...` a stack, `k(_, _)` a type **constructor** with
-its arity in underscores. A slot may name variables the theory does not
-declare; each is local to its slot and generalized there.
+wire (`Monoid(a)`), `...` a stack, and a type **constructor** carries its
+kind **one mark per argument** — `_` where that argument is one wire,
+`...` where it is a whole stack. So a hom-object over stacks is
+`k(..., ...)` and a parameterized exit over one wire is `d(_)`. A slot
+may name variables the theory does not declare; each is local to its
+slot and generalized there — and in a constructor's stack position they
+are stack variables, which is why `compose : k(a, b) k(b, c) ⇒ k(a, c)`
+composes whole sides of a diagram.
 
 `in DOCTRINE` (§8) says this theory **extends** another — at most one,
 because a presentation extends by inclusion and two inclusions want a
@@ -79,9 +84,9 @@ theory is applied by being *modelled*.
 `build.braid` (`Config`, a theory whose models are build settings);
 `autodiff.braid` (`Smooth(a, g)`, a ring with `exp` and `sin` over one
 carrier, and a second parameter for an exit whose result type varies by
-model); `circuits.braid` (`Arrow(k(_, _)) in Doctrine`, and `Vault`, a
-**sealed** theory with no exit); `prob.braid` (`Prob(k(_, _), d(_)) in
-Doctrine`, a Markov category); `frame.braid` (`Columns`);
+model); `circuits.braid` (`Arrow(k(..., ...)) in Doctrine`, and `Vault`,
+a **sealed** theory with no exit); `prob.braid` (`Prob(k(..., ...),
+d(...)) in Doctrine`, a Markov category); `frame.braid` (`Columns`);
 `lifting.braid` (`Lifting`); `reified.braid` (`Reflective`);
 `resources.braid` (`Collector(e, a)`, the generic handler);
 `payroll.braid`, `optimizer.braid`, `distributive.braid`,
@@ -95,8 +100,8 @@ Malformed theory declaration: after the parameters a theory head takes
   at most `in <Theory>` (…)
 `over` is gone since 2026-09-16: a theory extending another is
   MEMBERSHIP — write `theory … in <Theory>` where the `over` is
-A constructor parameter's kind is written with underscores, one per
-  argument: k(_, _)
+A constructor parameter's kind is written with one mark per argument —
+  `_` for a wire, `...` for a stack: k(..., ...), d(_)
 theory T: slot 's' is <arrow>, but Doctrine declares it <arrow> — a
   theory that extends Doctrine declares Doctrine's operations at
   Doctrine's signatures.
@@ -150,8 +155,7 @@ bare `data` name.
    arrow against the theory's **declared** arrow instantiated at this
    model's arguments — by subsumption, so a more general body is fine.
 4. `transportOf` reads this model's *shape* off the theory's declared
-   arrows (composition, embedding, strength, exits) — never off a
-   slot's name.
+   arrows (composition, embedding, exits) — never off a slot's name.
 5. The theory's **laws run**, as ordinary programs, at module start,
    before `main`.
 
@@ -182,6 +186,10 @@ model M: slot 's' is <arrow> but theory T declares <arrow>
 model M: theory T expects N argument(s)
 model M: theory T declares 'k' as a type constructor of arity 2, so its
   argument names a declared data type; 'X' is not one
+model Bad: T cannot fill the constructor parameter 'k' — theory Arrow
+  declares it at k(_, _), so T's parameters must be declared bare (a
+  wire) where that says `_`   (and the mirror, `...` where that says
+  `...`)
 law 'assoc' fails for model M: a model must be an audited model of its
   theory
 Duplicate model declaration: M (a functor and a model share one
@@ -238,21 +246,31 @@ doctrine's composition and embedding: it presents a **category**, and
 
 **Syntax.** No syntax of its own — it is an ordinary `model`. What
 makes it transport is the **shape** of its theory, read by
-`transportOf`: a hom-object `k(_, _)`, a slot at `k(a,b) k(b,c) ⇒
-k(a,c)`, a slot at `Fn⟨a ⇒ b⟩ ⇒ k(a,b)`, optionally a strength at
-`k(a,b) ⇒ k(p(a,c), p(b,c))`, and exits (`k(Int,Int) ⇒ Int` and kin).
+`transportOf`: a hom-object `k(..., ...)`, a slot at `k(a, b) k(b, c) ⇒
+k(a, c)`, a slot at `Fn⟨a ⇒ b⟩ ⇒ k(a, b)`, and exits (`k(Int, Int) ⇒
+Int` and kin) — `a`, `b`, `c` being **stacks**, so the carrier is a
+process on a whole side of a diagram. Its data type declares a stack
+parameter per side: `data Circuit(a..., b...) = …`.
 
 **What the checker does.** Everything a plain model gets, plus:
-`transportOf` records the carrier, composition, embedding, strength and
-exit slots; a generated word of the model's own name is checked like
-any functor's word (`checkFunctorWord`), so that `[Circuits]` and
+`transportOf` records the carrier, composition, embedding and exit
+slots; a generated word of the model's own name is checked like any
+functor's word (`checkFunctorWord`), so that `[Circuits]` and
 `lift2 [Circuits]` are values.
 
 **What `with` does to it.** `with M` **transports**: every stage
-becomes `embed` of that stage as a quotation, every `;` becomes
-`compose`, and a stage wider than one wire is packed through the
-strength. Exits are **refused inside** the scope and called under
-`in M`. At most one such model per clause.
+becomes `embed` of that stage as a quotation and every `;` becomes
+`compose`. No arity is read and nothing is packed or whiskered — a
+stage of any width embeds as **itself**, and is weighed at exactly the
+width it was written, so a stage that does not cover the stack it is
+handed fails with the base's own message (`Cannot unify stacks: • vs
+Int`). Exits are **refused inside** the scope and called under `in M`.
+At most one such model per clause.
+
+```text
+def sq with Circuits = dup ; *
+#   with@Circuits >> [dup] >> Circuits@embed >> _ [*] >> _ Circuits@embed >> Circuits@compose
+```
 
 **Examples.** `circuits.braid` (`Circuits` over stateful stream
 transducers, `Funcs` over plain functions, `Sealed` with no exit);
@@ -264,16 +282,14 @@ written); `prob.braid` (`Enum`, `Sampler`, `Nondet`);
 **Refusals.**
 
 ```text
-`with M`: <stage> is not one wire in and one wire out, and theory T's
-  hom-object K(a, b) names ONE object on each side. …
-`with M`: add1 takes 1 wire, but the scope is running 2 wires wide.
-`with M`: 5 takes no wire, and K(a, b) has an object on each side
-`with M`: theory T takes Doctrine's `compose` and not its `embed` (…)
+`with M`: theory T takes Doctrine's `compose` and not its `embed`
+  (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`): `with M` cannot transport a base stage;
+  `in M` and compose by hand.
 `observe` leaves M; call it outside `with M` (a category is left by a
   model, not by a marker)
 `with M1 M2`: a clause may name at most one category — the second would
   embed the first's carriers as if they were programs. …
-`with M`: the scope is empty, and a category has no empty composite
+`with M`: the scope is empty, and a transported scope must build a K
 ```
 
 ### Family — `model F(T(binders)) in T′(args)`
@@ -364,8 +380,8 @@ composes like the base (§8).
 **Examples.** `theories.braid` (`fold1 in Monoid`, read by three
 models); `build.braid` (`banner`, `stamped`, `plan` over `Config` — a
 template calling templates); `autodiff.braid` (`poly`, `wave`, `fxy`,
-`cosOf` over `Smooth`, read by five models); `prob.braid` (`second`,
-`bothFlip`, `coinSnd`, `flipSnd` over `Prob`, instantiated per model);
+`cosOf` over `Smooth`, read by five models); `prob.braid` (`bothFlip`,
+`coinSnd`, `flipSnd` over `Prob`, instantiated per model);
 `resources.braid` (`collected` over `Collector`, the generic handler);
 `transformations.braid`.
 
@@ -411,8 +427,8 @@ builds one carrier it is one of `K`'s words too.
 `with K` treats it as a carrier, not as a stage.
 
 **Examples.** `circuits.braid` (`hand`, `sum0`, `scale3`, `byHand`, and
-the `…Out` observations that call an exit); `prob.braid` (`secondE`,
-`bothFlipE`, `idS`, `thenS`, `coinSndE`, …); `reified.braid` (`sq5`,
+the `…Out` observations that call an exit); `prob.braid` (`bothFlipE`,
+`coinSndE`, `flipSndE`, `idS`, `thenS`, …); `reified.braid` (`sq5`,
 `w5`); `frame.braid` (`column`, `sqOut`, `polyOut`, `wiringOut`);
 `lifting.braid` (`report in Notes`); `transformations.braid`
 (`namedSq in Names`).
@@ -478,7 +494,10 @@ again.
 word, and the word is called like any other.
 
 **Examples.** `transformations.braid` (`Len : ListMonoid ⇒ IntSum`,
-sampled; `Forget : Names ⇒ Funcs`, all five squares **proved**);
+sampled; `Forget : Names ⇒ Funcs`, four squares — `embed` and `sample`
+**proved**, `compose` and `observe` **sampled**, because over stacks the
+witness is `Fn⟨ρ ⇒ σ⟩` with ρ open and `ev` of an open wire has no
+closed arity);
 `autodiff.braid` (`Value : Fwd(Floats) ⇒ Floats` — "AD computes the
 right value", all nine proved; `Transpose : Fwd(Floats) ⇒ Rev` —
 "forward and reverse are the same linear map", six sampled);
@@ -510,41 +529,60 @@ transformation N: the square for slot 's' is FALSE — `sameCode` decides
 ## the Doctrine
 
 **What it is.** The **built-in theory of the base's own structure** — a
-Freyd category; Hughes' `arr`/`>>>`/`first`. It is not declared by
-anyone and cannot be: it names the shape a theory must have for its
-models to transport.
+category whose hom-objects range over **stacks**, and the embedding of
+the base into it; Hughes' `arr` and `>>>` without his `first`, because
+a stage of any width now embeds as itself. It is not declared by anyone
+and cannot be: it names the shape a theory must have for its models to
+transport.
 
-**Syntax.** `theory T(k(_, _)[, …]) in Doctrine = …`. The Doctrine is
-`theory Doctrine(k(_, _), p(_, _))` with five slots — the three
-structural ones, `compose : k(a,b) k(b,c) ⇒ k(a,c)`, `embed : Fn⟨a ⇒ b⟩
-⇒ k(a,b)` and the strength `first : k(a,b) ⇒ k(p(a,c), p(b,c))`, plus
-the evidence a law needs, `observe : k(Int,Int) ⇒ Int` and `sample : •
-⇒ k(Int,Int)` — and seven laws stated over them (identity twice,
-associativity, functoriality of `embed`, and three about `first`). `k`
-is the hom-object and `p` is the pairing a wide stage is packed with.
-A theory declares as many of the five as it wants: composition alone
-composes carriers by hand, + embedding transports one-wire stages, +
-`first` transports any stage.
+**Syntax.** `theory T(k(..., ...)[, …]) in Doctrine = …`. The Doctrine
+is `theory Doctrine(k(..., ...))` with four slots — the two structural
+ones, `compose : k(a, b) k(b, c) ⇒ k(a, c)` and `embed : Fn⟨a ⇒ b⟩ ⇒
+k(a, b)`, plus the evidence a law needs, `observe : k(Int, Int) ⇒ Int`
+and `sample : • ⇒ k(Int, Int)` — and five laws stated over them
+(identity twice, associativity, functoriality of `embed`, and
+`embedWide`, which states `embed [f] ; embed [g] = embed [f ; g]` at a
+stage that is one wire in and two out and at one that whiskers,
+`(_ 1 ; +) _`). `k` is the hom-object, and `a`, `b`, `c` are stacks:
+there is no pairing parameter and no strength, because the base's own
+`...` does the whiskering **inside the quotation**, before `embed` sees
+it. A theory declares as many of the four as it wants, and there are
+two levels:
+
+| declared | it licenses |
+|---|---|
+| `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
+| `+ embed` | `with M` transports **any** stage, at the width it is written. |
 
 **What the checker does.** `checkExtends` verifies the claim once per
 theory, whether or not anything models it: every slot the theory
 declares that the Doctrine also declares must be the Doctrine's slot at
 the Doctrine's shape (`matchArrow`, a one-way match whose pattern
-variables are the Doctrine's slot-local wires and its constructor
-parameters), with `k` and `p` instantiated **consistently across every
-slot**. The grade is not compared — what a model may *do* is the
-theory's business, which is why `Arrow`'s slots may be `=Recursive>`. A
-theory that takes the composition and not the strength is audited for
-associativity and not for naturality: exactly what it claimed. The
-Doctrine's **laws are inherited**, and a model runs an inherited law
-when it can *state* it — when it declares every slot the law names.
+variables are the Doctrine's slot-local stacks and its constructor
+parameter), with `k` instantiated **consistently across every slot**.
+The grade is not compared — what a model may *do* is the theory's
+business, which is why `Arrow`'s slots may be `=Recursive>`. A theory
+that takes the composition and not the embedding is audited for
+associativity and for nothing else: exactly what it claimed, since
+every other law names `embed`. The Doctrine's **laws are inherited**,
+and a model runs an inherited law when it can *state* it — when it
+declares every slot the law names.
+
+A theory may declare a **strength of its own**, and one does:
+`prob.braid`'s `Prob` has `under : k(a, b) =Recursive> k(c a, c b)`, a
+wire `c` riding under the kernel's domain, with no pairing anywhere. It
+needs one because a Markov category's **generators** — `flip`,
+`uniform`, `condition` — are carriers at a fixed width, and nothing in
+the base can widen a carrier. `under` is not a Doctrine slot, so it is
+an ordinary slot of that theory: in scope under `in M`, ignored by
+transport.
 
 **What `with` does to it.** Nothing directly; it is `transportOf`
 reading a model of such a theory that makes `with M` transport.
 
 **Examples.** `circuits.braid` (`Arrow`, `Vault`), `frame.braid`
 (`Columns`), `lifting.braid` (`Lifting`), `prob.braid` (`Prob`, whose
-seven inherited arrow laws run for all three models before anything
+five inherited category laws run for all three models before anything
 prints), `reified.braid` (`Reflective`),
 `transformations.braid` (`Arrow`).
 
@@ -578,7 +616,7 @@ wiring:
 | a **functor** | the routed, renamed body goes to its `Code ⇒ Code` word as `Code`, and what comes back is spliced | `=F>`, plus the word's own labels | `def poly with Fuel Metered = …` (`metered.braid`) |
 | **`Recursive`** | the def's own name goes into scope in its own body and the knot is tied (innermost, before every other scope) | `=Recursive>` | `def fac with Recursive = …` (`recursion.braid`) |
 | a **model with a carrier**, no `in` | **transport**: stage ↦ `embed`, `;` ↦ `compose` | `=X>` | `def easy with Circuits = add1 ; dbl` (`circuits.braid`) |
-| a **model with a carrier**, with `in T` for its theory | **instantiate only**: slot names resolve, the spine stays base composition | `=X>` | `def secondE in Prob with Enum = second` (`prob.braid`) |
+| a **model with a carrier**, with `in T` for its theory | **instantiate only**: slot names resolve, the spine stays base composition | `=X>` | `def bothFlipE in Prob with Enum = bothFlip` (`prob.braid`) |
 
 **What the checker does.** `elabHeaders` runs **between parse and
 inference** and writes the clause out: a syntactic Term rewrite with
@@ -639,7 +677,7 @@ them*.
 **The pin.** Both of these type, and they are different programs:
 
 ```text
-def a with Enum = half ; flip ; dup   # a0 =Enum Recursive> Pair(Bool, Bool)
+def a with Enum = half ; flip ; dup   # a0 =Enum Recursive> Bool Bool
 def b in Enum   = flip ; dup          # • =Recursive> Kern(Float, Bool) Kern(Float, Bool)
 ```
 
@@ -760,7 +798,9 @@ checker holds (the environment, the `data`/`resource` declarations, the
 **What they answer with.** `data TypeRep` and `data Decl`, declared in
 the prelude beside `data Atom`, for the same reason: a prim's scheme
 has to point at something. `TypeRep` mirrors `Ty`/`SType`/`EffRow`/
-`Arrow` in seven alternatives; `Decl` is a `data` (name, parameters,
+`Arrow` in nine alternatives — the last two being a repeated closed
+**segment** with its width (`Aⁿ`) and **`Fin`** at a width, whose widths
+are a `WidthRep` and not a type; `Decl` is a `data` (name, parameters,
 body, **field names**), a `type` (name, parameters, body) or a `theory`
 (name, parameters, slots, law names). A `resource` reflects as the
 `data` it is; a `table` reflects as the `data` declaration it wrote.
@@ -778,8 +818,17 @@ construct of its own (`cellsFor`, the prelude; `examples/frame.braid`).
 | not reflected | why |
 |---|---|
 | `model`, `transformation`, `functor`, `resource`'s routing | nothing has asked; each needs a rep of its own and none of them is a function of the *declaration* alone |
-| a bundle exponent (`Intⁿ`), `Fin(n)` | a width is a second sort — an exponent is not a type — and a rep that flattened it would make two different types equal.  The miss track says so |
 | a template (`def f in T`) | it has no type until a model reads it, so `typeOfWord` has nothing to answer |
+
+**The width tier has its own sort** *(2026-09-16)*. `Aⁿ` is a stack
+SEGMENT repeated n times, so its rep stands in a `StackRep` beside the
+open end rather than being a wire, and the width beside it is a
+`WidthRep` — `lit k`, or `var n k` for `n+k`. A width is a second sort
+and keeping it one is the whole point: a CONCRETE width reflects
+expanded, because the checker itself expands it (`Int³` *is* three
+wires), and a VARIABLE width is never flattened, or `a0ⁿ⁰` and `a0ᵐ⁰`
+would be one type. `typeOfWord "pack"` answers now, and so do `zipN`,
+`mapN`, `checkedAt` and `indicesN`.
 
 **Refusals.** None of their own: `typeOfWord`, `typeOfCode` and
 `declOf` are total, and put the checker's own message on the **miss

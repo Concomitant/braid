@@ -52,7 +52,7 @@ preludeDifferential =
 
 runDifferential :: Maybe String
 runDifferential
-  | length preludeDifferentialPairs < 150 =
+  | length preludeDifferentialPairs < 205 =
       Just $ "the differential check compared only "
           ++ show (length preludeDifferentialPairs) ++ " words: something "
           ++ "stopped having a rep, or stopped inferring"
@@ -2741,10 +2741,22 @@ evalTests =
     -- own message, which is what makes the word TOTAL
   , (showT ++ "\"nope\" ; typeOfWord ; (drop ; \"?\" | (e -> e)) ; merge ; print",
      ["typeOfWord: nope is not a word at this point.  A template (`def f in T`) is not one either: it has no type until a model reads it."], "")
-    -- THE WIDTH TIER HAS NO REP: a bundle exponent is a WIDTH, not a
-    -- type, and a rep that flattened it would make two types equal
-  , (showT ++ "\"pack\" ; typeOfWord ; (drop ; \"a type\" | drop ; \"a width\") ; merge ; print",
-     ["a width"], "")
+    -- THE WIDTH TIER HAS ITS OWN REP (2026-09-16): a bundle exponent is
+    -- a stack SEGMENT repeated a width, so it stands in a stack beside
+    -- the open end, and the width is a `WidthRep` rather than a type.
+    -- The display round-trips: `showType` of the rep is what `:t` says.
+  , (showT ++ "\"pack\" ; typeOfWord ; say ; print",
+     ["a0\8319\8304 \8658 List(a0)"], "")
+  , (showT ++ "\"zipN\" ; typeOfWord ; say ; print",
+     ["a0\8319\8304 a1\8319\8304 \8658 (a0 a1)\8319\8304"], "")
+    -- ...and a variable width is NEVER flattened: `weaken` leaves
+    -- `Fin(n+1)`, offset and all
+  , (showT ++ "\"weaken\" ; typeOfWord ; say ; print",
+     ["Fin(n0) \8658 Fin(n0+1)"], "")
+    -- a repeated segment is not a WIRE, so it is not counted in a
+    -- stack's closed width — the same rule the open end obeys
+  , (showT ++ "\"pack\" ; typeOfWord ; ((r -> r ; unTypeRep ; ((s -> 0) | (s -> 0) | (n as -> 0) | (x -> 0) | (as t -> 0) | (s -> 0) | (i o ls t -> i ; stackWidth) | (b w -> 0) | (w -> 0)) ; mergeTypeRep) | drop ; 9) ; merge ; print",
+     ["0"], "")
     -- A DECLARATION as data: the field names a `data` wrote
   , (declSrc ++ "\"Trade\" ; declOf ; ((d -> d ; fieldsOf) | drop ; nil) ; merge ; [symStr] ... ; map ; print",
      ["list(sym, px, qty)"], "")
