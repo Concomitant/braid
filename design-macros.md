@@ -5052,3 +5052,175 @@ The cost was one number. `examples/typerep.braid`'s differential check
 counts the words in scope — 260 before, 272 now — because twelve of
 them are new. They have reps and they agree, which is the check doing its
 job.
+
+## Amendment (2026-09-18): `functor` takes a graph morphism; `resource` is a model
+
+Two keywords were carrying claims they could not pay for. The fix was
+not to add checking; it was to read the foundations and let the types
+say what was already true.
+
+### The foundations, in three sentences
+
+A **presentation** is generators and relations. An **interpretation** —
+a model — is a structure-preserving functor out of the category the
+presentation presents, and it is *finite* by the universal property:
+one image per generator, plus the laws, determines the whole functor.
+A **`Code ⇒ Code` word** is none of that: it is an endomap of the
+OBJECT OF MORPHISMS. It has no presentation, no object map, no
+generator images and no laws, and nothing about it requires it to
+commute with composition.
+
+`stagewise [(s -> …)]` respects `;` perfectly, and that was recorded
+here on the level ladder as "level 2a — functorial by construction".
+But the *construction* was the user's to perform, and `functor` took
+whatever came out of it. The ladder had level 2b — "audited if claimed,
+never by construction" — precisely because the keyword `functor` was
+promising something its argument did not have to be.
+
+### The change: the check is the type
+
+`functor F = w` now requires `w : • ⇒ Fn⟨Stage ⇒ Code⟩` — a **graph
+morphism**, one image per generator. A functor out of a FREE category
+*is* a graph morphism, so the declaration is functorial by the
+universal property, the name is honest, and the EXTENSION to the whole
+of `Code` is what the declaration means rather than something the
+author writes. Level 2b is gone, not demoted: there is no longer a form
+in which a functor is claimed and not checked.
+
+`stagewise` stops being something a user calls in a functor
+declaration. It is still the prelude word that computes the extension —
+it is what the generated word `F : Code ⇒ Code` is built from — but
+that is the compiler's call now, once per declaration, and `[F]` and
+`lift2 [F]` are the same functor as a value.
+
+`interpose` is retyped to BUILD a graph morphism, `Code ⇒ Fn⟨Stage ⇒
+Code⟩`, so `functor Ticked = tick ... ; interpose` reads exactly as it
+read and its check — a stage inserted at every cut must be `ρ ⇒ ρ`, or
+`E ρ ⇒ E ρ` over resource wires — sits where it sat. The check is now
+the prim `checkedStage : Code ⇒ Code` and the weaving is the ordinary
+prelude word `interposeRaw`; `interpose` is the two composed. A special
+form became two words, which is the fifth time that trade has paid.
+
+### The evidence: the escape hatch had no user
+
+Before changing anything, every `functor` declaration in the repository
+was read. All six named a word built from `stagewise` or `interpose`:
+
+| declaration | what its word was |
+|---|---|
+| `Traced = marked` | `[(s -> …)] ... ; stagewise` |
+| `Ticked = ticked` | `tick ... ; interpose` |
+| `Metered = metered` | `([burn …] ; getCode) ... ; interpose` |
+| `Spaced`, `Doubled` | `[(s -> …)] ... ; stagewise` |
+| `Same = idF` (test library) | the identity on `Code` |
+| `Cells = cellsOfCode` | **not a rewrite at all** |
+
+Five of the six were graph morphisms wearing an extension, and the
+migration deleted the extension: `functor Traced = [(s -> (s ; pack)
+(s ; markStage) ; append)]`. The sixth is the interesting one, and it
+is the whole argument in one declaration.
+
+### `Cells` was never a functor, and said so
+
+`cellsOfCode` took the body's `Code`, threw all of it away but the
+first symbol, looked that symbol up with `declOf` and emitted a
+printer. Its honest type is `Sym ⇒ Code`. It was code GENERATION, not
+a rewriting, and it wore a `with` scope for exactly one reason: there
+was no declaration form whose body is computed. `examples/typerep.braid`
+said so itself, in a paragraph titled THE GAP, and named stage 8 as
+where the gap would close.
+
+Stage 8's declaration substrate *is* that form. So the section is a
+top-level declaration program now —
+
+```braid
+(.Row ; cellsOfSym) "rowCells" ; defW
+```
+
+— and `rowCells` is `Row ⇒ List(Str)` instead of `Row =Cells>
+List(Str)`. The receipt was not decoration and it was not wrong: a
+scope had run, so a scope had to sign. The right fix was to stop
+running a scope over code that was being generated rather than
+rewritten.
+
+### What the whole-spine scope covered, and who covers it now
+
+A `Code ⇒ Code` word may no longer head a `with`, and the refusal names
+the two honest homes rather than leaving them to be found:
+
+- **`lift2 [w]`** applies any `Code ⇒ Code` word at RUNTIME, checked
+  per program against the program's own type, with the original as the
+  fallback. That is *more* checking than the scope gave, not less: the
+  scope re-inferred the expansion and took whatever it got.
+- **The declaration substrate** — a top-level `• =Dict> •` program
+  calling `defW` — declares code that is GENERATED rather than
+  rewritten, which is the `Cells` case and every case like it.
+
+Nothing is lost. That sentence is in the manual, and it is meant
+literally: the two homes between them cover every use the hatch had.
+
+### `resource R = Ty` → `model R in Doctrine = Ty`
+
+Since the 2026-09-17 amendment a `resource` declaration **is** a model
+declaration: it generates the carrier `R@k`, the theory `R@t in
+Doctrine` and the model `R`, and `transportOf`, `elabScope`, the
+receipt and the routing pass all read it as one. The keyword was a
+second spelling for a thing the language has one spelling for, which is
+the house rule it violated.
+
+The head is told from every other `model` head by its **body**: a
+STACK, with no `=` in it. A body of `p = q` lines is a table; a body
+with no `=` is a carrier. That is the same content-directed rule the
+object map already uses, and it needs no new punctuation and no
+position to remember.
+
+`in Doctrine` here is the one genuine widening. It names a
+**sub-presentation** — `compose` and `embed`, and not `observe` or
+`sample`, because a generated `observe` would have to run a resource
+program, which needs a seed, and seeds live at install sites. A plain
+`model M in T` is total over `T`'s slots and this one is not. That is
+said out loud in MANUAL §8 rather than left for a reader to discover.
+
+Seventy-two declaration sites, every one a textual substitution, and
+not one byte of printed output moved.
+
+### The ordering rule, restated in actions
+
+`with`'s clause used to be described by the keywords it could carry —
+"models first, then resources, then functors". With two keywords gone
+that reading had nothing left to order. The rule is the same rule and
+it is now stated as what each name DOES: templates expand, then
+**renames**, then **routes**, then **composes**, then **rewrites**,
+left to right.
+
+This is a documentation change and nothing else. `elabHeaders` has
+never partitioned by keyword: it looks each name up in the table its
+declaration put it in, and *which table* is decided by what the name's
+theory is — a carrier declared `model R in Doctrine` is in the resource
+list and routes; a model whose theory has slots renames; a model of
+`Base` rewrites by its table; a model whose theory has a hom-object
+composes; a functor rewrites the spine. The fold changed the spelling
+of one declaration and left the partition where it was.
+
+### Composing two functors, after the change
+
+`with F G` applies F and then G, and that is their composite: functor
+composition is `;` on the extensions. The old recommendation — name the
+composite with `functor Both = metered ; traced` — no longer types,
+because a graph morphism is not a `Code ⇒ Code` word and two of them do
+not compose by `;`. The replacement is the header: one clause, the
+names in the order you mean. A composite wanted as a VALUE is
+`[Metered] [Traced]` handed to `lift2` twice, or an ordinary def over
+the two extension words, both of which are in scope where a value is
+wanted — main, model bindings, laws. The extension words sit BELOW the
+module's defs, because a morphism may name any of them, so a def body
+composes with its header rather than with a word.
+
+### The cost, counted
+
+`examples/typerep.braid`'s differential check counts the words in
+scope: 272 before, 269 after. Three of the removals are the two helper
+defs `Cells` needed and the declaration word `resourceW`, which left
+the table with its keyword — a keyword names one declaration word, and
+this one's word is `modelW`. The count moving is the check doing its
+job, exactly as it was when twelve words arrived on 2026-09-17.

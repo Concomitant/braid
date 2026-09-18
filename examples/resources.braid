@@ -2,10 +2,14 @@
 #
 # The design bet (design-effects.md) is that the effect zoo decomposes
 # into structure Braid already has — state is a threaded wire, a log is
-# a wire, a reader is closure capture — and only IO is irreducible. A
-# `resource` names such a wire. It is NOMINAL, so `Int Int` is never
-# silently a GameState, and it rides DEEPEST, which is what puts every
-# offset a known distance from the bottom.
+# a wire, a reader is closure capture — and only IO is irreducible.
+# `model R in Doctrine = Ty` names such a wire.  It is a MODEL because
+# that is what it always was (the declaration writes a carrier, a theory
+# and a model — `:doc Log`), and the body being a STACK rather than a
+# table of bindings is what tells this head from every other `model`
+# head.  The wire is NOMINAL, so `Int Int` is never silently a
+# GameState, and it rides DEEPEST, which is what puts every offset a
+# known distance from the bottom.
 
 model Log     in Doctrine = Str
 model Counter in Doctrine = Int

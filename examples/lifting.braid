@@ -42,9 +42,10 @@ def celsius = (n -> 9 n >> * >> _ 5 >> div >> 32 ... >> +)
 _ print                                            # 212
 unLog >> print                                     # 100 — the log
 
-# The same shape one level up: a `Code ⇒ Code` functor applied by `with`
-# is this action on a whole region's spine instead of one quotation —
-# "the logged version of this block". See design-macros.md.
+# The same shape one level up: a `functor` — a graph morphism,
+# `Fn⟨Stage ⇒ Code⟩`, extended by `with` — is this action on a whole
+# region's spine instead of one quotation, "the logged version of this
+# block". See design-macros.md.
 
 # ---- the same block, said by TRANSPORT --------------------------------
 # The sentence at the top of this file is a theory slot:

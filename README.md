@@ -30,11 +30,16 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   category: circuits, data frames, probability as a Markov category.
   The Doctrine's hom-object ranges over whole STACKS, so a stage of any
   width transports as itself — products stay flat.
-- `resource`: a threaded wire, and a model of the Doctrine. `with R`
-  is transport into it; the routing is inferred, so a word that calls
-  a resource word carries the label with no header at all.
+- A **resource** is a threaded wire, and it is a model of the Doctrine —
+  so it is written as one: `model Log in Doctrine = Str`, told from
+  every other `model` head by its body being a stack. `with R` is
+  transport into it; the routing is inferred, so a word that calls a
+  resource word carries the label with no header at all.
 - `Code` as data, with reflection (`getCode`, `typeOfCode`, `declOf`)
-  and user-written `Code ⇒ Code` functors.
+  and user-written functors: `functor F = <graph morphism>` takes one
+  image per generator, `Fn⟨Stage ⇒ Code⟩`, and is functorial by the
+  universal property. Its extension is a word, so `lift2 [F]` applies
+  the same functor at run time.
 - Every keyword is a **declaration word** beneath: `def f = body` is
   `[body] "f" defW`, and `defW : Code Str =Dict> •` says in its arrow
   what it does. The table is open, and a program may declare too

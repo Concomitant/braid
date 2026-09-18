@@ -5,6 +5,7 @@ import Control.Monad.Except (runExceptT, liftEither)
 import qualified Data.Map as M
 import qualified Data.Set as S
 import Data.Char (isSpace, isAlphaNum)
+import Data.Maybe (isJust)
 import Data.List (isPrefixOf, intercalate)
 import Data.Bifunctor (first)
 import System.Environment (getArgs)
@@ -295,7 +296,7 @@ docOf st name
     verdicts =
       mapM_ (putStrLn . transformationDocLine)
             [ mi | mi <- rsTransformations st, tiName mi == name ]
-    -- STAGE 7b: `resource R` declares a MODEL OF THE DOCTRINE besides
+    -- STAGE 7b: `model R in Doctrine` declares a MODEL OF THE DOCTRINE besides
     -- the wire, and sugar you cannot read is a feature rather than a
     -- desugaring — so `:doc R` prints the three declarations it wrote,
     -- exactly as a `table` shows the `data` line it wrote.
@@ -522,12 +523,14 @@ handleLine st line =
     Right ([(name, _, _, _)], [], [], [], [], rest)
       | all isSpace rest -> defLine name
     Right ([], [(tyLine, _)], [], [], [], rest)
-      -- A `resource` DECLARES A MODEL OF THE DOCTRINE since stage 7b —
-      -- a carrier, a theory and the model — so a session's resource
-      -- line goes through the module checker, which is the one place
-      -- that generation lives.  A `type`/`data` line still takes the
-      -- short path: it generates no declaration beyond its own.
-      | all isSpace rest, ("resource" : _) <- words tyLine -> resourceLine tyLine
+      -- `model R in Doctrine = Ty` DECLARES A MODEL OF THE DOCTRINE
+      -- (stage 7b, spelled this way since 2026-09-18) — a carrier, a
+      -- theory and the model — so a session's resource line goes
+      -- through the module checker, which is the one place that
+      -- generation lives.  A `type`/`data` line still takes the short
+      -- path: it generates no declaration beyond its own.
+      | all isSpace rest, isJust (doctrineCarrierName tyLine) ->
+          resourceLine tyLine
       | all isSpace rest -> typeLine tyLine
     Right ([], [], [], [], [], _) -> programLine
     -- theory/model/functor are block declarations: they need a whole
@@ -547,9 +550,9 @@ handleLine st line =
   where
     report err = putStrLn ("error: " ++ err) >> pure st
 
-    -- resource Name = rhs : the wire, AND the model its declaration
-    -- generates.  Checked as a one-line module so a session and a file
-    -- agree about what a resource is.
+    -- `model R in Doctrine = rhs`: the wire, AND the model its
+    -- declaration generates.  Checked as a one-line module so a session
+    -- and a file agree about what a resource is.
     resourceLine src =
       case checkModuleWith (baseOf st) src
              >>= \m -> (,) m <$> moduleSlotTable m of

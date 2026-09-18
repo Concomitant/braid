@@ -9,8 +9,9 @@ copies where they exist.
 - Power & Robinson, *Premonoidal categories and notions of
   computation* — the state construction `C(E⊗Σ, E⊗Θ)` that every
   resource fibre is; non-interchange is our left-to-right decree.
-  Since 2026-09-17 that is not a reading but a declaration: `resource
-  R` generates a model of the Doctrine whose hom-object is
+  Since 2026-09-17 that is not a reading but a declaration, and since
+  2026-09-18 it is spelled as one: `model R in Doctrine` generates a
+  model of the Doctrine whose hom-object is
   `Fn⟨R ρ ⇒ R σ⟩`, so the fibre is **representable** and fibre
   composition *is* base composition of representatives — which is why
   `with R` fuses to the `_`-padding the elaborator already wrote
