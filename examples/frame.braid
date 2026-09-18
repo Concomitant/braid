@@ -292,7 +292,8 @@ def withSector  = (ts -> ([tsym] ts ; column) ts sectorSyms sectorNames ; join)
 ## nothing more, which is exactly the expectation the derived printer
 ## has to satisfy.  What is missing is a way to DECLARE a def from Code:
 ## a `functor` would splice this at ELABORATION and cost nothing at run
-## time, but every `with` mints a receipt, and `Trades =Cells> List(Str)`
+## time, but a `with` that rewrites mints a receipt, and
+## `Trades =Cells> List(Str)`
 ## no longer fits `embed`'s `Fn⟨a ⇒ b⟩`.  That gap is stage 8's
 ## (MANUAL §12, design-macros.md 2026-09-16).
 def cellsWitness = (r -> (r ; sym) ; single)

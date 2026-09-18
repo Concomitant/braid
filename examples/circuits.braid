@@ -261,9 +261,10 @@ def sum0 in Circuits = 0 ; sumFrom
 # did not — it is a circuit no base program denotes, which is the whole
 # reason Arrows exist — so claiming the label would claim membership in
 # the functor's IMAGE, which is a strictly stronger thing.  `in` mints
-# nothing, because `in` applies nothing; only a `with` mints, and every
-# `with` does.  Membership is carried by the carrier in the type and the
-# entry in the K-word table.
+# nothing, because `in` applies nothing; only a `with` mints, and a
+# `with` mints exactly when it CHANGED the code (2026-09-18).
+# Membership is carried by the carrier in the type and the entry in the
+# K-word table.
 #
 # Under the marker it composes like any other word of the category, and
 # THAT composite went through the functor, so it folds:

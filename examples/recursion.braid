@@ -52,9 +52,12 @@ def fib with Recursive =
 
 # A parameter NAMED LIKE THE DEF shadows it, exactly as it shadows any
 # other word: `fac` below is the binder's wire, and nothing recurses.
-# The label is still there — a receipt says what the scope DID, and this
-# scope tied a knot; it is the written `with` that mints, always.
-#   fac : Int =Recursive> Int
+# And there is NO LABEL — a receipt says what the scope CHANGED, and
+# this scope changed nothing: with no self-reference to rewrite there
+# was no knot to tie, so `with Recursive` here is a header that did not
+# apply (2026-09-18).  The arrow is the honest one: this word cannot
+# recurse, and nothing on it says it can.
+#   fac : Int ⇒ Int
 def fac with Recursive = (fac -> fac 1 >> +)
 7 >> fac >> print
 

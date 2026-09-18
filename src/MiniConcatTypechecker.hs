@@ -5757,13 +5757,23 @@ ecRCtx ctx = (ecRefl ctx) { rcEnv = ecEnv ctx }
 selfCallTerm :: Term
 selfCallTerm = Seq 0 (Tensor [Prim selfKnotName, Prim "pass"]) (Prim "ev")
 
+-- A GENUINE NO-OP WHEN THERE IS NOTHING TO TIE (2026-09-18).  A body
+-- that never names the def needs no knot, and wrapping one round it
+-- anyway put `#fix` into code that could not recurse — which is both a
+-- wasted `ev` at runtime and, since 2026-09-18, a lie: a scope mints
+-- its receipt iff it CHANGED the code, so an unconditional wrap would
+-- make `with Recursive` mint on a body it did nothing to.  The
+-- substitution decides: it is the only thing the rewrite does.
 tieKnot :: String -> Term -> Term
-tieKnot name body =
-  Seq 0 (Seq 0 (Tensor [Quote (OpenAbs [Just selfKnotName] True (subst body)),
-                        Prim "pass"])
-               (Tensor [Prim knotPrimName, Prim "pass"]))
-        (Prim "ev")
+tieKnot name body
+  | tied == body = body
+  | otherwise =
+      Seq 0 (Seq 0 (Tensor [Quote (OpenAbs [Just selfKnotName] True tied),
+                            Prim "pass"])
+                   (Tensor [Prim knotPrimName, Prim "pass"]))
+            (Prim "ev")
   where
+    tied = subst body
     subst (Prim n) | n == name = selfCallTerm
     subst (Seq n a b)          = Seq n (subst a) (subst b)
     subst (Tensor ts)          = Tensor (map subst ts)
@@ -6206,7 +6216,15 @@ elabHeaders ctx t0 = do
                            else maybe (Right n) (\(_, sl) -> Left (n, sl))
                                       (lookup n (ecSlots ctx))
                        | n <- rest ]
-          b0' = foldr (\(i, sl) t -> renameSlotsT i sl t) b' is
+          -- IMAGE MEMBERSHIP (2026-09-18).  Each model's rename is
+          -- applied on its own rather than folded blind, so its
+          -- receipt can be decided by whether ITS action changed the
+          -- code.  `foldr` applied the last element first; `foldl`
+          -- over the reverse is the same order.
+          stepRename (t, ch) (i, sl) =
+            let t' = renameSlotsT i sl t
+            in (t', ch ++ [ i | t' /= t ])
+          (b0', renamed) = foldl stepRename (b', []) (reverse is)
       -- the RESOURCES, transported into the models their declarations
       -- generated, as one group: `elabScope` is those models' fused
       -- evaluator (`runTransport`'s first clause is the k = 1 case of
@@ -6221,22 +6239,45 @@ elabHeaders ctx t0 = do
       -- type passes through untouched: the functor is the identity off
       -- A, which is what makes `with M` twice the identity the second
       -- time.
-      b'' <- foldM (\t i -> if null (inObjMap i)
-                              then Right (renameWordsT (baseWordTable i) t)
-                              else objTransportT ctx i t)
-                   b0' bs
+      (b'', based) <-
+        foldM (\(t, ch) i -> do
+                 t' <- if null (inObjMap i)
+                         then Right (renameWordsT (baseWordTable i) t)
+                         else objTransportT ctx i t
+                 pure (t', ch ++ [ inName i | t' /= t ]))
+              (b0', []) bs
       routed0 <- case rs of
                    [] -> pure b''
                    _  -> elabScope (ecEnv ctx) rs b''
-      routed <- foldM (flip (runTransport ctx)) routed0 ms
+      (routed, transported) <-
+        foldM (\(t, ch) tp -> do
+                 t' <- runTransport ctx tp t
+                 pure (t', ch ++ [ tpName tp | t' /= t ]))
+              (routed0, []) ms
       -- left to right: functor composition of Code ⇒ Code words IS `;`,
       -- so `with F G` is sugar for one composed functor
       -- Code cannot encode a `with`, so a functor's output never
       -- contains one: no re-walk needed
-      expanded <- foldM (flip (runFunctor ctx)) routed fs
+      (expanded, walked) <-
+        foldM (\(t, ch) fw -> do
+                 t' <- runFunctor ctx fw t
+                 pure (t', ch ++ [ fw | t' /= t ]))
+              (routed, []) fs
       -- and each functor leaves its receipt on the expansion.  A label
-      -- is minted here or nowhere: unconditionally, because a functor
-      -- that leaves no receipt is a functor that cannot be audited.
+      -- is minted here or nowhere, and since 2026-09-18 it is minted
+      -- IFF THE SCOPE CHANGED THE CODE — image membership, the law the
+      -- functor notes already state for an idempotent F (`F(p) = p` ⟺
+      -- p is in F's image).  A receipt therefore says "this scope
+      -- changed this code" rather than "this scope was applied to it",
+      -- which is the stronger reading and the useful one: code a scope
+      -- left alone has nothing to audit, and the label would only tell
+      -- a caller to expect something that is not there.  The
+      -- comparison is on the `Term`, before and after that one scope's
+      -- action — structural, total, and already blind to a stage's
+      -- line stamp (`instance Eq Term`), so provenance does not count
+      -- as a change.  It is the Term rather than its `Code` reflection
+      -- because a body may carry a binder, which `Code` does not
+      -- represent.
       --
       -- The receipt says what RAN, so it carries the functor word's OWN
       -- labels beside the functor's name (2026-09-12).  Before this,
@@ -6250,22 +6291,31 @@ elabHeaders ctx t0 = do
                    >>= inferTermIn (ecEnv ctx) of
               Right (Arrow _ _ (Eff ls _)) -> S.toList ls
               _                            -> []
-          -- Every `with` mints, models included: `def polyD with Duals
-          -- = poly` says WHICH model read the template, which is
-          -- provenance in exactly the sense a functor's receipt is.
-          -- An INSTANTIATING scope mints too — it is still a model
-          -- reading a body.  The one scope that does not mint is a
-          -- model's own component (`ecSelf`): the `with I` wrapping a
-          -- slot body resolves names, it does not apply the model to
-          -- itself, and a slot's declared arrow carries no label.
-          mine  = [ n | n <- map fst is ++ map inName bs
+          -- Every `with` that CHANGED something mints, models
+          -- included: `def polyD with Duals = poly` says WHICH model
+          -- read the template, which is provenance in exactly the
+          -- sense a functor's receipt is.  An INSTANTIATING scope
+          -- mints too — it is still a model reading a body.  A model
+          -- that both renames and transports (`with Circuits`) mints
+          -- if EITHER action changed the code: one scope, one receipt.
+          -- The one scope that still never mints is a model's own
+          -- component (`ecSelf`): the `with I` wrapping a slot body
+          -- resolves names, it does not apply the model to itself, and
+          -- a slot's declared arrow carries no label.  That filter
+          -- stays: a slot body that names a SIBLING slot IS changed by
+          -- the rename (`add` → `Fwd@add`), so image membership alone
+          -- would mint there and `checkInstance` would refuse the body
+          -- for carrying its own model's label.
+          mine  = [ n | n <- renamed ++ based ++ transported
                       , n `notElem` ecSelf ctx ]
           -- `with Recursive` mints like every other scope: the knot it
-          -- tied carries the label too, and a set unions to one.
-          marks = nub ([ receiptName recLabel | length ns /= length ns0 ]
+          -- tied carries the label too, and a set unions to one.  It
+          -- ties no knot when the body never names the def, and then
+          -- there is nothing to mint.
+          marks = nub ([ receiptName recLabel | b' /= b0 ]
                        ++ map receiptName mine
                        ++ concat [ receiptName f : map receiptName (wordLabels w)
-                                 | (f, w) <- fs ])
+                                 | (f, w) <- walked ])
       pure (foldr (Seq 0 . Prim) expanded marks)
     -- `in` declares what a def IS, so it is consumed where a def is
     -- recorded (`addDef`) and never reaches here except out of place.
@@ -10238,7 +10288,9 @@ checkModuleRaw base src = do
           -- over-claim in exactly the gap between "went through F" and
           -- "is in the image of F".  Membership is carried by the TYPE
           -- (checked below) and by the K-word table, and nothing else:
-          -- only a `with` mints, and every `with` does.
+          -- only a `with` mints, and since 2026-09-18 a `with` mints
+          -- exactly when it CHANGED the code — so the gap the receipt
+          -- used to leave has closed from the other side too.
           let ectx = ElabCtx env1 run slotTable funcs tmpls
                               thNames trans kws bases self
                               ('@' `elem` name || name `elem` tblGen)

@@ -49,8 +49,10 @@ def fold1 in Monoid = [op] unit ... ; foldExp
 # so each instantiation has its OWN principal type — `total` is
 # `Intⁿ⁰ =IntSum> Int` and `joined` is `Strⁿ⁰ =StrCat> Str` — with no
 # dictionary passed and no rank-1 wall met.  The label is the scope's
-# RECEIPT: every `with` mints, so the arrow records which model read the
-# template.  `in Monoid` mints nothing — it applied nothing.
+# RECEIPT: a `with` mints when it changed the code, and renaming
+# `fold1`'s slots to this model's words is a change, so the arrow
+# records which model read the template.  `in Monoid` mints nothing —
+# it applied nothing.
 def total with IntSum = fold1
 def prod with IntProd = fold1
 def joined with StrCat = fold1

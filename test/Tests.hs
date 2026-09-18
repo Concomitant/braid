@@ -803,10 +803,16 @@ moduleTypeTests =
     -- THE FUNCTOR RECEIPT SAYS WHAT RAN (2026-09-12).  `checkFunctorWord`
     -- tests `eIO` alone, so a `Recursive`-labelled functor word runs at
     -- elaboration (fuel-bounded); before this its `Recursive` escaped and the
-    -- expansion read `Int =RecId> Int`.  The receipt now carries the
-    -- word's own labels beside the functor's name.
+    -- expansion read `Int =RecId> Int`.  The receipt carries the word's
+    -- own labels beside the functor's name — WHEN there is a receipt.
+    -- Since 2026-09-18 a scope mints iff it CHANGED the code, and this
+    -- graph morphism is the identity on `dup >> +`, so nothing is
+    -- minted and the word's `Recursive` has nothing to ride on.  That
+    -- is the right answer twice over: the expansion IS `dup >> +`, and
+    -- the functor's own recursion was elaboration-phase, fuel-bounded,
+    -- and never in the runtime code.
   , ("def idRec = [(self s -> s >> pack)] ... >> fix\nfunctor RecId = idRec\ndef twice with RecId =\n    dup >> +\ntwice",
-     "Int =RecId Recursive> Int")
+     "Int ⇒ Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
     -- routers, now derived in the prelude from eq?/lt?/mod via the
@@ -1014,9 +1020,10 @@ moduleTypeTests =
      \def until100 with Recursive = lt100? >> (double >> until100 | _) >> merge\n\
      \until100", "Int =Recursive> Int")
     -- a binder parameter of the def's own name SHADOWS it, as it
-    -- shadows any word — and the receipt is still minted, because a
-    -- receipt says what the SCOPE did, not what the body happened to
-  , ("def f with Recursive = (f -> f 1 >> +)\nf", "Int =Recursive> Int")
+    -- shadows any word — so there is no self-reference, no knot is
+    -- tied, and since 2026-09-18 NO LABEL is minted: a receipt says
+    -- what the scope CHANGED, and this one changed nothing.
+  , ("def f with Recursive = (f -> f 1 >> +)\nf", "Int ⇒ Int")
     -- a self-call inside a quotation is a CAPTURE, and abstraction
     -- elimination handles it: guarded corecursion, unchanged
   , ("data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)\n\
@@ -1349,33 +1356,66 @@ moduleTypeTests =
      "Int Int Int Intⁿ⁰ ⇒ Int")
     -- STAGE 4½: PROVENANCE.  `with F` mints F onto everything it
     -- elaborated, and the manifest carries it to every caller.
-  , (idF ++ "def p with Same = dup >> *\np",          "Int =Same> Int")
+    -- IMAGE MEMBERSHIP (2026-09-18).  `Same` is the IDENTITY graph
+    -- morphism, so on a body it leaves alone it mints nothing — and a
+    -- caller inherits nothing, because there is nothing to inherit.
+    -- `Pad` below is the same shape of test with a functor that
+    -- actually rewrites, and there every one of these labels is back.
+  , (idF ++ "def p with Same = dup >> *\np",          "Int ⇒ Int")
+  , (padF ++ "def p with Pad = dup >> *\np",          "Int =Pad> Int")
+  , (padF ++ "def p with Pad = dup >> *\ndef q = p >> p\nq", "Int =Pad> Int")
+    -- A SCOPE MINTS IFF IT CHANGED THE CODE (2026-09-18), the same rule
+    -- read through every kind of scope there is.
+    -- `with Recursive` on a body that never names the def: no
+    -- self-reference, so no knot, so no label — and the def really
+    -- cannot recurse, which is what the bare arrow now says.
+  , ("def noRec with Recursive = (n -> n >> _ 1 >> +)\nnoRec", "Int ⇒ Int")
+    -- ...and one that DOES name itself still ties its knot and mints
+  , ("def loopy with Recursive = (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> loopy)) >> merge)\nloopy",
+     "Int =Recursive> Int")
+    -- a MODEL whose slot names do not occur in the body renames
+    -- nothing, and mints nothing
+  , (tmplMod ++ "def plain = dup >> *\ndef r with IntSum = plain\nr", "Int ⇒ Int")
+    -- ...while the same model over a body that DOES name a slot mints
+  , (tmplMod ++ "def r with IntSum = twice\nr", "Int =IntSum> Int")
+    -- a RESOURCE scope mints even with nothing to route, and that is
+    -- the SAME rule: `with Log` emits a CLAIM about the incoming wires
+    -- (`unLog >> Log`, the identity on a Log and nothing else), which
+    -- is a change to the code.  The claim is what makes the scope a
+    -- statement rather than padding, so a resource scope is never in
+    -- its own image (2026-09-18).
+  , ("model Log in Doctrine = Str\ndef quiet with Log = (n -> n >> _ 1 >> +)\nquiet",
+     "Int ρ0 =Log> Int ρ0")
+  , ("model Log in Doctrine = Str\ndef note = unLog _ >> cat >> Log\n\
+     \def loud with Log = \"hi\" >> note\nloud", "ρ0 =Log> ρ0")
   , (idF ++ "def p with Same = dup >> *\ndef q = p >> p\nq",
-     "Int =Same> Int")
+     "Int ⇒ Int")
     -- labels are a SET: two functors union, io is one member among
     -- them, and a resource name joins them in the same manifest
   , (idF ++ "def idG = [(s -> s >> pack)]\nfunctor Twice = idG\n"
-         ++ "def p with Same Twice = dup >> *\np", "Int =Same Twice> Int")
+         ++ "def p with Same Twice = dup >> *\np", "Int ⇒ Int")
   , (idF ++ "def p with Same = dup >> * >> print\np", "Int =IO Same> •")
+    -- the RESOURCE still routes and still folds onto the arrow: the
+    -- routing genuinely rewrites the spine, which is a change.
   , (idF ++ "model Fuel in Doctrine = Int\ndef p with Fuel Same =\n    dup >> *\np",
-     "Int ρ0 =Same Fuel> Int ρ0")
+     "Int ρ0 =Fuel> Int ρ0")
     -- a labelled word composes with an unlabelled one and with an io
     -- one: unification absorbs into the open tail, exactly as io always
     -- did.  Nothing about `=Same>` makes a word less composable.
   , (idF ++ "def p with Same = dup >> *\ndef q = p >> toStr >> print\nq",
-     "Int =IO Same> •")
+     "Int =IO> •")
     -- two DIFFERENT labels meeting at a cut: neither tail is poorer, so
     -- the rows bridge through a shared residual
   , (idF ++ "def idG = [(s -> s >> pack)]\nfunctor Twice = idG\n"
          ++ "def p with Same = dup >> *\ndef q with Twice = _ 1 >> +\n"
-         ++ "def both = p >> q\nboth", "Int =Same Twice> Int")
+         ++ "def both = p >> q\nboth", "Int ⇒ Int")
     -- a functor's own word is UNLABELLED — it is called at elaboration,
     -- not elaborated under anything
   , (idF ++ "idF", "• ⇒ Fn⟨a0 ⇒ List(a0)⟩")
     -- STAGE 5a½: `Recursive` joins that same set.  A receipt, io and
     -- recursion union in one manifest and display sorted.
   , (idF ++ "def q with Same = [_ 100 >> less?] [2 _ >> *] ... >> while\nq",
-     "Int =Recursive Same> Int")
+     "Int =Recursive> Int")
   , (idF ++ "def p with Same = [_ 100 >> less?] [2 _ >> *] ... >> while >> toStr >> print\np",
      "Int =IO Recursive Same> •")
     -- TEMPLATES: one body, two instantiations, two PRINCIPAL types.
@@ -1387,10 +1427,13 @@ moduleTypeTests =
     -- instantiates the whole chain
   , (tmplMod ++ "def r with IntSum = quad\nr", "Int =IntSum> Int")
   , (tmplMod ++ "def r with StrCat = quad\nr", "Str =StrCat> Str")
-    -- through a def, and nested scopes resolve innermost-first — and
-    -- BOTH scopes are on the receipt, because both were entered
+    -- through a def, and nested scopes resolve innermost-first.  Only
+    -- `StrCat` is on the receipt: it renamed `twice`'s slots, while
+    -- `with IntSum` over the body `inner` found no slot name to rename
+    -- and so changed nothing (2026-09-18).  The label that is there is
+    -- the one that did the work.
   , (tmplMod ++ "def a with IntSum = twice\ndef b with StrCat = twice\n\
-     \def inner with StrCat = twice\ndef c with IntSum = inner\nc", "Str =IntSum StrCat> Str")
+     \def inner with StrCat = twice\ndef c with IntSum = inner\nc", "Str =StrCat> Str")
     -- the handler: an effectful arrow is a resource + a macro + a
     -- theory, and this is the macro half.  `=Log>` is discharged.
   , (handlerMod ++ "collectLog", "Fn⟨ρ0 =Log> ρ1⟩ ⇒ Fn⟨ρ0 ⇒ Str ρ1⟩")
@@ -1470,8 +1513,10 @@ moduleTypeTests =
      \def polyMod with Mod = poly\ndef polyModMod with Mod = polyMod\n\
      \polyModMod", "Mod7 =Mod> Mod7")
     -- ...and a word whose scheme never mentions the mapped type passes
-    -- through UNTOUCHED: the functor is the identity off `Int`
-  , (objMod ++ "def rot with Mod = swap\nrot", "a0 a1 =Mod> a1 a0")
+    -- through UNTOUCHED: the functor is the identity off `Int`, so
+    -- since 2026-09-18 it mints nothing either — untouched code has
+    -- nothing to audit, which is the same fact the arrow now states.
+  , (objMod ++ "def rot with Mod = swap\nrot", "a0 a1 ⇒ a1 a0")
   ]
 
 -- TEMPLATES (stage 5a).  A def whose `with` names a THEORY is a body
@@ -1522,6 +1567,14 @@ collectorMod =
 -- leaves behind, without a rewrite getting in the way.
 idF :: String
 idF = "def idF = [(s -> s >> pack)]\nfunctor Same = idF\n"
+
+-- ...and one that REWRITES while meaning the same thing at run time:
+-- it interposes an open `pass` after every stage.  Since 2026-09-18 a
+-- scope mints iff it CHANGED the code, so this is the functor that
+-- still leaves a receipt, and it is what the propagation tests want.
+padF :: String
+padF = "def nopC = [pass ...] >> getCode\n\
+       \def padded = nopC ... >> interpose\nfunctor Pad = padded\n"
 
 -- TRANSPORT (5c, reshaped in 5c\189; over STACKS since 2026-09-16).  A
 -- model whose theory has a hom-object `k(..., ...)` and slots at the
@@ -2736,12 +2789,23 @@ evalTests =
     -- was minted onto, and code that carries a label needs a witness
     -- that carries it too — the sandbox reads provenance exactly as it
     -- reads io
+    -- ...with the identity functor there is no receipt to reflect, and
+    -- the sandbox lets the code through: a written pure type now
+    -- ACCEPTS code a scope left alone, which is the direction the
+    -- change was made in (2026-09-18).
   , (idF ++ "def q = [with Same = dup >> *]\nq >> getCode >> unparse >> print",
-     ["with@Same >> dup >> *"], "")
+     ["dup >> *"], "")
   , (idF ++ "def q = [with Same = dup >> *]\n[with Same = dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
      ["36"], "")
   , (idF ++ "def q = [with Same = dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
-     ["Cannot unify effects: Same vs pure (the expected type fixes the grade; this code must stay pure)"], "")
+     ["36"], "")
+    -- ...and with a functor that REWRITES, all three answers are the
+    -- ones the receipt mechanism has always given: the label reflects
+    -- with the code it was minted onto, and a pure witness refuses it.
+  , (padF ++ "def q = [with Pad = dup >> *]\nq >> getCode >> unparse >> print",
+     ["with@Pad >> dup >> pass pass >> * >> pass pass"], "")
+  , (padF ++ "def q = [with Pad = dup >> *]\n[dup >> *] (q >> getCode) (6) >> evalAs >> (print | print forget) >> merge",
+     ["Cannot unify effects: Pad vs pure (the expected type fixes the grade; this code must stay pure)"], "")
 
     -- TEMPLATES run: one body, two models, two answers
   , (tmplMod ++ "def total  with IntSum = fold1\n\
@@ -2884,9 +2948,10 @@ evalTests =
      \2 3 >> Two >> run >> print",
      ["15"], "")
     -- the same theory with no `in Doctrine` is not a category: the
-    -- spine is left alone, and only the receipt is minted
+    -- spine is left alone — and since 2026-09-18 a scope that leaves
+    -- the spine alone mints nothing, so there is no receipt either
   , (plainMod ++ "[with Plain = add1 ; dbl] ; getCode ; unparse ; print",
-     ["with@Plain >> add1 >> dbl"], "")
+     ["add1 >> dbl"], "")
     -- TRANSPORT (5c, reshaped 5c½).  The scope runs: `with Funcs ; add1
     -- ; dbl` is `compose (embed [add1]) (embed [dbl])`, and the EXIT is
     -- called under `in`, which transports nothing.
