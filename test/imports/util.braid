@@ -12,7 +12,9 @@ theory Sink(a) =
 model Loud in Sink(Int) =
     emit = dup >> *
 
-def idF = (c -> c)
+## the IDENTITY GRAPH MORPHISM: every generator to itself.  A functor
+## takes Fn⟨Stage ⇒ Code⟩ and extends it, so this is the identity functor.
+def idF = [(s -> s >> pack)]
 functor Same = idF
 
 ## an INSTANCE OF `Base` travels like any other declaration: the

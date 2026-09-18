@@ -805,7 +805,7 @@ moduleTypeTests =
     -- elaboration (fuel-bounded); before this its `Recursive` escaped and the
     -- expansion read `Int =RecId> Int`.  The receipt now carries the
     -- word's own labels beside the functor's name.
-  , ("def idRec = [(self c -> c)] ... >> fix ... >> ev\nfunctor RecId = idRec\ndef twice with RecId =\n    dup >> +\ntwice",
+  , ("def idRec = [(self s -> s >> pack)] ... >> fix\nfunctor RecId = idRec\ndef twice with RecId =\n    dup >> +\ntwice",
      "Int =RecId Recursive> Int")
     -- >=> is Kleisli composition in the sum monad
   , ("even? >=> zero?",                         "Int ⇒ (Int | Int)")
@@ -823,7 +823,7 @@ moduleTypeTests =
     -- the runtime lift of a functor has the program's arrow BY
     -- CONSTRUCTION; the checked interposition is a plain Code word
   , ("lift2",     "Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩")
-  , ("interpose", "Code Code ⇒ Code")
+  , ("interpose", "Code ⇒ Fn⟨Stage ⇒ Code⟩")
   , ("7 >> zero? >> (forget | ---)",            "• ⇒ (• | Int)")
     -- 2026-09-12 PRIM REDUCTION.  `id` is the WORD for `_`, and `loop`
     -- is the Elgot dagger built on `fix` — both prelude defs now, with
@@ -1010,7 +1010,7 @@ moduleTypeTests =
   , ("def spin with Recursive = [done] ... >> loop\nspin", "ρ0 =Recursive> ρ0")
     -- the marker is INNERMOST, so a functor on the same header sees the
     -- closed spine rather than a name that is not in scope yet
-  , ("def idF = (c -> c)\nfunctor Same = idF\n\
+  , ("def idF = [(s -> s >> pack)]\nfunctor Same = idF\n\
      \def down with Same Recursive = (n -> n >> zero? >> ((z -> 0) | (m -> m >> _ 1 >> - >> down)) >> merge)\n\
      \down", "Int =Recursive Same> Int")
     -- `fix` is DERIVED now (it left the prim set 2026-09-14): the body
@@ -1040,7 +1040,7 @@ moduleTypeTests =
      "• ⇒ •")
     -- three labels from three sources still UNION on one arrow: the
     -- join is the whole point, and the set displays sorted
-  , ("def tracer = (c -> c)\nfunctor Traced = tracer\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef report with Traced = fac ; toStr ; print\nreport",
+  , ("def tracer = [(s -> s >> pack)]\nfunctor Traced = tracer\ndef fac = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ... >> fix ... >> ev\ndef report with Traced = fac ; toStr ; print\nreport",
      "Int =IO Recursive Traced> •")
     -- structural recursors mint NOTHING: they are bounded by the value
     -- they eat, so the whole derived library stays unlabelled
@@ -1337,7 +1337,7 @@ moduleTypeTests =
      "Int =Same> Int")
     -- labels are a SET: two functors union, io is one member among
     -- them, and a resource name joins them in the same manifest
-  , (idF ++ "def idG = (c -> c)\nfunctor Twice = idG\n"
+  , (idF ++ "def idG = [(s -> s >> pack)]\nfunctor Twice = idG\n"
          ++ "def p with Same Twice = dup >> *\np", "Int =Same Twice> Int")
   , (idF ++ "def p with Same = dup >> * >> print\np", "Int =IO Same> •")
   , (idF ++ "resource Fuel = Int\ndef p with Fuel Same =\n    dup >> *\np",
@@ -1349,12 +1349,12 @@ moduleTypeTests =
      "Int =IO Same> •")
     -- two DIFFERENT labels meeting at a cut: neither tail is poorer, so
     -- the rows bridge through a shared residual
-  , (idF ++ "def idG = (c -> c)\nfunctor Twice = idG\n"
+  , (idF ++ "def idG = [(s -> s >> pack)]\nfunctor Twice = idG\n"
          ++ "def p with Same = dup >> *\ndef q with Twice = _ 1 >> +\n"
          ++ "def both = p >> q\nboth", "Int =Same Twice> Int")
     -- a functor's own word is UNLABELLED — it is called at elaboration,
     -- not elaborated under anything
-  , (idF ++ "idF", "a0 ⇒ a0")
+  , (idF ++ "idF", "• ⇒ Fn⟨a0 ⇒ List(a0)⟩")
     -- STAGE 5a½: `Recursive` joins that same set.  A receipt, io and
     -- recursion union in one manifest and display sorted.
   , (idF ++ "def q with Same = [_ 100 >> less?] [2 _ >> *] ... >> while\nq",
@@ -1504,7 +1504,7 @@ collectorMod =
 -- a trivial functor: the identity on Code.  Enough to ask what `with`
 -- leaves behind, without a rewrite getting in the way.
 idF :: String
-idF = "def idF = (c -> c)\nfunctor Same = idF\n"
+idF = "def idF = [(s -> s >> pack)]\nfunctor Same = idF\n"
 
 -- TRANSPORT (5c, reshaped in 5c\189; over STACKS since 2026-09-16).  A
 -- model whose theory has a hom-object `k(..., ...)` and slots at the
@@ -1883,14 +1883,14 @@ evalTests =
     -- and the literal round-trips through unparse/parse by its name
   , ("[2.5 ... ; fmul] ; reflect ; ((c -> c ; unparse ; print) | print) ; forget\n[2.5 ... ; fmul] ; reflect ; ((c -> [2.5 ... ; fmul] c 3.0 ; evalAs ; print) | print) ; forget",
      ["2.5 pass >> fmul", "alt1(7.5)"], "")
-  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\ndef weave   = (f h -> [(s -> (s >> pack) h >> append)] f >> flatMap)\ndef tracer  = (f -> f ([trace] >> getCode) >> weave)\nfunctor Traced = tracer\ndef process with Traced =\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
+  , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndef trace   = dup ... >> print ...\nfunctor Traced = ([trace] >> getCode) >> interposeRaw\ndef process with Traced =\n    dup >> *\n    2 _ >> *\n7 >> process >> print",
      ["7", "49", "2", "98", "98"], "")
     -- an identity functor changes nothing
-  , ("def idF = (c -> c)\nfunctor Same = idF\ndef p with Same = 1 ... >> +\n3 >> p >> print",
+  , ("def idF = [(s -> s >> pack)]\nfunctor Same = idF\ndef p with Same = 1 ... >> +\n3 >> p >> print",
      ["4"], "")
     -- three kinds of name in ONE header: model renames, resource
     -- routes, functor rewrites — in that order
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud in Sink(Int) =\n    emit = dup >> *\ndef idF = (c -> c)\nfunctor Same = idF\ndef run with Log Loud Same =\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
+  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud in Sink(Int) =\n    emit = dup >> *\ndef idF = [(s -> s >> pack)]\nfunctor Same = idF\ndef run with Log Loud Same =\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
      ["25"], "")
     -- STAGE 4: the checked interposition.  A marker reads no wire —
     -- `ρ =IO> ρ` — so `interpose` admits it at every cut
@@ -1904,7 +1904,7 @@ evalTests =
     -- the marker tracer of examples/traced.braid: the stage's text is
     -- the marker's content, so it lifts everywhere a wire-reading
     -- trace could not
-  , ("def orNil = ((c -> c) | drop >> nil) >> merge\ndef markStage = (s -> \"\\\"after \" (s >> pack >> unparse) >> cat >> _ \"\\\" ... >> print ...\" >> cat >> parse >> orNil)\ndef marked = [(s -> (s >> pack) (s >> markStage) >> append)] ... >> stagewise\nfunctor Traced = marked\ndef poly with Traced = dup >> * >> _ 1 >> +\n5 >> poly >> print",
+  , ("def orNil = ((c -> c) | drop >> nil) >> merge\ndef markStage = (s -> \"\\\"after \" (s >> pack >> unparse) >> cat >> _ \"\\\" ... >> print ...\" >> cat >> parse >> orNil)\nfunctor Traced = [(s -> (s >> pack) (s >> markStage) >> append)]\ndef poly with Traced = dup >> * >> _ 1 >> +\n5 >> poly >> print",
      ["after dup", "after *", "after _ 1", "after +", "26"], "")
     -- by-generators functors: stagewise and atomwise are flatMaps on
     -- the spine
@@ -1915,9 +1915,9 @@ evalTests =
     -- lift2: a Code ⇒ Code functor lifted to Fn ⇒ Fn at runtime, the
     -- program its own witness — metered where the result types, and
     -- the original where it does not
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [with Fuel = dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered ... >> stagewise] [with Fuel = dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
      ["25", "7"], "")
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered] [dup >> *] >> lift2) 5 >> ev >> print",
+  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered ... >> stagewise] [dup >> *] >> lift2) 5 >> ev >> print",
      ["25"], "")
     -- DECIDED laws (§12.9): `sameCode` normalizes both programs in the
     -- free cartesian category over their words and compares.  `same`
@@ -2505,11 +2505,11 @@ evalTests =
   , ("def getCode = reflect >> ((c -> c) | drop >> nil) >> merge\ndata Shape = (Int | Int Int | Int Int Int)\ndef pick = [(x s -> s >> unShape >> (drop >> x | drop drop >> x 100 >> + | drop drop drop >> x 200 >> +) >> mergeShape)]\ndef c = (pick) >> getCode\n9 (7 >> alt1 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge\n9 (7 8 >> alt2 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge\n9 (7 8 1 >> alt3 >> Shape) >> (pick) (c) ... >> evalAs >> (print | forget) >> merge",
      ["9", "109", "209"], "")
     -- `with F` over the `fix` IDIOM: the 5a½ demo that was refused
-  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef fac with Traced =\n    [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...\n    fix ...\n    ev\n4 >> fac >> print",
+  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\nfunctor Traced = [(s -> (s ; pack) (s ; markStage) ; append)]\ndef fac with Traced =\n    [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)] ...\n    fix ...\n    ev\n4 >> fac >> print",
      ["after [_ dup pass >> _ _ zero? >> dup pass >> _ swap pass >> _ _ (dist2 >> (_ _ 1 >> _ drop pass >> drop pass | _ dup pass >> _ dup pass >> _ _ swap pass >> dup pass >> _ swap pass >> _ _ swap pass >> _ _ _ (_ dup pass >> _ _ _ 1 >> _ _ - >> dup pass >> _ swap pass >> _ _ ev >> _ drop pass >> drop pass) >> _ _ * >> _ drop pass >> drop pass)) >> _ _ merge >> drop drop pass] pass",
       "after fix pass", "after ev", "24"], "")
     -- and over a capturing QUOTE, where the emitted word is `capture`
-  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\ndef marked = [(s -> (s ; pack) (s ; markStage) ; append)] ... ; stagewise\nfunctor Traced = marked\ndef adder with Traced =\n    (n -> [n ... >> +])\n7 >> adder >> _ 5 >> ev >> print",
+  , ("def orNil = ((c -> c) | drop ; nil) ; merge\ndef markStage = (s -> \"\\\"after \" (s ; pack ; unparse) ; cat ; _ \"\\\" ... ; print ...\" ; cat ; parse ; orNil)\nfunctor Traced = [(s -> (s ; pack) (s ; markStage) ; append)]\ndef adder with Traced =\n    (n -> [n ... >> +])\n7 >> adder >> _ 5 >> ev >> print",
      ["after dup pass", "after _ (_ [dup pass >> _ + >> drop pass] >> capture)", "after drop pass", "12"], "")
     -- dist2/undist2 are inverse at sample points
   , ("7 (5 >> alt1) >> dist2 >> (+ | -) >> merge >> print", ["12"], "")
@@ -3296,16 +3296,25 @@ moduleFailTests =
     -- first use (declarations are hoisted, so that is where the prefix
     -- scope is what it will be at run time)
   , ("def w = dup >> *\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
-     "must be Code ⇒ Code")
-  , ("def w = (c -> c >> unparse >> print >> c)\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
+     "must be a GRAPH MORPHISM")
+    -- ...and a `Code ⇒ Code` word is refused BY NAME, with the two homes
+    -- it does have: it is an endomap of the object of morphisms, and
+    -- nothing makes such a thing commute with composition (2026-09-18)
+  , ("def w = (c -> c)\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
+     "is Code ⇒ Code — an ENDOMAP OF THE OBJECT OF MORPHISMS")
+  , ("def w = (c -> c)\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
+     "`lift2 [w]` applies it at RUNTIME")
+  , ("def w = \"x\" >> print >> [(s -> s >> pack)]\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
      "must be pure")
   , ("functor F = nosuch\ndef p with F = 1 ... >> +\n3 >> p >> print",
-     "not defined at this point")
+     "must be defined before the functor line")
     -- purity is not totality: the budget is what stands between a
     -- looping functor and a hung compiler
-  , ("def w = [(self c -> c >> self ... >> ev)] ... >> fix ... >> ev\nfunctor F = w\ndef p with F = 1 ... >> +\n3 >> p >> print",
+  , ("def spin = [(self x -> x >> self ... >> ev)] ... >> fix ... >> ev\n\
+     \functor F = 0 >> spin >> drop >> [(s -> s >> pack)]\n\
+     \def p with F = 1 ... >> +\n3 >> p >> print",
      "step budget exhausted")
-  , ("def idF = (c -> c)\nfunctor F = idF\nfunctor F = idF\n1",
+  , ("def idF = [(s -> s >> pack)]\nfunctor F = idF\nfunctor F = idF\n1",
      "Duplicate functor declaration")
     -- STAGE 4½: a label is minted by a scope or not at all.  The
     -- receipt is a word in the environment (it has to be — it is the
@@ -3492,7 +3501,7 @@ moduleFailTests =
   , ("def f = with@Recursive ; 1\n1", "is the receipt of `with Recursive`")
     -- one spelling per thing: the marker owns the name, so a functor
     -- (or model, or theory) of that name is a collision, not a shadow
-  , ("def idF = (c -> c)\nfunctor Recursive = idF\ndef f with Recursive = (n -> n)\n1",
+  , ("def idF = [(s -> s >> pack)]\nfunctor Recursive = idF\ndef f with Recursive = (n -> n)\n1",
      "is the built-in recursion marker")
     -- a non-final open-arity atom must report the placement rule, not
     -- panic in appendStack (regression: was a Haskell error).  Until
@@ -3564,7 +3573,7 @@ moduleFailTests =
     -- ...and the MODEL is real: it takes the resource's own name, so a
     -- functor of that name collides with it.  (This is the cheapest
     -- proof from source that the generated model exists at all.)
-  , ("resource Log = Str\ndef w = (c -> c)\nfunctor Log = w\n1 ; print",
+  , ("resource Log = Str\ndef w = [(s -> s >> pack)]\nfunctor Log = w\n1 ; print",
      "Duplicate model declaration: Log")
     -- `in R` still answers about the RESOURCE, not about the model its
     -- declaration generated
@@ -3764,7 +3773,7 @@ moduleFailTests =
     -- STAGE 5c½: `in` names a theory or a model with a carrier, and
     -- nothing else.  Each other kind is refused by kind, with the word
     -- to write.
-  , (modeMod ++ "def idF = (c -> c)\nfunctor Same = idF\n\
+  , (modeMod ++ "def idF = [(s -> s >> pack)]\nfunctor Same = idF\n\
      \def bad in Same = add1\n1 ; print",
      "`in Same` names a functor, and a functor is applied to a body, \
      \not inhabited by one.  Write `with Same`.")
@@ -3811,7 +3820,7 @@ moduleFailTests =
   , ("theory Base =\n    op : a \8658 a\n1 >> print",
      "`Base` is the ambient presentation and may not be declared")
     -- a model of `Base` shares one namespace with functors
-  , ("def idF = (c -> c)\nfunctor Opt = idF\nmodel Opt in Base = dup = dup\n1 >> print",
+  , ("def idF = [(s -> s >> pack)]\nfunctor Opt = idF\nmodel Opt in Base = dup = dup\n1 >> print",
      "Duplicate model declaration: Opt")
     -- `sameCodeC` reports outside the fragment exactly as `sameCode`
     -- does — they are one procedure — and a `fix` body that applies its

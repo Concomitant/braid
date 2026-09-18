@@ -8,6 +8,11 @@
 resource Fuel = Int
 def burn = unFuel ; _ 1 ; - ; Fuel
 
+# `interpose` BUILDS a graph morphism — `Code ⇒ Fn⟨Stage ⇒ Code⟩` —
+# having checked that the stage fits at every cut, and `functor` takes
+# exactly that: one image per generator.  The declaration also puts the
+# EXTENSION in scope as the word `Metered : Code ⇒ Code`, which is what
+# `with Metered` runs and what `lift2` lifts below.
 def metered = ([burn ...] ; getCode) ... ; interpose
 functor Metered = metered
 
@@ -23,7 +28,7 @@ def poly with Fuel Metered =
 # the label it mints) rides INSIDE that claim rather than in a stage of
 # its own, which is exactly why the count is seven and not eight.
 "-- the metered wiring --" ; print
-[with Fuel = dup ; * ; dup ; + ; _ 1 ; +] ; getCode ; metered ; unparse ; print
+[with Fuel = dup ; * ; dup ; + ; _ 1 ; +] ; getCode ; Metered ; unparse ; print
 
 "-- seven stages, seven units of fuel --" ; print
 (10 ; Fuel) 5 ; poly ; _ print ; unFuel ; print          # 51, then 3
@@ -36,10 +41,10 @@ def poly with Fuel Metered =
 # is its own witness, so the result has the program's arrow whatever
 # the functor did.  A program that threads Fuel is metered …
 "-- lift2: metered where it types --" ; print
-([metered] [with Fuel = dup ; *] ; lift2) (10 ; Fuel) 5 ; ev ; _ print ; unFuel ; print   # 25, then 7
+([Metered] [with Fuel = dup ; *] ; lift2) (10 ; Fuel) 5 ; ev ; _ print ; unFuel ; print   # 25, then 7
 
 # … and one that does not thread Fuel is left alone: the metered code
 # needs a wire the program never had, the witness refuses it, and the
 # original runs.
 "-- lift2: the original where it does not --" ; print
-([metered] [dup ; *] ; lift2) 5 ; ev ; print          # 25
+([Metered] [dup ; *] ; lift2) 5 ; ev ; print          # 25

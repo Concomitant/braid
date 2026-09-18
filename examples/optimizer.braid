@@ -117,14 +117,18 @@ def optimized = [with Opt = dupInt ; +]
 # ---------------------------------------------------------------------
 # 5. Two functors to compare it with.
 # ---------------------------------------------------------------------
-# `spaced` puts an identity stage after every stage: a different SPINE,
+# A `functor` takes a GRAPH MORPHISM — `Fn⟨Stage ⇒ Code⟩`, one image
+# per generator — and extends it by the universal property, so the
+# declaration says what happens to a generator and nothing more.  The
+# extension is in scope as a word of the functor's own name, which is
+# what the laws below name and what `lift2 [Spaced]` would lift.
+#
+# `Spaced` puts an identity stage after every stage: a different SPINE,
 # the same MORPHISM.  It is the cheapest demonstration that `sameCodeC`
 # is semantic and `eq?` is syntactic.
-def spaced  = [(s -> (s >> pack) ([_] >> getCode) >> append)] ... >> stagewise
-# `doubled` repeats every stage: functorial, and not idempotent.
-def doubled = [(s -> (s >> pack) (s >> pack) >> append)] ... >> stagewise
-functor Spaced  = spaced
-functor Doubled = doubled
+functor Spaced  = [(s -> (s >> pack) ([_] >> getCode) >> append)]
+# `Doubled` repeats every stage: functorial, and not idempotent.
+functor Doubled = [(s -> (s >> pack) (s >> pack) >> append)]
 
 # ---------------------------------------------------------------------
 # 6. The laws, as theories.  These are audited at module start: an
@@ -173,32 +177,32 @@ model OptIsOptimizer in Optimizer
     sample = [copyDrop >> dupSwap >> + >> dupInt >> *] >> getCode
 
 model SpacedIsFunctor in Functor
-    ap      = spaced
+    ap      = Spaced
     sample  = [dupSwap >> +] >> getCode
     sample2 = [copyDrop] >> getCode
 
-## Functoriality is FREE for a `stagewise` (or `atomwise`) functor: a
-## stage's image depends on that stage alone, so `F(p ; q) = F(p) ; F(q)`
-## holds by construction and the law above cannot fail.  It is still
+## Functoriality is FREE for a graph morphism: the image of a stage
+## depends on that stage alone, so `F(p ; q) = F(p) ; F(q)` holds by the
+## universal property and the law above cannot fail.  It is still
 ## written, and still runs, because "cannot fail by construction" is a
 ## claim about the construction, and a law is how a claim gets checked.
 model SpacedIsOptimizer in Optimizer
-    ap     = spaced
+    ap     = Spaced
     sample = [dupSwap >> +] >> getCode
 
-## `spaced` and `Opt` commute: one renames atoms, the other adds
+## `Spaced` and `Opt` commute: one renames atoms, the other adds
 ## identity stages, and neither looks at what the other did.
 model OptSpacedCommute in Commuting
     apF    = Opt
-    apG    = spaced
+    apG    = Spaced
     sample = [copyDrop >> dupSwap >> + >> dupInt >> *] >> getCode
 
-# `doubled` is a functor and NOT an optimizer: weaving twice weaves
+# `Doubled` is a functor and NOT an optimizer: weaving twice weaves
 # twice, so it has no image to detect.  Uncomment to watch the audit
 # stop the module:
 #
 #   model DoubledIsOptimizer : Optimizer
-#       ap     = doubled
+#       ap     = Doubled
 #       sample = [dupSwap] >> getCode
 #   → law 'idempotent' fails for model DoubledIsOptimizer: an
 #     model must be an audited model of its theory
@@ -266,11 +270,11 @@ def fastLoop = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) >> (dup     >> + 
 
 (slowLoop >> getCode >> Opt) (fastLoop >> getCode) >> sameSpine >> print
 
-# `spaced` is the counterpoint that needs no recursion at all: same
+# `Spaced` is the counterpoint that needs no recursion at all: same
 # morphism, different spine, and both verdicts are printed side by side.
 "-- spaced: same morphism, different spine --" >> print
-([dupSwap >> +] >> getCode >> spaced) ([dupSwap >> +] >> getCode) >> sameSpine    >> print
-([dupSwap >> +] >> getCode >> spaced) ([dupSwap >> +] >> getCode) >> sameMorphism >> print
+([dupSwap >> +] >> getCode >> Spaced) ([dupSwap >> +] >> getCode) >> sameSpine    >> print
+([dupSwap >> +] >> getCode >> Spaced) ([dupSwap >> +] >> getCode) >> sameMorphism >> print
 
 # ---------------------------------------------------------------------
 # 9. The runtime lift, and the fallback.

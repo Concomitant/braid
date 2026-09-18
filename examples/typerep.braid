@@ -294,50 +294,48 @@ def failing = (f l -> l ; [(e -> f e ; ev ; (b -> b nil (e ; nameOf ; single) ; 
 # report is both numbers rather than a comparison rigged to agree.
 
 # ---------------------------------------------------------------------
-# 4. DERIVING AT ELABORATION — a functor that reads a declaration
+# 4. DERIVING AT ELABORATION — a declaration whose body is COMPUTED
 # ---------------------------------------------------------------------
-# A `functor` is handed the body's `Code` and may return anything.
-# Since the reflection words are pure and read the PREFIX SCOPE, a
-# functor may call them — so a def whose body is a SYM naming a
-# declaration can elaborate into the printer that declaration implies.
-# Nothing runs at run time: what the def contains after elaboration IS
-# the derived program, checked by ordinary inference like any other.
+# The reflection words are pure and read the PREFIX SCOPE, so a
+# DECLARATION-TIME PROGRAM may call them: `declOf` answers with a
+# declaration, `cellsFor` turns it into a printer, and `defW` — the word
+# every `def` line is parsed into — declares the result.  Nothing runs
+# at run time: what `rowCells` contains IS the derived program, checked
+# by ordinary inference like any other.
+#
+# THIS WAS A `functor` UNTIL 2026-09-18, and that was the wrong home.
+# `cellsOfCode` discarded the body it was handed but for one symbol and
+# emitted a printer from a declaration: code GENERATION, not a
+# rewriting.  Its honest type is `Sym ⇒ Code` — not a graph morphism,
+# not a functor of anything — and it wore a `with` scope only for want
+# of "a declaration form whose body is computed", which is the gap this
+# very section used to report.  Stage 8's declaration substrate IS that
+# form.  So the derivation is a declaration now, and the receipt that
+# had to be there when a scope did it is gone with the scope: `rowCells`
+# is `Row ⇒ List(Str)`, an ordinary word that fits an ordinary `Fn`.
 
 data Row = (label: Str, n: Int)
 
-def symOfAtom =
-    [(s -> s)] [(i -> .none)] [(t -> .none)] [(s -> s)] \
-    [(c -> .none)] [(cs b -> .none)] [(c -> .none)] ... ; foldAtom
+def cellsOfSym = (s -> s ; symStr ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge)
+#   cellsOfSym : Sym ⇒ Code — the printer a named declaration implies
 
-def firstSym =
-    c ->
-    c ; unList
-      ; ( .none \
-        | (st r -> st ; unList ; (.none | (a r2 -> a ; symOfAtom)) ; merge) ) ; merge
-
-def cellsOfCode =
-    c -> (c ; firstSym ; symStr) ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge
-
-functor Cells = cellsOfCode
-
-def rowCells with Cells = .Row
-#   rowCells : Row =Cells> List(Str) — the body is the DERIVED printer,
-#   and the `=Cells>` on the arrow is the receipt that says so.
+(.Row ; cellsOfSym) "rowCells" ; defW
+#   A DECLARATION LINE: its grade carries `Dict`, so it is lifted above
+#   main and run at check time, and the def it writes is checked, routed
+#   and labelled exactly where a written one is.  `def rowCells = …` is
+#   this line with the body written instead of computed.
 
 "" ; print
 "-- a printer derived at elaboration --" ; print
 ("x" 7 ; Row) ; rowCells ; [(s -> "  " s ; cat)] ... ; map ; printAll
 ("rowCells : " ("rowCells" ; typeOfWord ; say) ; cat) ; print
 
-# THE GAP, and it is stage 8's.  That receipt is not decoration: it is
-# part of the type, so `rowCells` no longer fits an `Fn⟨a ⇒ b⟩` — which
-# is why `examples/frame.braid` derives `tradeCells` through a runtime
-# `evalAs` against a witness instead of through a functor.  The receipt
-# is right (a functor that leaves no receipt cannot be audited) and the
-# refusal is right (a label is part of the type).  What is missing is a
-# DECLARATION FORM WHOSE BODY IS COMPUTED — a way to declare a def from
-# Code without applying a scope to it.  Until it exists, a derivation
-# either pays a runtime `evalAs` or wears a label.
+# WHAT `frame.braid` STILL PAYS FOR, and why.  `tradeCells` there is
+# derived through a runtime `evalAs` against a witness, because its
+# declaration depends on a CSV read at check time by `table` — a
+# declaration line can do no IO, so the derivation happens later.  The
+# gap this section reported is closed; that one is a different gap, and
+# it is the loader's.
 
 # ---------------------------------------------------------------------
 # 5. WHAT IS NOT ADMITTED, on its own merits
@@ -349,10 +347,10 @@ def rowCells with Cells = .Row
 # `a` is.  Such a word is not refused; it is UNWRITABLE, because no
 # atom produces a `TypeRep` from a value.
 #
-# And rewriting triggered by the manifest of the def BEING elaborated
-# is impossible by construction: elaboration precedes inference, so
-# when `Cells` ran above, `rowCells` had no type yet.  What a functor
-# can read is the prefix scope — `Row`, `dup`, `cellsFor` — which was
-# settled before this declaration was reached.  That is what "prefix
-# scope" means, and it is the same property that lets a functor be RUN
-# while the module is still being checked.
+# And a derivation triggered by the manifest of the def BEING declared
+# is impossible by construction: the declaration line runs before there
+# is a def to have a type.  What it can read is the prefix scope —
+# `Row`, `dup`, `cellsFor` — which was settled before the line was
+# reached.  That is what "prefix scope" means, and it is the same
+# property that lets a functor be RUN while the module is still being
+# checked.

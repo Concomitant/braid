@@ -5300,13 +5300,14 @@ primEnv =
            (arrPure (one TStr)
                   (one (TSum (RCons (one codeStructTy)
                         (RCons (one TStr) RNil))))))
-       -- η c ; interpose — insert the stage η after every stage of c,
-       -- having CHECKED that η is a unit endomorphism (`ρ ⇒ ρ`, or
-       -- `E ρ ⇒ E ρ` over a resource prefix), so the woven program
-       -- types whenever c did.  The one checked Code ⇒ Code functor.
-       , ("interpose", Forall [] [] [] [] [] []
-           (arrPure (SCons codeStructTy (SCons codeStructTy SEnd))
-                    (one codeStructTy)))
+       -- η ; checkedStage — η, having been CHECKED to be a unit
+       -- endomorphism (`ρ ⇒ ρ`, or `E ρ ⇒ E ρ` over a resource
+       -- prefix), so that a stage inserted at every cut leaves the
+       -- program's type where it was.  The check is the whole of it:
+       -- the weaving is `interposeRaw`, an ordinary prelude word, and
+       -- `interpose` is the two composed (2026-09-18).
+       , ("checkedStage", Forall [] [] [] [] [] []
+           (arrPure (one codeStructTy) (one codeStructTy)))
        , ("readLine",  Forall [] [] [] [] [] []
            (arrIO SEnd
                   (one (TSum (RCons (one TStr)
@@ -5711,22 +5712,24 @@ elabCtx0 env slots =
   ElabCtx env M.empty slots [] [] [] [] [] [] [] False Nothing [] []
           (rctxOf env)
 
--- Apply one functor to a scope body: reify the code, RUN the word
--- (purely, on a step budget), splice the result back.  The word's type
--- was checked `Code ⇒ Code` and pure where the functor was declared.
+-- Apply one functor to a scope body: reify the code, RUN the
+-- EXTENSION of the declared graph morphism (purely, on a step budget),
+-- splice the result back.  The morphism was checked
+-- `Fn⟨Stage ⇒ Code⟩` and pure where the functor was declared.
 runFunctor :: ElabCtx -> (String, String) -> Term -> Either String Term
-runFunctor ctx (fname, word) body = do
-  -- declarations are hoisted above defs, so the word is checked at the
-  -- first USE, where the prefix scope is what it will be at run time.
-  -- That is the ordering rule made concrete.
-  either (Left . (pre ++)) Right (checkFunctorWord (ecEnv ctx) fname word)
+runFunctor ctx (fname, gm) body = do
+  -- declarations are hoisted above defs, so the morphism is checked at
+  -- the first USE, where the prefix scope is what it will be at run
+  -- time.  That is the ordering rule made concrete.
+  ext <- either (Left . (pre ++)) Right
+           (checkFunctorWord (ecEnv ctx) (rcDatas (ecRefl ctx)) fname gm)
   cv  <- inF (reflectPure (ecEnv ctx) body)
   out <- inF (runPureEval (evalTerm (ecRCtx ctx) (ecRun ctx) emptyVarEnv
-                            (Prim word) [cv]))
+                            ext [cv]))
   case fst out of
     [c] -> inF (codeToTermV c)
     vs  -> Left $ pre ++ "a functor must return exactly one Code value, "
-                ++ "but " ++ word ++ " returned " ++ show (length vs)
+                ++ "but " ++ gm ++ " returned " ++ show (length vs)
   where
     pre  = "`with " ++ fname ++ "`: "
     inF  = either (Left . (pre ++)) Right
@@ -5856,26 +5859,112 @@ receiptEnv :: [(String, String)] -> Env -> Env
 receiptEnv funcs env =
   foldr (\(f, _) e -> M.insert (receiptName f) (receiptScheme f) e) env funcs
 
--- A functor's word must be a pure `Code ⇒ Code`: pure because it runs
--- at elaboration (the io grade IS the phase distinction), and
--- Code ⇒ Code because it rewrites a program's spine.
-checkFunctorWord :: Env -> String -> String -> Either String ()
-checkFunctorWord env fname word =
+-- A FUNCTOR IS A GRAPH MORPHISM (2026-09-18).  A presentation is
+-- generators and relations, and a functor out of the category it
+-- presents is determined by one image per generator — that is the
+-- universal property, and a free category's functors ARE exactly its
+-- graph morphisms.  So `functor F = w` asks `w` for one image per
+-- generator, `Fn⟨Stage ⇒ Code⟩`, and the EXTENSION to the whole of
+-- `Code` is the meaning of the declaration rather than something the
+-- author writes.
+--
+-- Pure, because it runs at elaboration and the io grade IS the phase
+-- distinction.  `Recursive` is admitted (the budget is what stands
+-- between a looping functor and a hung compiler) and rides on the
+-- receipt.
+--
+-- Returns the extension, parsed: `runFunctor` runs it and the word `F`
+-- the declaration generates is the same source, so there is one
+-- spelling of what a functor DOES.
+checkFunctorWord :: Env -> [DataDecl] -> String -> String
+                 -> Either String Term
+checkFunctorWord env datas fname gm = do
+  g   <- ordering (parseProgramIn datas gm)
+  arr <- ordering (inferTermIn env g)
+  let Arrow i o eff = arr
+      sOne t        = SCons t SEnd
+      isCodeCode    = either (const False) (const True)
+                        (solve [ CEqStack i (sOne codeTy)
+                               , CEqStack o (sOne codeTy) ])
+  case o of
+    SCons (TFn (Arrow gi go geff)) SEnd
+      | Right _ <- solve [ CEqStack i SEnd
+                         , CEqStack gi (sOne stageTy)
+                         , CEqStack go (sOne codeTy) ] ->
+          if eIO eff || eIO geff
+            then Left $ here ++ "must be pure — a functor runs while the "
+                             ++ "module is being elaborated, so it cannot "
+                             ++ "do IO"
+            else Right ()
+    _ | isCodeCode -> Left wholeSpine
+    _ -> Left $ here ++ "must be a GRAPH MORPHISM — `\8226 \8658 "
+             ++ graphMorphismTy ++ "`, one image per generator, which is "
+             ++ "what a functor out of a free category is determined by "
+             ++ "— but is " ++ show (normalizeArrow arr)
+  parseProgramIn datas (functorExtSrc gm)
+  where
+    here = "functor " ++ fname ++ ": " ++ gm ++ " "
+    ordering = first (\e -> here ++ "— " ++ e
+                         ++ " (a functor's graph morphism must be defined "
+                         ++ "before the functor line)")
+    -- THE WHOLE-SPINE SCOPE IS GONE, and nothing is lost: the two
+    -- honest homes for a `Code ⇒ Code` word are named here rather than
+    -- left for the reader to find.
+    wholeSpine =
+      here ++ "is Code ⇒ Code — an ENDOMAP OF THE OBJECT OF MORPHISMS, "
+        ++ "not a functor: it has no object map, no generator images and "
+        ++ "nothing that makes it commute with `;`.  `functor` takes a "
+        ++ "graph morphism, " ++ graphMorphismTy ++ ".  A "
+        ++ "Code \8658 Code word has two homes: `lift2 [" ++ gm
+        ++ "]` applies it at RUNTIME, checked against the program's own "
+        ++ "type with the original as the fallback; and a top-level "
+        ++ "declaration program (`[code] \"name\" ; " ++ defWordName
+        ++ "`) DECLARES what it generates, for code that is generated "
+        ++ "rather than rewritten.  MANUAL \167\&8."
+
+-- The `Code ⇒ Code` EXTENSION of a graph morphism, as source.  `with
+-- F` runs this and the word `F` the declaration generates IS this, so
+-- a functor's action has one spelling.  `stagewise` is the extension
+-- operator (`flatMap` on the spine): the image of a composite is the
+-- composite of the images, which is the universal property computed.
+functorExtSrc :: String -> String
+functorExtSrc gm = "(" ++ gm ++ ") ... >> stagewise"
+
+-- what a functor's declaration asks for, spelled as the manual spells
+-- it (the display folds `Stage` and `Code` only with the alias table in
+-- hand, and a refusal should read the way the docs read)
+graphMorphismTy :: String
+graphMorphismTy = "Fn\10216Stage \8658 Code\10217"
+
+-- `Stage = List(Atom)`, the generators a graph morphism is defined on
+stageTy :: Ty
+stageTy = TData "List" [SCons (TData "Atom" []) SEnd]
+
+-- the declaration word a generated def goes through, named once
+defWordName :: String
+defWordName = "defW"
+
+-- The generated TRANSPORT word of a model with a carrier is a
+-- `Code ⇒ Code` word the compiler wrote, and this is its check: if a
+-- model's slots ever stop composing, the message says so at the
+-- declaration rather than at some use.  It is not a functor
+-- declaration's check — a functor takes a graph morphism — which is
+-- why it is a routine of its own.
+checkCodeWord :: Env -> String -> Either String ()
+checkCodeWord env word =
   case M.lookup word env of
-    Nothing -> Left $ "functor " ++ fname ++ ": " ++ word
-                   ++ " is not defined at this point (a functor's word "
-                   ++ "must be defined before the functor line)"
+    Nothing -> Left $ "model " ++ word ++ ": the transport word is not "
+                   ++ "defined at this point"
     Just sc ->
       let arr@(Arrow i o g) = runInfer0 (instantiate sc)
           codeS = SCons codeTy SEnd
       in case solve [CEqStack i codeS, CEqStack o codeS] of
-           Left _ -> Left $ "functor " ++ fname ++ ": " ++ word
-                         ++ " must be Code ⇒ Code, but is "
+           Left _ -> Left $ "model " ++ word ++ ": the transport word must "
+                         ++ "be Code \8658 Code, but is "
                          ++ show (normalizeArrow arr)
            Right _
-             | eIO g -> Left $ "functor " ++ fname ++ ": " ++ word
-                            ++ " must be pure — a functor runs while the "
-                            ++ "module is being elaborated, so it cannot do IO"
+             | eIO g -> Left $ "model " ++ word ++ ": the transport word "
+                            ++ "must be pure"
              | otherwise -> Right ()
 
 elabHeaders :: ElabCtx -> Term -> Either String Term
@@ -6033,9 +6122,11 @@ elabHeaders ctx t0 = do
       -- its `Recursive` escaped: the expansion said nothing about it.  `IO`
       -- cannot reach here (`checkFunctorWord` refuses it), so in
       -- practice this mints `Recursive` and any receipt the word itself wears.
-      let wordLabels w = case M.lookup w (ecEnv ctx) of
-            Just (Forall _ _ _ _ _ _ (Arrow _ _ (Eff ls _))) -> S.toList ls
-            Nothing                                        -> []
+      let wordLabels w =
+            case parseProgramIn (rcDatas (ecRefl ctx)) (functorExtSrc w)
+                   >>= inferTermIn (ecEnv ctx) of
+              Right (Arrow _ _ (Eff ls _)) -> S.toList ls
+              _                            -> []
           -- Every `with` mints, models included: `def polyD with Duals
           -- = poly` says WHICH model read the template, which is
           -- provenance in exactly the sense a functor's receipt is.
@@ -8494,14 +8585,18 @@ imageTerm here datas q = do
     scan (OpenAbs _ _ b) = scan b
     scan _             = Right ()
 
--- `functor Name = word` — a declaration line, no block.
+-- `functor Name = <graph morphism>` — a declaration line, no block.
+-- The right-hand side is a PROGRAM, because a graph morphism is
+-- ordinarily built rather than named (`tick ... ; interpose`); what it
+-- has to be is checked by `checkFunctorWord`, which is the type.
 parseFunctorLine :: String -> Either String (String, String)
 parseFunctorLine l =
   case break (== '=') (takeWhile (/= '#') l) of
     (lhs, '=' : rhs)
       | ["functor", nm] <- words lhs
-      , [w] <- words rhs -> Right (nm, w)
-    _ -> Left $ "Malformed functor declaration (want `functor Name = word`): "
+      , not (all isSpace rhs) -> Right (nm, trimSpace rhs)
+    _ -> Left $ "Malformed functor declaration (want `functor Name = "
+             ++ "<a graph morphism, Fn\10216Stage \8658 Code\10217>`): "
              ++ dropWhile isSpace l
 
 -- THE DOCTRINE.  `theory Doctrine(k(..., ...))` is declared in the
@@ -9691,12 +9786,31 @@ checkModuleRaw base src = do
                        ownBases resNames
                        [ (inName i, inScope i) | i <- insts ] allDatas
                        (RCtx M.empty allDatas allAliases theories)
-  st0 <-
+  stA <-
     foldM addDef'
           (envSig, runTy, shadow0 ++ map fst slotSigs ++ map fst transformationSigs,
            [], docs0,
            mbTemplates base, mbKWords base, [])
-          (baseDefs ++ transDefs ++ resDefs ++ defSrcs ++ instDefs
+          (baseDefs ++ transDefs ++ resDefs ++ defSrcs)
+  -- EVERY FUNCTOR'S GRAPH MORPHISM, CHECKED ONCE, here — over the
+  -- module's own defs, which is where a morphism that names one can be
+  -- read.  A `with F` earlier in the file has already checked it
+  -- (`runFunctor`, the ordering rule); this is the declaration that
+  -- nothing applies, and it is still a declaration.
+  let envA = (\(e, _, _, _, _, _, _, _) -> e) stA
+  mapM_ (uncurry (checkFunctorWord envA allDatas)) ownFuncs
+  -- ...and the EXTENSION of each is a word of the functor's own name,
+  -- so that the same functor is a value: `[Traced]` is a quote and
+  -- `lift2 [Traced]` applies it at runtime.  Same source as the one
+  -- `with Traced` runs, so a functor's action has one spelling.
+  let funcDefs = [ ( n, noHdr, functorExtSrc gm
+                   , Just ("functor " ++ n ++ " \8212 the Code \8658 Code "
+                            ++ "extension of the graph morphism `" ++ gm
+                            ++ "`") )
+                 | (n, gm) <- ownFuncs ]
+  st0 <-
+    foldM addDef' stA
+          (funcDefs ++ instDefs
              ++ [ (n, noHdr, b, d) | (n, b, d) <- transformationDefSrcs ])
   -- STAGE 8: THE MODULE'S DECLARATION PROGRAM, run here \8212 above
   -- main, below the defs, which is the dictionary a compile-time word
@@ -9720,7 +9834,7 @@ checkModuleRaw base src = do
   -- the generated transport word is checked like any other functor's
   -- word: if a model's slots ever stop composing, the message says so
   -- here
-  mapM_ (\(n, _, _, _) -> checkFunctorWord env' n n) transDefs
+  mapM_ (\(n, _, _, _) -> checkCodeWord env' n) transDefs
   -- every slot's inferred type must match the theory's declaration,
   -- instantiated at this model's arguments
   mapM_ (checkInstance env' theories) insts
@@ -10294,15 +10408,19 @@ preludeSrc = unlines
   , "def box = (w cd -> [(w) (cd) ... >> evalAs])"
   , "## a program's wiring as Code — nil when it has none to show (a closure)"
   , "def getCode = reflect >> ((c -> c) | drop >> nil) >> merge"
-  , "## by-generators functors (level 2a): rewrite every stage, or every"
-  , "## atom, of a spine.  Functorial by construction — a stage's image"
-  , "## depends on that stage alone — which is a law that comes free, not"
-  , "## a promise that the result types."
+  , "## THE EXTENSION of a graph morphism to the whole of Code.  A"
+  , "## `functor` declaration names one image per generator — `Fn⟨Stage"
+  , "## ⇒ Code⟩` — and this is the word that carries it along every"
+  , "## spine.  Functorial by the universal property (a functor out of a"
+  , "## free category IS a graph morphism), so the law comes free rather"
+  , "## than being a promise.  `atomwise` is the same one level down."
   , "def stagewise = flatMap"
   , "def atomwise = (f c -> c >> [[f ... >> ev] ... >> flatMap] ... >> map)"
-  , "## insert a stage after every stage, UNCHECKED (level 2b); the"
-  , "## checked word is the prim `interpose`"
-  , "def interposeRaw = (h c -> c >> [(s -> (s >> pack) h >> append)] ... >> flatMap)"
+  , "## the graph morphism that puts a stage after every generator,"
+  , "## UNCHECKED; `interpose` is this one with the prim `checkedStage`"
+  , "## in front, and that check is what makes it one you can trust"
+  , "def interposeRaw = (h -> [(s -> (s >> pack) h >> append)])"
+  , "def interpose = checkedStage >> interposeRaw"
   , "## the runtime lift of any Code ⇒ Code functor to Fn ⇒ Fn: the"
   , "## program is its own witness and its own fallback, so the result"
   , "## has the program's arrow by construction — a rewrite the witness"
@@ -11987,12 +12105,10 @@ runBuiltin ctx _ "showType" [r] =
   case showTypeV ctx r of
     Right t -> Right ([VStr t], [])
     Left e  -> Left ("showType: " ++ e)
-runBuiltin env _ "interpose" [eta, c]    = do
+runBuiltin env _ "checkedStage" [eta]    = do
   etaT <- codeToTermV eta
   checkInterposed (rcEnv env) etaT
-  etaS <- decodeListV eta
-  cs   <- decodeListV c
-  Right ([encodeListV (concat [ s : etaS | s <- cs ])], [])
+  Right ([eta], [])
 runBuiltin _ _ "asInt?" [VStr t]        =
   case reads t :: [(Int, String)] of
     [(n, "")] -> Right ([VSum 0 [VInt n]], [])
