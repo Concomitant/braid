@@ -478,6 +478,32 @@ Type formers:
   Display folds structural types back to their alias names when they
   match exactly (`:t!` shows raw).
 
+  **A declaration may not name itself to the left of an arrow**
+  *(2026-09-18)*. `data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)` is
+  fine — the self-occurrence is in the arrow's **output**, which is
+  codata — and so is one under no arrow at all (`List`, `Tree`). A
+  self-occurrence in an arrow's **input**, at any depth, is refused:
+
+  ```text
+  data Rec(a, b) = Fn⟨Rec(a, b) ⇒ Fn⟨a ⇒ b⟩⟩
+
+  error: Type Rec: `Rec` occurs to the LEFT of an arrow in its own
+  declaration, which admits general recursion with no `Recursive` on the
+  arrow.
+  ```
+
+  That type is the typed Z combinator's, and with it general recursion
+  types **pure**: `fixZ : Fn⟨Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩⟩ ⇒ Fn⟨a ⇒ b⟩`, a
+  factorial built from it `• ⇒ Fn⟨Int ⇒ Int⟩`, and no label on any
+  arrow to say so. The refusal is what leaves `with Recursive` as the
+  **one door** into recursion (§8, §14) — the alternative, minting
+  `Recursive` on a negative declaration, would have been a rule with
+  cases where this is a rule with none. Polarity is tracked through
+  other declared types by their parameters' variance, so
+  `data Neg(a) = Fn⟨a ⇒ Int⟩` then `data Bad = Neg(Bad)` is refused
+  too; `type` aliases need no rule of their own, being expanded before
+  the body is checked.
+
   **Named fields** *(2026-09-14)*. A **single-alternative** `data`
   declaration may name its positions, and each name becomes a
   **projection word**:
@@ -1219,6 +1245,16 @@ def name in T with M … = body # the two header clauses (below)
   reflected atom can name it — the same trick that keeps `#dist:K` and
   `with@F` out of source. It is why `fix` could leave the primitive set
   (§9, 48 → 47) without the language losing a knot.
+
+  **There is exactly one door** *(2026-09-18)*. `#fix` is unspellable
+  and `with Recursive` is the only thing that opens it, so an
+  unlabelled word ties no knot — but until 2026-09-18 that was not the
+  whole story, because a `data` declaration naming itself to the **left
+  of an arrow** made the typed Z combinator writable and general
+  recursion available with a **pure** manifest. Such a declaration is
+  now refused (§5, §14). With that door shut, provenance and the
+  semantic property coincide: the label is minted where the knot is
+  tied, and there is nowhere else to tie one.
 - **Functors reach inside** *(2026-09-12)*: a self-call inside a row
   component or a quotation reflects (§6, §12), so `with Traced` over a
   `with Recursive` factorial traces every stage and prints `24`.
@@ -4144,6 +4180,19 @@ corrected in place rather than dated one by one.
   — recursion is a **marker**. The same message with *(`recurse` named
   the definition being written)* is the word `recurse` used outside any
   `with Recursive` (§8).
+- **``` Type T: `T` occurs to the LEFT of an arrow in its own
+  declaration ```** — **strict positivity**. A `data` (or `model … in
+  Doctrine`) body may name itself in an arrow's **output**, which is
+  codata (`data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)`), or under
+  no arrow at all (`List`, `Tree`); in an arrow's **input** it is
+  refused, at any depth, because that type is the typed Z combinator's
+  and makes general recursion type pure. Recursion enters through
+  `with Recursive` and nowhere else (§5, §8). The check follows
+  polarity through other declared types by their parameters' variance,
+  so the indirection `data Neg(a) = Fn⟨a ⇒ Int⟩` then
+  `data Bad = Neg(Bad)` is refused too, and through a `type` alias,
+  which is expanded before the body is checked. If what you want is a
+  self-applying value, it is not expressible.
 - **`Duplicate definition: n` / `Duplicate parameter: p` / `Duplicate
   type declaration: T` / `Duplicate resource in `with`: R`** — objects
   are added, never merged. Rename one.

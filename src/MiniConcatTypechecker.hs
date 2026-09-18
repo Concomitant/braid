@@ -3289,6 +3289,97 @@ occursData n = goT
     goS (SCons t st)   = goT t || goS st
     goS _              = False
 
+-- STRICT POSITIVITY (2026-09-18).  A `data` body may mention the name
+-- it is declaring, but never to the LEFT of an arrow.  A negative
+-- self-occurrence is a second door into general recursion, and one
+-- with no guard on it: `data Rec(a, b) = Fn⟨Rec(a, b) ⇒ Fn⟨a ⇒ b⟩⟩`
+-- makes the typed Z combinator writable, so `fac` types `• ⇒
+-- Fn⟨Int ⇒ Int⟩` — PURE — and runs.  `#fix` is the other door and it
+-- is guarded: it is unspellable, `with Recursive` is the only thing
+-- that opens it, and the knot it ties mints `=Recursive>`.  One door
+-- beats two, so this one is closed rather than made to mint: with it
+-- shut, provenance and the semantic property coincide again, which is
+-- what MANUAL §8's claim rests on.
+--
+-- Codata stays legal: an occurrence in an arrow's OUTPUT is positive
+-- (`data Circuit(a…, b…) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩`),
+-- and so is one under no arrow at all (`List`, `Tree`).
+--
+-- Polarity is tracked THROUGH other declared types, by their
+-- parameters' variance: `data Neg(a) = Fn⟨a ⇒ Int⟩` makes `a`
+-- negative, so `data Bad = Neg(Bad)` is refused even though `Bad`
+-- reads as an argument.  `type` aliases need no separate treatment —
+-- they are expanded by the parser, so the body checked here is already
+-- alias-free.
+
+-- | Which polarities a value substituted for each parameter can reach:
+-- (can land positive, can land negative).
+type ParamVariance = [(Bool, Bool)]
+
+-- | Every name a type body mentions, tagged with the polarity it sits
+-- at: `Left` a declared type's name, `Right` a parameter's.  True is
+-- positive — right of every arrow it is under.
+polarityOccs :: (String -> ParamVariance) -> Bool -> Ty
+             -> [(Either String String, Bool)]
+polarityOccs var = goT
+  where
+    goT p (TVarTy (TV a))     = [(Right a, p)]
+    goT p (TFn (Arrow i o _)) = goS (not p) i ++ goS p o
+    goT p (TSum r)            = goR p r
+    goT p (TData m as)        =
+      (Left m, p)
+        : concat [ occ
+                 | (a, (pos, neg)) <- zip as (var m ++ repeat (True, True))
+                 , occ <- [ goS p a | pos ] ++ [ goS (not p) a | neg ] ]
+    goT _ _                   = []
+    goR p (RCons st r)        = goS p st ++ goR p r
+    goR p (RTail (RV v))      = [(Right v, p)]
+    goR _ RNil                = []
+    goS p (SCons t st)        = goT p t ++ goS p st
+    goS p (STail (SV s))      = [(Right s, p)]
+    goS p (SExp b _ r)        = goS p b ++ goS p r
+    goS _ SEnd                = []
+
+-- | Each declared type's parameter variances, to a fixed point.  The
+-- start is "reaches nothing" and each pass can only add, so it
+-- terminates; the pass is needed because a type's variance can depend
+-- on its own (`Circuit`'s `a` is negative only through `Circuit`).
+paramVariances :: [DataDecl] -> M.Map String ParamVariance
+paramVariances ds = settle (M.fromList [ (dName d, blank d) | d <- ds ])
+  where
+    blank d = [ (False, False) | _ <- dParams d ]
+    settle m = let m' = pass m in if m' == m then m else settle m'
+    pass m = M.fromList [ (dName d, varianceOf m d) | d <- ds ]
+    varianceOf m d =
+      [ (any (hit q True) occs, any (hit q False) occs)
+      | q <- map pName (dParams d) ]
+      where
+        occs = polarityOccs (look m) True (dBody d)
+        hit q b (Right n, p) = n == q && p == b
+        hit _ _ _            = False
+    look m n = M.findWithDefault (repeat (True, True)) n m
+
+-- | The refusal.  `d` is the declaration being added; `ds` is what is
+-- already in scope (`d` shadows an earlier one of its name).
+checkPositive :: [DataDecl] -> DataDecl -> Either String ()
+checkPositive ds d
+  | any neg (polarityOccs look True (dBody d)) =
+      Left $ "Type " ++ n ++ ": `" ++ n ++ "` occurs to the LEFT of an "
+          ++ "arrow in its own declaration, which admits general "
+          ++ "recursion with no `" ++ recLabel ++ "` on the arrow.  "
+          ++ "Recursion enters through `with " ++ recLabel
+          ++ "` and nowhere else (MANUAL §8).  An occurrence in an "
+          ++ "arrow's OUTPUT is codata and is fine (`data Stream(a) = "
+          ++ "(a Fn⟨• =" ++ recLabel ++ "> Stream(a)⟩)`); if what you "
+          ++ "want is a self-applying value, it is not expressible."
+  | otherwise = Right ()
+  where
+    n    = dName d
+    vs   = paramVariances (d : filter ((/= n) . dName) ds)
+    look m = M.findWithDefault (repeat (True, True)) m vs
+    neg (Left m, p) = m == n && not p
+    neg _           = False
+
 lookupAlias :: String -> [Alias] -> Maybe Alias
 lookupAlias n = go
   where
@@ -4006,9 +4097,9 @@ bodyWireCount (TSum (RCons st RNil)) = go st
     go _           = Nothing
 bodyWireCount _ = Just 1
 
-parseTypeLine :: [Alias] -> [(String, [TyParam])] -> String
+parseTypeLine :: [Alias] -> [DataDecl] -> String
               -> Either String (Either Alias DataDecl)
-parseTypeLine aliases dataSigs line =
+parseTypeLine aliases datas line =
   case break (== '=') line of
     (lhs, '=' : rhs0) -> do
       (kw, name, params) <- parseHead lhs
@@ -4063,6 +4154,16 @@ parseTypeLine aliases dataSigs line =
       -- self-recursive (which forces nominality)
       -- a resource is nominal by keyword, never an alias: its whole
       -- point is that `Int Int` must NOT silently become a GameState
+      -- ONE DOOR (2026-09-18): a nominal declaration may not put its
+      -- own name to the left of an arrow.  Checked here, where the
+      -- body is parsed and aliases are already expanded, so the
+      -- refusal reaches every path that declares a type — the
+      -- keyword, `resource`'s fold into `model`, a `table`'s generated
+      -- line, and `dataW` called from a program.
+      if kw == "data" || kw == resourceKw || occursData name body
+        then checkPositive datas (DataDecl name params body
+                                           (kw == resourceKw) fields)
+        else Right ()
       pure $ if kw == "data" || kw == resourceKw || occursData name body
                then Right (DataDecl name params body (kw == resourceKw) fields)
                else Left  (Alias name params body)
@@ -4112,6 +4213,7 @@ parseTypeLine aliases dataSigs line =
     paramList (TokDashes : _) =
       Left "'---' must be the last type parameter"
     paramList _ = Left "Malformed type parameter list"
+    dataSigs = map dataSig datas
     declKws = ["type", "data"]
     validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
                               , "type", "data", "model", "•" ]
@@ -9963,7 +10065,7 @@ checkModuleRaw base src = do
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
     addType tblTypes (env, run, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
-      decl <- parseTypeLine aliasesIn (map dataSig datasIn) line
+      decl <- parseTypeLine aliasesIn datasIn line
       let n = either aName dName decl
       if any ((== n) . aName) ownAl || any ((== n) . dName) ownDt
         then Left $ "Duplicate type declaration: " ++ n

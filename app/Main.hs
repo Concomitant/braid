@@ -585,7 +585,7 @@ handleLine st line =
     -- type Name(...) = rhs : declare (or replace) a type alias or a
     -- recursive (nominal) data type
     typeLine src =
-      case parseTypeLine (rsAliases st) (map dataSig (rsDatas st)) src of
+      case parseTypeLine (rsAliases st) (rsDatas st) src of
         Left err -> report err
         Right (Left al) -> do
           putStrLn $ "type " ++ aName al

@@ -898,6 +898,23 @@ moduleTypeTests =
         "a0 Fn⟨• =Recursive> Stream(a0)⟩ ⇒ Stream(a0)")
   , ("data S2(a) = (a Fn⟨• =Recursive IO> S2(a)⟩)\nS2",
         "a0 Fn⟨• =IO Recursive> S2(a0)⟩ ⇒ S2(a0)")
+    -- ONE DOOR (2026-09-18): a self-occurrence in an arrow's OUTPUT is
+    -- codata and stays legal, at any depth and through another type's
+    -- arguments; only a NEGATIVE one is refused (the error list below).
+  , ("data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩\nCircuit",
+        "Fn⟨Box(ρ0) =Recursive> Box(ρ1) Circuit(ρ0, ρ1)⟩ ⇒ Circuit(ρ0, ρ1)")
+  , ("data Coded(a..., b...) = Fn⟨a ⇒ b⟩ Code\nCoded",
+        "Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Coded(ρ0, ρ1)")
+  , ("data Weighted(b...) = List(Box(b))\ndata Kern(a..., b...) = Fn⟨a =Recursive> Weighted(b)⟩\nKern",
+        "Fn⟨ρ0 =Recursive> Weighted(ρ1)⟩ ⇒ Kern(ρ0, ρ1)")
+  , ("data Col(a..., b...) = Fn⟨List(Box(a)) =Recursive> List(Box(b))⟩\nCol",
+        "Fn⟨List(Box(ρ0)) =Recursive> List(Box(ρ1))⟩ ⇒ Col(ρ0, ρ1)")
+  , ("data Grad = Float Float\ndata Rev = Float Fn⟨Float ⇒ Grad⟩\nRev",
+        "Float Fn⟨Float ⇒ Grad⟩ ⇒ Rev")
+    -- a self-occurrence under NO arrow, through another type's
+    -- argument: `Tree` rides `List`'s parameter, which is positive
+  , ("data Tree(a) = (a | List(Tree(a)))\nTree",
+        "(a0 | List(Tree(a0))) ⇒ Tree(a0)")
     -- pack: list introduction from a bundle — (elements ; pack) replaces
     -- the list(…) special form; elements are full programs, groups delimit
   , ("(1 2 3 >> pack)",          "• ⇒ List(Int)")
@@ -3490,6 +3507,36 @@ moduleFailTests =
   , ("type Bad(a) = Fn⟨a ⇒ a\n1",                "close the Fn type")
   , ("type Fn(a) = (• | a)\n1",                  "Malformed type declaration")
   , ("type Bad = Fn\n1",                         "Fn must be written")
+    -- ONE DOOR (2026-09-18).  A NEGATIVE self-occurrence in a `data`
+    -- body is the typed Z combinator's type, and with it general
+    -- recursion types PURE: `fixZ : Fn⟨Fn⟨a ⇒ b⟩ ⇒ Fn⟨a ⇒ b⟩⟩ ⇒
+    -- Fn⟨a ⇒ b⟩` with no label on any arrow.  Refused, so `#fix` —
+    -- reachable only through `with Recursive`, which mints — is the
+    -- one way in.
+  , ("data Rec(a, b) = Fn⟨Rec(a, b) ⇒ Fn⟨a ⇒ b⟩⟩\n1",
+     "`Rec` occurs to the LEFT of an arrow in its own declaration")
+  , ("data Rec(a, b) = Fn⟨Rec(a, b) ⇒ Fn⟨a ⇒ b⟩⟩\n1",
+     "Recursion enters through `with Recursive` and nowhere else")
+    -- at any depth, and in the input of an arrow that is itself in
+    -- OUTPUT position
+  , ("data Neg = Fn⟨Int ⇒ Fn⟨Neg ⇒ Int⟩⟩\n1",
+     "occurs to the LEFT of an arrow")
+    -- through a `type` alias, which the parser expands
+  , ("type F(a) = Fn⟨a ⇒ Int⟩\ndata Bad = F(Bad)\n1",
+     "`Bad` occurs to the LEFT of an arrow")
+    -- ...and through ANOTHER DATA TYPE'S ARGUMENT, by that type's
+    -- parameter variance: `Neg2`'s parameter is negative, so `Bad2`
+    -- reaches a negative position even though it reads as an argument
+  , ("data Neg2(a) = Fn⟨a ⇒ Int⟩\ndata Bad2 = Neg2(Bad2)\n1",
+     "`Bad2` occurs to the LEFT of an arrow")
+    -- a `resource` body is checked by the same rule
+  , ("model R in Doctrine = Fn⟨R ⇒ Int⟩\n1",
+     "`R` occurs to the LEFT of an arrow")
+    -- MUTUAL data declarations do not exist: a body may name itself
+    -- and what is already declared, and nothing else — so there is no
+    -- mutual group for the check to miss.
+  , ("data A = Fn⟨B ⇒ Int⟩\ndata B = A\n1",
+     "Unknown type")
     -- STAGE 5a½: a definition is not in scope in its own body, under
     -- either spelling — unless its header SAYS so (5e).
   , ("def f = 1 ... >> + >> f\n1",
