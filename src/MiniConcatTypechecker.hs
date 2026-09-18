@@ -2248,7 +2248,7 @@ remapLines f = go
 -- parsed off the line's left-hand side (2026-09-16).  `in` is
 -- MEMBERSHIP (what this def is a morphism of; applies nothing, mints
 -- nothing) and `with` is APPLICATION (the functors to apply to the
--- body; every `with` mints its receipt).  At most one `in`, `in` before
+-- body; a `with` mints its receipt when it changed the body).  At most one `in`, `in` before
 -- `with`, both header-only: the body is a pure spine.
 data DefHdr = DefHdr { dhIn :: Maybe String, dhWith :: [String] }
   deriving (Show, Eq)

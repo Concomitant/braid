@@ -11,10 +11,14 @@
 # scope, which is what keeps `reflect`, the per-stage schemes and every
 # functor total.
 #
-# `Recursive` is the RECEIPT of that scope, minted exactly as `use
-# Traced` mints `Traced`. It reads "may recurse without bound", not
-# "diverges": a word without it ties no knot and terminates by
-# construction. Structural recursors (`foldList`, `foldTree`, … —
+# `Recursive` is the RECEIPT of that scope, minted exactly as `with
+# Traced` mints `Traced` — and, since 2026-09-18, minted only when the
+# scope CHANGED the code, which here means the body named the def.  It
+# reads "may recurse without bound", not "diverges": a word without it
+# ties no knot and terminates by construction, and since 2026-09-18
+# that is true rather than nearly true — a `data` declaration naming
+# itself to the left of an arrow used to be a second door into
+# recursion with no label on it, and is now refused (MANUAL §5). Structural recursors (`foldList`, `foldTree`, … —
 # emitted per `data` declaration) mint nothing, because they are bounded
 # by the value they eat.
 

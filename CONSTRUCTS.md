@@ -730,7 +730,7 @@ declares nothing* when the theory shares no slot with it.
 ## `with` — the application clause
 
 **What it is.** The clause that **applies** things to a def's body.
-Every `with` mints a receipt.
+A `with` mints a receipt when it CHANGED the body *(2026-09-18)*.
 
 **Syntax.** `def NAME [in T] with X₁ X₂ … = body`, left of the `=`,
 never in a spine. A **quotation** takes the same clause, introduced by
@@ -994,7 +994,10 @@ test 'wrong' must be a program with type `• ⇒ Bool`, but is • ⇒ Int
 
 **What it is.** The **label a `with` clause leaves** on the manifest of
 everything it elaborated: provenance about how a word was built, not a
-claim its author made.
+claim its author made. It says "this scope **changed** this code", not
+"this scope was applied to it" *(2026-09-18)* — the stronger reading,
+and the useful one for auditing, since code a scope left alone has
+nothing to audit.
 
 **Syntax.** None — you cannot write one. Internally it is a word
 `with@F : ∀ρ. ρ =F> ρ`, a unit endomorphism prepended to the expansion;
@@ -1008,14 +1011,25 @@ with@Ticked >> dup >> "tick" pass >> print pass >> + >> "tick" pass >> print pas
 (`traced.braid`, printed).
 
 **What the checker does.** `receiptScheme` gives it its type;
-`elabHeaders` mints it **unconditionally** for every `with`, because a
-functor that leaves no receipt cannot be audited; and the same walk
-refuses `@` in source, which is what makes a label evidence. The one
-scope that does not mint is a model's own component — the `with I`
-wrapping a slot body resolves names, it does not apply the model to
-itself. `in` mints nothing, ever: a hand-built morphism is by
-definition not in the functor's image, and `=K>` on it would over-claim
-in exactly the gap between "went through F" and "is in the image of F".
+`elabHeaders` mints it for every `with` **whose action left the code
+different from the code it was given** — one structural comparison of
+the `Term`, before and after that scope, per scope per def. That is
+**image membership**, the law the functor notes already state for an
+idempotent F (`F(p) = p` ⟺ p is in F's image). So an identity graph
+morphism, a model whose slot names do not occur, and a `with Recursive`
+on a body that never names the def all mint nothing — and `with
+Recursive` on such a body ties no knot either, which is the same fact
+said in the code. A **resource** scope always mints, by the same rule:
+it emits a CLAIM about the incoming wires (`unLog ; Log`), and that is
+a change. The same walk refuses `@` in source, which is what makes a
+label evidence. The one scope exempted by a rule of its own is a
+model's own component — the `with I` wrapping a slot body resolves
+names, it does not apply the model to itself, and it must be exempted
+rather than left to image membership because a body naming a SIBLING
+slot really is changed by the rename. `in` mints nothing, ever: a
+hand-built morphism is by definition not in the functor's image, and
+`=K>` on it would over-claim in exactly the gap between "went through
+F" and "is in the image of F".
 
 **Examples.** Every labelled arrow. `traced.braid` prints one inside
 reflected code and uses it as an `evalAs` witness; `theories.braid`

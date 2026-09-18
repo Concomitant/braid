@@ -209,11 +209,14 @@ a resource declaration drives — `World` is declared by none, so there is
 no `World` and no `unWorld` to write one with, and the name it does have
 is in the compiler's `@` namespace. `print : a0 =IO> •`, unchanged.
 
-**And every `with` leaves a receipt.** A scope (§6, §12) elaborates the
-code under it — rewriting it, routing it, renaming it — and mints its
-own name onto the manifest of what it elaborated, so the arrow records
-not only what a word touches but what built it, and every caller
-inherits the label by composition:
+**And a `with` that changes anything leaves a receipt.** A scope (§6,
+§12) elaborates the code under it — rewriting it, routing it, renaming
+it — and mints its own name onto the manifest of what it elaborated, so
+the arrow records not only what a word touches but what built it, and
+every caller inherits the label by composition. **A receipt says "this
+scope CHANGED this code", not "this scope was applied to it"**
+*(2026-09-18)* — the stronger reading, and the useful one for auditing,
+since code a scope left alone has nothing to audit:
 
 ```text
 poly    : Int =Traced> Int          -- elaborated under `with Traced`
@@ -223,9 +226,14 @@ total   : Intⁿ⁰ =IntSum> Int        -- and a MODEL mints too: which
                                     --   model read this template
 ```
 
-Only a `with` mints, and every `with` mints. `in` (§6, §8) declares
+Only a `with` mints, and a `with` mints exactly when its action left
+the code different from the code it was given — image membership, the
+law the functor notes already state for an idempotent F (`F(p) = p` ⟺
+p is in F's image). So a functor that finds nothing to rewrite, a model
+whose slot names do not occur, and a `with Recursive` on a body that
+never names the def all mint nothing. `in` (§6, §8) declares
 what a def *is* rather than applying anything to it, so it mints
-nothing. The label is not written, cannot be written
+nothing either. The label is not written, cannot be written
 (`with@Traced` in your own source is an error), and does not have to be
 threaded — which is what makes it evidence rather than a comment. It
 is also part of the type: a declaration that says `Fn⟨Int ⇒ Int⟩`
@@ -257,7 +265,11 @@ sentence: it is *run-time* code it speaks about — a functor word runs
 in the other phase, where a step budget rather than `Recursive` is the bound
 (§8) — and "knot-free ⟹ terminates" rests on the primitive set holding
 no other unbounded construct, which is believed and has not been
-audited end to end.
+audited end to end. It had a third until 2026-09-18, and that one was
+a real hole rather than a caveat: a `data` declaration naming itself to
+the **left of an arrow** made the typed Z combinator writable, so
+general recursion typed **pure**. Such a declaration is now refused
+(§5, §14), and there is exactly one door.
 
 **And a MODEL WITH A CARRIER is a label with a carrier**
 *(2026-09-13)*. When a model's theory is declared `in Doctrine` and
@@ -290,7 +302,7 @@ The built-in labels, then:
 | label | minted by | carrier | says |
 |---|---|---|---|
 | `IO` | the four io prims (`print`, `readLine`, `readFile`, `writeFile`) | an abstract, linear `World` — one of it, ambient, never written | touched the world |
-| `Recursive` | `with Recursive` on a `def` (§8) | none | may recurse without bound |
+| `Recursive` | `with Recursive` on a `def` **that names itself** (§8) | none | ties a knot, and may recurse without bound |
 | `F` (any functor) | `with F` on a `functor` (§12) | none | its graph morphism was extended along the wiring |
 | `R` (any resource) | `with R` on a `model R in Doctrine` (§8), **or inferred routing** | a wire of type `R` | threads the `R` wire |
 | `M` (any model with a carrier) | `with M` on a `model` whose theory has a hom-object (§8) | the hom-object `K(a, b)` | was built in the category `M` presents |
@@ -1209,10 +1221,12 @@ def name in T with M … = body # the two header clauses (below)
   ```
 
   `Recursive` is the **receipt** of that scope (§3), minted exactly as
-  `with Traced` mints `Traced` — unconditionally, because a receipt says
-  what the scope did. The knot the marker ties carries the label too,
-  and a manifest is a set, so a marked def that also calls `loop` says
-  `Recursive` once.
+  `with Traced` mints `Traced` — when the scope CHANGED the code, which
+  here means the body named the def and a knot was tied. A body that
+  never names it gets no knot and no label *(2026-09-18)*, including
+  one where a binder parameter shadows the def's name. The knot the
+  marker ties carries the label too, and a manifest is a set, so a
+  marked def that also calls `loop` says `Recursive` once.
 - **`fix` is derived** *(2026-09-14)*, and is for **open** recursion —
   a body someone else hands you, a memoizing or logging `self`, a body
   you built at runtime:
@@ -3012,7 +3026,12 @@ one term with two spellings. Derived-but-primitive-looking words
 everything else in the language itself") is proven in both directions.
 
 **There are 66 primitives** *(2026-09-17: `showStack`, 65 → 66; the
-count had said 60 since 2026-09-14 and was stale)*. A word keeps its place here
+count had said 60 since 2026-09-14 and was stale)*. The count is of
+**words source can name**, and it therefore **excludes `#fix`**, the
+knot `with Recursive` emits: `#` opens a comment, so no program and no
+reflected atom can spell it. It is a generator of the free category
+all the same — and since 2026-09-18 an irreducible one, because
+nothing else in the language can produce an unbounded knot (§8, §5). A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), the open
@@ -3221,7 +3240,7 @@ The `id` says the knot is **one wire**: a grouped atom in non-final
 position is closed (§4), and closing would otherwise erase the knot's
 own arity. Its arrow carries `Recursive` where the old primitive's was
 pure — the derived word runs the knot's `ev`, and the scope it is
-written under mints unconditionally (§3).
+written under tied one, so it minted (§3).
 
 **Loops** *(all derived since 2026-09-12)*: `loop :
 Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1` is the **Elgot dagger**, and it is
@@ -4416,9 +4435,15 @@ corrected in place rather than dated one by one.
   nothing**: a hand-built morphism prints as the carrier it is,
   `sum0 : • =Recursive> Circuit(Int, Int)`, unfolded, because `=Circuits>`
   would say the code went through the functor and it did not.
-- **Every `with` mints — models included** *(2026-09-13)*. `with
-  IntSum ; fold1` leaves `=IntSum>` on the arrow, exactly as `with
-  Traced` leaves `=Traced>`. The consequence is the sharp edge below,
+- **Every `with` that CHANGED something mints — models included**
+  *(2026-09-13; the qualification is 2026-09-18)*. `with IntSum ;
+  fold1` leaves `=IntSum>` on the arrow, exactly as `with Traced`
+  leaves `=Traced>`, because renaming `fold1`'s slots to that model's
+  words is a change. A scope that leaves the code exactly as it found
+  it mints nothing: the identity functor, a model whose slot names do
+  not occur in the body, an object-mapped model over a word whose
+  scheme never mentions the mapped type, a `with Recursive` on a body
+  that never names the def. The consequence is the sharp edge below,
   now uniform: **a theory slot declared without the label refuses a
   body written under another model.**
 
@@ -4432,9 +4457,11 @@ corrected in place rather than dated one by one.
   Write the label in the theory if you mean it (`op : a a =IntProd> a`
   is rarely what you want), or — much more often — say which model you
   meant at the call rather than inside another model.
-  A model's **own** slot bodies are exempt: the `with I` that
-  resolves their slot names applies nothing and mints nothing, because
-  a model does not apply itself.
+  A model's **own** slot bodies are exempt by a rule of their own, and
+  need to be: the `with I` that resolves their slot names *does* change
+  a body that names a sibling slot (`add` → `Fwd@add`), so image
+  membership alone would mint there and the slot's own declared arrow
+  would then refuse it. A model does not apply itself.
 - The same goes for a functor's receipt, and it surprises people once:
   a *written* type with no labels refuses labelled code. An `evalAs`
   witness `Fn⟨Int ⇒ Int⟩`, or a theory slot declared `a ⇒ a`, will not
@@ -4826,7 +4853,8 @@ template (§8) over a theory naming the two operations a handler needs
 `Fn⟨ρ0 =Log> ρ1⟩ =Logs> Fn⟨ρ0 ⇒ Str ρ1⟩` under `with Logs` and
 `Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩` under `with Counts` —
 `examples/resources.braid` writes both halves. (The outer label is the
-scope's receipt: every `with` mints, models included.)
+scope's receipt: a `with` that changed the code mints, models
+included.)
 
 **What not to reach for.** Effects do not need new machinery: state is a
 a resource, failure is the railway sum track, writer is a resource,

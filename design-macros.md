@@ -5224,3 +5224,154 @@ defs `Cells` needed and the declaration word `resourceW`, which left
 the table with its keyword — a keyword names one declaration word, and
 this one's word is `modelW`. The count moving is the check doing its
 job, exactly as it was when twelve words arrived on 2026-09-17.
+
+---
+
+## Amendment (2026-09-18): one door, and a receipt that means something
+
+*Two claims the language was making for free. One was false; the other
+was weaker than it looked. Both are now paid for.*
+
+### The bug: a second door into recursion, with no guard on it
+
+`data` admitted a **negative** self-occurrence — the declared name to
+the left of an arrow — and that is exactly the typed Z combinator's
+type. Reproduced 2026-09-18:
+
+```braid
+data Rec(a, b) = Fn⟨Rec(a, b) ⇒ Fn⟨a ⇒ b⟩⟩
+def selfApp  = (x -> (x ; unRec) x ; ev)
+def selfAppZ = (x -> [(v -> (x ; selfApp) v ; ev)])
+def fixZ = (f -> [(x -> f (x ; selfAppZ) ; ev)] ; (g -> g (g ; Rec) ; ev))
+def facBody = (self -> [(n -> n ; zero? ; ((z -> 1) | (m -> m (self (m ; _ 1 ; -) ; ev) ; *)) ; merge)])
+def fac = [facBody] ; fixZ
+fac 5 ; ev ; print        -- prints 120
+```
+
+```text
+fixZ : Fn⟨Fn⟨a0 ⇒ a1⟩ ⇒ Fn⟨a0 ⇒ a1⟩⟩ ⇒ Fn⟨a0 ⇒ a1⟩
+fac  : • ⇒ Fn⟨Int ⇒ Int⟩
+```
+
+Both **pure**. No `Recursive` anywhere, no `#fix` anywhere, and the
+un-eta-expanded Y version types pure too and then runs out of memory.
+So MANUAL's reading of an unlabelled word — *ties no knot, and
+therefore terminates by construction* — was not a caveat short of
+proof; it was **false**. `#fix` was one door with a guard on it, and a
+negative recursive type was a second with none.
+
+### Refusal beat polarity-directed minting
+
+The other repair was available: keep the declaration and mint
+`Recursive` on the arrows that pass through it. It was rejected for two
+reasons.
+
+**One door beats a rule with cases.** A polarity-directed mint is a
+rule that has to say *which* occurrences count, at *what* depth, and in
+whose type the label lands — `unRec`'s? `Rec`'s? the arrow a value of
+it is later applied at? Every one of those is a place to be subtly
+wrong, and the wrongness is silent: an under-minted arrow reads pure.
+Refusal has no cases. A declaration is legal or it is not, and the
+answer is decided once, where the declaration is written.
+
+**It restores the coincidence the docs depend on.** `with Recursive` is
+provenance — *this scope tied a knot* — and MANUAL reads the same label
+as a semantic property — *this word may recurse without bound*. Those
+agree only if there is exactly one way to make a knot. There is again.
+
+So: the standard strict-positivity check on a nominal declaration's
+body. A self-occurrence in an arrow's OUTPUT is codata and stays legal
+(`Circuit`, `Stream`), as does one under no arrow at all (`List`,
+`Tree`); a self-occurrence in an arrow's INPUT is refused at any depth,
+including in the input of an arrow that is itself in output position.
+Polarity is tracked through other declared types by their parameters'
+variance, computed to a fixed point (a type's variance can depend on
+its own — `Circuit`'s `a` is negative only through `Circuit`), so
+`data Neg(a) = Fn⟨a ⇒ Int⟩` then `data Bad = Neg(Bad)` is refused too.
+`type` aliases need no rule of their own: the parser expands them
+before the body is checked. Mutual `data` groups do not exist — a body
+may name itself and what is already declared, and nothing else — so
+there is no group for the check to miss.
+
+144 nominal declarations across the prelude, the examples and the tests
+were checked mechanically. None needed changing.
+
+### The receipt: image membership
+
+The second claim. Every `with` minted **unconditionally**, so a def
+marked `with Recursive` whose body never named itself still carried
+`=Recursive>`, and a functor that found nothing to rewrite still
+stamped its label. That is provenance in the weakest sense — *this
+scope was applied to this code* — and it is nearly useless for
+auditing, because the thing you want to know is whether the scope
+**did** anything.
+
+The rule now: **a scope mints its label iff the elaborated code differs
+from the code it was given.** That is the image-membership law this
+file already states for an idempotent F (`F(p) = p` ⟺ p is in F's
+image), moved from a property a theory may declare to the definition of
+what a receipt is. A receipt says *this scope changed this code*.
+
+The comparison is one structural `==` on the **`Term`**, before and
+after that one scope's action, per scope per def. The `Term` rather
+than its `Code` reflection for two reasons: `Code` does not represent a
+binder, and a body may carry one; and `Term`'s hand-written `Eq`
+already skips a stage's line stamp, so provenance does not count as a
+change. Where a scope has two actions — a model that both renames and
+transports — either change mints, because it is one scope and one
+receipt.
+
+The implementation had to be made honest first. `tieKnot` wrapped every
+body in `[…] ; #fix ; ev` whether or not anything substituted, so a
+non-recursive body's code differed and the check would have minted
+anyway. It now returns the body unchanged when the substitution finds
+no self-reference: both the fix and an optimization, since that `#fix`
+and `ev` were dead.
+
+Three findings from doing it:
+
+- **`ecSelf` stays.** `instanceDefs` wraps each slot body in `with I`
+  to RESOLVE names, and a slot body that references a SIBLING slot is
+  genuinely changed by that rename (`add` → `Fwd@add`) — so image
+  membership alone mints there, and `checkInstance` then refuses the
+  body for carrying its own model's label against a slot arrow declared
+  pure. Verified by deleting the filter: eleven failures, including
+  `examples/autodiff.braid`, all reading *slot 'add' is Dual(Float)
+  Dual(Float) =Floats> Dual(Float) but theory Ring declares … ⇒ …*.
+  Bodies referencing no sibling stop minting, which is harmless.
+- **A resource scope always mints, and by the same rule.** `with Log`
+  emits a CLAIM about the incoming wires (`unLog ; Log`, the identity
+  on a `Log` and on nothing else). The claim is what makes the scope a
+  statement rather than padding, so a resource scope is never in its
+  own image. This is not an exception to image membership; it is image
+  membership answering honestly about a scope that always changes
+  something.
+- **A functor's round trip through `Code` re-associates a multi-stage
+  spine**, and the `Term` comparison counts that as a change. So the
+  identity graph morphism mints nothing on a one-stage body and mints
+  on a three-stage one. The direction is the safe one — it over-mints
+  rather than under-mints — and it is honest about what the elaborated
+  `Term` is; a sharper answer would need a normalizer, which is a
+  different tool than a receipt.
+
+One pinned type moved in the examples and every printed output stayed
+byte-identical: `examples/recursion.braid`'s `fac`, whose binder
+shadows the def name, was `Int =Recursive> Int` and is now `Int ⇒
+Int` — the honest arrow, since that word cannot recurse. A pure written
+type that used to refuse such code now accepts it, which is the
+direction the change was made in, and is pinned as a test.
+
+### The consequence for the minimality floor
+
+`#fix` was, briefly and without anyone noticing, **reducible**: a
+program that could write a negative `data` declaration could build a
+knot without it. With that door shut it is irreducible again — nothing
+else in the language produces an unbounded knot — so it counts as a
+generator, and the floor is **13 rather than 12**.
+
+It is not counted as a *primitive*, and the two counts are different
+questions. The primitive count is of words **source can name**, and
+`#fix` is unspellable by construction (`#` opens a comment), which is
+the whole of its guard. The generator count is of what the free
+category needs. MANUAL §9 and the README now say which count they are
+giving.
