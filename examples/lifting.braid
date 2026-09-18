@@ -11,7 +11,7 @@
 # ---- game rules advance game state -----------------------------------
 # The moves are ordinary functions. No Game anywhere in sight.
 
-resource Game = Int
+model Game in Doctrine = Int
 
 def play  = (f -> [unGame >> f ... >> ev >> Game])
 #   play : Fn⟨Int ⇒ Int⟩ ⇒ Fn⟨• =Game> •⟩ — a pure rule, made a move
@@ -30,7 +30,7 @@ unGame >> print                                    # 6 — ((0+1)·2+1)·2
 # The wrapper's body is written OBLIVIOUSLY: `with Log` inside the quote
 # makes the elaborator thread the log wire, so `logged` is one line.
 
-resource Log = Str
+model Log in Doctrine = Str
 def note = unLog _ >> cat >> Log
 
 def logged = (f -> [with Log = dup >> toStr >> note >> " " >> note >> f ... >> ev])

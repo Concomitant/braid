@@ -72,7 +72,7 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1231-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1233-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove

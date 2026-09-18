@@ -189,7 +189,7 @@ model Enum in Prob(Kern, Weighted) =
 # every count printed below is reproducible, and a different seed is a
 # different test rather than a different program.
 
-resource Rng = Int
+model Rng in Doctrine = Int
 data Draws(b...)      = List(Box(b))
 data Samp(a..., b...) = Fn⟨Rng a =Recursive> Rng b⟩
 

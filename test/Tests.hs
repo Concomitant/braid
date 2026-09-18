@@ -1128,41 +1128,41 @@ moduleTypeTests =
     -- parameter was stack-kinded (the split was ambiguous).
     -- RESOURCES (design-effects stage 2): a nominal threaded wire,
     -- folding onto the ARROW as `=Name>` when it rides a suffix.
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\nnote",
+  , ("model Log in Doctrine = Str\ndef note = unLog _ >> cat >> Log\nnote",
      "Str =Log> •")
     -- bottom-anchored routing is width-polymorphic: the resource stays
     -- put and the remainder threads, which is what lets the elaborator
     -- place wires without consulting inference
-  , ("resource Log = Str\ndef note = (unLog _ >> cat >> Log) ...\nnote",
+  , ("model Log in Doctrine = Str\ndef note = (unLog _ >> cat >> Log) ...\nnote",
      "Str ρ0 =Log> ρ0")
-  , ("resource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef tick = _ bump ...\ntick",
+  , ("model Counter in Doctrine = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef tick = _ bump ...\ntick",
      "a0 Counter ρ0 ⇒ a0 Counter ρ0")
     -- the grade and the resources are the same arrow: one `=IO Log>`
-  , ("resource Log = Str\ndef peek = unLog >> dup >> print ... >> Log\npeek",
+  , ("model Log in Doctrine = Str\ndef peek = unLog >> dup >> print ... >> Log\npeek",
      "• =IO Log> •")
-  , ("resource Log = Str\ndef quiet = unLog >> dup >> drop ... >> Log\nquiet",
+  , ("model Log in Doctrine = Str\ndef quiet = unLog >> dup >> drop ... >> Log\nquiet",
      "• =Log> •")
     -- NOMINAL, which is the whole point: a bare Int Int is never a
     -- resource, so nothing folds by accident
-  , ("resource GameState = Int Int\ndef notState = swap\nnotState",
+  , ("model GameState in Doctrine = Int Int\ndef notState = swap\nnotState",
      "a0 a1 ⇒ a1 a0")
     -- the roll/unroll doors do not fold (no suffix on the input side)
-  , ("resource Log = Str\nLog",   "Str ⇒ Log")
-  , ("resource Log = Str\nunLog", "Log ⇒ Str")
+  , ("model Log in Doctrine = Str\nLog",   "Str ⇒ Log")
+  , ("model Log in Doctrine = Str\nunLog", "Log ⇒ Str")
     -- STAGE 7b commit 2: ONE carrier table, so a label and a resource
     -- of the SAME NAME print the name once.  Before 7b the folded
     -- carriers were appended to the whole sorted label set and
     -- `unWeird` read `Fn⟨Int =R R> Int⟩` — the name twice, once as a
     -- label and once as its own carrier.
-  , ("resource R = Int\ndata Weird = Fn⟨R Int =R> R Int⟩\nunWeird",
+  , ("model R in Doctrine = Int\ndata Weird = Fn⟨R Int =R> R Int⟩\nunWeird",
      "Weird ⇒ Fn⟨Int =R> Int⟩")
     -- ...and the ORDER is pinned while we are here: labels sorted,
     -- then the folded carriers in CARRIER order (the order they sit in
     -- on the stack), which is what keeps `=Log Counter>` in `with`
     -- order rather than alphabetical.
-  , ("resource R = Int\ndata Weird2 = Fn⟨R Int =Alpha R> R Int⟩\nunWeird2",
+  , ("model R in Doctrine = Int\ndata Weird2 = Fn⟨R Int =Alpha R> R Int⟩\nunWeird2",
      "Weird2 ⇒ Fn⟨Int =Alpha R> Int⟩")
-  , ("resource Log = Str\nresource Counter = Int\n\
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\n\
      \data W3 = Fn⟨Log Counter Int =IO> Log Counter Int⟩\nunW3",
      "W3 ⇒ Fn⟨Int =IO Log Counter> Int⟩")
     -- STAGE 7b commit 4: a resource-shaped carrier whose model is NOT
@@ -1171,7 +1171,7 @@ moduleTypeTests =
     -- This is the clause that keeps `examples/prob.braid`'s
     -- hand-written `Sampler` (which threads `Rng`) on the path it was
     -- written for.
-  , ("resource Rg = Int\n\
+  , ("model Rg in Doctrine = Int\n\
      \data K2(a..., b...) = Fn⟨Rg a ⇒ Rg b⟩\n\
      \theory T2(k(..., ...)) in Doctrine =\n\
      \    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n\
@@ -1185,43 +1185,43 @@ moduleTypeTests =
      "Int =M2> Int")
     -- STAGE 4: `with` opens an ambient scope and the elaborator writes
     -- every `_`/`...` — the body below contains none.
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f with Log Counter = dup >> * >> bump\nf",
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef f with Log Counter = dup >> * >> bump\nf",
      "Int ρ0 =Log Counter> Int ρ0")
-  , ("resource Log = Str\nresource Counter = Int\ndef note = unLog _ >> cat >> Log\ndef f with Log Counter = \"x\" >> note\nf",
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\ndef note = unLog _ >> cat >> Log\ndef f with Log Counter = \"x\" >> note\nf",
      "ρ0 =Log Counter> ρ0")
     -- `with` ASSERTS its claim: the wires must really be those resources,
     -- even when the body never touches one
-  , ("resource Log = Str\ndef f with Log = dup\nf",
+  , ("model Log in Doctrine = Str\ndef f with Log = dup\nf",
      "a0 ρ0 =Log> a0 a0 ρ0")
     -- STAGE 7b commit 5: INFERRED ROUTING.  A def that CALLS a
     -- resource word is routed for it with no header: the resource word
     -- originates its label at the leaf, exactly as the four io prims
     -- do, and it propagates by row unification as every label does.
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\n\
+  , ("model Log in Doctrine = Str\ndef note = unLog _ >> cat >> Log\n\
      \def f = \"x\" >> note\nf",
      "ρ0 =Log> ρ0")
     -- ...and `with Log` on the same def is exactly what inference did.
     -- Routing is idempotent, so the header is the EXPLICIT FORM rather
     -- than a second mechanism.
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\n\
+  , ("model Log in Doctrine = Str\ndef note = unLog _ >> cat >> Log\n\
      \def f with Log = \"x\" >> note\nf",
      "ρ0 =Log> ρ0")
     -- STAGE 7b commit 6: the scope MINTS, so the label is on the
     -- arrow and the display order survives -- labels sorted, then the
     -- folded carriers in carrier (`with`) order.
-  , ("resource Fuel = Int\ndef burn = unFuel ; _ 1 ; - ; Fuel\n\
+  , ("model Fuel in Doctrine = Int\ndef burn = unFuel ; _ 1 ; - ; Fuel\n\
      \def metered = ([burn ...] ; getCode) ... ; interpose\n\
      \functor Metered = metered\n\
      \def poly with Fuel Metered = dup ; *\npoly",
      "Int ρ0 =Metered Fuel> Int ρ0")
     -- inference routes for what the CALLEE threads and nothing else
-  , ("resource Log = Str\nresource Counter = Int\n\
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\n\
      \def bump = unCounter >> 1 ... >> + >> Counter\n\
      \def h = dup >> * >> bump\nh",
      "Int ρ0 =Counter> Int ρ0")
     -- ...and the header OVERRIDES: it names the scope, inference only
     -- proposes one
-  , ("resource Log = Str\nresource Counter = Int\n\
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\n\
      \def bump = unCounter >> 1 ... >> + >> Counter\n\
      \def h with Log Counter = dup >> * >> bump\nh",
      "Int ρ0 =Log Counter> Int ρ0")
@@ -1233,7 +1233,7 @@ moduleTypeTests =
     -- and it must be alone"), so this test is that it still checks;
     -- the type it prints is the display fold, which fires on the
     -- shared prefix and never needed a scope.
-  , ("resource Log = Str\nresource Counter = Int\n\
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\n\
      \def bump = unCounter >> 1 ... >> + >> Counter\n\
      \def note = unLog _ >> cat >> Log\n\
      \def byHand =\n\
@@ -1250,11 +1250,11 @@ moduleTypeTests =
     -- Without this, a multi-resource word could be WRITTEN with `with`
     -- and then never CALLED from one, which makes the scope a notation
     -- rather than an abstraction.
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step with Log Counter = toStr >> note >> bump\ndef twice with Log Counter = step >> step\ntwice",
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step with Log Counter = toStr >> note >> bump\ndef twice with Log Counter = step >> step\ntwice",
      "a0 a1 ρ0 =Log Counter> ρ0")
     -- ... and a resourceful step is exactly a fold's step function, so
     -- folding it over data is the ordinary `fold`
-  , ("resource Books = Str\ndef say = unBooks _ >> cat >> Books\ndef step with Books = toStr >> say\n[step]",
+  , ("model Books in Doctrine = Str\ndef say = unBooks _ >> cat >> Books\ndef step with Books = toStr >> say\n[step]",
      "• ⇒ Fn⟨a0 ρ0 =Books> ρ0⟩")
     -- THEORIES (stage 3): named slots, models selected BY NAME with
     -- `with`, resolution as a renaming at elaboration.  Generic code is
@@ -1340,7 +1340,7 @@ moduleTypeTests =
   , (idF ++ "def idG = [(s -> s >> pack)]\nfunctor Twice = idG\n"
          ++ "def p with Same Twice = dup >> *\np", "Int =Same Twice> Int")
   , (idF ++ "def p with Same = dup >> * >> print\np", "Int =IO Same> •")
-  , (idF ++ "resource Fuel = Int\ndef p with Fuel Same =\n    dup >> *\np",
+  , (idF ++ "model Fuel in Doctrine = Int\ndef p with Fuel Same =\n    dup >> *\np",
      "Int ρ0 =Same Fuel> Int ρ0")
     -- a labelled word composes with an unlabelled one and with an io
     -- one: unification absorbs into the open tail, exactly as io always
@@ -1480,7 +1480,7 @@ tmplMod =
 -- unroll the wire — the arrow loses `=Log>` across it
 handlerMod :: String
 handlerMod =
-  "resource Log = Str\n\
+  "model Log in Doctrine = Str\n\
   \def note = unLog _ ; cat ; Log\n\
   \def collectLog = (f -> [f (\"\" ; Log) ... ; ev ; unLog ...])\n"
 
@@ -1488,8 +1488,8 @@ handlerMod =
 -- resource name, so the two words a handler needs become slots
 collectorMod :: String
 collectorMod =
-  "resource Log = Str\n\
-  \resource Counter = Int\n\
+  "model Log in Doctrine = Str\n\
+  \model Counter in Doctrine = Int\n\
   \theory Collector(e, a) =\n\
   \    seed   : • ⇒ e\n\
   \    unwrap : e ⇒ a\n\
@@ -1676,7 +1676,7 @@ evalTests =
     -- Commit 6 put the scope's RECEIPT inside the claim's own atom
     -- rather than in a stage of its own, which is why `with@Fuel`
     -- appears here and the stage count does not.
-  [ ("resource Fuel = Int\n\
+  [ ("model Fuel in Doctrine = Int\n\
      \[with Fuel = dup ; * ; _ 1 ; +] ; getCode ; unparse ; print",
      ["(with@Fuel >> unFuel >> Fuel) pass >> _ dup pass >> _ * pass \
       \>> _ _ 1 pass >> _ + pass"], "")
@@ -1690,7 +1690,7 @@ evalTests =
     -- STAGE 7b commit 5: a CHAIN of header-less defs, routed
     -- transitively until the wire meets the install site the main
     -- program writes.
-  , ("resource Log = Str\n\
+  , ("model Log in Doctrine = Str\n\
      \def note  = unLog _ ; cat ; Log\n\
      \def one   = \"a \" ; note\n\
      \def two   = one ; one\n\
@@ -1700,7 +1700,7 @@ evalTests =
     -- ...and the HANDLER IDIOM is unchanged: `collected` seeds and
     -- unwraps, so it names the constructors and is never auto-routed,
     -- and the def it handles needs no header either.
-  , ("resource Counter = Int\n\
+  , ("model Counter in Doctrine = Int\n\
      \theory Collector(e, a) =\n\
      \    seed   : \8226 \8658 e\n\
      \    unwrap : e \8658 a\n\
@@ -1890,7 +1890,7 @@ evalTests =
      ["4"], "")
     -- three kinds of name in ONE header: model renames, resource
     -- routes, functor rewrites — in that order
-  , ("resource Log = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud in Sink(Int) =\n    emit = dup >> *\ndef idF = [(s -> s >> pack)]\nfunctor Same = idF\ndef run with Log Loud Same =\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
+  , ("model Log in Doctrine = Str\ndef note = unLog _ >> cat >> Log\ntheory Sink(a) =\n    emit : a ⇒ a\nmodel Loud in Sink(Int) =\n    emit = dup >> *\ndef idF = [(s -> s >> pack)]\nfunctor Same = idF\ndef run with Log Loud Same =\n    emit\n    toStr\n    note\n(\"\" >> Log) 5 >> run >> unLog >> print",
      ["25"], "")
     -- STAGE 4: the checked interposition.  A marker reads no wire —
     -- `ρ =IO> ρ` — so `interpose` admits it at every cut
@@ -1899,7 +1899,7 @@ evalTests =
     -- a resource endomorphism `Fuel ρ ⇒ Fuel ρ` is admitted too, and
     -- meters every stage of the ROUTED program (the claim stage
     -- `with Fuel` writes, then six cuts of arithmetic)
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef poly with Fuel Metered =\n    dup >> *\n    dup >> +\n    _ 1 >> +\n(10 >> Fuel) 5 >> poly >> _ print >> unFuel >> print",
+  , ("model Fuel in Doctrine = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef poly with Fuel Metered =\n    dup >> *\n    dup >> +\n    _ 1 >> +\n(10 >> Fuel) 5 >> poly >> _ print >> unFuel >> print",
      ["51", "3"], "")
     -- the marker tracer of examples/traced.braid: the stage's text is
     -- the marker's content, so it lifts everywhere a wire-reading
@@ -1915,9 +1915,9 @@ evalTests =
     -- lift2: a Code ⇒ Code functor lifted to Fn ⇒ Fn at runtime, the
     -- program its own witness — metered where the result types, and
     -- the original where it does not
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered ... >> stagewise] [with Fuel = dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
+  , ("model Fuel in Doctrine = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered ... >> stagewise] [with Fuel = dup >> *] >> lift2) (10 >> Fuel) 5 >> ev >> _ print >> unFuel >> print",
      ["25", "7"], "")
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered ... >> stagewise] [dup >> *] >> lift2) 5 >> ev >> print",
+  , ("model Fuel in Doctrine = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\n([metered ... >> stagewise] [dup >> *] >> lift2) 5 >> ev >> print",
      ["25"], "")
     -- DECIDED laws (§12.9): `sameCode` normalizes both programs in the
     -- free cartesian category over their words and compares.  `same`
@@ -2736,7 +2736,7 @@ evalTests =
      \5 ; a ; print\n\"z\" ; b ; print", ["20", "zzzz"], "")
     -- a template is expanded where it LANDS: a resource scope between
     -- the model and the call routes the expanded body too
-  , (tmplMod ++ "resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+  , (tmplMod ++ "model Log in Doctrine = Str\ndef note = unLog _ ; cat ; Log\n\
      \def p with IntSum Log =\n    twice\n    \"done\"\n    note\n\
      \(\"\" ; Log) 3 ; p ; unLog _ ; print ... ; print", ["done", "6"], "")
     -- the handler discharges the resource and the program runs
@@ -3290,7 +3290,7 @@ moduleFailTests =
     -- composition is exact: a word threading a resource the scope does
     -- not have (or in another order) is still a routing error, with the
     -- mismatch named on both sides
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step with Log Counter = toStr >> note >> bump\ndef bad with Counter Log = step\n1",
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef step with Log Counter = toStr >> note >> bump\ndef bad with Counter Log = step\n1",
      "threads Log Counter, but this scope is over Counter Log")
     -- a functor's word must be a pure `Code ⇒ Code`, checked at the
     -- first use (declarations are hoisted, so that is where the prefix
@@ -3340,7 +3340,7 @@ moduleFailTests =
     -- a resource stage passes the check, and then the scope must
     -- actually thread the resource: this is the re-inference of the
     -- expansion, and the error is an ordinary one
-  , ("resource Fuel = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef bad with Metered = dup >> +\n3 >> bad >> print",
+  , ("model Fuel in Doctrine = Int\ndef burn = unFuel >> _ 1 >> - >> Fuel\ndef metered = ([burn ...] >> getCode) ... >> interpose\nfunctor Metered = metered\ndef bad with Metered = dup >> +\n3 >> bad >> print",
      "Cannot unify types: Int vs Fuel")
     -- outside the fragment `sameCode` REPORTS, rather than guessing:
     -- "I cannot tell" is not "they differ".  Since 2026-09-13 the
@@ -3400,7 +3400,7 @@ moduleFailTests =
     -- Fin is a built-in type former, not a user name
   , ("type Fin = Int\n1",             "Malformed type declaration")
     -- a resource is unrolled, not eliminated by points: no fold
-  , ("resource Log = Str\nfoldLog",   "Unknown primitive: foldLog")
+  , ("model Log in Doctrine = Str\nfoldLog",   "Unknown primitive: foldLog")
     -- a model is AUDITED: its slots must match the theory's
     -- signatures, read at the model's own argument
   , ("theory Monoid(a) =\n    unit : • ⇒ a\n    op   : a a ⇒ a\nmodel Bad in Monoid(Int) =\n    unit = \"oops\"\n    op   = +\n1",
@@ -3445,15 +3445,23 @@ moduleFailTests =
   , ("theory T(a) =\n    f : a ⇒ a\n    law silly = 5\nmodel I in T(Int) =\n    f = id\n1",
      "must be a program with type `• ⇒ Bool`")
     -- one resource operation per stage; the elaborator says so
-  , ("resource Log = Str\nresource Counter = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f with Log Counter = \"x\" >> note bump\n1",
+  , ("model Log in Doctrine = Str\nmodel Counter in Doctrine = Int\ndef bump = unCounter >> 1 ... >> + >> Counter\ndef note = unLog _ >> cat >> Log\ndef f with Log Counter = \"x\" >> note bump\n1",
      "at most one resource operation")
     -- a clause with no body: `with` applies to something, and there is
     -- nothing here for it to apply to
-  , ("resource Log = Str\ndef f with Log =\n1", "Empty definition body")
+  , ("model Log in Doctrine = Str\ndef f with Log =\n1", "Empty definition body")
     -- ...and a clause written as a STAGE is refused where it stands
-  , ("resource Log = Str\ndef f = use Log ; dup\n1",
+  , ("model Log in Doctrine = Str\ndef f = use Log ; dup\n1",
      "`use` is gone since 2026-09-16")
-  , ("resource resource = Int\n1",    "Malformed type declaration")
+    -- THE FOLD (2026-09-18): `resource` is gone, and a resource IS the
+    -- model of the Doctrine its declaration generates.  Refused by
+    -- name, with the one-line rewrite spelled out.
+  , ("resource Log = Str\n1 ; print",
+     "`resource` is gone since 2026-09-18")
+  , ("resource Log = Str\n1 ; print",
+     "write `model Log in Doctrine = Str`")
+    -- ...and a carrier may not be named for the keyword that declares it
+  , ("model model in Doctrine = Int\n1",  "Malformed type declaration")
     -- a declared pure Fn type refuses an io quotation: the declaration
     -- is not decoration
   , ("data Quiet = (Fn⟨Str ⇒ •⟩)\n[print] >> Quiet >> drop",
@@ -3550,13 +3558,13 @@ moduleFailTests =
      \`with IntSum`")
   , (tmplMod ++ "1 2 ; IntSum@op ; print",
      "is the compiler's spelling of a slot")
-    -- STAGE 7b commit 3: `resource R = Ty` GENERATES a model of the
+    -- STAGE 7b commit 3: `model R in Doctrine = Ty` GENERATES a model of the
     -- Doctrine — the carrier `R@k`, the theory `R@t` and the model `R`
     -- — and the four generated names sit in the compiler's namespace,
     -- refused in source by the rule that already refuses a slot.
-  , ("resource Log = Str\ndef q = Log@arr\n1 ; print",
+  , ("model Log in Doctrine = Str\ndef q = Log@arr\n1 ; print",
      "is the compiler's spelling of a slot")
-  , ("resource Log = Str\ndef q = Log@then\n1 ; print",
+  , ("model Log in Doctrine = Str\ndef q = Log@then\n1 ; print",
      "is the compiler's spelling of a slot")
     -- STAGE 7b commit 7: `IO` is a carriered label like any other, and
     -- its carrier is an ABSTRACT, LINEAR `World` the elaborator never
@@ -3568,33 +3576,33 @@ moduleFailTests =
   , ("def w = IO@World\n1 ; print", "is the compiler's spelling")
     -- the carrier is a `data` line the compiler wrote, so a written
     -- declaration of that name is the ordinary duplicate refusal
-  , ("resource Log = Str\ndata Log@k = Int\n1 ; print",
+  , ("model Log in Doctrine = Str\ndata Log@k = Int\n1 ; print",
      "Duplicate type declaration: Log@k")
     -- ...and the MODEL is real: it takes the resource's own name, so a
     -- functor of that name collides with it.  (This is the cheapest
     -- proof from source that the generated model exists at all.)
-  , ("resource Log = Str\ndef w = [(s -> s >> pack)]\nfunctor Log = w\n1 ; print",
+  , ("model Log in Doctrine = Str\ndef w = [(s -> s >> pack)]\nfunctor Log = w\n1 ; print",
      "Duplicate model declaration: Log")
     -- `in R` still answers about the RESOURCE, not about the model its
     -- declaration generated
-  , ("resource Log = Str\ndef bad in Log = dup\n1 ; print",
+  , ("model Log in Doctrine = Str\ndef bad in Log = dup\n1 ; print",
      "`in Log` names a resource, and a resource is threaded through a \
      \body.  Write `with Log`.")
     -- STAGE 7b commit 6: THE BEST ERROR IN THE SYSTEM.  The scope
     -- mints, so a WRITTEN pure expectation meeting routed code is
     -- refused on the ROW, by name, rather than by a shape complaint
     -- about a wire the user never wrote.
-  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+  , ("model Log in Doctrine = Str\ndef note = unLog _ ; cat ; Log\n\
      \def f = \"x\" ; note\n\
      \data Keeper = Fn⟨Log Int ⇒ Log Int⟩\n[f] ; Keeper ; print",
      "Cannot unify effects: Log vs pure")
     -- ...and either way the hint says what to do about it: you forgot
     -- to install
-  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+  , ("model Log in Doctrine = Str\ndef note = unLog _ ; cat ; Log\n\
      \def f = \"x\" ; note\n\
      \data Keeper = Fn⟨Log Int ⇒ Log Int⟩\n[f] ; Keeper ; print",
      "`Log` is a resource, so the code on one side of this was ROUTED")
-  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+  , ("model Log in Doctrine = Str\ndef note = unLog _ ; cat ; Log\n\
      \def f = \"x\" ; note\n7 ; f ; print",
      "seed it at the call site")
     -- STAGE 7b commit 5: the one rare edge INFERRED ROUTING has, and
@@ -3602,7 +3610,7 @@ moduleFailTests =
     -- calls a resource word gets routed, and then holds two `Log`
     -- wires — one routed beneath it, one handed to it.  The carrier is
     -- nominal, so nothing is silent: a `Str` is never a `Log`.
-  , ("resource Log = Str\ndef note = unLog _ ; cat ; Log\n\
+  , ("model Log in Doctrine = Str\ndef note = unLog _ ; cat ; Log\n\
      \def mk = (s -> s ; Log)\ndef use = mk ; note\n1 ; print",
      "in def use: Cannot unify types: Log vs Str")
     -- a template shares the def namespace
@@ -3755,14 +3763,14 @@ moduleFailTests =
   , ("\"hi\" ; print ; ([dup] ; getCode) \"q\" ; defW\n2 ; print",
      "a DECLARATION LINE runs at check time, before main, so it may not \
      \touch the world")
-    -- ...and of the ten words, `defW` is the one a program may call
+    -- ...and of the eleven words, `defW` is the one a program may call
   , ("\"Mon\" \"op : a a ⇒ a\" ; theoryW\n1 ; print",
      "`theoryW` is a declaration word, and a program may not call this \
      \one yet")
     -- STAGE 8: `Dict` is the dictionary's own wire, and discharge is
     -- structural — there is no `Dict` and no `unDict` because the
     -- name may not be declared at all, by any keyword.
-  , ("resource Dict = Int\n1 ; print",
+  , ("model Dict in Doctrine = Int\n1 ; print",
      "`Dict` is the dictionary's own wire and may not be declared")
   , ("data Dict = Int\n1 ; print",
      "`Dict` is the dictionary's own wire and may not be declared")
@@ -3777,7 +3785,7 @@ moduleFailTests =
      \def bad in Same = add1\n1 ; print",
      "`in Same` names a functor, and a functor is applied to a body, \
      \not inhabited by one.  Write `with Same`.")
-  , (modeMod ++ "resource Log = Str\ndef bad in Log = add1\n1 ; print",
+  , (modeMod ++ "model Log in Doctrine = Str\ndef bad in Log = add1\n1 ; print",
      "`in Log` names a resource, and a resource is threaded through a \
      \body.  Write `with Log`.")
   , (modeMod ++ "def bad in Nope = add1\n1 ; print",

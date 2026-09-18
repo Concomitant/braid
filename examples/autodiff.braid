@@ -530,7 +530,7 @@ transformation Transpose in Fwd(Floats) ⇒ Rev = transpose, gx
 # The `=Gradient>` fold is display and does not run backwards, so a
 # `data` field that is a resource-threading function names the wire.
 
-resource Gradient = Grad
+model Gradient in Doctrine = Grad
 data RevG = Float Fn⟨Gradient Float ⇒ Gradient⟩
 
 def emit = unGradient _ ; gadd ; Gradient          # Grad =Gradient> •

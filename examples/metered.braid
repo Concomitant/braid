@@ -5,7 +5,7 @@
 # resource deepest for the whole scope, so `burn pass` fits after every
 # routed stage, and `interpose` checks exactly that before inserting it.
 
-resource Fuel = Int
+model Fuel in Doctrine = Int
 def burn = unFuel ; _ 1 ; - ; Fuel
 
 # `interpose` BUILDS a graph morphism — `Code ⇒ Fn⟨Stage ⇒ Code⟩` —

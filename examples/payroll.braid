@@ -13,7 +13,7 @@
 # mistaken for a Books. One wire is also what a fold's accumulator is,
 # which is why bundling the state this way is what makes the pass below
 # an ordinary `fold` instead of special machinery.
-resource Books = Str Int
+model Books in Doctrine = Str Int
 
 def say  = unBooks _ ; (log n s -> (log s ; cat) n) ; Books
 def hire = unBooks ; _ (1 ... ; +) ; Books

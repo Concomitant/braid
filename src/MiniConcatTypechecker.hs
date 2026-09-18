@@ -665,7 +665,7 @@ hintFor ls mn msg =
         else Nothing
 
     declaredRes = [ takeWhile (/= '(') n
-                  | l <- ls, ("resource" : n : _) <- [words (lineCode l)] ]
+                  | l <- ls, Just n <- [doctrineCarrierName (lineCode l)] ]
 
     -- the message's IDENTIFIER-LIKE words, so a resource name matches
     -- as a name and not as a substring of a longer one
@@ -3725,7 +3725,7 @@ parseModelHead aliases dataSigs theories header = do
       ty <- parseTyBody aliases dataSigs (concatMap mpBinders mps) src
       Right (IAStack (SCons ty SEnd))
     -- `@` is the compiler's character, and a generated declaration may
-    -- name a type with it: `resource R` writes `model R in R@t(R@k)`
+    -- name a type with it: `model R in Doctrine` writes `model R in R@t(R@k)`
     -- (stage 7b).  Source cannot reach those names \8212 `elabHeaders`
     -- refuses `@` in a term \8212 so admitting it here costs nothing.
     isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!@" :: String)
@@ -4051,7 +4051,7 @@ parseTypeLine aliases dataSigs line =
       -- which carries stacks only; aliases are transparent, so they are
       -- fine.  Reject the nominal case with direction.
       case [ q | q <- params, isWidthParam q ] of
-        (q : _) | kw == "data" || occursData name body ->
+        (q : _) | kw == "data" || kw == resourceKw || occursData name body ->
           Left $ "Type " ++ name ++ ": width parameter '" ++ pName q
               ++ "' is supported on `type` aliases only, not on "
               ++ "recursive/`data` declarations"
@@ -4063,14 +4063,23 @@ parseTypeLine aliases dataSigs line =
       -- self-recursive (which forces nominality)
       -- a resource is nominal by keyword, never an alias: its whole
       -- point is that `Int Int` must NOT silently become a GameState
-      pure $ if kw == "data" || kw == "resource" || occursData name body
-               then Right (DataDecl name params body (kw == "resource") fields)
+      pure $ if kw == "data" || kw == resourceKw || occursData name body
+               then Right (DataDecl name params body (kw == resourceKw) fields)
                else Left  (Alias name params body)
     _ -> Left $ "Malformed type declaration (missing '='): " ++ line
   where
     parseHead lhs = do
       toks <- normalizeToks <$> tokenize lhs
       case toks of
+        -- `model R in Doctrine = Ty` is a resource declaration (the
+        -- fold of 2026-09-18): a model of as much of the Doctrine as
+        -- the state construction at `Ty` supports.  The body is a
+        -- STACK, which is what tells this head from a table; the
+        -- keyword branch below is the only thing that changed, and the
+        -- DataDecl it makes is the one `resource` made.
+        [TokIdent "model", TokIdent name, TokIdent "in", TokIdent d]
+          | d == doctrineName, validName name ->
+              Right (resourceKw, name, [])
         [TokIdent kw, TokIdent name]
           | kw `elem` declKws, validName name ->
               Right (kw, name, [])
@@ -4103,9 +4112,9 @@ parseTypeLine aliases dataSigs line =
     paramList (TokDashes : _) =
       Left "'---' must be the last type parameter"
     paramList _ = Left "Malformed type parameter list"
-    declKws = ["type", "data", "resource"]
+    declKws = ["type", "data"]
     validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
-                              , "type", "data", "resource", "•" ]
+                              , "type", "data", "model", "•" ]
     tyParams t = let (_, ss, _, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
@@ -6018,11 +6027,23 @@ elabHeaders ctx t0 = do
               else case ecDef ctx of
                      Just d  -> pure (tieKnot d b0)
                      Nothing -> Left noSelfToTieErr
-      -- four kinds of name, applied in a fixed order: templates expand
-      -- (a phase earlier, in `expandTemplates`), models rename,
-      -- resources route, functors rewrite — so a functor always sees
-      -- fully renamed, fully routed code, and an expanded template body
-      -- is routed by the scopes it landed in.
+      -- THE ORDER IS ACTIONS, NOT KEYWORDS (restated 2026-09-18, when
+      -- `resource` folded into `model` and there were fewer keywords to
+      -- order by).  Templates EXPAND (a phase earlier, in
+      -- `expandTemplates`); then renames, then routes, then composes,
+      -- then rewrites — so a rewrite always sees fully renamed, fully
+      -- routed code, and an expanded template body is routed by the
+      -- scopes it landed in.
+      --
+      -- Nothing here ever read a keyword.  Each name is looked up in
+      -- the table its DECLARATION put it in, and the table is decided
+      -- by what the name's theory is: a carrier declared `model R in
+      -- Doctrine` is in `ecRes` and ROUTES; a model whose theory has
+      -- slots is in `ecSlots` and RENAMES; a model of `Base` is in
+      -- `ecBases` and REWRITES by its table; a model whose theory has a
+      -- hom-object is in `ecTrans` and COMPOSES; a functor is in
+      -- `ecFuncs` and REWRITES the spine.  That is why the fold was a
+      -- change of spelling and not of behaviour.
       case [ n | n <- ns, n `elem` ecThs ctx ] of
         (n : _) -> Left $ "`with " ++ n ++ "` names a theory: `with` "
                        ++ "applies a functor, and a theory is not one — "
@@ -7604,14 +7625,15 @@ dwArrow w = unwords (map shapeTy (dwShapes w)) ++ " ="
     shapeTy ShStr  = "Str"
     shapeTy ShTy   = "TypeRep"
 
--- THE TABLE.  Ten rows, one per keyword, and it is open: `keyword` adds
--- one (stage 8, commit 4).
+-- THE TABLE.  Eleven rows \8212 one per keyword, and one word with no
+-- keyword \8212 and it is open: `keyword` adds a row (stage 8, commit
+-- 4).  `resource` left it on 2026-09-18: a resource is a MODEL of the
+-- Doctrine, so `modelW` is the word its lines call.
 declWordTable :: [DeclWord]
 declWordTable =
   [ DeclWord "def"            "defW"            SpanDef   (Just ShCode) False
   , DeclWord "type"           "typeW"           SpanLine  (Just ShTy)   False
   , DeclWord "data"           "dataW"           SpanLine  (Just ShTy)   False
-  , DeclWord "resource"       "resourceW"       SpanLine  (Just ShTy)   False
   , DeclWord "theory"         "theoryW"         SpanBlock (Just ShStr)  False
   , DeclWord "model"          "modelW"          SpanBlock (Just ShStr)  False
   , DeclWord "transformation" "transformationW" SpanLine  (Just ShStr)  False
@@ -7620,8 +7642,8 @@ declWordTable =
     -- is the one place IO happens before anything is checked: the
     -- loader resolves a path and reads a file, and `=Dict IO>` is the
     -- manifest of exactly that (design-macros.md, 2026-09-15 \8212 "a
-    -- declaration word of type `Str =Dict IO> Code`").  Eight of the
-    -- ten are `=Dict>`, so which two touch the world is readable off
+    -- declaration word of type `Str =Dict IO> Code`").  Nine of the
+    -- eleven are `=Dict>`, so which two touch the world is readable off
     -- the table rather than off the implementation.
   , DeclWord "import"         "importW"         SpanLine  Nothing       True
   , DeclWord "table"          "tableW"          SpanLine  (Just ShStr)  True
@@ -7737,7 +7759,12 @@ applyDecl :: DeclCall -> Dict -> Either String Dict
 applyDecl c dk = case dcWord c of
   "importW"         -> Right dk { dkImports = dcRaw c : dkImports dk }
   "tableW"          -> Right dk { dkTables  = dcRaw c : dkTables dk }
-  w | w `elem` ["typeW", "dataW", "resourceW"] ->
+  w | w == "modelW", isJust (doctrineCarrierName (dcRaw c)) ->
+        -- `model R in Doctrine = Ty` is a RESOURCE: the same bucket
+        -- `resource` wrote to until 2026-09-18, reached by a shape test
+        -- on the body rather than by a keyword of its own.
+        Right dk { dkTypes = (dcRaw c, dcDoc c) : dkTypes dk }
+    | w `elem` ["typeW", "dataW"] ->
         Right dk { dkTypes = (dcRaw c, dcDoc c) : dkTypes dk }
     | w `elem` ["functorW", "transformationW"] ->
         Right dk { dkBlocks = (dcRaw c, [], dcDoc c) : dkBlocks dk }
@@ -8044,6 +8071,23 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
       | Just w <- wordOf dk l, dwSpan w == SpanLine = do
           dk' <- applyDecl (call w lineNo l [] doc (inlineOf l)) dk
           go dk' Nothing rest
+      -- `resource` was a keyword until 2026-09-18.  A resource IS the
+      -- model of the Doctrine its declaration generated (stage 7b), so
+      -- the keyword was a second spelling of a thing the language has
+      -- one spelling for.
+      | ("resource" : _) <- words l =
+          Left $ "`resource` is gone since 2026-09-18: a resource IS the "
+              ++ "model of the Doctrine its declaration generates (stage "
+              ++ "7b) \8212 write `model "
+              ++ (case words (takeWhile (/= '=') l) of
+                    (_ : n : _) -> n
+                    _           -> "<Name>")
+              ++ " in " ++ doctrineName ++ " ="
+              ++ drop 1 (dropWhile (/= '=') l)
+              ++ "`.  `:doc "
+              ++ (case words l of (_ : n : _) -> n; _ -> "<Name>")
+              ++ "` prints the carrier, the theory and the model, exactly "
+              ++ "as it did.  CONSTRUCTS.md, MANUAL \167\&8."
       -- `rules` was a keyword until 2026-09-13; it is a model now.
       | ("rules" : _) <- words l =
           Left $ "`rules` is gone: a rule set is a PARTIAL MODEL of the "
@@ -8859,10 +8903,10 @@ representableAt datas modelNm carrier =
   where resNames = [ dName r | r <- datas, dResource r ]
 
 --------------------------------------------------------------------------------
--- What `resource R = Ty` GENERATES (stage 7b, 2026-09-17)
+-- What `model R in Doctrine = Ty` GENERATES (stage 7b, 2026-09-17)
 --
 -- Beside the roll and the unroll the `data` machinery already writes,
--- a resource declares a MODEL OF THE DOCTRINE: the carrier, the theory
+-- a resource IS a MODEL OF THE DOCTRINE, and writes: the carrier, the theory
 -- it models, and the model itself.  Not a compiler secret \8212 an
 -- ordinary model, in the compiler's namespace (`@`, unwritable in
 -- source) and visible through `:doc R`, because sugar you cannot read
@@ -8883,6 +8927,35 @@ representableAt datas modelNm carrier =
 -- writes by hand for `Samp` (`sEmbed`, `sCompose`), which is the
 -- verification that this is the resource shape and not a guess.
 --------------------------------------------------------------------------------
+
+-- THE FOLD (2026-09-18).  `resource R = Ty` is spelled
+-- `model R in Doctrine = Ty`, and it always was one: since 7b the
+-- declaration generates a carrier, a theory and a MODEL of the
+-- Doctrine, and everything downstream already treated it as that.  The
+-- head is told from every other `model` head by its BODY — a STACK,
+-- with no `=` in it — which is the same content-directed rule the
+-- object map uses.  A body of `p = q` lines is a table; a body with no
+-- `=` is a carrier.
+--
+-- `in Doctrine` here names a SUB-PRESENTATION: `compose` and `embed`,
+-- and not `observe`/`sample`, for 7b's reason.  A plain `model M in T`
+-- is total over T's slots and this one is not, which is said out loud
+-- in MANUAL w\&8.
+doctrineCarrierName :: String -> Maybe String
+doctrineCarrierName header =
+  case break (== '=') (takeWhile (/= '#') header) of
+    (lhs, '=' : body)
+      | ["model", nm, "in", d] <- words lhs
+      , d == doctrineName
+      , '=' `notElem` body
+      , not (all isSpace body) -> Just nm
+    _ -> Nothing
+
+-- The internal name of the shape `model R in Doctrine = Ty` declares.
+-- The KEYWORD is gone; the NOUN is not, and this is the noun: a
+-- resource is a wire the elaborator threads.
+resourceKw :: String
+resourceKw = "resource"
 
 resCarrierName, resTheoryName, resEmbedName, resComposeName
   :: String -> String
@@ -8925,15 +8998,15 @@ resModelDefs :: String -> [(String, DefHdr, String, Maybe String)]
 resModelDefs r =
   [ ( resEmbedName r, noHdr
     , "(f -> [_ f ... >> _ ev] >> " ++ k ++ ")"
-    , Just ("generated by `resource " ++ r ++ "`: the Doctrine's `"
-             ++ doctrineEmbed ++ "` at " ++ r
+    , Just ("generated by `model " ++ r ++ " in " ++ doctrineName
+             ++ "`: the Doctrine's `" ++ doctrineEmbed ++ "` at " ++ r
              ++ " \8212 a base stage with the " ++ r
              ++ " wire whiskered underneath") )
   , ( resComposeName r, noHdr
     , "(c e -> [c ... >> un" ++ k ++ " ... >> ev >> e ... >> un" ++ k
         ++ " ... >> ev] >> " ++ k ++ ")"
-    , Just ("generated by `resource " ++ r ++ "`: the Doctrine's `"
-             ++ doctrineCompose ++ "` at " ++ r
+    , Just ("generated by `model " ++ r ++ " in " ++ doctrineName
+             ++ "`: the Doctrine's `" ++ doctrineCompose ++ "` at " ++ r
              ++ " \8212 base composition of representatives") ) ]
   where k = resCarrierName r
 
@@ -8955,8 +9028,8 @@ dictResourceDoc =
   , "## reflection words (`declOf`, `typeOfWord`, `envOf`)."
   , "## there is no `" ++ dictLabel ++ "` and no `un" ++ dictLabel
       ++ "`: a handler is `seed ; \8230 ; unwrap` and both"
-  , "## ends come from the `data` machinery a `resource` line drives, "
-      ++ "so a wire"
+  , "## ends come from the `data` machinery a `model R in "
+      ++ doctrineName ++ "` line drives, so a wire"
   , "## nobody declared cannot be discharged by anything a program can "
       ++ "write."
   , "## the loader discharges it, because the loader is the host."
@@ -8965,8 +9038,8 @@ dictResourceDoc =
 -- what `:doc R` shows: the sugar, spelled out
 resourceModelDoc :: String -> [String]
 resourceModelDoc r =
-  [ "## generated by `resource " ++ r ++ "` (a model of "
-      ++ doctrineName ++ "):"
+  [ "## generated by `model " ++ r ++ " in " ++ doctrineName
+      ++ "` (the state construction at this carrier):"
   , resCarrierLine r ]
   ++ (th : tb) ++ (mh : mb)
   where (th, tb) = resTheoryDecl r

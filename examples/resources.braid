@@ -7,8 +7,8 @@
 # silently a GameState, and it rides DEEPEST, which is what puts every
 # offset a known distance from the bottom.
 
-resource Log     = Str
-resource Counter = Int
+model Log     in Doctrine = Str
+model Counter in Doctrine = Int
 
 # ---- the resource's operations: the only place roll/unroll appears ----
 def note = unLog _ ; cat ; Log         # Str =Log> •
