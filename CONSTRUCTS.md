@@ -366,6 +366,9 @@ def sq with Circuits = dup ; *
 
 **Examples.** `circuits.braid` (`Circuits` over stateful stream
 transducers, `Funcs` over plain functions, `Sealed` with no exit);
+`linear.braid` (`Dense`, linear maps — a model of a theory that takes
+`compose` and **not** `embed`, so `with Dense` is refused and every
+morphism is built by hand out of the presentation's generators);
 `frame.braid` (`Frame`, a data frame as a category — no loop is ever
 written); `prob.braid` (`Enum`, `Sampler`, `Nondet`);
 `reified.braid` (`Reified`, a program paired with its own `Code`);
@@ -557,7 +560,9 @@ the `…Out` observations that call an exit); `prob.braid` (`bothFlipE`,
 `coinSndE`, `flipSndE`, `idS`, `thenS`, …); `reified.braid` (`sq5`,
 `w5`); `frame.braid` (`column`, `sqOut`, `polyOut`, `wiringOut`);
 `lifting.braid` (`report in Notes`); `transformations.braid`
-(`namedSq in Names`).
+(`namedSq in Names`); `linear.braid` (`dbl`, `two`, `row11`, `col11` —
+where `in Dense` is the **only** way in, the theory declaring no
+`embed`).
 
 **Refusals.**
 
@@ -720,7 +725,16 @@ reading a model of such a theory that makes `with M` transport.
 (`Columns`), `lifting.braid` (`Lifting`), `prob.braid` (`Prob`, whose
 five inherited category laws run for all three models before anything
 prints), `reified.braid` (`Reflective`),
-`transformations.braid` (`Arrow`).
+`transformations.braid` (`Arrow`), `linear.braid` (`GLA`, the
+compose-only row of the table above: no `embed`, which is what makes
+everything nameable in the theory linear).
+
+A theory's **own** strength is bounded by the same rule every
+declaration obeys: `under : k(a, b) ⇒ k(c a, c b)` declares and
+`k(a c, b c)` does not (*The stack parameter 'a' must be the last thing
+in its stack*), so a generator takes wires riding below it and never
+above. With `embed` the base supplies the rest; without it, that is the
+theory's ceiling.
 
 **Refusals.** Those listed under `theory`, plus *`in Doctrine`
 declares nothing* when the theory shares no slot with it.

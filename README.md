@@ -29,7 +29,11 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 - Models of the Doctrine transport whole programs into another
   category: circuits, data frames, probability as a Markov category.
   The Doctrine's hom-object ranges over whole STACKS, so a stage of any
-  width transports as itself — products stay flat.
+  width transports as itself — products stay flat. A theory may take
+  the Doctrine's composition and **not** its embedding, and then there
+  is no functor from the base at all: `examples/linear.braid` presents
+  linear maps that way, so that every morphism nameable in the theory
+  is linear by scope rather than by a check.
 - A **resource** is a threaded wire, and it is a model of the Doctrine —
   so it is written as one: `model Log in Doctrine = Str`, told from
   every other `model` head by its body being a stack. `with R` is
@@ -75,13 +79,13 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 - `MANUAL.md`: the language reference, with types checked against the
   implementation.
 - `CONSTRUCTS.md`: the declaration layer, construct by construct.
-- `examples/`: 71 programs, each run by the test suite.
+- `examples/`: 73 programs, each run by the test suite.
 - `design-*.md` and `READING.md`: the design decisions and the papers
   behind them.
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1301-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1306-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove

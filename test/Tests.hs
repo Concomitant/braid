@@ -762,6 +762,12 @@ runFamilyReport (src, wantFams, wantModels) =
 moduleTypeTests :: [(String, String)]
 moduleTypeTests =
   [ ("def square = dup >> *\nsquare",           "Int ⇒ Int")
+    -- STAGE 9 (2026-09-21): a morphism of a compose-only category is
+    -- built by hand and prints as the carrier it is — UNFOLDED, with no
+    -- receipt, because `in` applied nothing.  `Mat`'s two sides are
+    -- STACKS, which is what lets one hom-object hold `Float ⇒ Float
+    -- Float` with no width arithmetic anywhere.
+  , (glaSrc ++ "def cp in Dense = copy\ncp", "• ⇒ Mat(Float, Float Float)")
     -- STAGE 8: the declaration words, and a def nobody wrote.  A
     -- top-level group is a DECLARATION LINE when its grade carries
     -- `Dict`; it is run against the dictionary at check time, above
@@ -3286,8 +3292,53 @@ moduleNoHintTests =
      "wants `merge` after the row")
   ]
 
+-- GLA (stage 9, 2026-09-21).  The compose-only row of the level table
+-- is the level LINEAR MAPS need: declaring `embed` would make
+-- `embed [fsin]` a linear map, so the theory declares only the
+-- composition and every morphism is built by hand out of the
+-- presentation's own generators (`examples/linear.braid`).  Three
+-- things about it are pinned below: `with` of such a model is refused
+-- by name, the carrier comes from the `in Doctrine` CLAIM and not from
+-- the shape, and only one of the two whiskerings is spellable.
+glaBody :: [String]
+glaBody =
+  [ "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+  , "    copy    : \8226 \8658 k(Float, Float Float)"
+  , "    app     : k(a, b) \8658 Fn\10216a \8658 b\10217"
+  , "data Mat(a..., b...) = Fn\10216a \8658 b\10217 Fn\10216b \8658 a\10217 Code"
+  , "def thenFn = (f g -> [f ... ; ev ; g ... ; ev])"
+  , "def composeM = (m n -> m ; unMat ; (f f2 p -> n ; unMat ; \
+      \(g g2 q -> (f g ; thenFn) (g2 f2 ; thenFn) (p q ; append) ; Mat)))"
+  , "def copyM = [dup] [fadd] ([dup] ; getCode) ; Mat"
+  , "def appM = Mat(f, g, c) -> f"
+  , "model Dense in GLA(Mat) ="
+  , "    compose = composeM"
+  , "    copy    = copyM"
+  , "    app     = appM"
+  ]
+
+glaSrc, glaNoClaimSrc :: String
+glaSrc        = unlines ("theory GLA(k(..., ...)) in Doctrine =" : glaBody)
+glaNoClaimSrc = unlines ("theory GLA(k(..., ...)) ="             : glaBody)
+
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- GLA (2026-09-21): `with` a compose-only model is refused, and the
+    -- refusal names the clause that works instead.
+  [ (glaSrc ++ "def bad with Dense = dup ; fadd\nbad ; app ... ; _ 1.0 ; ev ; print",
+     "theory GLA takes Doctrine's `compose` and not its `embed`")
+    -- ...a hom-object ALONE is not a carrier: the CLAIM is what
+    -- `transportOf` reads, so without `in Doctrine` there is nothing to
+    -- build and `in Dense` says so.
+  , (glaNoClaimSrc ++ "def m in Dense = copy\nm ; app ... ; _ 1.0 ; ev ; print",
+     "names a model of GLA in the base: it has no carrier to build")
+    -- ...and only ONE whiskering is spellable, which is why a theory's
+    -- own generators take wires riding BELOW them and never above.
+  , (unlines [ "theory Half(k(..., ...)) in Doctrine ="
+             , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+             , "    over    : k(a, b) \8658 k(a c, b c)"
+             , "1 ; print" ],
+     "must be the last thing in its stack")
     -- LOCATIONS (2026-09-15).  Checked without a file, a refusal still
     -- names the line of the text it was handed: the stage that failed
     -- inside a def body, and the stage that failed in a main program.
@@ -3295,7 +3346,7 @@ moduleFailTests =
     -- refused with the spelling that is right: a family is not a model,
     -- a model is not a family, the argument must be a model in scope,
     -- and it must model the theory the parameter declares.
-  [ (famSrc ++ "def d with Fwd = cube\nd ; drop",
+  , (famSrc ++ "def d with Fwd = cube\nd ; drop",
      "`with Fwd`: Fwd is a model PARAMETERIZED by a model")
   , (famSrc ++ "def d with Floats(Fwd) = cube\nd ; drop",
      "Floats is not a parameterized model at this point")

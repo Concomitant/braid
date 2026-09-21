@@ -2419,6 +2419,69 @@ them: a slot taking the carrier and returning base is an **exit**
 single carrier is an **entry** (already a stage of the category, left
 alone). Identity is `embed [pass]` and needs no slot.
 
+**A compose-only theory, in practice: linear maps** *(2026-09-21,
+`examples/linear.braid`)*. The upper row of that table is not a
+degenerate case; it is the right level whenever there is **no functor
+from the whole base** into the category. Linear maps are that case, and
+graphical linear algebra is the theory:
+
+```braid
+data Mat(a..., b...) = Fn⟨a ⇒ b⟩ Fn⟨b ⇒ a⟩ Code
+theory GLA(k(..., ...)) in Doctrine =
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    copy : • ⇒ k(Float, Float Float)     add : • ⇒ k(Float Float, Float)
+    zero : • ⇒ k(•, Float)               discard : • ⇒ k(Float, •)
+    scale : Float ⇒ k(Float, Float)      sym : • ⇒ k(Float Float, Float Float)
+    under : k(a, b) ⇒ k(c a, c b)        tr : k(a, b) ⇒ k(b, a)
+    app : k(a, b) ⇒ Fn⟨a ⇒ b⟩            diagram : k(a, b) ⇒ Code
+```
+
+**Declaring no `embed` IS the guarantee.** `embed` takes *any* base
+function, so a theory that declares it makes `embed [fsin]` a linear
+map. Without it, a def under `in Dense` can name only GLA's slots, and
+those slots ARE the generators of the PROP of matrices — a comonoid, a
+monoid, the symmetry, the scalars (Bonchi–Sobociński–Zanasi; READING).
+Everything nameable is linear **by scope**, and the runtime scan
+`examples/transpose.braid` calls `linear?` has nothing left to ask. The
+price is the one the table names: composition is a word, `f g ;
+compose`.
+
+The honest limit is the one `circuits.braid` ends on: a model seals the
+**category**, not the **type**. `Mat` is an ordinary constructor, so
+`[fsin] [fsin] c ; Mat` still builds a carrier from outside the
+vocabulary.
+
+**Only one whiskering is writable, and it is a real limit.** A stack
+parameter may sit only in tail position, so `under : k(a, b) ⇒ k(c a,
+c b)` declares and `over : k(a, b) ⇒ k(a c, b c)` is refused — *The
+stack parameter 'a' must be the last thing in its stack*. The
+consequence is that the monoidal product `m ⊗ n` is **not
+constructible from a theory's own slots**: a generator can be given
+wires riding below it and never wires riding above. Where the base is
+reachable this costs nothing — `prob.braid` builds `flip ⊗ flip` as
+`embed [swap] ; under flip ; embed [swap] ; under flip`, the symmetry
+coming from the base at whatever width the stage needs. A theory with
+no `embed` cannot reach for it: `GLA` declares the symmetry as a
+generator, but only at `k(Float Float, Float Float)`, and widening
+*that* would need the whiskering that does not exist. `GLA` therefore
+states
+the unit, counit and scalar corollaries of the bialgebra laws and not
+the four-wire equation itself, which needs `copy ⊗ copy`.
+
+**The dual, not the `Code`, is what transposition needs.** `tr :
+k(a, b) ⇒ k(b, a)` cannot be computed from a function: probing at basis
+vectors is an anamorphism and erasure forbids it. It cannot be computed
+from the `Code` either — `evalAs` is the only way back from `Code` to
+`Fn` and it wants a **witness** at the flipped arrow, which is the
+thing being built. So the carrier holds the transpose beside the map (a
+map *with a chosen adjoint*, Elliott's representation), and `tr` is a
+projection. The `Code` stays for a different job: it is the **diagram**,
+and `sameCodeC` *decides* equations on it — `tr ; tr = id`,
+contravariance, and the comonoid/monoid exchange `Δᵀ = ∇` are proved
+rather than sampled, while the bialgebra corollaries, which relate two
+*different* diagrams, are sampled through `app`.
+
+
 **The laws are the doctrine's, and they run.** A model is audited
 against every inherited law it can *state* — every slot the law names
 is one its theory declared. `Arrow` above takes all four slots, so all
@@ -4144,6 +4207,19 @@ at every width. Rules (full version: `guide-open-arity.md`):
 The index words `at` and `indicesN` are exponent-shaped, so rule 1
 holds for them too: final atom of their stage (§9).
 
+**A hom-object's arguments are STACKS, not widths** *(2026-09-21)*. It
+is tempting to index a category of matrices by dimension —
+`data Mat(a, b) = Fn⟨Float^a ⇒ Float^b⟩` — and it is wrong twice. `data`
+takes no width parameters and a constructor argument cannot be
+width-kinded, so it does not declare; and the deeper reason is that a
+width-indexed hom-object forces width **arithmetic**, because the
+tensor of two such carriers is `k(a, b) k(c, d) ⇒ k(a+c, b+d)` — two
+variables added, which is the level-2 algebra this section defers. Over
+stacks the tensor is **concatenation**, which is free because stacks are
+flat: `k(ρ, σ)` already names a whole side of a diagram. `examples/
+linear.braid` is the worked case, and §8 records what it cost instead
+(only one of the two whiskerings is spellable).
+
 The **base** of an exponent may be the terminal object *(2026-09-20)*:
 `•^n` — equivalently `one^n` or `(•)^n` — is the zero-wide bundle, and
 `•^k` is `•` for every literal k. The parenthesized form always parsed;
@@ -4595,6 +4671,24 @@ corrected in place rather than dated one by one.
   nothing**: a hand-built morphism prints as the carrier it is,
   `sum0 : • =Recursive> Circuit(Int, Int)`, unfolded, because `=Circuits>`
   would say the code went through the functor and it did not.
+- **A hom-object alone is not a carrier — the theory must say `in
+  Doctrine`** *(2026-09-21)*. A theory may declare a constructor
+  parameter and a `compose` at exactly the Doctrine's shape and still
+  have no carrier, because `transportOf` reads the *claim* and not the
+  shape (§8). Until `theory GLA(k(..., ...))` gains its `in Doctrine`,
+  `def m in Dense = …` is refused with *`in Dense` names a model of GLA
+  in the base: it has no carrier to build — write `with Dense`, or `in
+  GLA` for a template*, which names both fixes and neither is the one
+  wanted. Add the clause.
+- **Only one whiskering is spellable** *(2026-09-21)*. A slot that gives
+  a carrier a wire riding **below** it declares — `under : k(a, b) ⇒
+  k(c a, c b)` — and its mirror does not: `k(a c, b c)` is refused with
+  *The stack parameter 'a' must be the last thing in its stack*, the
+  same rule every declaration obeys (§5). So a theory's own generators
+  can be widened downward and never upward, and `m ⊗ n` is not
+  constructible from slots alone. When the theory declares `embed` the
+  base supplies the symmetry and it does not matter; when it does not
+  (`examples/linear.braid`), it is a limit on what the theory can say.
 - **Every `with` that CHANGED something mints — models included**
   *(2026-09-13; the qualification is 2026-09-18)*. `with IntSum ;
   fold1` leaves `=IntSum>` on the arrow, exactly as `with Traced`

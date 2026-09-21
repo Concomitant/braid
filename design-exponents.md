@@ -141,6 +141,15 @@ exponent buys the single variadic word.
 
 ## Level-1 GLA programme (what this unlocks, no arithmetic)
 
+*Amendment (2026-09-21): the list below is the VECTOR half, and it
+shipped — `examples/gla.braid`. The MORPHISM half turned out not to
+need any of it: a matrix is presented as a word of a category whose
+hom-object ranges over STACKS, so the dimension arithmetic this section
+defers is never reached. `design-gla.md` and `examples/linear.braid`
+are the record; the short version is that a width-indexed hom-object
+forces `k(a, b) k(c, d) ⇒ k(a+c, b+d)`, and a stack-shaped one makes
+the tensor concatenation.*
+
 Generators, all width-polymorphic in `n`:
 `dupN` (Δ, copy), `addN` (∇, pointwise add), `zeroN` (unit),
 `dropN` (counit/discard), `zip`, `sumN`, scalar `scale : ℝ ℝ^n ⇒ ℝ^n`.
