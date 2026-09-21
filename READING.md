@@ -233,6 +233,22 @@ copies where they exist.
 - [*Semantics of multimodal adjoint type
   theory*](https://arxiv.org/pdf/2303.02572) — the model theory.
 
+## Bundles: traversable and Naperian (the width arc)
+
+- Gibbons, [*APLicative programming with Naperian
+  functors*](https://www.cs.ox.ac.uk/publications/publication10857-abstract.html)
+  — a functor is Naperian when `t a ≅ a^(Log t)`, and Naperian is
+  exactly what makes `zip` total and canonical. `Aⁿ ≅ A^Fin(n)` is the
+  case Braid has, and the paper's subject is rank-polymorphic array
+  programming, which is the ML target.
+- Gibbons & Oliveira, [*The essence of the iterator
+  pattern*](https://www.cs.ox.ac.uk/jeremy.gibbons/publications/iterator.pdf),
+  and Jaskelioff & Rypáček, [*An investigation of the laws of
+  traversals*](https://arxiv.org/abs/1202.2919) — traversal, and why
+  traversing in the State applicative (`mapAccum`) recovers all of it
+  for a finitary container. The justification for one generator
+  covering map, fold and indexing.
+
 ## Matrices as a PROP (the GLA arc)
 
 - Lafont, [*Towards an algebraic theory of Boolean
