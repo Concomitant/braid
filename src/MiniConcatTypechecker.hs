@@ -2595,6 +2595,11 @@ parseStage ln = go []
     -- `parseProgramToks`, and must get the same refusal (2026-09-16)
     go [] (TokIdent w : TokIdent _ : _)
       | Just e <- retiredHeader w = here e
+    -- `•` is the glyph spelling of `one`, the identity on the terminal
+    -- object (§5, §9).  It dies at the parse, exactly as `...` becomes
+    -- `pass` and `->` becomes `⇒`: one morphism, one word, two ways to
+    -- type it — and `reflect`/`unparse` show the word.
+    go acc (TokIdent "•" : rest)  = go (Prim "one" : acc) rest
     go acc (TokIdent name : rest) = go (Prim name : acc) rest
     go acc (TokInt n : rest)      = go (Prim (show n) : acc) rest
     -- [p] reifies; [x y -> p] is shorthand for [(x y -> p)]
@@ -5336,6 +5341,17 @@ primEnv =
        , ("pass",  Forall []     [rho] [] [] [] [] (arrPure (STail rho) (STail rho)))
          -- the terminal morphism: forget the whole segment
        , ("forget", Forall []    [rho] [] [] [] [] (arrPure (STail rho) SEnd))
+         -- `one` is the IDENTITY ON THE TERMINAL OBJECT, and it is a
+         -- prim rather than a prelude def for the same reason `pass`
+         -- is: it must RUN NOTHING.  `1 ; drop : • ⇒ •` was the only
+         -- way to write this morphism before 2026-09-20, and it
+         -- allocates an Int in order to discard it.  Its type is
+         -- MONOMORPHIC and that is the whole point — `pass : ρ0 ⇒ ρ0`
+         -- names the same morphism at every width and therefore PINS
+         -- NOTHING, so `[pass]` cannot serve where `[one] : • ⇒
+         -- Fn⟨• ⇒ •⟩` is wanted.  `•` is the second spelling of this
+         -- word in term position (parseStage); the display is `one`.
+       , ("one",   Forall []     []   [] [] [] [] (arrPure SEnd SEnd))
        , ("+",     binIntTy)
        , ("*",     binIntTy)
        , ("print", Forall [a]    [] [] [] [] [] (arrIO (one ta) SEnd))
@@ -12231,6 +12247,8 @@ runBuiltin _ _ "drop"  [_]              = Right ([], [])
 runBuiltin _ _ "weaken" [v]             = Right ([v], [])
 runBuiltin _ _ "finInt" [v]             = Right ([v], [])
 runBuiltin _ _ "pass"  []               = Right ([], [])
+-- the identity on •: nothing in, nothing out, nothing done
+runBuiltin _ _ "one"   []               = Right ([], [])
 -- a receipt is `pass` that a type can see: nothing happens here, and
 -- the whole content is in the manifest (like weaken's bound)
 runBuiltin _ _ name    []

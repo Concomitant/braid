@@ -571,6 +571,26 @@ passTests =
   , ("toStr",         "a0 ⇒ Str")
   , ("asInt?",        "Str ⇒ (Int | Str)")
   , ("forget",        "ρ0 ⇒ •")
+    -- 2026-09-20: the terminal object has a NAME.  `one` is the
+    -- identity on •, monomorphic on purpose — `pass : ρ0 ⇒ ρ0` names
+    -- the same morphism at every width and so pins nothing, which is
+    -- why `[pass]` could not serve where `[one]` does.
+  , ("one",           "• ⇒ •")
+  , ("•",             "• ⇒ •")          -- the glyph is the same word
+  , ("[one]",         "• ⇒ Fn⟨• ⇒ •⟩")  -- and THIS is what it is for
+  , ("[•]",           "• ⇒ Fn⟨• ⇒ •⟩")
+  , ("[one] >> ev",   "• ⇒ •")
+  , ("one one",       "• ⇒ •")
+    -- BESIDE other atoms in a tensor stage it takes no wires and so
+    -- constrains nothing; with the explicit remainder it is the
+    -- identity on any stack.
+  , ("1 one",         "• ⇒ Int")
+  , ("dup one",       "a0 ⇒ a0 a0")
+  , ("one ...",       "ρ0 ⇒ ρ0")
+    -- but a bare `; one ;` in a spine is an ASSERTION that the stack is
+    -- empty, because there are no implicit remainders: this is the
+    -- `1 >> 2` refusal, not a special case.
+  , ("1 ; forget ; one", "• ⇒ •")
     -- STAGE 7b commit 1: a RENDERER for a whole stack, not a class.
     -- Consuming and open-tailed, so the final-atom rule already says
     -- where it may stand and nothing new was needed for it.
@@ -593,6 +613,11 @@ passTests =
 failTests :: [(String, String)]
 failTests =
   [ ("1 true >> +",   "Cannot unify types")
+    -- `; one ;` in a spine ASSERTS the stack is empty.  There are no
+    -- implicit remainders, so this is the `1 >> 2` refusal and not a
+    -- rule of its own; `one ...` is the whiskered reading.
+  , ("1 ; one",       "Cannot unify stacks: Int vs •")
+  , ("1 ; •",         "Cannot unify stacks: Int vs •")
   , ("true >> (1 ... >> +)",     "Cannot unify types")
     -- nothing has an implicit remainder: 1 makes exactly one wire,
     -- + consumes exactly two
@@ -1126,6 +1151,9 @@ moduleTypeTests =
     -- node tripped the recursive-call placement check.
   , ("sumN _",  "a0 ⇒ Int a0")   -- the seed, beside the wire
   , ("forget _", "a0 ⇒ a0")      -- the ρ analogue, for comparison
+    -- 2026-09-20: `one` generalizes to nothing, which is the point
+  , ("def unit0 = one\nunit0",  "• ⇒ •")
+  , ("def unit0 = •\n[unit0]",  "• ⇒ Fn⟨• ⇒ •⟩")
   , ("unzipN",  "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
@@ -1762,9 +1790,9 @@ evalTests =
     -- program writes.
   , ("model Log in Doctrine = Str\n\
      \def note  = unLog _ ; cat ; Log\n\
-     \def one   = \"a \" ; note\n\
-     \def two   = one ; one\n\
-     \def three = two ; \"z \" ; note\n\
+     \def once  = \"a \" ; note\n\
+     \def twice = once ; once\n\
+     \def three = twice ; \"z \" ; note\n\
      \(\"\" ; Log) ; three ; unLog ; print",
      ["a a z "], "")
     -- ...and the HANDLER IDIOM is unchanged: `collected` seeds and
@@ -2371,6 +2399,14 @@ evalTests =
   , ("7 >> odd? >> (ok | zero?) >> merge >> print", ["alt1(7)"], "")
     -- forget (terminal morphism) and verdict: routers to pure decisions
   , ("1 2 3 >> forget", [], "")
+    -- `one` RUNS NOTHING: the stack it is whiskered over comes out
+    -- untouched, and no Int is allocated to be dropped
+  , ("1 one >> print", ["1"], "")
+  , ("1 • >> print",   ["1"], "")
+  , ("[one] >> ev >> 2 >> print", ["2"], "")
+    -- the glyph dies at the parse, so reflection shows the WORD
+  , ("[• >> 1 >> drop] >> reflect >> (unparse | pass) >> merge >> print",
+     ["one >> 1 >> drop"], "")
   , ("5 >> odd? >> verdict >> print", ["alt1()"], "")
   , ("4 >> odd? >> verdict >> print", ["alt2()"], "")
   , ("3 4 >> eq? >> verdict >> print", ["alt2()"], "")
@@ -3453,6 +3489,9 @@ moduleFailTests =
      "outside the structural fragment: the case tree grew past 16 splits")
   , ("def square = dup >> *\ndef square = id\n1", "Duplicate definition")
   , ("def while = drop\ndef while = id\n1",       "Duplicate definition")
+    -- 2026-09-20: `one` is a prim now, so its name is taken — objects
+    -- are added, never merged (§14)
+  , ("def one = pass\n1",                        "Duplicate definition: one")
   , ("type Bool = (• | •)\ntype Bool = (• | •)\n1", "Duplicate type declaration")
   , ("type Foo = (• | Unknowable)\n1",           "Unknown type name")
     -- width parameters: declared by USE (a parameter under `^`), so a
