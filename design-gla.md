@@ -319,6 +319,20 @@ scalars would need a multi-stage pattern in the reader (`_ <lit> ;
 fmul`), which is a different mechanism — the reader is a graph morphism
 on ATOMS, and a scalar is not one.
 
+### What `transpose.braid` keeps, and why
+
+`transposeC` reappears in `examples/linear.braid` as `dualC` — a slot
+body with laws over it that `sameCodeC` decides — and `linear?`
+dissolves twice: by SCOPE under `in Dense`, and by REFUSAL under `with
+Dense`. Neither is retired, and the reason is not sentiment. A theory is
+a statement about code you WRITE, checked where you write it; those two
+are folds over `Code`, and `Code` is also what `parse` and `evalCode`
+hand you at RUN TIME, for programs that did not exist when the module
+was checked. No scope can be put around a string that arrives from a
+file. So `linear?` is the honest remainder rather than a duplicate
+spelling: one spelling for the static question (the theory), one for the
+dynamic one. The files now point at each other and say which is which.
+
 ### Sound, incomplete, and said out loud
 
 `with Dense` accepts only programs built from the theory's generators,

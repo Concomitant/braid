@@ -434,3 +434,9 @@ t6 ; print                          # 12.0 — 3 ⇒ 6 ⇒ 6 ⇒ 12
 # is not constructible at all, in either half, because only one
 # whiskering is spellable — which is why the bialgebra law proper is
 # absent and its corollaries are what the theory states.
+#
+# AND `examples/transpose.braid` STAYS.  Its `linear?` asks this file's
+# question of code that arrives at RUN TIME — from `parse`, from
+# `evalCode` — and no scope can be put around a string read from a
+# file.  One spelling for the static question, which is this file; one
+# for the dynamic one, which is that one.

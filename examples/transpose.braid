@@ -1,6 +1,31 @@
 # GLA transforms as code munging: transpose reverses the spine and
 # dualizes each atom (copy <-> add); linear? checks a diagram uses
 # only linear generators. Both are ordinary folds over reflected code.
+#
+# ---- what stage 9 did and did not take (2026-09-21) -----------------
+# `examples/linear.braid` presents the same PROP as a THEORY, and it
+# answers both of these questions STATICALLY: `transposeC` reappears
+# there as `dualC`, a slot body with laws over it that `sameCodeC`
+# DECIDES rather than a fold nobody audits; and `linear?` dissolves
+# twice over — a def written `in Dense` can only name the theory's own
+# slots, all of which are linear, and `with Dense` reads each atom of a
+# base program into a slot and REFUSES by name any atom that is not a
+# generator (`fmul` has no image under GLA).
+#
+# So why do these two stay?  Because the question they ask is not the
+# one the theory answers.  A theory is a statement about code you
+# WRITE, checked where you write it; these are folds over `Code`, and
+# `Code` is also what `parse` and `evalCode` hand you at RUN TIME, for
+# programs that did not exist when the module was checked.  A scope
+# cannot be put around a string that arrives from a file.  `linear?` is
+# what is left for that case, and it is the honest remainder rather
+# than a duplicate: one spelling for the static question (the theory),
+# one for the dynamic one (this file).
+#
+# The Int/Float difference is the other half of the answer.  `linear.
+# braid` is over `Float` because its laws must sample at literals; this
+# file dualizes `+`, which is the Int monoid.  Neither file can be the
+# other at a rename.
 
 def dualSym = (s -> (s .dup >> equals) [.+] [(s .+ >> equals) [.dup] [s] ... >> cond] ... >> cond)
 def dualAtom = [(s -> s >> dualSym >> alt1 >> Atom)] [(n -> n >> alt2 >> Atom)] [(t -> t >> alt3 >> Atom)] [(y -> y >> alt4 >> Atom)] [(c -> c >> alt5 >> Atom)] [(l b -> l b >> alt6 >> Atom)] [(c -> c >> alt7 >> Atom)] ... >> foldAtom
