@@ -988,12 +988,20 @@ moduleTypeTests =
     -- GLA generators: width-polymorphic wiring over bundles
   , ("dupN",   "a0ⁿ⁰ ⇒ a0ⁿ⁰ a0ⁿ⁰")
   , ("addN",   "Intⁿ⁰ Intⁿ⁰ ⇒ Intⁿ⁰")
-  , ("zipN",   "a0ⁿ⁰ a1ⁿ⁰ ⇒ (a0 a1)ⁿ⁰")
+  , ("zipN",   "a0ⁿ⁰ a1ⁿ⁰ ⇒ Box(a0 a1)ⁿ⁰")
+  , ("unzipN", "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
+    -- THE TIER'S ONE CATAMORPHISM.  Every fold-shaped bundle word is
+    -- this at a different motive, and the four that used to be prims
+    -- are prelude defs printing character-for-character what they did:
+  , ("mapAccumN", "Fn⟨a0 a1 ⇒ a0 a2⟩ a0 a1ⁿ⁰ ⇒ a0 a2ⁿ⁰")
+  , ("mapN",    "Fn⟨a0 ⇒ a1⟩ a0ⁿ⁰ ⇒ a1ⁿ⁰")
+  , ("foldExp", "Fn⟨a0 a1 ⇒ a0⟩ a0 a1ⁿ⁰ ⇒ a0")
+  , ("foldExp2", "Fn⟨a0 a1 a2 ⇒ a0⟩ a0 (a1 a2)ⁿ⁰ ⇒ a0")
   , ("sumN",   "Intⁿ⁰ ⇒ Int")
   , ("firstTrue", "Fn⟨• ⇒ ρ0⟩ ((• | •) Fn⟨• ⇒ ρ0⟩)ⁿ⁰ ⇒ ρ0")
     -- (before the grouped-compound constraint fix this leaked fake
     -- polymorphism: a0ⁿ a1ⁿ ⇒ Int, crashing on non-Int bundles)
-  , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\ndot", "Intⁿ⁰ Intⁿ⁰ ⇒ Int")
+  , ("def dot = zipN >> [(acc p -> p >> unBox >> (a b -> (a b >> *) acc >> +))] 0 ... >> foldExp\ndot", "Intⁿ⁰ Intⁿ⁰ ⇒ Int")
     -- two-tier control flow: p? routes and keeps, bare p forgets to Bool
   , ("equals",                                  "a0 a0 ⇒ Bool")
   , ("less",                                    "Int Int ⇒ Bool")
@@ -2215,9 +2223,10 @@ evalTests =
   , ("1 2 3 10 20 30 >> subN >> sumN >> print",   ["-54"], "")
   , ("3 1 2 3 >> scaleN >> sumN >> print",        ["18"],  "")
     -- lift a word the prelude does not ship, in one line
-  , ("def maxN = zipN >> [(x y -> (x y >> less) [y] [x] ... >> cond)] ... >> mapN2\n1 9 3 5 2 7 >> maxN >> sumN >> print", ["21"], "")
-    -- unzipN is zipN's inverse
-  , ("1 2 3 10 20 30 >> zipN >> unzipN >> addN >> sumN >> print", ["66"], "")
+  , ("def maxN = zipN >> [(p -> p >> unBox >> (x y -> (x y >> less) [y] [x] ... >> cond))] ... >> mapN\n1 9 3 5 2 7 >> maxN >> sumN >> print", ["21"], "")
+    -- `unzipN >> zipN` is the flat-to-boxed normalizer: split a flat
+    -- (a b)ⁿ into two lanes, then re-pair them ONE WIRE at a time
+  , ("1 2 3 10 20 30 >> unzipN >> zipN >> [unBox >> +] ... >> mapN >> sumN >> print", ["66"], "")
   , ("[dup >> *] 1 2 3 >> mapN >> sumN >> print",   ["14"], "")
   , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
     -- INDICES at runtime.  A Fin is a bare Int: the bound is a type,
@@ -2770,7 +2779,7 @@ evalTests =
   , ("2 1 2 3 >> scaleN >> sumN >> print", ["12"], "")
     -- the bialgebra check, operationally: copy-then-add = scale-by-2
   , ("def dbl = dupN >> addN\ndef dblS = 2 ... >> scaleN\n20 30 >> dbl >> sumN >> print\n20 30 >> dblS >> sumN >> print", ["100", "100"], "")
-  , ("def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2\n1 2 3 4 5 6 >> dot >> print", ["32"], "")
+  , ("def dot = zipN >> [(acc p -> p >> unBox >> (a b -> (a b >> *) acc >> +))] 0 ... >> foldExp\n1 2 3 4 5 6 >> dot >> print", ["32"], "")
     -- firstTrue: guard lanes as a bare product, first true wins
   , ("def sign = x -> [x >> toStr] (x >> negative) [\"neg\"] (x >> zero) [\"zero\"] >> firstTrue\n-4 >> sign >> print\n0 >> sign >> print\n7 >> sign >> print", ["neg", "zero", "7"], "")
     -- cut soundness: at stage boundaries, run(prefix) ; run(suffix) =
@@ -3107,7 +3116,7 @@ evalTests =
   , (showT ++ "\"pack\" ; typeOfWord ; say ; print",
      ["a0\8319\8304 \8658 List(a0)"], "")
   , (showT ++ "\"zipN\" ; typeOfWord ; say ; print",
-     ["a0\8319\8304 a1\8319\8304 \8658 (a0 a1)\8319\8304"], "")
+     ["a0\8319\8304 a1\8319\8304 \8658 Box(a0 a1)\8319\8304"], "")
     -- ...and a variable width is NEVER flattened: `weaken` leaves
     -- `Fin(n+1)`, offset and all
   , (showT ++ "\"weaken\" ; typeOfWord ; say ; print",

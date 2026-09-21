@@ -44,7 +44,7 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   `[body] "f" defW`, and `defW : Code Str =Dict> •` says in its arrow
   what it does. The table is open, and a program may declare too
   (`examples/dictionary.braid`).
-- 67 primitives; everything else is in the prelude, in Braid. (The
+- 64 primitives; everything else is in the prelude, in Braid. (The
   count is of words source can name, so it **excludes** `#fix`, the
   knot `with Recursive` emits — `#` opens a comment. The kernel holds
   one more morphism than this number reports, and it is always that
@@ -81,7 +81,7 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1286-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1291-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove

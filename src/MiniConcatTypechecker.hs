@@ -5192,10 +5192,8 @@ primEnv =
   let rho = SV "ρ"
       a   = TV "A"
       b   = TV "B"
-      c   = TV "C"
       ta  = TVarTy a
       tb  = TVarTy b
-      tc  = TVarTy c
       gam = SV "Γ"
       del = SV "Δ"
       one t = SCons t SEnd
@@ -5288,47 +5286,41 @@ primEnv =
       -- Bool ≡ (• | •): two payload-free tracks; true = alt1, false = alt2
       tBool    = TSum (RCons SEnd (RCons SEnd RNil))
       boolLit  = Forall [] [] [] [] [] [] (arrPure SEnd (one tBool))
-      -- foldExp: the eliminator of an exponent bundle aⁿ (the stack-level
-      -- foldList).  n is erased; at runtime the bundle is the final
-      -- segment and its width is the witness.
+      -- mapAccumN: the tier's ONE catamorphism.  `Aⁿ` is the initial
+      -- algebra of `n ↦ Aⁿ` in [ℕ, C], and every fold-shaped word over
+      -- a bundle is this same catamorphism at a different MOTIVE:
+      -- `foldExp` at the constant carrier `n ↦ r`, `mapN` at
+      -- `n ↦ bⁿ`, and the general one here at `n ↦ (r ⇒ r bⁿ)` —
+      -- traversal in the State applicative, which for a finitary
+      -- container is all of traversability (design-exponents.md,
+      -- amendment 2026-09-21).  THE ACCUMULATOR IS A WIRE: with a wire
+      -- the runtime reads n off the segment as `total − 1` and the
+      -- split is determined; a stack accumulator would leave
+      -- `|ρ| + n = total` with nothing to fix it, which is the same
+      -- erasure argument that rules out segment variables.  Elements
+      -- are one wire too; a wider element boxes (`Box`).
       nExp = Exp 0 (Just (NV "n"))
-      foldExpTy =
-        let stepArr = arrPure (SCons tb (one ta)) (one tb)
-        in Forall [a, b] [] [] [NV "n"] [] []
-             (arrPure (SCons (TFn stepArr)
-                      (SCons tb (SExp (one ta) nExp SEnd)))
-                    (one tb))
-      -- foldExp2: the two-wide twin — eliminate a bundle of PAIRS
-      -- (a c)ⁿ; the step sees [acc, a, c]
-      foldExp2Ty =
-        let c  = TV "c"
-            tc = TVarTy c
-            stepArr = arrPure (SCons tb (SCons ta (one tc))) (one tb)
-        in Forall [a, b, c] [] [] [NV "n"] [] []
-             (arrPure (SCons (TFn stepArr)
-                      (SCons tb (SExp (SCons ta (one tc)) nExp SEnd)))
-                    (one tb))
+      mapAccumNTy =
+        let d  = TV "D"
+            td = TVarTy d
+            stepArr = arrEps (SCons td (one ta)) (SCons td (one tb))
+        in Forall [a, b, d] [] [] [NV "n"] [epsV] []
+             (arrEps (SCons (TFn stepArr)
+                      (SCons td (SExp (one ta) nExp SEnd)))
+                    (SCons td (SExp (one tb) nExp SEnd)))
       -- GLA generators, width-polymorphic in n (design-exponents.md)
       dupNTy = Forall [a] [] [] [NV "n"] [] []
         (arrPure (SExp (one ta) nExp SEnd)
                (SExp (one ta) nExp (SExp (one ta) nExp SEnd)))
+      -- the Naperian half: powers preserve products, `aⁿ bⁿ ≅ (a b)ⁿ`.
+      -- The merge side BOXES, so the element it hands `mapAccumN` is
+      -- ONE WIRE — the discipline that lets one catamorphism serve
+      -- every element width (MANUAL §13).  `unzipN` splits the flat
+      -- stack-native form, so `unzipN >> zipN` is flat → boxed.
       zipNTy = Forall [a, b] [] [] [NV "n"] [] []
         (arrPure (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
-               (SExp (SCons ta (one tb)) nExp SEnd))
-      -- map a one-wire function across a bundle: the tier's missing
-      -- container-preserving word (folds collapse, this one rebuilds)
-      mapNTy = Forall [a, b] [] [] [NV "n"] [epsV] []
-        (arrEps (SCons (TFn (arrEps (one ta) (one tb)))
-                      (SExp (one ta) nExp SEnd))
-               (SExp (one tb) nExp SEnd))
-      -- the pair twin, mirroring foldExp/foldExp2.  With zipN this
-      -- lifts ANY two-wire word pointwise, so addN and the rest stop
-      -- needing to be primitive.
-      mapN2Ty = Forall [a, b, c] [] [] [NV "n"] [epsV] []
-        (arrEps (SCons (TFn (arrEps (SCons ta (one tb)) (one tc)))
-                      (SExp (SCons ta (one tb)) nExp SEnd))
-               (SExp (one tc) nExp SEnd))
-      -- zipN's inverse: de-interleave a pair bundle into two bundles
+               (SExp (one (TData "Box" [SCons ta (one tb)])) nExp SEnd))
+      -- de-interleave a flat pair bundle into two bundles
       -- INDICES (design-indices.md).  Every introduction's n is forced
       -- by a relevant input: `indicesN` and `checkedAt` read a live
       -- bundle, and the finK literals carry their bound as an offset.
@@ -5541,15 +5533,12 @@ primEnv =
        , ("there",     thereTy)
        , ("merge",     mergeTy)
        , (knotPrimName, fixTy)
-       , ("foldExp",   foldExpTy)
-       , ("foldExp2",  foldExp2Ty)
+       , ("mapAccumN", mapAccumNTy)
        , ("at",        atTy)
        , ("indicesN",  indicesNTy)
        , ("checkedAt", checkedAtTy)
        , ("weaken",    weakenTy)
        , ("finInt",    finIntTy)
-       , ("mapN",      mapNTy)
-       , ("mapN2",     mapN2Ty)
        , ("unzipN",    unzipNTy)
        , ("dupN",      dupNTy)
        , ("zipN",      zipNTy)
@@ -10516,6 +10505,28 @@ preludeSrc = unlines
   , "def single = _ nil >> cons"
   , "## map then flatten: bind of the list monad"
   , "def flatMap = map >> concat"
+    -- THE N-FAMILY, DERIVED.  Every one of these is `mapAccumN` at a
+    -- different MOTIVE (design-exponents.md, amendment 2026-09-21):
+    -- `foldExp` at the constant carrier (the output bundle is a
+    -- discarded copy of the accumulator — `b := •` is unreachable,
+    -- because `b` is a WIRE variable and `•` is not a wire), `mapN` at
+    -- `n ↦ bⁿ` (the accumulator is the quotation itself, threaded
+    -- untouched), and the two-wire twins by BOXING the element:
+    -- `unzipN >> zipN` re-chunks a flat `(a b)ⁿ` as `Box(a b)ⁿ`, one
+    -- wire each, and then the one-wire words serve.
+  , "## fold a bundle: aⁿ collapsed by a step, DERIVED at the constant"
+  , "## motive.  The step's own output bundle is a copy of the"
+  , "## accumulator, discarded by the group that forgets the segment."
+  , "def foldExp = (f b ... -> [(s x -> f s x >> ev >> dup)] b ... >> mapAccumN >> (r ... -> r (... >> forget)))"
+  , "## map a one-wire word across a bundle, DERIVED with the quotation"
+  , "## itself as the accumulator — threaded untouched, then dropped"
+  , "def mapN = (f ... -> [(s x -> s (f x >> ev))] f ... >> mapAccumN >> (acc ... -> ...))"
+  , "## the two-wire twins: box each pair (`unzipN >> zipN`), then the"
+  , "## one-wire words do the work.  This is the boxing discipline —"
+  , "## a multi-wire element always fits in one wire (MANUAL §13)."
+  , "def mapN2 = (f ... -> unzipN >> zipN >> [(p -> f (p >> unBox) >> ev)] ... >> mapN)"
+  , "## fold a bundle of PAIRS; the step sees [acc, a, b]"
+  , "def foldExp2 = (f b ... -> unzipN >> zipN >> [(s p -> f s (p >> unBox) >> ev >> dup)] b ... >> mapAccumN >> (r ... -> r (... >> forget)))"
   , "## box a bundle as a list, DERIVED from its own eliminator:"
   , "## pack : aⁿ ⇒ List(a) — the flat list constructor; groups delimit"
   , "def pack = [(l x -> x l >> cons)] nil ... >> foldExp >> reverse"
@@ -10699,17 +10710,17 @@ preludeSrc = unlines
   , "## run a program one wire deeper: `[f] >> lift` is f with one wire riding beneath it, untouched.  Compose it once per context wire.  This is tensorial STRENGTH — the action of (A ⊗ −) on a morphism — and it is what threads a resource past a pure stage, so it is an ordinary word rather than machinery."
   , "def lift = (f -> [_ (f ... >> ev)])"
   , "def sumN = [+] 0 ... >> foldExp"
-    -- the GLA generators are now DERIVED: mapN/mapN2 lift any one- or
-    -- two-wire word pointwise, so `+` and `*` are the only arithmetic
-    -- the bundle tier needs to know about
+    -- the GLA generators are DERIVED: `zipN` boxes each pair, so one
+    -- `mapN` lifts any two-wire word pointwise and `+` and `*` are the
+    -- only arithmetic the bundle tier needs to know about
   , "## pointwise add: the bundle monoid ∇, lifted from `+`"
-  , "def addN = zipN >> [+] ... >> mapN2"
+  , "def addN = zipN >> [unBox >> +] ... >> mapN"
   , "## scale a bundle by a scalar, lifted from `*`"
   , "def scaleN = (k ... -> [k _ >> *] ... >> mapN)"
   , "## pointwise multiply (NOT linear — outside the GLA generators)"
-  , "def mulN = zipN >> [*] ... >> mapN2"
+  , "def mulN = zipN >> [unBox >> *] ... >> mapN"
   , "## pointwise subtract"
-  , "def subN = zipN >> [-] ... >> mapN2"
+  , "def subN = zipN >> [unBox >> -] ... >> mapN"
   , "## guard lanes as a bare product: (Bool Fn)^n lanes, default Fn on"
   , "## top.  All conditions are pre-evaluated (probe every lane); the"
   , "## FIRST true lane's action runs, else the default — exactly one"
@@ -11968,41 +11979,26 @@ evalTerm env defs vars term st =
               pure (out, stk', logs)
             _ -> throwError (recErr "expected one case per constructor \
                                     \and a value")
-    -- foldExp: eliminate an exponent bundle aⁿ.  n is erased, so the
+    -- mapAccumN: the tier's one catamorphism.  n is erased, so the
     -- bundle is the final segment and its runtime width is the witness
-    -- (the forget convention).  Non-final was typed at n := 0.
-    applyAtom isFinal (Prim "foldExp") stk
-      | not (M.member "foldExp" vars), not (M.member "foldExp" defs) = do
-          (args, stk') <- takeWires "foldExp" 2 stk
+    -- (the forget convention).  The accumulator is ONE WIRE, so the
+    -- two wires taken here fix the boundary with no width channel.
+    -- Non-final was typed at n := 0.
+    applyAtom isFinal (Prim "mapAccumN") stk
+      | not (M.member "mapAccumN" vars), not (M.member "mapAccumN" defs) = do
+          (args, stk') <- takeWires "mapAccumN" 2 stk
           case args of
-            [VFn scope cv body, b0] -> do
+            [VFn scope cv body, acc0] -> do
               let bundle = if isFinal then stk' else []
-                  go acc [] logs = pure (acc, logs)
-                  go acc (x : xs) logs = do
+                  go acc [] outs logs = pure (acc, reverse outs, logs)
+                  go acc (x : xs) outs logs = do
                     (out, lg) <- evalTerm env scope cv body [acc, x]
                     case out of
-                      [acc'] -> go acc' xs (logs ++ lg)
-                      _ -> throwError "Runtime type error in foldExp: the step must return exactly the accumulator"
-              (result, logs) <- go b0 bundle []
-              pure ([result], if isFinal then [] else stk', logs)
-            _ -> throwError "Runtime type error in foldExp: expected a step quotation and an initial accumulator"
-    -- foldExp2: the pair-bundle twin — chunk the segment in twos
-    applyAtom isFinal (Prim "foldExp2") stk
-      | not (M.member "foldExp2" vars), not (M.member "foldExp2" defs) = do
-          (args, stk') <- takeWires "foldExp2" 2 stk
-          case args of
-            [VFn scope cv body, b0] -> do
-              let bundle = if isFinal then stk' else []
-                  go acc (x : y : xs) logs = do
-                    (out, lg) <- evalTerm env scope cv body [acc, x, y]
-                    case out of
-                      [acc'] -> go acc' xs (logs ++ lg)
-                      _ -> throwError "Runtime type error in foldExp2: the step must return exactly the accumulator"
-                  go acc [] logs = pure (acc, logs)
-                  go _ _ _ = throwError "foldExp2: odd segment (unreachable on typechecked programs)"
-              (result, logs) <- go b0 bundle []
-              pure ([result], if isFinal then [] else stk', logs)
-            _ -> throwError "Runtime type error in foldExp2: expected a step quotation and an initial accumulator"
+                      [acc', y] -> go acc' xs (y : outs) (logs ++ lg)
+                      _ -> throwError "Runtime type error in mapAccumN: the step must return the accumulator and one wire"
+              (acc', ys, logs) <- go acc0 bundle [] []
+              pure (acc' : ys, if isFinal then [] else stk', logs)
+            _ -> throwError "Runtime type error in mapAccumN: expected a step quotation and an initial accumulator"
     -- GLA generators: width-polymorphic wiring; the segment IS the witness
     applyAtom isFinal (Prim "dupN") stk
       | not (M.member "dupN" vars), not (M.member "dupN" defs) =
@@ -12014,7 +12010,7 @@ evalTerm env defs vars term st =
           else if odd (length stk)
             then throwError "zipN: odd segment (unreachable on typechecked programs)"
             else let (xs, ys) = splitAt (length stk `div` 2) stk
-                 in pure (concat (zipWith (\x y -> [x, y]) xs ys), [], [])
+                 in pure (zipWith (\x y -> VSum 0 [x, y]) xs ys, [], [])
     applyAtom isFinal (Prim "unzipN") stk
       | not (M.member "unzipN" vars), not (M.member "unzipN" defs) =
           if not isFinal then pure ([], stk, [])
@@ -12022,25 +12018,6 @@ evalTerm env defs vars term st =
             then throwError "unzipN: odd segment (unreachable on typechecked programs)"
             else let pairs = chunk2 stk
                  in pure (map fst pairs ++ map snd pairs, [], [])
-    applyAtom isFinal (Prim "mapN2") stk
-      | not (M.member "mapN2" vars), not (M.member "mapN2" defs) = do
-          (args, stk') <- takeWires "mapN2" 1 stk
-          case args of
-            [VFn scope cvars body] -> do
-              let bundle = if isFinal then stk' else []
-              if odd (length bundle)
-                then throwError "mapN2: odd segment (unreachable on typechecked programs)"
-                else do
-                  let step (x, y) = do
-                        (out, lg) <- evalTerm env scope cvars body [x, y]
-                        case out of
-                          [w] -> pure (w, lg)
-                          _   -> throwError
-                                   "mapN2: the quotation must be two wires in, one out"
-                  rs <- mapM step (chunk2 bundle)
-                  pure ( map fst rs, if isFinal then [] else stk'
-                       , concatMap snd rs )
-            _ -> throwError "Runtime type error in mapN2: expected a quotation"
     -- at: index into the segment.  0 is the DEEPEST wire — the same
     -- leftmost-is-deepest alignment atoms use.  Non-final closes to
     -- Fin(0), which is uninhabited, so that branch cannot be reached
@@ -12074,22 +12051,6 @@ evalTerm env defs vars term st =
               pure ( [VSum tag (VInt i : bundle)]
                    , if isFinal then [] else stk', [] )
             _ -> throwError "Runtime type error in checkedAt: expected an Int"
-    applyAtom isFinal (Prim "mapN") stk
-      | not (M.member "mapN" vars), not (M.member "mapN" defs) = do
-          (args, stk') <- takeWires "mapN" 1 stk
-          case args of
-            [VFn scope cvars body] -> do
-              let bundle = if isFinal then stk' else []
-                  step v = do
-                    (out, lg) <- evalTerm env scope cvars body [v]
-                    case out of
-                      [w] -> pure (w, lg)
-                      _   -> throwError
-                               "mapN: the quotation must be one wire in, one out"
-              rs <- mapM step bundle
-              pure ( map fst rs, if isFinal then [] else stk'
-                   , concatMap snd rs )
-            _ -> throwError "Runtime type error in mapN: expected a quotation"
     applyAtom _ (Prim name) stk
       | Just k <- finIndex name
       , not (M.member name vars)

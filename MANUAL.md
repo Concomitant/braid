@@ -3058,11 +3058,13 @@ single-wire basis stays primitive because it is the normal-form
 alphabet reflected `Code` is written in. `pass` is not merely
 equivalent to `...` — the remainder marker *denotes* `pass`; they are
 one term with two spellings. Derived-but-primitive-looking words
-(`odd?`-family, `pack`/`pack2`, `sumN`, `id`, `loop`, `gt?`/`gte?`/
-`lte?`) live in the prelude — the design bet ("primitives span
+(`odd?`-family, `pack`/`pack2`, `sumN`, `mapN`, `foldExp`, `id`,
+`loop`, `gt?`/`gte?`/`lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
-**There are 67 primitives** *(2026-09-20: `one`, 66 → 67; 2026-09-17:
+**There are 64 primitives** *(2026-09-21: the N-family reduced to one
+catamorphism — `foldExp`, `foldExp2`, `mapN`, `mapN2` out, `mapAccumN`
+in, 67 → 64; 2026-09-20: `one`, 66 → 67; 2026-09-17:
 `showStack`, 65 → 66; the count had said 60 since 2026-09-14 and was
 stale)*. **The count is of words source can name, and it therefore
 EXCLUDES `#fix`**, the knot `with Recursive` emits: `#` opens a
@@ -3075,7 +3077,8 @@ produce an unbounded knot (§8, §5). A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), the open
-coproduct (`into`), the exponent eliminators over `Aⁿ` — or if it
+coproduct (`into`), the ONE eliminator over `Aⁿ` and its Naperian
+rewirings — or if it
 **touches the implementation**: arithmetic and strings, `eq?`, the four
 io edges, reflection (`parse`/`unparse`/`reflect`/`evalAs`/`sameCode`/
 `sameCodeC`/`interpose`/`rewrite`), and the type-level `weaken`/`finInt`. Everything else is
@@ -3182,24 +3185,24 @@ Exponent tier (widths erased; see §13):
 
 | word | type |
 |---|---|
-| `foldExp` | `Fn⟨a0 a1 ⇒ a0⟩ a0 a1ⁿ ⇒ a0` |
-| `foldExp2` | `Fn⟨a0 a1 a2 ⇒ a0⟩ a0 (a1 a2)ⁿ ⇒ a0` |
+| `mapAccumN` | `Fn⟨a0 a1 ⇒ a0 a2⟩ a0 a1ⁿ ⇒ a0 a2ⁿ` — the tier's ONE catamorphism |
 | `dupN` | `a0ⁿ ⇒ a0ⁿ a0ⁿ` |
-| `zipN` | `a0ⁿ a1ⁿ ⇒ (a0 a1)ⁿ` |
-| `unzipN` | `(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` |
-| `mapN` | `Fn⟨a0 ⇒ a1⟩ a0ⁿ ⇒ a1ⁿ` |
-| `mapN2` | `Fn⟨a0 a1 ⇒ a2⟩ (a0 a1)ⁿ ⇒ a2ⁿ` |
+| `zipN` | `a0ⁿ a1ⁿ ⇒ Box(a0 a1)ⁿ` — merge two lanes, ONE WIRE per element |
+| `unzipN` | `(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` — split the flat stack-native form |
 | `at` | `Fin(n) a0ⁿ ⇒ a0` — index the bundle; 0 is the DEEPEST wire |
 | `indicesN` | `a0ⁿ ⇒ (Fin(n) a0)ⁿ` — tag every wire with its own index |
 
-Folds collapse a bundle; `mapN`/`mapN2` rebuild one, which is what lets
-you **lift an ordinary word pointwise**. `addN` and `scaleN` are
-therefore prelude defs, not primitives — and so is any lift you need:
+**`foldExp`, `foldExp2`, `mapN` and `mapN2` left this list on
+2026-09-21** (67 → 64): all four are `mapAccumN` at a different motive
+and are now prelude defs with character-for-character the schemes they
+had (§13). `mapAccumN` rebuilds a bundle as it folds, which is what
+lets you **lift an ordinary word pointwise**. `addN` and `scaleN` are
+prelude defs too — and so is any lift you need:
 
 ```braid
-def addN  = zipN >> [+] ... >> mapN2        # the bundle monoid ∇
-def mulN  = zipN >> [*] ... >> mapN2        # NOT linear — outside the GLA set
-def maxN  = zipN >> [(x y -> (x y >> less) [y] [x] ... >> cond)] ... >> mapN2
+def addN  = zipN >> [unBox >> +] ... >> mapN    # the bundle monoid ∇
+def mulN  = zipN >> [unBox >> *] ... >> mapN    # NOT linear — outside the GLA set
+def maxN  = zipN >> [(p -> p >> unBox >> (x y -> (x y >> less) [y] [x] ... >> cond))] ... >> mapN
 def negN  = [0 _ >> -] ... >> mapN
 ```
 

@@ -8,7 +8,7 @@
 # ---- the workhorse -----------------------------------------------------
 # dot : Intⁿ Intⁿ ⇒ Int — dimension-checked: a 3-weight syllabus
 # cannot meet a 4-score transcript.
-def dot = zipN ; [(acc a b -> (a b ; *) acc ; +)] 0 ... ; foldExp2
+def dot = zipN ; [(acc p -> p ; unBox ; (a b -> (a b ; *) acc ; +))] 0 ... ; foldExp
 
 # ---- the syllabus ------------------------------------------------------
 # homework 20%, midterm 30%, final 50% — weights are just wires

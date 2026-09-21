@@ -3,7 +3,7 @@
 # word, every dimension. No boxes: the stack is the vector.
 #   dupN : aⁿ ⇒ aⁿ aⁿ            copy (Δ)
 #   addN : Intⁿ Intⁿ ⇒ Intⁿ     pointwise add (∇)
-#   zipN : aⁿ bⁿ ⇒ (a b)ⁿ       pair two bundles
+#   zipN : aⁿ bⁿ ⇒ Box(a b)ⁿ   pair two bundles, one wire each
 #   sumN : Intⁿ ⇒ Int           fold a bundle
 # A matrix is just a value Fn⟨Intⁿ ⇒ Intᵐ⟩.
 
@@ -15,7 +15,7 @@ def dblS = 2 ... >> scaleN
 20 30 >> dbl  >> sumN >> print              # 100
 20 30 >> dblS >> sumN >> print              # 100
 
-# dot product: zip the bundles, fold the pairs — dimension-checked
-# (zipN forces the two widths equal at compile time)
-def dot = zipN >> [(acc a b -> (a b >> *) acc >> +)] 0 ... >> foldExp2
+# dot product: zip the bundles, fold the boxed pairs — dimension-
+# checked (zipN forces the two widths equal at compile time)
+def dot = zipN >> [(acc p -> p >> unBox >> (a b -> (a b >> *) acc >> +))] 0 ... >> foldExp
 1 2 3 4 5 6 >> dot >> print                 # 1·4 + 2·5 + 3·6 = 32

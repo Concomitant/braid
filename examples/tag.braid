@@ -58,7 +58,7 @@ tag ; print                        # .foo — named without naming 1 or "a"
 # ---- brackets may span lines --------------------------------------------
 # A newline against a bracket's inner edge is layout, not a stage
 # boundary, so a wide atom can wrap. (Between stages it is still `>>`.)
-def dot = zipN ; [(acc a b ->
-                     (a b ; *) acc ; +)] 0 ... ; foldExp2
+def dot = zipN ; [(acc p -> p ; unBox ; (a b ->
+                     (a b ; *) acc ; +))] 0 ... ; foldExp
 
 2 3 5 95 90 95 ; dot ; print       # 935
