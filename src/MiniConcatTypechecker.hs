@@ -3394,7 +3394,17 @@ lookupAlias n = go
 
 -- the type names that are always in scope and are never variables
 builtinTyNames :: [String]
-builtinTyNames = ["Int", "Str", "Sym", "Fn", "Fin", "•"]
+builtinTyNames = ["Int", "Str", "Sym", "Fn", "Fin"] ++ terminalSpellings
+
+-- The empty stack, both ways of typing it (2026-09-20).  `•` is the one
+-- name in the language that needed a character most keyboards cannot
+-- produce; every other glyph already had an ASCII spelling (`Fn(Σ -> Θ)`
+-- for `Fn⟨Σ ⇒ Θ⟩`, `->!` for `=IO>`, `^n` for the superscripts).  The
+-- word is `one`, so the type and the WORD for its identity read the
+-- same: `Fn(one -> a)` is `Fn⟨• ⇒ a⟩`.  Input only — the display stays
+-- `•`, exactly as `->` displays as `⇒`.
+terminalSpellings :: [String]
+terminalSpellings = ["•", "one"]
 
 -- Parse a whole `type …` declaration line (aliases and data types in
 -- scope are needed to resolve references in the RHS; the declared name
@@ -4220,8 +4230,9 @@ parseTypeLine aliases datas line =
     paramList _ = Left "Malformed type parameter list"
     dataSigs = map dataSig datas
     declKws = ["type", "data"]
-    validName n = n `notElem` [ "Int", "Str", "Sym", "Fn", "Fin"
-                              , "type", "data", "model", "•" ]
+    validName n = n `notElem` ([ "Int", "Str", "Sym", "Fn", "Fin"
+                               , "type", "data", "model" ]
+                               ++ terminalSpellings)
     tyParams t = let (_, ss, _, _, _) = varsOfTy t in ss
     -- every stack appearing anywhere in a type body
     stacksOf :: Ty -> [SType]
@@ -4380,8 +4391,23 @@ parseTyElem aliases dataSigs params toks = case toks of
           pure (st : alts, end, rest'')
         (TokRParen : rest') -> pure ([st], RNil, rest')
         _ -> Left "Expected '|' or ')' in sum type"
-    -- a stack: • or a run of elements; a parameter occurrence splices
-    goStack (TokIdent "•" : rest) = pure (SEnd, rest)
+    -- a stack: • or a run of elements; a parameter occurrence splices.
+    -- `one` is `•`'s ASCII spelling (2026-09-20) and is read here, in
+    -- the same position, so there is one rule and not two.
+    --
+    -- `•^n` is the zero-wide bundle, and it is a legal exponent base
+    -- WITHOUT parentheses since 2026-09-20: `(•)^n` and `(• )^n` both
+    -- parsed before, and the bare form fell out of the stack parser
+    -- into *Expected '|' or ')' in sum type* for no reason but the
+    -- order of these two equations.  It is the k = 0 case of the width
+    -- schema (design-exponents.md, 2026-09-20).
+    goStack (TokIdent t : TokCaret : rest)
+      | t `elem` terminalSpellings = do
+          (e, rest1) <- expLit rest
+          (suffix, rest') <- goStackEnd rest1
+          pure (sexp SEnd e suffix, rest')
+    goStack (TokIdent t : rest)
+      | t `elem` terminalSpellings = pure (SEnd, rest)
     goStack (TokEllipsis : rest)
       | Just (PStack sv) <- stackParam params = do
           (suffix, rest') <- goStackEnd rest

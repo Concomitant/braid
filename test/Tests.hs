@@ -956,6 +956,31 @@ moduleTypeTests =
   , ("type T3 = (Int^3 | Str)\n1 2 3 >> alt1 >> (pass | drop >> \"x\")", "• ⇒ T3")
   , ("type W = (• | Int³)\n1 2 3 >> alt2 >> (forget | pass)", "• ⇒ W")
   , ("type PP = ((Int Str)^2 | •)\n1 \"a\" 2 \"b\" >> alt1 >> (pass | forget)", "• ⇒ PP")
+    -- 2026-09-20: the terminal object is a legal exponent BASE with no
+    -- parentheses.  `(•)^k` and `(• )^k` already parsed; the bare form
+    -- fell out of the stack parser into *Expected '|' or ')' in sum
+    -- type* for no reason but the order of two equations.  All three
+    -- spellings mean the same nothing, `•` included, `one` included.
+  , ("type E1 = (Int^3 •^2 | Str)\n1 2 3 >> alt1 >> (pass | drop >> \"x\")",
+     "• ⇒ E1")
+  , ("type E2 = (Int^3 (•)^2 | Str)\n1 2 3 >> alt1 >> (pass | drop >> \"x\")",
+     "• ⇒ E2")
+  , ("type E3 = (Int^3 one^2 | Str)\n1 2 3 >> alt1 >> (pass | drop >> \"x\")",
+     "• ⇒ E3")
+  , ("type E4 = (•^0 Int^3 | Str)\n1 2 3 >> alt1 >> (pass | drop >> \"x\")",
+     "• ⇒ E4")
+    -- and with a width PARAMETER it is the zero-wide bundle: the k = 0
+    -- case of the width schema (design-exponents.md, 2026-09-20)
+  , ("type E5(n) = Fn⟨Int •^n ⇒ Int⟩\n[1 ... >> +]", "• ⇒ Fn⟨Int ⇒ Int⟩")
+    -- `one` is `•`'s ASCII spelling in TYPE position, so the word and
+    -- the type read the same.  Display stays `•` — input only, like
+    -- `->` for `⇒`.  Alias folding is the proof they are one type.
+  , ("type E6 = Fn(one -> Int)\n[1]",            "• ⇒ E6")
+  , ("type E7 = Fn(Int -> one)\n[0 ... >> + >> drop]", "• ⇒ E7")
+  , ("type E8 = Fn(one -> one)\n[one]",          "• ⇒ E8")
+    -- two aliases, two spellings, ONE type: the display folds to a
+    -- single name, which is the proof they are not two
+  , ("type E9 = Fn⟨• ⇒ Int⟩\ntype EA = Fn(one -> Int)\n[1]", "• ⇒ EA")
     -- foldExp: the exponent eliminator — variadic folds over bare stack
     -- products; n is erased and generalizes per def
   , ("[+] 0 ... >> foldExp",                    "Intⁿ⁰ ⇒ Int")
@@ -3498,6 +3523,10 @@ moduleFailTests =
     -- bare ^n with no such parameter is the error now
   , ("type Bad = (• | Int^n)\n1",                  "not a parameter of this declaration")
   , ("type Bad(n) = (Int^n n)\n1",                 "both as a wire and as a width")
+    -- 2026-09-20: `one` is the terminal object in type position, so it
+    -- is a built-in type name and can no longer be declared
+  , ("type one = Int\n1",                          "Malformed type declaration")
+  , ("data one = (Int)\n1",                        "Malformed type declaration")
   , ("data BadD(n) = (• | Int^n)\n1",              "`type` aliases only")
   , ("type Bad = (• | Int^)\n1",                 "Expected an exponent")
   , ("type = (• | •)\n1",                        "Malformed type declaration")
