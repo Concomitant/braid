@@ -3058,13 +3058,14 @@ single-wire basis stays primitive because it is the normal-form
 alphabet reflected `Code` is written in. `pass` is not merely
 equivalent to `...` — the remainder marker *denotes* `pass`; they are
 one term with two spellings. Derived-but-primitive-looking words
-(`odd?`-family, `pack`/`pack2`, `sumN`, `mapN`, `foldExp`, `id`,
-`loop`, `gt?`/`gte?`/`lte?`) live in the prelude — the design bet ("primitives span
+(`odd?`-family, `pack`/`pack2`, `sumN`, `mapN`, `foldExp`, `dupN`,
+`id`, `loop`, `gt?`/`gte?`/`lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
 **There are 64 primitives** *(2026-09-21: the N-family reduced to one
 catamorphism — `foldExp`, `foldExp2`, `mapN`, `mapN2` out, `mapAccumN`
-in, 67 → 64; 2026-09-20: `one`, 66 → 67; 2026-09-17:
+in, 67 → 64; then `dupN` out and `splitN` in when `unzipN` boxed, 64 →
+64; 2026-09-20: `one`, 66 → 67; 2026-09-17:
 `showStack`, 65 → 66; the count had said 60 since 2026-09-14 and was
 stale)*. **The count is of words source can name, and it therefore
 EXCLUDES `#fix`**, the knot `with Recursive` emits: `#` opens a
@@ -3186,18 +3187,27 @@ Exponent tier (widths erased; see §13):
 | word | type |
 |---|---|
 | `mapAccumN` | `Fn⟨a0 a1 ⇒ a0 a2⟩ a0 a1ⁿ ⇒ a0 a2ⁿ` — the tier's ONE catamorphism |
-| `dupN` | `a0ⁿ ⇒ a0ⁿ a0ⁿ` |
 | `zipN` | `a0ⁿ a1ⁿ ⇒ Box(a0 a1)ⁿ` — merge two lanes, ONE WIRE per element |
-| `unzipN` | `(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` — split the flat stack-native form |
+| `unzipN` | `Box(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` — `zipN`'s two-sided inverse |
+| `splitN` | `(a0 a1)ⁿ ⇒ a0ⁿ a1ⁿ` — chunk the flat stack-native form |
 | `at` | `Fin(n) a0ⁿ ⇒ a0` — index the bundle; 0 is the DEEPEST wire |
 | `indicesN` | `a0ⁿ ⇒ (Fin(n) a0)ⁿ` — tag every wire with its own index |
 
+**`zipN >> unzipN` and `unzipN >> zipN` are both the identity**
+*(2026-09-21)*. They were not while `unzipN` took the flat `(a0 a1)ⁿ`:
+`zipN` boxes, so the flat splitter could not consume what `zipN`
+produced and the two were not inverse. Both sides box now, and the
+flat chunker keeps working under its own name, `splitN` — which is
+what `foldExp2`, `mapN2` and `indicesN`'s output are shaped like.
+
 **`foldExp`, `foldExp2`, `mapN` and `mapN2` left this list on
-2026-09-21** (67 → 64): all four are `mapAccumN` at a different motive
-and are now prelude defs with character-for-character the schemes they
-had (§13). `mapAccumN` rebuilds a bundle as it folds, which is what
-lets you **lift an ordinary word pointwise**. `addN` and `scaleN` are
-prelude defs too — and so is any lift you need:
+2026-09-21** (67 → 64), and `dupN` followed them the same day when
+`unzipN` boxed (`splitN` took its seat, so the count held at 64): all
+five are `mapAccumN` at a different motive and are now prelude defs
+with character-for-character the schemes they had (§13). `mapAccumN`
+rebuilds a bundle as it folds, which is what lets you **lift an
+ordinary word pointwise**. `addN` and `scaleN` are prelude defs too —
+and so is any lift you need:
 
 ```braid
 def addN  = zipN >> [unBox >> +] ... >> mapN    # the bundle monoid ∇
@@ -4165,11 +4175,26 @@ Jaskelioff & Rypáček). So `mapAccumN` is the prim and `foldExp`,
 
 `unzipN` is the one motive that is NOT reachable that way: its carrier
 is two containers, and a catamorphism whose step returns one wire per
-element cannot produce two bundles. `dupN` is not a catamorphism at
-all — it is the diagonal of the **Naperian** reading, `Aⁿ ≅ A^Fin(n)`
-(READING, Gibbons), which is a second structure on the same object and
-the one `zipN`/`unzipN` come from. The two structures are independent:
-the initial algebra gives the fold, the Naperian view gives the zip.
+element cannot produce two bundles. It is the structure map of the
+**Naperian** reading, `Aⁿ ≅ A^Fin(n)` (READING, Gibbons) — a second
+structure on the same object, and the one `zipN`/`unzipN` come from.
+The two structures are independent: the initial algebra gives the
+fold, the Naperian view gives the zip.
+
+`dupN` is the **diagonal** of that second structure, and it is not a
+catamorphism either — but it FACTORS through one *(2026-09-21)*. A
+fold's step returns one wire, so it cannot hand back two bundles; it
+can hand back one bundle of boxed pairs, and `unzipN` opens those.
+That is the whole derivation, and it is a prelude def:
+
+```braid
+def dupN = [(s x -> s (x >> dup >> Box))] 0 ... >> mapAccumN >> (acc ... -> ... >> unzipN)
+```
+
+The accumulator is an unread `0`: `mapAccumN` wants a wire there
+(§13.2) and this motive carries no state. `dupN` became derivable only
+when `unzipN` started taking the BOXED form — while it split the flat
+`(a b)ⁿ` there was nothing to open a `Box(a a)ⁿ` with.
 
 ### 13.2 The one-wire-element discipline
 
@@ -4184,13 +4209,21 @@ argument that rules out segment variables (`design-segments.md` §6.1).
 A wider element therefore **boxes**: `Box : ρ0 ⇒ Box(ρ0)` turns any
 segment into one wire, and `Box(a b)ⁿ` is a bundle of pairs whose
 elements a one-wire word can read (`unBox` inside the step). `zipN`
-merges two lanes straight into that form; `unzipN` splits the flat,
-stack-native `(a b)ⁿ`; so `unzipN >> zipN` is the flat → boxed
-normalizer, and the two-wire twins are one line each over it:
+merges two lanes straight into that form and `unzipN` takes it apart
+again, so **the two are inverse in both directions** — `zipN >> unzipN`
+and `unzipN >> zipN` are each the identity. The flat, stack-native
+`(a b)ⁿ` still needs a chunker, and that is `splitN`; `splitN >> zipN`
+is the flat → boxed normalizer, and the two-wire twins are one line
+each over it:
 
 ```braid
-def mapN2 = (f ... -> unzipN >> zipN >> [(p -> f (p >> unBox) >> ev)] ... >> mapN)
+def mapN2 = (f ... -> splitN >> zipN >> [(p -> f (p >> unBox) >> ev)] ... >> mapN)
 ```
+
+The asymmetric pairing shipped first — boxed `zipN`, flat `unzipN` —
+and cost the inverse law, since `unzipN` could not consume what `zipN`
+produced. Three words, one iso and one chunker, keep both *(the
+rename landed 2026-09-21; `design-exponents.md` carries the history)*.
 
 Two consequences worth knowing. **`b := •` is not reachable**: the
 output element is a WIRE variable and `•` is not a wire, so `foldExp`
@@ -4258,7 +4291,11 @@ corrected in place rather than dated one by one.
   the hint says what it usually is: a row arm on its own line is a
   **stage**, so the arms compose at `>>` instead of standing side by
   side — carry each line of the row on with `\`, or put the row on one
-  line (§4).
+  line (§4). ✦ If the failing line names `unzipN` and the refusal
+  mentions `Box`, the hint says which of the two splitters this is:
+  `unzipN` takes the **boxed** bundle `Box(a b)ⁿ` and is `zipN`'s
+  inverse, while `splitN` is the one that chunks a flat `(a b)ⁿ`
+  (§13.2).
 - **`Cannot unify types: Int vs Float. …`** — the same, with the
   reason spelled out: Braid has no numeric tower and no overloading.
   `+ - * div mod lt?` are Int words, `fadd fsub fmul fdiv flt?` are

@@ -563,14 +563,14 @@ locFor lm src msg =
 -- behind it, and what to write instead.  Each one fires only on a
 -- syntactic shape the checker can see in the source — never on the type
 -- error alone — and each says "usually"/"often" where it is a guess,
--- because a confident wrong diagnosis costs more than none.  The six
+-- because a confident wrong diagnosis costs more than none.  The seven
 -- shapes are the ones three agents in a row lost time to (§14).
 --------------------------------------------------------------------------------
 
 hintFor :: [String] -> Maybe Int -> String -> Maybe String
 hintFor ls mn msg =
   listToMaybe (catMaybes [ rowArm, knotRow, residual, closedGroup, newStage
-                         , forgotInstall ])
+                         , forgotInstall, flatUnzip ])
   where
     at k | k >= 1, k <= length ls = Just (ls !! (k - 1))
          | otherwise              = Nothing
@@ -662,6 +662,21 @@ hintFor ls mn msg =
                 ++ "label: seed it at the call site (`(\"\" ; " ++ r
                 ++ ")`), or wrap the program in a handler that seeds and "
                 ++ "unwraps (MANUAL \167\&14).")
+        else Nothing
+
+    -- 7. `unzipN` ON A FLAT PAIR BUNDLE (2026-09-21).  `unzipN` took
+    -- the flat `(a b)\8319` until the Naperian iso was made symmetric;
+    -- it takes the BOXED form now, and the flat chunker kept working
+    -- under the name `splitN`.  The shape is unmistakable: the line
+    -- says `unzipN` and the refusal says `Box`.
+    flatUnzip = do
+      h <- here
+      if "Cannot unify" `isInfixOf` msg && "Box" `isInfixOf` msg
+           && "unzipN" `isInfixOf` h
+        then Just "`unzipN` takes the BOXED bundle `Box(a b)\8319` \8212 it \
+                   \is `zipN`'s inverse, not the flat splitter. To chunk a \
+                   \flat `(a b)\8319` into two lanes, write `splitN` \
+                   \(MANUAL \167\&13.2)."
         else Nothing
 
     declaredRes = [ takeWhile (/= '(') n
@@ -5308,19 +5323,25 @@ primEnv =
              (arrEps (SCons (TFn stepArr)
                       (SCons td (SExp (one ta) nExp SEnd)))
                     (SCons td (SExp (one tb) nExp SEnd)))
-      -- GLA generators, width-polymorphic in n (design-exponents.md)
-      dupNTy = Forall [a] [] [] [NV "n"] [] []
-        (arrPure (SExp (one ta) nExp SEnd)
-               (SExp (one ta) nExp (SExp (one ta) nExp SEnd)))
       -- the Naperian half: powers preserve products, `aⁿ bⁿ ≅ (a b)ⁿ`.
-      -- The merge side BOXES, so the element it hands `mapAccumN` is
-      -- ONE WIRE — the discipline that lets one catamorphism serve
-      -- every element width (MANUAL §13).  `unzipN` splits the flat
-      -- stack-native form, so `unzipN >> zipN` is flat → boxed.
+      -- BOTH SIDES BOX (2026-09-21), so the element either one hands
+      -- `mapAccumN` is ONE WIRE — the discipline that lets one
+      -- catamorphism serve every element width (MANUAL §13) — and so
+      -- that the iso is an iso: `zipN >> unzipN` and `unzipN >> zipN`
+      -- are both the identity, which they were not while `unzipN`
+      -- took the flat form.  `splitN` is the flat chunker, kept under
+      -- its own name because `(a b)ⁿ` is what the stack-native
+      -- two-wire words (`foldExp2`, `mapN2`, `indicesN`'s output) see.
       zipNTy = Forall [a, b] [] [] [NV "n"] [] []
         (arrPure (SExp (one ta) nExp (SExp (one tb) nExp SEnd))
                (SExp (one (TData "Box" [SCons ta (one tb)])) nExp SEnd))
-      -- de-interleave a flat pair bundle into two bundles
+      unzipNTy = Forall [a, b] [] [] [NV "n"] [] []
+        (arrPure (SExp (one (TData "Box" [SCons ta (one tb)])) nExp SEnd)
+               (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
+      -- de-interleave a FLAT pair bundle into two bundles
+      splitNTy = Forall [a, b] [] [] [NV "n"] [] []
+        (arrPure (SExp (SCons ta (one tb)) nExp SEnd)
+               (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
       -- INDICES (design-indices.md).  Every introduction's n is forced
       -- by a relevant input: `indicesN` and `checkedAt` read a live
       -- bundle, and the finK literals carry their bound as an offset.
@@ -5343,9 +5364,6 @@ primEnv =
         (arrPure (one (TFin nExp)) (one (TFin (Exp 1 (Just (NV "n"))))))
       finIntTy = Forall [] [] [] [NV "n"] [] []
         (arrPure (one (TFin nExp)) (one TInt))
-      unzipNTy = Forall [a, b] [] [] [NV "n"] [] []
-        (arrPure (SExp (SCons ta (one tb)) nExp SEnd)
-               (SExp (one ta) nExp (SExp (one tb) nExp SEnd)))
   in M.fromList $
          -- `_` is the identity: the positional spelling, a wire this
          -- stage does not touch.  `id` is the WORD for the same
@@ -5539,8 +5557,8 @@ primEnv =
        , ("checkedAt", checkedAtTy)
        , ("weaken",    weakenTy)
        , ("finInt",    finIntTy)
+       , ("splitN",    splitNTy)
        , ("unzipN",    unzipNTy)
-       , ("dupN",      dupNTy)
        , ("zipN",      zipNTy)
        -- THE DECLARATION WORDS (stage 8).  Ordinary words, with the
        -- manifest in the arrow: `defW : Code Str =Dict> \8226`.  They
@@ -10512,8 +10530,11 @@ preludeSrc = unlines
     -- because `b` is a WIRE variable and `•` is not a wire), `mapN` at
     -- `n ↦ bⁿ` (the accumulator is the quotation itself, threaded
     -- untouched), and the two-wire twins by BOXING the element:
-    -- `unzipN >> zipN` re-chunks a flat `(a b)ⁿ` as `Box(a b)ⁿ`, one
-    -- wire each, and then the one-wire words serve.
+    -- `splitN >> zipN` re-chunks a flat `(a b)ⁿ` as `Box(a b)ⁿ`, one
+    -- wire each, and then the one-wire words serve.  `dupN` joins
+    -- them (2026-09-21): with `unzipN` boxed it is the diagonal
+    -- `mapAccumN` writes, `[(s x -> s (x >> dup >> Box))]`, unboxed
+    -- back into two lanes.
   , "## fold a bundle: aⁿ collapsed by a step, DERIVED at the constant"
   , "## motive.  The step's own output bundle is a copy of the"
   , "## accumulator, discarded by the group that forgets the segment."
@@ -10521,12 +10542,17 @@ preludeSrc = unlines
   , "## map a one-wire word across a bundle, DERIVED with the quotation"
   , "## itself as the accumulator — threaded untouched, then dropped"
   , "def mapN = (f ... -> [(s x -> s (f x >> ev))] f ... >> mapAccumN >> (acc ... -> ...))"
-  , "## the two-wire twins: box each pair (`unzipN >> zipN`), then the"
+  , "## copy a bundle (the GLA Δ), DERIVED: box a copy of every"
+  , "## element, then unbox the bundle of pairs into two lanes.  The"
+  , "## accumulator is an unread Int — mapAccumN wants a wire and this"
+  , "## motive has no state to carry."
+  , "def dupN = [(s x -> s (x >> dup >> Box))] 0 ... >> mapAccumN >> (acc ... -> ... >> unzipN)"
+  , "## the two-wire twins: box each pair (`splitN >> zipN`), then the"
   , "## one-wire words do the work.  This is the boxing discipline —"
   , "## a multi-wire element always fits in one wire (MANUAL §13)."
-  , "def mapN2 = (f ... -> unzipN >> zipN >> [(p -> f (p >> unBox) >> ev)] ... >> mapN)"
+  , "def mapN2 = (f ... -> splitN >> zipN >> [(p -> f (p >> unBox) >> ev)] ... >> mapN)"
   , "## fold a bundle of PAIRS; the step sees [acc, a, b]"
-  , "def foldExp2 = (f b ... -> unzipN >> zipN >> [(s p -> f s (p >> unBox) >> ev >> dup)] b ... >> mapAccumN >> (r ... -> r (... >> forget)))"
+  , "def foldExp2 = (f b ... -> splitN >> zipN >> [(s p -> f s (p >> unBox) >> ev >> dup)] b ... >> mapAccumN >> (r ... -> r (... >> forget)))"
   , "## box a bundle as a list, DERIVED from its own eliminator:"
   , "## pack : aⁿ ⇒ List(a) — the flat list constructor; groups delimit"
   , "def pack = [(l x -> x l >> cons)] nil ... >> foldExp >> reverse"
@@ -11999,11 +12025,9 @@ evalTerm env defs vars term st =
               (acc', ys, logs) <- go acc0 bundle [] []
               pure (acc' : ys, if isFinal then [] else stk', logs)
             _ -> throwError "Runtime type error in mapAccumN: expected a step quotation and an initial accumulator"
-    -- GLA generators: width-polymorphic wiring; the segment IS the witness
-    applyAtom isFinal (Prim "dupN") stk
-      | not (M.member "dupN" vars), not (M.member "dupN" defs) =
-          if isFinal then pure (stk ++ stk, [], [])
-                     else pure ([], stk, [])
+    -- The Naperian structure maps: width-polymorphic wiring, and the
+    -- segment IS the witness.  `zipN` and `unzipN` are inverse (both
+    -- sides box); `splitN` chunks the flat stack-native form.
     applyAtom isFinal (Prim "zipN") stk
       | not (M.member "zipN" vars), not (M.member "zipN" defs) =
           if not isFinal then pure ([], stk, [])
@@ -12014,8 +12038,19 @@ evalTerm env defs vars term st =
     applyAtom isFinal (Prim "unzipN") stk
       | not (M.member "unzipN" vars), not (M.member "unzipN" defs) =
           if not isFinal then pure ([], stk, [])
+          else do
+            let unboxPair (VSum 0 [x, y]) = pure (x, y)
+                unboxPair _ = throwError
+                  "unzipN: element is not a boxed pair (unreachable on \
+                  \typechecked programs) \8212 to split the FLAT (a b)\8319, \
+                  \use `splitN`"
+            pairs <- mapM unboxPair stk
+            pure (map fst pairs ++ map snd pairs, [], [])
+    applyAtom isFinal (Prim "splitN") stk
+      | not (M.member "splitN" vars), not (M.member "splitN" defs) =
+          if not isFinal then pure ([], stk, [])
           else if odd (length stk)
-            then throwError "unzipN: odd segment (unreachable on typechecked programs)"
+            then throwError "splitN: odd segment (unreachable on typechecked programs)"
             else let pairs = chunk2 stk
                  in pure (map fst pairs ++ map snd pairs, [], [])
     -- at: index into the segment.  0 is the DEEPEST wire — the same

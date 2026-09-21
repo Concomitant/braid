@@ -16,18 +16,21 @@ mapAccumN : Fn⟨r a ⇒ r b⟩ r aⁿ ⇒ r bⁿ    fold and rebuild at once
 dupN    : aⁿ ⇒ aⁿ aⁿ                     copy a bundle
 mapN2   : Fn⟨a b ⇒ c⟩ (a b)ⁿ ⇒ cⁿ        map across a PAIR bundle
 zipN    : aⁿ bⁿ ⇒ Box(a b)ⁿ              pair two bundles, one wire each
-unzipN  : (a b)ⁿ ⇒ aⁿ bⁿ                 split a flat pair bundle
+unzipN  : Box(a b)ⁿ ⇒ aⁿ bⁿ              unpair them again — zipN's inverse
+splitN  : (a b)ⁿ ⇒ aⁿ bⁿ                 chunk a FLAT pair bundle
 at      : Fin(n) aⁿ ⇒ a                  index a bundle (0 = deepest)
 indicesN: aⁿ ⇒ (Fin(n) a)ⁿ               tag each wire with its index
 ```
 
-Only `mapAccumN`, `dupN`, `zipN`, `unzipN`, `at` and `indicesN` are
-PRIMITIVE *(2026-09-21)*: the four fold-and-map words are `mapAccumN`
-at different motives and live in the prelude (MANUAL §13.1). Elements
-are one wire, so a pair bundle boxes — `unzipN >> zipN` re-chunks a
-flat `(a b)ⁿ` as `Box(a b)ⁿ` and a one-wire step reads it with
-`unBox`. That is why `addN`, `scaleN`, `mulN` and `subN` are prelude
-defs rather than primitives (`def addN = zipN >> [unBox >> +] ... >> mapN`).
+Only `mapAccumN`, `zipN`, `unzipN`, `splitN`, `at` and `indicesN` are
+PRIMITIVE *(2026-09-21)*: the fold-and-map words are `mapAccumN` at
+different motives and live in the prelude, and so does `dupN` (MANUAL
+§13.1). Elements are one wire, so a pair bundle boxes — `splitN >> zipN`
+re-chunks a flat `(a b)ⁿ` as `Box(a b)ⁿ` and a one-wire step reads it
+with `unBox`. `zipN` and `unzipN` both work in the boxed form, which
+is what makes them inverse: `zipN >> unzipN` and `unzipN >> zipN` are
+both the identity. That is why `addN`, `scaleN`, `mulN` and `subN` are
+prelude defs rather than primitives (`def addN = zipN >> [unBox >> +] ... >> mapN`).
 
 `at` and `indicesN` are the index words: `Aⁿ` *is* the function space
 `Fin(n) ⇒ A` stored flat, and a `Fin(n)` is an index into it. Indices
@@ -123,6 +126,7 @@ first argument for exactly this reason.
 sumN                                       # 0        (n = 0: seed)
 1 2 3 >> dupN >> addN                      # 2 4 6    (copy, pointwise add)
 1 2 3 10 20 30 >> zipN                     # alt1(1, 10) alt1(2, 20) alt1(3, 30)
+1 2 3 10 20 30 >> zipN >> unzipN           # 1 2 3 10 20 30   (the inverse law)
 def dot = zipN ; [(acc p -> p ; unBox ; (a b -> (a b ; *) acc ; +))] 0 ... ; foldExp
 1 2 3 4 5 6 >> dot                         # 32, and dot : Intⁿ Intⁿ ⇒ Int
 ```

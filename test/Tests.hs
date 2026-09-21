@@ -988,11 +988,18 @@ moduleTypeTests =
     -- GLA generators: width-polymorphic wiring over bundles
   , ("dupN",   "a0ⁿ⁰ ⇒ a0ⁿ⁰ a0ⁿ⁰")
   , ("addN",   "Intⁿ⁰ Intⁿ⁰ ⇒ Intⁿ⁰")
+    -- THE NAPERIAN ISO, SYMMETRIC (2026-09-21).  Both sides box, so
+    -- the two are genuinely inverse — see the round-trip pins below.
+    -- `splitN` is the flat chunker under its own name.
   , ("zipN",   "a0ⁿ⁰ a1ⁿ⁰ ⇒ Box(a0 a1)ⁿ⁰")
-  , ("unzipN", "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
+  , ("unzipN", "Box(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
+  , ("splitN", "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
+  , ("zipN >> unzipN", "a0ⁿ⁰ a1ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
+  , ("unzipN >> zipN", "Box(a0 a1)ⁿ⁰ ⇒ Box(a0 a1)ⁿ⁰")
     -- THE TIER'S ONE CATAMORPHISM.  Every fold-shaped bundle word is
-    -- this at a different motive, and the four that used to be prims
-    -- are prelude defs printing character-for-character what they did:
+    -- this at a different motive, and the five that used to be prims
+    -- are prelude defs printing character-for-character what they did
+    -- (`dupN` joined them on 2026-09-21, once `unzipN` boxed):
   , ("mapAccumN", "Fn⟨a0 a1 ⇒ a0 a2⟩ a0 a1ⁿ⁰ ⇒ a0 a2ⁿ⁰")
   , ("mapN",    "Fn⟨a0 ⇒ a1⟩ a0ⁿ⁰ ⇒ a1ⁿ⁰")
   , ("foldExp", "Fn⟨a0 a1 ⇒ a0⟩ a0 a1ⁿ⁰ ⇒ a0")
@@ -1187,7 +1194,7 @@ moduleTypeTests =
     -- 2026-09-20: `one` generalizes to nothing, which is the point
   , ("def unit0 = one\nunit0",  "• ⇒ •")
   , ("def unit0 = •\n[unit0]",  "• ⇒ Fn⟨• ⇒ •⟩")
-  , ("unzipN",  "(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
+  , ("unzipN",  "Box(a0 a1)ⁿ⁰ ⇒ a0ⁿ⁰ a1ⁿ⁰")
   , ("map",     "Fn⟨a0 ⇒ a1⟩ List(a0) ⇒ List(a1)")
   , ("fold",    "Fn⟨a0 a1 ⇒ a0⟩ a0 List(a1) ⇒ a0")
   , ("def square = dup >> *\nsquare >> square", "Int ⇒ Int")
@@ -2224,9 +2231,21 @@ evalTests =
   , ("3 1 2 3 >> scaleN >> sumN >> print",        ["18"],  "")
     -- lift a word the prelude does not ship, in one line
   , ("def maxN = zipN >> [(p -> p >> unBox >> (x y -> (x y >> less) [y] [x] ... >> cond))] ... >> mapN\n1 9 3 5 2 7 >> maxN >> sumN >> print", ["21"], "")
-    -- `unzipN >> zipN` is the flat-to-boxed normalizer: split a flat
+    -- `splitN >> zipN` is the flat-to-boxed normalizer: split a flat
     -- (a b)ⁿ into two lanes, then re-pair them ONE WIRE at a time
-  , ("1 2 3 10 20 30 >> unzipN >> zipN >> [unBox >> +] ... >> mapN >> sumN >> print", ["66"], "")
+  , ("1 2 3 10 20 30 >> splitN >> zipN >> [unBox >> +] ... >> mapN >> sumN >> print", ["66"], "")
+    -- THE INVERSE LAW, both ways round (2026-09-21).  `unzipN` takes
+    -- the BOXED form, so it is `zipN`'s two-sided inverse and each
+    -- round trip is the identity on its own wires.
+  , ("1 2 3 10 20 30 >> zipN >> unzipN >> addN >> sumN >> print", ["66"], "")
+  , ("1 2 3 10 20 30 >> zipN >> unzipN >> zipN >> [unBox >> +] ... >> mapN >> sumN >> print", ["66"], "")
+  , ("1 2 3 10 20 30 >> splitN >> zipN >> unzipN >> zipN >> unzipN >> addN >> sumN >> print", ["66"], "")
+    -- ...and the LANES come back in order, not just their sum: subN is
+    -- not commutative, so -54 pins left-lane-first
+  , ("1 2 3 10 20 30 >> zipN >> unzipN >> subN >> sumN >> print", ["-54"], "")
+    -- `dupN` is a prelude def now; it still runs at n = 0 and non-final
+  , ("dupN >> addN >> sumN >> print", ["0"], "")
+  , ("5 >> dupN _ >> print", ["5"], "")
   , ("[dup >> *] 1 2 3 >> mapN >> sumN >> print",   ["14"], "")
   , ("[dup >> *] >> mapN >> sumN >> print",         ["0"],  "")
     -- INDICES at runtime.  A Fin is a bare Int: the bound is a type,
@@ -3323,6 +3342,12 @@ moduleFailTests =
      "A recursive call inside a row usually wants `merge` after the \
      \row: the row leaves the alternatives open, and the knot cannot \
      \close them (MANUAL \167\&14).")
+    -- `unzipN` on a flat pair bundle: the rename of 2026-09-21 says
+    -- which of the two splitters this is
+  , ("1 2 3 10 20 30 ; unzipN ; addN ; sumN ; print",
+     "`unzipN` takes the BOXED bundle `Box(a b)\8319` \8212 it is `zipN`'s \
+     \inverse, not the flat splitter. To chunk a flat `(a b)\8319` into \
+     \two lanes, write `splitN` (MANUAL \167\&13.2).")
     -- an open injection leaves a residual, and a written type has none
   , ("data Res = (Int | Str)\ndef mk = alt1\ndef use2 = 1 ; mk ; unRes\n1 ; print",
      "An open injection leaves a residual (`\963`), and a written type \

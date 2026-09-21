@@ -416,6 +416,50 @@ action") is **ANSWERED**: `mapN` is `mapAccumN` with the quotation
 itself as the accumulator, threaded untouched and dropped. `(-)ⁿ` is
 functorial, and its fmap is a prelude def.
 
+## Addendum 2026-09-21 — the iso is symmetric, and `dupN` falls out
+
+The amendment above shipped the Naperian iso ASYMMETRIC: `zipN` boxed,
+`unzipN` did not. That was not an iso. `zipN : aⁿ bⁿ ⇒ Box(a b)ⁿ`
+produces boxed elements and the flat `unzipN : (a b)ⁿ ⇒ aⁿ bⁿ` cannot
+consume them, so **`zipN >> unzipN` did not typecheck** and the two
+words named a retraction at best. The correction is to box both sides
+and give the flat chunker its own name:
+
+```
+zipN   : aⁿ bⁿ        ⇒ Box(a b)ⁿ
+unzipN : Box(a b)ⁿ    ⇒ aⁿ bⁿ        -- was (a b)ⁿ ⇒ aⁿ bⁿ
+splitN : (a b)ⁿ       ⇒ aⁿ bⁿ        -- the old unzipN, renamed
+```
+
+`zipN >> unzipN` and `unzipN >> zipN` are now both the identity, and
+both are pinned. `splitN` stays because the flat `(a b)ⁿ` is a real
+shape and not a mistake — it is what `foldExp2`, `mapN2`, `pack2`,
+`pack2R`, `decide`, `firstTrue` and `indicesN`'s output all are — so
+`splitN >> zipN` is the flat → boxed normalizer that `unzipN >> zipN`
+used to be.
+
+**`dupN` derives now**, and that is the part worth recording. The
+amendment above argued it could not: "a catamorphism whose step
+returns one wire per element cannot produce two bundles". True, and it
+does not have to — it can produce ONE bundle of boxed pairs, and the
+boxed `unzipN` is exactly the word that opens those:
+
+```braid
+def dupN = [(s x -> s (x >> dup >> Box))] 0 ... >> mapAccumN >> (acc ... -> ... >> unzipN)
+```
+
+So the Naperian diagonal FACTORS through the initial algebra:
+`Δ = unzipN ∘ mapN(Box ∘ dup)`. The one-wire-element discipline is not
+a restriction on which motives are reachable; it is a change of basis,
+and every motive of the form `n ↦ A₁ⁿ … A_kⁿ` comes back through
+`Box`. `dupN` leaves the prims and `splitN` takes its seat, so the
+count holds at 64.
+
+What did NOT change: `at` and `indicesN` are still prims, for the
+reasons listed above (no inhabited seed, and a `Fin(n)` no user
+quotation can write). And the erasure rule is untouched — every word
+here consumes a bundle whose width the live stack reports.
+
 ## Open questions
 
 1. Does `unExp`'s nil/cons refinement interact with the persistent
