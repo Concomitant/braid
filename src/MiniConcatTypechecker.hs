@@ -2844,6 +2844,11 @@ data Theory = Theory
   , thIn     :: Maybe String         -- `theory T(…) in D` — T's slots
                                      -- that D also declares are D's, at
                                      -- D's shape, and D's laws are T's
+  , thReads  :: [(String, String)]   -- slot -> its canonical BASE word
+                                     -- (`copy : • ⇒ k(Float, Float Float)
+                                     -- = dup`).  The generators of the
+                                     -- WIDE SUBCATEGORY `embed` is
+                                     -- defined on: see `readTransport`.
   } deriving (Eq, Show)
 
 -- THE OBJECT MAP (stage 7c, 2026-09-17).  A model is a presentation
@@ -3012,11 +3017,23 @@ data Transport = Transport
                                   -- `compose` is `;`, so transport
                                   -- FUSES to what the routing pass
                                   -- already writes (design-7b.md §3.2).
+  , tpRead     :: [(String, String, Maybe Arrow)]
+                                  -- THE READER (stage 9, 2026-09-21):
+                                  -- base atom -> slot, with the arrow
+                                  -- that atom must have in the base when
+                                  -- the slot is an ENTRY (`• ⇒ k(ρ, σ)`
+                                  -- reads as `ρ ⇒ σ`), and `Nothing`
+                                  -- when it is a WHISKERING, which takes
+                                  -- a carrier and gives one back.  The
+                                  -- theory's base spellings, inverted.
+                                  -- See `readTransport`.
   } deriving (Eq, Show)
 
--- the two levels `with M` needs, and the message when one is missing
+-- the two levels `with M` needs, and the message when one is missing.
+-- A READER is the third: `embed` on a subcategory (stage 9).
 tpTransports :: Transport -> Bool
-tpTransports tp = isJust (tpCompose tp) && isJust (tpEmbed tp)
+tpTransports tp =
+  isJust (tpCompose tp) && (isJust (tpEmbed tp) || not (null (tpRead tp)))
 
 -- NOT `#`: that starts a comment, so a generated name using it would be
 -- eaten by the lexer the moment it appeared in emitted source.
@@ -3431,12 +3448,23 @@ parseTheory :: [Alias] -> [(String, [TyParam])] -> String -> [String]
 parseTheory aliases dataSigs header body = do
   (name, params, ext) <- parseHead
   entries <- mapM (parseEntry params) (filter (not . blank) body)
-  let slots = [ e | Left  e <- entries ]
-      laws  = [ e | Right e <- entries ]
+  let slots = [ (n, a) | Left  (n, a, _) <- entries ]
+      laws  = [ e      | Right e         <- entries ]
+      reads' = [ (n, w) | Left (n, _, Just w) <- entries ]
   case slots of
     [] -> Left $ "theory " ++ name ++ " declares no operations"
     _  -> Right ()
-  pure (Theory name params slots laws ext)
+  -- THE TABLE IS INJECTIVE ON GENERATORS, which is what makes it
+  -- invertible at all: `read : B ⇀ B[T]` is a model read BACKWARDS, and
+  -- two slots spelled the same way would give one base atom two images.
+  case [ w | (_, w) <- reads', length [ () | (_, w') <- reads', w' == w ] > 1 ] of
+    (w : _) -> Left $ "theory " ++ name ++ ": two slots are spelled `" ++ w
+                   ++ "` in the base, and the base spelling is READ "
+                   ++ "BACKWARDS — one atom, one slot, or `with` a model "
+                   ++ "of " ++ name ++ " could not say which generator `"
+                   ++ w ++ "` is"
+    []      -> Right ()
+  pure (Theory name params slots laws ext reads')
   where
     blank l = all isSpace (takeWhile (/= '#') l)
     parseHead = do
@@ -3501,15 +3529,22 @@ parseTheory aliases dataSigs header body = do
                       ++ "one mark per argument — `_` for a wire, `...` "
                       ++ "for a stack: k(..., ...), d(_)")
 
-    -- `law nm = program` | `slot : Σ ⇒ Θ`
+    -- `law nm = program` | `slot : Σ ⇒ Θ` | `slot : Σ ⇒ Θ = <base word>`
+    --
+    -- THE BASE SPELLING (stage 9, 2026-09-21).  A generator of a theory
+    -- may say how it is written in the AMBIENT presentation, and that
+    -- table is what makes `embed` definable on a SUBCATEGORY: see
+    -- `readTransport`.  It is split on ` = ` with spaces, because `=`
+    -- with none is part of a labelled arrow (`=IO>`).
     parseEntry params l =
       case words l of
         ("law" : nm : "=" : _) ->
           Right (Right (nm, drop 1 (dropWhile (/= '=') l)))
         _ -> case break (== ':') l of
-          (_, ':' : sig) | ';' `elem` sig -> Left (separatorErr "slots")
-          (lhs, ':' : sig)
+          (_, ':' : sig0) | ';' `elem` sig0 -> Left (separatorErr "slots")
+          (lhs, ':' : sig0)
             | [nm] <- words lhs -> do
+                (sig, spelled) <- splitSpelling nm sig0
                 -- SLOT-LOCAL VARIABLES.  A slot may name variables the
                 -- theory does not declare (`thenP : k(a,b) k(b,c) ⇒
                 -- k(a,c)` needs `a b c`), and each is local to its own
@@ -3524,10 +3559,28 @@ parseTheory aliases dataSigs header body = do
                 ty <- parseTyBody aliases dataSigs (params ++ locals)
                                   ("Fn⟨" ++ sig ++ "⟩")
                 case ty of
-                  TFn arr -> Right (Left (nm, arr))
+                  TFn arr -> Right (Left (nm, arr, spelled))
                   _ -> Left $ "theory: slot '" ++ nm
                            ++ "' needs a signature like `Σ ⇒ Θ`"
           _ -> Left $ "Malformed theory entry: " ++ dropWhile isSpace l
+
+    -- ` = <word>` after a slot's signature: its spelling in the base.
+    splitSpelling nm sig = case breakOn " = " sig of
+      Nothing        -> Right (sig, Nothing)
+      Just (s, rest) -> case words (takeWhile (/= '#') rest) of
+        [w] -> Right (s, Just w)
+        _   -> Left $ "theory: slot '" ++ nm ++ "' is spelled `"
+                   ++ trimSpace rest ++ "` in the base, and a base "
+                   ++ "spelling is ONE WORD — a generator of the ambient "
+                   ++ "presentation, which is what the subcategory is "
+                   ++ "generated by.  A composite is not a generator."
+
+    breakOn sep s = go "" s
+      where
+        go _   []          = Nothing
+        go acc r@(c : cs)
+          | sep `isPrefixOf` r = Just (reverse acc, drop (length sep) r)
+          | otherwise          = go (c : acc) cs
 
     -- the variables a slot introduces on its own, in order of first use
     slotLocals params sig = do
@@ -5943,6 +5996,10 @@ runTransport :: ElabCtx -> Transport -> Term -> Either String Term
 -- and the padding depth is the group's size.
 runTransport ctx tp body
   | Just e <- tpResource tp = elabScope (ecEnv ctx) [e] body
+-- THE READER (stage 9, 2026-09-21).  A theory with no `embed` and a
+-- table of base spellings transports ATOM-WISE instead of stage-wise.
+runTransport ctx tp body
+  | isNothing (tpEmbed tp), not (null (tpRead tp)) = readTransport ctx tp body
 runTransport ctx tp body = do
   embW <- maybe (Left noEmbed) Right (fmap (slotDefName nm) (tpEmbed tp))
   thenW <- maybe (Left "internal: transport with no composition") Right
@@ -6001,6 +6058,173 @@ runTransport ctx tp body = do
            ++ doctrineEmbed ++ "` (`Fn\10216\961 \8658 \963\10217 \8658 k(\961, \963)`): `with "
            ++ nm ++ "` cannot transport a base stage; `in " ++ nm ++ "` and "
            ++ "compose by hand."
+
+--------------------------------------------------------------------------------
+-- `embed` ON A SUBCATEGORY (stage 9, 2026-09-21)
+--
+-- The Doctrine's `embed : Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)` asserts an
+-- identity-on-objects functor from the WHOLE base.  For linear maps
+-- that is false, and declaring it anyway makes `embed [fsin]` a linear
+-- map.  What IS true is a WIDE SUBCATEGORY `B_lin ⊆ B` and a functor
+-- `B_lin → K`, so `embed` is PARTIAL — and the partiality is the
+-- guarantee.
+--
+-- A wide subcategory is determined by a set of GENERATORS closed under
+-- composition.  The base is PRESENTED, so every program is a composite
+-- of generators and "is this program in the subcategory" reduces to "is
+-- every atom in the generator set" — a syntactic scan, decidable.
+-- `examples/transpose.braid`'s `linear?` asks exactly that at RUNTIME
+-- and answers with a Bool; this asks it at ELABORATION and answers with
+-- a refusal.
+--
+-- THE MECHANISM IS A MODEL READ BACKWARDS.  A theory's base spellings
+-- are a model of it IN THE BASE (`copy ↦ dup`, `add ↦ fadd`); the table
+-- is injective on generators (checked at the `theory` line), so it has
+-- a PARTIAL INVERSE `read : B ⇀ B[T]`, undefined off the table, and
+-- transport is `read` then the model.  Not new machinery: one table
+-- used as a PARSER composed with another used as an interpreter, and
+-- the universal property does the rest — a functor out of a free
+-- category IS a graph morphism, so an image per generator extends to
+-- every program.
+--
+-- THE TABLE IS THE THEORY'S, NOT A MODEL'S, and that is the design
+-- decision.  `B_lin` is a property of the PRESENTATION — which base
+-- programs are linear is not something two models of one theory may
+-- disagree about — so the spelling is written beside the signature,
+-- where the generator is, and every model of the theory reads through
+-- the same one.  A reference model named at the scope (`with Dense via
+-- Funcs`) would put it in the wrong place twice: it would let two
+-- models define two different subcategories, and it would ask the
+-- inverse of a model whose slot bodies are PROGRAMS, which is not a
+-- table at all.
+--
+-- ATOM-WISE, NOT STAGE-WISE.  Standard transport sends `f ; g` to
+-- `embed [f] embed [g] ; compose`, embedding each STAGE opaquely; this
+-- must send `dup ; fadd` to `copy add ; compose`, reading each ATOM
+-- into a slot.  It is a MODE rather than a parameterization: the two
+-- share the composition and the K-word and exit rules, and differ in
+-- what one stage becomes, which is the whole of `carrierOf`.
+--
+-- SOUND BUT INCOMPLETE.  It accepts only programs built from the
+-- theory's generators; it rejects base programs that are semantically
+-- in the subcategory but spelled with an atom off the table; it never
+-- accepts one that is not.  That is the direction that matters.
+readTransport :: ElabCtx -> Transport -> Term -> Either String Term
+readTransport ctx tp body = do
+  mapM_ spellingOK (tpRead tp)
+  case [ e | (dn, e) <- exits, dn `elem` primsIn body ] of
+    (e : _) -> Left $ "`" ++ e ++ "` leaves " ++ nm
+                   ++ "; call it outside `with " ++ nm ++ "` (a category is "
+                   ++ "entered by a marker and left by a model: inside the "
+                   ++ "scope every word builds a carrier, `" ++ tpCarrier tp
+                   ++ "(a, b)`).  `in " ++ nm ++ "` opens the same "
+                   ++ "vocabulary and transports nothing."
+    []      -> Right ()
+  case stages of
+    [] -> Left $ "`with " ++ nm ++ "`: the scope is empty, and a "
+              ++ "transported scope must build a " ++ tpCarrier tp
+    ss -> do
+      cs <- mapM carrierOf ss
+      pure (chainTerm (concat (zipWith step (True : repeat False) cs)))
+  where
+    nm     = tpName tp
+    thenW  = slotDefName nm (fromMaybe doctrineCompose (tpCompose tp))
+    stages = filter (not . null) (spineOf body)
+    exits  = [ (slotDefName nm e, e) | e <- tpExits tp ]
+    enters = map (slotDefName nm) (tpEnters tp)
+    kword [Prim n] = lookup n (ecKWords ctx) == Just nm || n `elem` enters
+    kword _        = False
+
+    -- a carrier already on the stack is put underneath and composed,
+    -- exactly as the stage-wise path does
+    step first cs = if first then cs else map (Prim "_" :) cs ++ [[Prim thenW]]
+
+    -- THE CHECK, at the first USE rather than at the declaration:
+    -- declarations are hoisted above defs, so a theory's base spelling
+    -- may name a word this module defines, and the prefix scope is what
+    -- it will be at run time.  The same rule a `functor`'s graph
+    -- morphism obeys (2026-09-06).
+    spellingOK (_, _, Nothing)   = Right ()   -- a whiskering: `_` has no scheme
+    spellingOK (w, slot, Just a) = case M.lookup w (ecEnv ctx) of
+      Nothing -> Left $ here ++ "theory " ++ tpTheory tp ++ " spells its "
+        ++ "generator `" ++ slot ++ "` `" ++ w ++ "`, and `" ++ w
+        ++ "` is not defined at this point: a base spelling is read where "
+        ++ "the scope is written, so the word must be in scope there."
+      Just sc -> case subsumes sc a of
+        Right () -> Right ()
+        Left _   -> Left $ here ++ "theory " ++ tpTheory tp ++ " spells its "
+          ++ "generator `" ++ slot ++ "` `" ++ w ++ "`, and the two do not "
+          ++ "agree: the slot says the base atom is `"
+          ++ show (normalizeArrow a) ++ "` and `" ++ w ++ "` is `"
+          ++ show (normalizeArrow (runInfer0 (instantiate sc)))
+          ++ "`.  A base spelling is the generator ITSELF, written in the "
+          ++ "ambient presentation."
+
+    -- A STAGE the reader can transport is `_`\8230 followed by exactly ONE
+    -- generator: the `_`s are the whiskering, and the generator is the
+    -- carrier they ride under.  Two generators side by side IS a tensor,
+    -- and there is nothing to send it to — a hom-object over stacks
+    -- writes only one of the two whiskerings, so `m \8855 n` is not
+    -- constructible from a theory's own slots (MANUAL \167\&8).
+    carrierOf s
+      | kword s   = Right [s]
+      | otherwise = do
+          named <- mapM readAtom s
+          let gens = [ sl | (_, sl, Just _)  <- named ]
+              whs  = [ sl | (_, sl, Nothing) <- named ]
+          case (gens, named) of
+            ([g], _) | (_, _, Just _) <- last named ->
+              Right ( [[Prim (slotDefName nm g)]]
+                   ++ [ [Prim (slotDefName nm w)] | w <- reverse whs ] )
+            ([_], _) -> Left $ stageHere s ++ "ends in a whiskering: a `"
+                     ++ "_` rides UNDER what follows it, so the generator "
+                     ++ "goes last in its stage."
+            ([], _)  -> Left $ stageHere s ++ "is all whiskering and no "
+                     ++ "generator, so there is no carrier to ride under."
+            _        -> Left $ stageHere s ++ "puts two of "
+                     ++ tpTheory tp ++ "'s generators side by side, which "
+                     ++ "is their TENSOR — and a hom-object over stacks "
+                     ++ "writes only one of the two whiskerings "
+                     ++ "(`k(\964 \961, \964 \963)` declares, `k(\961 \964, \963 \964)` "
+                     ++ "does not), so " ++ tpTheory tp ++ " has nothing to "
+                     ++ "send it to.  Write the stages one at a time."
+
+    stageHere s = here ++ "the stage `" ++ renderTerm (chainTerm [s]) ++ "` "
+
+    -- ...and this is the refusal the whole construction exists for.
+    readAtom (Prim n)
+      | Just (sl, a) <- lookup3 n (tpRead tp) = Right (n, sl, a)
+      | isLiteralAtom n = Left $ here ++ "`" ++ n ++ "` has no image under "
+          ++ tpTheory tp ++ ": a LITERAL is not a generator of it.  A "
+          ++ "literal is a stage `\8226 \8658 \964`, and a constant introduced into "
+          ++ "a diagram is what makes a map AFFINE rather than linear "
+          ++ "(`x ; " ++ n ++ " ; fadd` is the shortest example).  A "
+          ++ "scalar IS a generator of the presentation, but one per "
+          ++ "value and never a word, so no literal can enter the table "
+          ++ "and this one is refused rather than quietly admitted."
+      | otherwise = Left $ here ++ "`" ++ n ++ "` has no image under "
+          ++ tpTheory tp ++ ": its generators are "
+          ++ intercalate ", " [ "`" ++ w ++ "`" | (w, _, _) <- tpRead tp ]
+          ++ ", and `" ++ n ++ "` is not one of them, so the functor has "
+          ++ "nothing to send it to.  `with " ++ nm ++ "` admits exactly "
+          ++ "the programs built from those atoms — sound, and "
+          ++ "deliberately incomplete: call `" ++ n ++ "` outside the "
+          ++ "scope, or write the word it belongs to under `with " ++ nm
+          ++ "` too."
+    readAtom t = Left $ here ++ "`" ++ renderTerm t ++ "` is not an atom of "
+      ++ "the base presentation, so there is no generator to read it as: a "
+      ++ "scope transported by a reader is a composite of "
+      ++ tpTheory tp ++ "'s generators and nothing else."
+
+    lookup3 n tbl = listToMaybe [ (sl, a) | (w, sl, a) <- tbl, w == n ]
+    here = "`with " ++ nm ++ "`: "
+
+-- A LITERAL IS NOT A GENERATOR.  Its family is infinite and none of its
+-- members is a word, which is why an object-mapped model needs `via`
+-- for it — and why a reader must refuse it: see `readTransport`.
+isLiteralAtom :: String -> Bool
+isLiteralAtom n =
+  isIntLiteral n || isFloatLiteral n || isStrLiteral n || isSymLiteral n
 
 -- The RECEIPT of a functor: a stage that does nothing and says so.
 --
@@ -8991,6 +9215,59 @@ checkExtends theories th = case thIn th of
                 ++ " — one theory instantiates it once."
           [] -> Right (M.union cm' cm)
 
+-- A THEORY'S BASE SPELLINGS, audited where they are written (stage 9,
+-- 2026-09-21) — once per theory, whether or not anything models it,
+-- exactly as `in D` is.
+--
+-- The table carves a WIDE SUBCATEGORY out of the base and `embed` is
+-- the functor out of it (`readTransport`), so what may carry a spelling
+-- is a GENERATOR: a slot that builds a carrier out of nothing, or one
+-- that whiskers a carrier.  A slot that takes something from the BASE
+-- is one generator per VALUE and no one word spells it — which is where
+-- the AFFINE TRAP is pinned, because `scale : Float ⇒ k(Float, Float)`
+-- is exactly such a slot, and refusing it here is what keeps every
+-- literal out of the table.
+checkBaseSpellings :: Theory -> ConMap -> Either String ()
+checkBaseSpellings th cm
+  | null (thReads th) = Right ()
+  | thIn th /= Just doctrineName = Left $ here
+      ++ "a base spelling says which base atoms `" ++ doctrineEmbed
+      ++ "` is defined on, so it needs a hom-object to embed INTO: "
+      ++ "declare this theory `in " ++ doctrineName ++ "`, or drop the "
+      ++ "spellings."
+  | otherwise = do
+      case (lookup doctrineEmbed (thSlots th), thReads th) of
+        (Just _, ((n, _) : _)) -> Left $ here ++ "slot '" ++ n
+          ++ "' declares a base spelling, and this theory also declares `"
+          ++ doctrineEmbed ++ "`.  A base spelling says which base atoms "
+          ++ "the embedding is DEFINED ON \8212 it carves out a subcategory "
+          ++ "\8212 and `" ++ doctrineEmbed ++ "` says it is defined on all "
+          ++ "of them.  Declare one or the other."
+        _ -> Right ()
+      case [ (n, ar) | (n, _) <- thReads th, Just ar <- [lookup n (thSlots th)]
+                     , not (builds ar), not (whiskers ar) ] of
+        ((n, ar) : _) -> Left $ here ++ "slot '" ++ n
+          ++ "' declares a base spelling, and only a GENERATOR may \8212 one "
+          ++ "that builds a carrier out of nothing (`\8226 \8658 k(\961, \963)`) or "
+          ++ "whiskers one (`k(\961, \963) \8658 k(\964 \961, \964 \963)`).  `" ++ n
+          ++ "` is " ++ show (normalizeArrow ar) ++ ", which takes "
+          ++ "something from the base, so it is one generator per VALUE "
+          ++ "and no one word spells it.  Drop the spelling: the "
+          ++ "subcategory is generated by the atoms that ARE words."
+        [] -> Right ()
+      case [ n | (n, _) <- thReads th, isNothing (lookup n (thSlots th)) ] of
+        (n : _) -> Left $ here ++ "'" ++ n ++ "' is not a slot of this "
+                       ++ "theory"
+        []      -> Right ()
+  where
+    here   = "theory " ++ thName th ++ ": "
+    kParam = M.lookup doctrineK cm
+    isCar (TData n [_, _]) = Just n == kParam
+    isCar _                = False
+    carriers st = length (filter isCar (fromMaybe [] (closedWires st)))
+    builds   (Arrow i o _) = i == SEnd && carriers o == 1
+    whiskers (Arrow i o _) = carriers i == 1 && carriers o == 1
+
 -- the closed leading wires of a stack, and whether a tail rides above
 -- them
 stackPrefix :: SType -> Maybe (Int, Bool)
@@ -9065,10 +9342,31 @@ transportOf datas theories inst = do
                        , carriers i >= 1, carriers o == 0 ]
           enters = [ n | (n, Arrow i o _) <- slots, n `notElem` spoken
                        , i == SEnd, carriers o == 1 ]
+          -- THE READER, inverted (stage 9).  A base spelling names the
+          -- generator, and what the transport does with it is read off
+          -- the slot's DECLARED arrow exactly as everything else here
+          -- is: an ENTRY builds a carrier out of nothing, anything else
+          -- takes one and gives one back (a whiskering).  Slots that do
+          -- neither are refused where the spelling is written, below.
+          -- `• ⇒ k(ρ, σ)` READ AS A BASE ARROW is `ρ ⇒ σ`: what the
+          -- atom that spells this generator must actually be.
+          baseArr n = case lookup n slots of
+            Just (Arrow SEnd (SCons (TData _ [x, y]) SEnd) _)
+              | n `elem` enters -> Just (Arrow x y effPure)
+            _                   -> Nothing
+          reader = [ (w, n, baseArr n) | (n, w) <- thReads th ]
+      -- A BASE SPELLING IS FOR A GENERATOR, and a generator either makes
+      -- a carrier or whiskers one.  `scale : Float ⇒ k(Float, Float)` is
+      -- neither — it takes a base wire, so it is one generator PER
+      -- SCALAR and no single word names it — and refusing it here is
+      -- where the affine trap is pinned: a Float literal never enters
+      -- the table, so `x ; 1.0 ; fadd` cannot be read as linear, which
+      -- it is not.
       pure (Transport (inName inst) (thName th) carrier
                       (has doctrineCompose) (has doctrineEmbed)
                       exits enters
-                      (representableAt datas (inName inst) carrier))
+                      (representableAt datas (inName inst) carrier)
+                      reader)
 
 -- WHEN A MODEL'S FIBRE IS REPRESENTABLE AT A RESOURCE WIRE (stage 7b).
 --
@@ -9938,7 +10236,7 @@ checkModuleRaw base src = do
       thNames  = map thName theories
   -- `in D` in a theory head is a CLAIM, and it is checked here, once,
   -- whether or not anything models the theory
-  mapM_ (\th -> () <$ checkExtends theories th) ownTheories
+  mapM_ (\th -> checkExtends theories th >>= checkBaseSpellings th) ownTheories
   declared <- sequence [ parseInstance allAliases sigs theories h b
                        | (h, b, _) <- declLines, take 5 h == "model"
                        , isNothing (baseInstanceName h) ]

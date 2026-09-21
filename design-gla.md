@@ -64,7 +64,7 @@ shape — but it is worth writing down, because a theory whose slots
 already look like the Doctrine's is exactly where the omission is
 easiest to make.
 
-## 3. NO `embed` — and that is the whole guarantee
+## 3. No TOTAL `embed` — and that is the whole guarantee
 
 The Doctrine's `embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` asserts an
 identity-on-objects functor from the **whole base**. For linear maps
@@ -92,7 +92,10 @@ existed.
 
 The price is the one the table names: composition is a **word**,
 `f g ; compose`, not `;`. `;`-as-composition is what a `with` scope
-writes out, and a `with` scope embeds every stage.
+writes out, and a `with` scope embeds every stage. §7 is how that price
+is paid back without giving the guarantee up: `embed` defined on a
+SUBCATEGORY, which is partial, and the partiality is the same guarantee
+said a second way.
 
 The honest caveat is the one `examples/circuits.braid` already ends on:
 a model seals the **category**, not the **type**. `Mat` is an ordinary
@@ -214,7 +217,7 @@ any diagram containing it (*`scale` has no closed arity*), which is why
 every scalar law samples. The same fact is what makes a bare Float
 literal dangerous in a subcategory reader — see below.
 
-## 7. What is next: `embed` on a SUBCATEGORY (option 3)
+## 7. `embed` on a SUBCATEGORY — shipped the same day
 
 `;` becoming composition needs `embed`, and `embed` from the whole base
 is false. What is true is a **wide subcategory** `B_lin ⊆ B` and a
@@ -222,22 +225,106 @@ functor `B_lin → K`, so `embed` is **partial and the partiality is the
 guarantee**. A wide subcategory is determined by a set of generators
 closed under composition; the base is presented, so "is this program in
 the subcategory" reduces to "is every atom in the generator set" — a
-syntactic scan, decidable, and the answer at elaboration is a
-**refusal** rather than a boolean.
+syntactic scan, decidable. `linear?` does exactly that at run time and
+answers with a Bool; this does it at elaboration and answers with a
+refusal.
 
-Three things this stage settles in advance for it:
+```braid
+theory GLA(k(..., ...)) in Doctrine =
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    copy    : • ⇒ k(Float, Float Float) = dup
+    add     : • ⇒ k(Float Float, Float) = fadd
+    under   : k(a, b) ⇒ k(c a, c b)     = _
 
-- **The reader table's home.** It belongs to the **theory**, not to a
-  reference model, because `B_lin` is a property of the presentation
-  and two models of one theory must not disagree about which base
-  programs are linear.
-- **The affine trap is sharper than it looked.** It is not only that a
-  literal must be allowed in `scale` position and nowhere else; it is
-  that `scale` has no single-atom base spelling at all (§6), so an
-  atom-wise reader cannot recognise a scalar without a multi-stage
-  pattern. The conservative reader — no literals at all — is the sound
-  one, and it costs scaling under transport.
-- **The transported stage's shape.** Only one whiskering is spellable
-  (§5), so a stage a reader can transport is `_`\* followed by exactly
-  one generator. Two generators side by side in a stage is a tensor,
-  and there is nothing to send it to.
+def f with Dense = dup ; fadd        # Float =Dense> Float
+```
+
+### The mechanism is a model read backwards
+
+The spellings ARE a model of the theory in the base (`copy ↦ dup`,
+`add ↦ fadd`), whose image is `B_lin`. The table is injective on
+generators — checked where it is written — so it has a partial inverse
+`read : B ⇀ B[GLA]`, undefined off the table, and `embed_Dense` is
+`read` then `Dense`. Not new machinery: one table used as a **parser**
+composed with another used as an **interpreter**, and the universal
+property does the rest, since a functor out of a free category IS a
+graph morphism.
+
+### The decision: the table is the THEORY's
+
+The lead left this open with three candidates: (a) a reference model of
+the theory in the base, named at the scope (`with Dense via Funcs`);
+(b) the theory declares each slot's base spelling; (c) something else.
+
+**(b), and the argument is about what `B_lin` IS.** Which base programs
+are linear is a property of the **presentation** — it is the set of
+generators, and the generators are what a theory declares. Two models of
+one theory are two *interpretations* of the same subcategory; letting
+either of them define it would let them disagree, and there would be no
+answer to "is `dup ; fadd` linear?" without naming a model first, which
+is exactly the wrong shape of question.
+
+Two smaller reasons, each decisive on its own:
+
+- **A model's slot bodies are PROGRAMS, not atoms.** `copyA = [dup] ;
+  Arr` is a carrier-builder; inverting it means reaching inside a
+  quotation inside a constructor application and hoping there is one
+  atom in there. There is nothing to invert in the general case, and the
+  cases where there is are an accident of how the model was written. A
+  spelling beside the signature is a table because it is declared to be
+  one.
+- **It answers the "several models" question by construction.** With the
+  table on the theory, `read` is shared and `embed_M = read ; M` for
+  every model M — which is the statement that all of them agree about
+  the subcategory and differ only about what its morphisms mean. With
+  the table on a model, every scope would have to name two models and
+  the reader would be a second axis of choice with nothing to constrain
+  it.
+
+The surface is the one the lead proposed, `slot : Σ ⇒ Θ = word`, split
+on ` = ` with spaces because `=` without them is part of a labelled
+arrow (`=IO>`).
+
+### Atom-wise transport is a MODE, not a parameterization
+
+`runTransport` splits the body into STAGES and sends each to `embed
+[stage]`; the stage is opaque. A reader must send `dup ; fadd` to `copy
+add ; compose`, which means looking INSIDE the stage. So `readTransport`
+is a sibling clause of `runTransport` rather than an argument to it: the
+two share the composition, the exit refusal, the K-word table and the
+`_`-padding that slides an accumulated carrier underneath, and differ in
+exactly one function — what one stage becomes. That is 60 lines, and the
+shared part is the reason it is not more.
+
+A stage a reader can transport is `_`\* followed by exactly one
+generator: the `_`s are `under` and the generator is the carrier they
+ride beneath. Two generators side by side is their TENSOR, and §5 says
+there is nothing to send it to.
+
+### The affine trap, pinned at the declaration
+
+If a Float literal were a generator, `x ; 1.0 ; fadd` would be admitted,
+and that map is AFFINE. It is refused, and **not by a special case**: a
+base spelling is accepted only on a slot that builds a carrier out of
+nothing or whiskers one, and a scalar (`scale : Float ⇒ k(Float,
+Float)`) is neither — it takes a base wire, so it is one generator per
+*value* and no one word spells it (§6). So no literal can enter the
+table, and a literal inside a transported scope meets the ordinary *no
+image* refusal with a message that names the trap.
+
+The cost is honest and worth writing down: **a transported program
+cannot scale.** `two`, `fan` and every scalar law in
+`examples/linear.braid` are hand-built for that reason. Admitting
+scalars would need a multi-stage pattern in the reader (`_ <lit> ;
+fmul`), which is a different mechanism — the reader is a graph morphism
+on ATOMS, and a scalar is not one.
+
+### Sound, incomplete, and said out loud
+
+`with Dense` accepts only programs built from the theory's generators,
+every one of which is in the subcategory; it rejects programs that are
+in the subcategory but spelled with an atom off the table; it never
+accepts one that is not. The criterion is a **sufficient condition, not
+a decision procedure**, and MANUAL §8 and §14 both say so — the
+direction that costs something when it is wrong is the one this cannot
+get wrong.

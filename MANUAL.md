@@ -2411,6 +2411,7 @@ sees it, so there is nothing left for a strength law to say.
 | declared | it licenses |
 |---|---|
 | `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
+| `+ ` **base spellings** *(2026-09-21)* | `with M` transports a base program built from the atoms the theory named, **atom by atom**, and refuses any other by name. `embed` on a **subcategory** — below. |
 | `+ embed` | `with M` transports **any** stage, at the width it is written. |
 
 Slots that are not the doctrine's are classified exactly as 5c read
@@ -2480,6 +2481,86 @@ and `sameCodeC` *decides* equations on it — `tr ; tr = id`,
 contravariance, and the comonoid/monoid exchange `Δᵀ = ∇` are proved
 rather than sampled, while the bialgebra corollaries, which relate two
 *different* diagrams, are sampled through `app`.
+
+**`embed` ON A SUBCATEGORY — a slot may declare its base spelling**
+*(2026-09-21)*. `embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` asserts a functor from
+the **whole** base, and for linear maps that assertion is false. What is
+true is a **wide subcategory** `B_lin ⊆ B` and a functor `B_lin → K`, so
+`embed` is **partial — and the partiality is the guarantee**. A wide
+subcategory is determined by a set of generators closed under
+composition, and the base is *presented*, so "is this program in the
+subcategory" reduces to "is every atom in the generator set" — a
+syntactic scan, decidable. `examples/transpose.braid` runs that scan at
+run time and answers with a Bool; a theory that spells its generators
+runs it at **elaboration** and answers with a refusal.
+
+The spelling goes after the signature, one word, split on ` = ` (with
+spaces — `=` with none is part of a labelled arrow):
+
+```braid
+theory GLA(k(..., ...)) in Doctrine =
+    compose : k(a, b) k(b, c) ⇒ k(a, c)
+    copy    : • ⇒ k(Float, Float Float) = dup
+    add     : • ⇒ k(Float Float, Float) = fadd
+    under   : k(a, b) ⇒ k(c a, c b)     = _
+
+def f with Dense = dup ; fadd        # Float =Dense> Float
+```
+
+**It is a model read backwards.** The spellings *are* a model of the
+theory in the base (`copy ↦ dup`); the table is injective on generators
+(checked at the `theory` line), so it has a partial inverse
+`read : B ⇀ B[T]`, undefined off the table, and transport is `read` then
+the model. No new machinery: one table used as a **parser** composed
+with another used as an interpreter, and the universal property does the
+rest — a functor out of a free category *is* a graph morphism.
+
+**The table belongs to the THEORY, not to a model.** Which base programs
+are linear is a property of the *presentation*; two models of one theory
+must not be able to disagree about it. A reference model named at the
+scope (`with Dense via Funcs`) would put it in the wrong place twice: it
+would make `B_lin` depend on which model you named, and the inverse
+asked for would be the inverse of a model whose slot bodies are
+*programs*, which is not a table at all.
+
+**The transport is ATOM-WISE**, which is the one new mode. Standard
+transport sends `f ; g` to `embed [f] embed [g] ; compose`, embedding
+each **stage** opaquely; a reader sends `dup ; fadd` to
+`copy add ; compose`, reading each **atom** into a slot. The two share
+the composition, the exit rule and the K-word table, and differ only in
+what one stage becomes. A stage a reader can transport is `_`… followed
+by exactly **one** generator — the `_`s are the whiskering and the
+generator is the carrier they ride beneath — so two generators side by
+side is a *tensor*, and only one whiskering is spellable (above), so
+there is nothing to send it to.
+
+**The affine trap, and where it is pinned.** If a Float literal were a
+generator, `x ; 1.0 ; fadd` would be admitted and that map is **affine**,
+not linear. It is refused, and not by a special case: a base spelling is
+accepted only on a slot that *builds* a carrier out of nothing or
+*whiskers* one, and a scalar (`scale : Float ⇒ k(Float, Float)`) is
+neither — it takes a base wire, so it is one generator per *value* and
+no one word spells it. So no literal ever enters the table, and a
+literal in a transported scope meets the ordinary *no image* refusal
+with a message that names the trap.
+
+**Sound, and deliberately incomplete.** A reader accepts only programs
+built from the theory's generators, every one of which is in the
+subcategory; it rejects programs that *are* in the subcategory but are
+spelled with an atom off the table; it never accepts one that is not.
+That is the direction that matters, and it is worth saying in the docs
+of any theory that uses this: `with M` is a *sufficient* condition, not
+a decision procedure.
+
+Refusals, each naming the atom: *`fmul` has no image under GLA: its
+generators are `dup`, `fadd`, … and `fmul` is not one of them*; *`1.0`
+has no image under GLA: a LITERAL is not a generator of it*; *the stage
+`dup dup` puts two of GLA's generators side by side, which is their
+TENSOR*; *the stage `dup _` ends in a whiskering*; and at the `theory`
+line, *slot 'scale' declares a base spelling, and only a GENERATOR may*,
+*two slots are spelled `dup` in the base, and the base spelling is READ
+BACKWARDS*, and *slot 'copy' declares a base spelling, and this theory
+also declares `embed` … Declare one or the other*.
 
 
 **The laws are the doctrine's, and they run.** A model is audited
@@ -4689,6 +4770,18 @@ corrected in place rather than dated one by one.
   constructible from slots alone. When the theory declares `embed` the
   base supplies the symmetry and it does not matter; when it does not
   (`examples/linear.braid`), it is a limit on what the theory can say.
+- **A reader admits an atom, not a meaning** *(2026-09-21)*. When a
+  theory spells its generators (§8), `with M` is a **syntactic** test:
+  every atom of the scope must be one of the words the theory named.
+  A program that is semantically in the subcategory but spelled another
+  way is refused — *`fmul` has no image under GLA* — and the fix is to
+  spell it with the generators or to call it outside the scope. The
+  criterion is **sound and incomplete** on purpose: it never admits a
+  program that is not in the subcategory, which is the direction that
+  costs something when it is wrong. A LITERAL is refused by the same
+  rule with its own message, because a constant in a diagram is what
+  makes a map affine rather than linear, and a scalar — which *is* a
+  generator — has no one-word base spelling to be read as.
 - **Every `with` that CHANGED something mints — models included**
   *(2026-09-13; the qualification is 2026-09-18)*. `with IntSum ;
   fold1` leaves `=IntSum>` on the arrow, exactly as `with Traced`

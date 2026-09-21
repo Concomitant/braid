@@ -65,8 +65,15 @@ particular one.
 ```text
 theory NAME [ ( params ) ] [ in DOCTRINE ] =
     slot : Σ ⇒ Θ            # a generator, one per line
+    slot : Σ ⇒ Θ = word     # ...and how it is spelled in the BASE
     law name = <program>    # an equation, one per line
 ```
+
+The optional **base spelling** *(2026-09-21)* names the atom of the
+ambient presentation that IS this generator. The set of them determines
+a **wide subcategory** of the base, and that is the subcategory `embed`
+is defined on — see the Doctrine, below. It is split on ` = ` with
+spaces, since `=` without them is part of a labelled arrow (`=IO>`).
 
 Parameters are **kinded by how they are written**: a bare name is one
 wire (`Monoid(a)`), `...` a stack, and a type **constructor** carries its
@@ -91,6 +98,14 @@ doctrine's slot *at the doctrine's shape*, with the doctrine's
 constructor parameters instantiated **consistently across every such
 slot**.
 
+`checkBaseSpellings` runs beside it, on the same terms: a spelling is
+accepted only on a slot that **builds** a carrier out of nothing or
+**whiskers** one (those are the generators; a slot that takes something
+from the base is one generator per *value*), the table must be
+**injective** (it is read backwards), the theory must be `in Doctrine`
+(there must be something to embed into), and it must not also declare
+`embed` (which already claims the whole base).
+
 **What `with` does to it.** Nothing — `with T` is refused (below). A
 theory is applied by being *modelled*.
 
@@ -104,7 +119,9 @@ d(...)) in Doctrine`, a Markov category); `frame.braid` (`Columns`);
 `lifting.braid` (`Lifting`); `reified.braid` (`Reflective`);
 `resources.braid` (`Collector(e, a)`, the generic handler);
 `payroll.braid`, `optimizer.braid`, `distributive.braid`,
-`transformations.braid`.
+`transformations.braid`; `linear.braid` (`GLA`, whose generators carry
+their base spellings, so `embed` is defined on the linear programs and
+refuses the rest by name).
 
 **Refusals.**
 
@@ -124,6 +141,19 @@ theory T: slot 's' reads Doctrine's parameter 'k' as X, but another
 theory T: `in Doctrine` declares nothing: Doctrine's operations are …
 `Base` is the ambient presentation and may not be declared
 `;` composes; separate slots with `,` or a newline
+theory T: slot 's' is spelled `p ; q` in the base, and a base spelling
+  is ONE WORD — a generator of the ambient presentation … A composite
+  is not a generator.
+theory T: slot 'scale' declares a base spelling, and only a GENERATOR
+  may — one that builds a carrier out of nothing (`• ⇒ k(ρ, σ)`) or
+  whiskers one (`k(ρ, σ) ⇒ k(τ ρ, τ σ)`) …
+theory T: two slots are spelled `dup` in the base, and the base
+  spelling is READ BACKWARDS — one atom, one slot …
+theory T: slot 'copy' declares a base spelling, and this theory also
+  declares `embed` … Declare one or the other.
+theory T: a base spelling says which base atoms `embed` is defined on,
+  so it needs a hom-object to embed INTO: declare this theory
+  `in Doctrine`, or drop the spellings.
 ```
 
 ---
@@ -352,7 +382,10 @@ slots; a generated word of the model's own name is checked to be
 
 **What `with` does to it.** `with M` **transports**: every stage
 becomes `embed` of that stage as a quotation and every `;` becomes
-`compose`. No arity is read and nothing is packed or whiskered — a
+`compose` — or, when the theory spells its generators instead of
+declaring `embed`, every **atom** becomes the slot it was read into and
+every `;` becomes `compose` (a `_` in the stage is the whiskering, and
+a stage with two generators in it is a tensor and is refused). No arity is read and nothing is packed or whiskered — a
 stage of any width embeds as **itself**, and is weighed at exactly the
 width it was written, so a stage that does not cover the stack it is
 handed fails with the base's own message (`Cannot unify stacks: • vs
@@ -693,6 +726,7 @@ two levels:
 | declared | it licenses |
 |---|---|
 | `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
+| `+` **base spellings** *(2026-09-21)* | `embed` on a **wide subcategory**: `with M` transports a base program **atom by atom** when every atom is one of the words the theory named, and refuses any other by name (*`fmul` has no image under GLA*). The table is the theory's, not a model's; it is a model read backwards. Sound and deliberately incomplete. |
 | `+ embed` | `with M` transports **any** stage, at the width it is written. |
 
 **What the checker does.** `checkExtends` verifies the claim once per

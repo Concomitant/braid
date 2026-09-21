@@ -768,6 +768,11 @@ moduleTypeTests =
     -- STACKS, which is what lets one hom-object hold `Float ⇒ Float
     -- Float` with no width arithmetic anywhere.
   , (glaSrc ++ "def cp in Dense = copy\ncp", "• ⇒ Mat(Float, Float Float)")
+    -- ...and a TRANSPORTED one carries the receipt and FOLDS, so a
+    -- matrix reads like the function it is.  `in` mints nothing and
+    -- `with` mints because it changed the code: the two displays are
+    -- the difference the receipt exists to record.
+  , (glaReadSrc ++ "def f with Dense = dup ; fadd\nf", "Float =Dense> Float")
     -- STAGE 8: the declaration words, and a def nobody wrote.  A
     -- top-level group is a DECLARATION LINE when its grade carries
     -- `Dict`; it is run against the dictionary at check time, above
@@ -1824,6 +1829,23 @@ evalTests =
      \[with Fuel = dup ; * ; _ 1 ; +] ; getCode ; unparse ; print",
      ["(with@Fuel >> unFuel >> Fuel) pass >> _ dup pass >> _ * pass \
       \>> _ _ 1 pass >> _ + pass"], "")
+    -- STAGE 9 (2026-09-21): the reader transports ATOM-WISE.  Standard
+    -- transport writes `embed [stage] ; compose` per STAGE; this writes
+    -- the SLOT each atom was read into, with a `_` in the stage read as
+    -- the whiskering it is.  `dup ; _ dup ; _ fadd ; fadd` is x ↦ 3x,
+    -- and every generator in the composite is one GLA named.
+  , (glaReadSrc ++ "def w with Dense = dup ; _ dup ; _ fadd ; fadd\n\
+     \def ap in Dense = w ; app ... ; _ 2.0 ; ev\n\
+     \ap ; print",
+     ["6.0"], "")
+    -- ...and a transported word composes in the category with a word
+    -- built BY HAND, because `in Dense` put both in the same table
+  , (glaReadSrc ++ "def w with Dense = dup ; fadd\n\
+     \def byHand in Dense = copy add ; compose\n\
+     \def both with Dense = w ; byHand\n\
+     \def ap in Dense = both ; app ... ; _ 3.0 ; ev\n\
+     \ap ; print",
+     ["12.0"], "")
     -- A FAMILY'S SLOT BODY NAMES THE PARAMETER'S SLOT (2026-09-15).
     -- `lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)` — every theory name in
     -- a family's body is R's, the slot being defined included, so `lit`
@@ -3317,9 +3339,50 @@ glaBody =
   , "    app     = appM"
   ]
 
+-- replace the first occurrence of one substring by another
+subst :: String -> String -> String -> String
+subst from to = go
+  where
+    go [] = []
+    go s@(c : cs)
+      | from `isPrefixOf` s = to ++ drop (length from) s
+      | otherwise           = c : go cs
+
 glaSrc, glaNoClaimSrc :: String
 glaSrc        = unlines ("theory GLA(k(..., ...)) in Doctrine =" : glaBody)
 glaNoClaimSrc = unlines ("theory GLA(k(..., ...)) ="             : glaBody)
+
+-- `embed` ON A SUBCATEGORY (stage 9, option 3, 2026-09-21).  The same
+-- theory with a BASE SPELLING on each generator: `read : B ⇀ B[GLA]`
+-- is that table inverted, `embed_Dense` is `read` then the model, and
+-- `with Dense` then means composition — ATOM-WISE, since each atom is
+-- read into a slot rather than each stage embedded opaquely.  The table
+-- lives on the THEORY because which base programs are linear is a
+-- property of the presentation, not of a model.
+glaReadSrc :: String
+glaReadSrc = unlines
+  [ "theory GLA(k(..., ...)) in Doctrine ="
+  , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+  , "    copy    : \8226 \8658 k(Float, Float Float) = dup"
+  , "    add     : \8226 \8658 k(Float Float, Float) = fadd"
+  , "    under   : k(a, b) \8658 k(c a, c b) = _"
+  , "    app     : k(a, b) \8658 Fn\10216a \8658 b\10217"
+  , "data Mat(a..., b...) = Fn\10216a \8658 b\10217 Fn\10216b \8658 a\10217 Code"
+  , "def thenFn = (f g -> [f ... ; ev ; g ... ; ev])"
+  , "def composeM = (m n -> m ; unMat ; (f f2 p -> n ; unMat ; \
+      \(g g2 q -> (f g ; thenFn) (g2 f2 ; thenFn) (p q ; append) ; Mat)))"
+  , "def copyM = [dup] [fadd] ([dup] ; getCode) ; Mat"
+  , "def addM  = [fadd] [dup] ([fadd] ; getCode) ; Mat"
+  , "def underM = (m -> m ; unMat ; (f g c -> \
+      \[_ (f ... ; ev)] [_ (g ... ; ev)] c ; Mat))"
+  , "def appM = Mat(f, g, c) -> f"
+  , "model Dense in GLA(Mat) ="
+  , "    compose = composeM"
+  , "    copy    = copyM"
+  , "    add     = addM"
+  , "    under   = underM"
+  , "    app     = appM"
+  ]
 
 moduleFailTests :: [(String, String)]
 moduleFailTests =
@@ -3339,6 +3402,53 @@ moduleFailTests =
              , "    over    : k(a, b) \8658 k(a c, b c)"
              , "1 ; print" ],
      "must be the last thing in its stack")
+    -- OPTION 3 (2026-09-21): `embed` on a SUBCATEGORY.  The three
+    -- refusals are the whole guarantee — an atom off the table, a
+    -- LITERAL (the affine trap), and a TENSOR, which the stack-shaped
+    -- hom-object cannot express in any case.
+  , (glaReadSrc ++ "def bad with Dense = dup ; fmul\nbad ; app ... ; _ 1.0 ; ev ; print",
+     "`fmul` has no image under GLA")
+  , (glaReadSrc ++ "def bad with Dense = dup ; _ 1.0 ; fadd\nbad ; app ... ; _ 1.0 ; ev ; print",
+     "a LITERAL is not a generator of it")
+  , (glaReadSrc ++ "def bad with Dense = dup dup\nbad ; app ... ; _ 1.0 ; ev ; print",
+     "puts two of GLA's generators side by side, which is their TENSOR")
+    -- ...a generator goes LAST in its stage, because a `_` whiskers
+    -- what follows it
+  , (glaReadSrc ++ "def bad with Dense = dup ; dup _\nbad ; app ... ; _ 1.0 ; ev ; print",
+     "ends in a whiskering")
+    -- A BASE SPELLING IS FOR A GENERATOR, and this is where the affine
+    -- trap is pinned: `scale` takes a base wire, so it is one generator
+    -- PER SCALAR and no one word spells it.  The refusal is at the
+    -- DECLARATION, which is why no literal is ever in the table.
+  , (unlines [ "theory Lin(k(..., ...)) in Doctrine ="
+             , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+             , "    scale   : Float \8658 k(Float, Float) = fmul"
+             , "1 ; print" ],
+     "only a GENERATOR may")
+    -- ...and the spelling must BE that generator: a table that lies is
+    -- caught where the scope is written, because that is where the
+    -- prefix scope the word is read in exists.
+  , (subst "k(Float, Float Float) = dup" "k(Float, Float Float) = drop" glaReadSrc
+       ++ "def f with Dense = dup ; fadd\nf ; app ... ; _ 1.0 ; ev ; print",
+     "A base spelling is the generator ITSELF")
+    -- ...nor may one atom stand for two generators: the table is READ
+    -- BACKWARDS, so it must be injective.
+  , (subst "k(Float Float, Float) = fadd" "k(Float Float, Float) = dup" glaReadSrc
+       ++ "def f with Dense = dup\nf ; app ... ; _ 1.0 ; ev ; print",
+     "the base spelling is READ BACKWARDS")
+    -- ...and a theory that declares `embed` has the functor already:
+    -- carving a subcategory out of a total embedding says nothing.
+  , (unlines [ "theory Both(k(..., ...)) in Doctrine ="
+             , "    compose : k(a, b) k(b, c) \8658 k(a, c)"
+             , "    embed   : Fn\10216a \8658 b\10217 \8658 k(a, b)"
+             , "    copy    : \8226 \8658 k(Float, Float Float) = dup"
+             , "data C(a..., b...) = Fn\10216a \8658 b\10217"
+             , "model M in Both(C) ="
+             , "    compose = (f g -> [f ... ; ev ; g ... ; ev] ; C)"
+             , "    embed   = C"
+             , "    copy    = [dup] ; C"
+             , "1 ; print" ],
+     "Declare one or the other")
     -- LOCATIONS (2026-09-15).  Checked without a file, a refusal still
     -- names the line of the text it was handed: the stage that failed
     -- inside a def body, and the stage that failed in a main program.
