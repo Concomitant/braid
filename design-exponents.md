@@ -317,6 +317,105 @@ given three things:
 recorded so the reason this stage is small is on the record: it is the
 first of three, and the only one of the three that costs nothing.
 
+## Amendment 2026-09-21 — every N prim is one catamorphism at a different motive
+
+**SHIPPED**: `mapAccumN : Fn⟨r a ⇒ r b⟩ r aⁿ ⇒ r bⁿ` is a prim;
+`foldExp`, `foldExp2`, `mapN` and `mapN2` are prelude defs printing
+character-for-character the schemes they printed as prims. 67 → 64.
+
+**The reading.** `Aⁿ` is a stack SEGMENT repeated n times, and the
+family `n ↦ Aⁿ` is the **initial algebra** in `[ℕ, C]`. A catamorphism
+out of an initial algebra is determined by its **motive** — its
+carrier — and the N-family was one catamorphism listed four times:
+
+| word | motive `n ↦ …` |
+|---|---|
+| `foldExp` | `r` (constant carrier) |
+| `mapN` | `bⁿ` |
+| `mapAccumN` | `r ⇒ r bⁿ` |
+| `unzipN` | `aⁿ bⁿ` |
+
+The family was plural because **Braid cannot write a width-indexed
+motive**: no scheme can say "the carrier at n is `bⁿ`". Carrying the
+accumulator explicitly writes them all anyway, because **traversal in
+the State applicative is all of traversability for a finitary
+container** (READING: Gibbons & Oliveira, *The essence of the iterator
+pattern*; Jaskelioff & Rypáček, *An investigation of the laws of
+traversals*) — which is exactly why ONE generator covers map, fold and
+index.
+
+**Lambek, and what is actually missing.** The Stage 4–5 note says
+there is no `unExp`. Read from the mathematics' side that is not a
+statement about existence: Lambek's lemma says the structure map of an
+initial algebra is an **isomorphism**, so the inverse — the unroll —
+EXISTS, and `Aⁿ` is genuinely `• ⊕ (A × A^m)` with n = S m. What is
+missing is the ability to **NAME its codomain**: `Σ m. (n = S m) × A ×
+A^m` is a dependent sum, and a Braid row runs one component per
+alternative with every other wire's type identical across arms. The
+note's existing phrasing — "n = 0 and n = S m would have to share a
+scheme" — is that same fact seen from the type system's side. The fold
+is the honest eliminator because the fold is the half of the iso the
+scheme language can spell.
+
+**The erasure rule, in general form.** *Catamorphisms are
+erasure-safe; anamorphisms are not.* A catamorphism CONSUMES the
+structure, so the runtime counts the wires that are present and never
+needs n; an anamorphism BUILDS from a seed, and nothing on the stack
+tells the runtime how big. `tabulate` is the anamorphism, and
+`zeroN`'s "operationally uninhabitable" (Stage 5) is the special case
+of that rule at the constant coalgebra. This subsumes the positional
+rules: an untyped evaluator finds a segment boundary only when the
+segment runs to the end of the stack or is empty, and a catamorphism's
+argument is always one of those.
+
+The same rule fixes the prim's shape. **The accumulator is a WIRE, and
+so is the element.** With a wire accumulator the runtime reads
+`n = total − 1` off the final segment and the split is determined; a
+stack accumulator leaves `|ρ| + n = total` and a k-wire element leaves
+`k · n = total`, neither of which anything fixes. That is the erasure
+argument of `design-segments.md` §6.1 — whose analysis is sound — and
+it is why the reduction went through BOXING rather than through a
+segment-variable sort. A multi-wire element always fits in one wire
+(`Box : ρ0 ⇒ Box(ρ0)`), so `zipN` now merges two lanes into
+`Box(a b)ⁿ` while `unzipN` still splits the flat stack-native
+`(a b)ⁿ`; `unzipN >> zipN` is the flat → boxed normalizer and the
+two-wire twins are one line each over it. Segment variables are NOT
+being built: the boxing discipline buys the same collapse for the cost
+of one `Box` per element, with no new sort, no deferred width
+constraints, and no change to the rep format.
+
+**Two independent structures on `Aⁿ`.** The initial algebra gives the
+fold. The **Naperian / representable** view — `Aⁿ ≅ A^Fin(n)` (READING:
+Gibbons, *APLicative programming with Naperian functors*) — gives the
+zip, and it is what makes `zip` total and canonical rather than a
+choice. `dupN` is the diagonal of that second structure, not a fold,
+which is why it stays a prim: a catamorphism whose step returns one
+wire per element cannot produce two bundles. `unzipN` stays for the
+same reason.
+
+**What did NOT collapse, and why.**
+- `foldExp` is not `mapAccumN` at `b := •`. `b` is a WIRE variable and
+  `•` is not a wire, so that instance is unreachable by instantiation.
+  Derived `foldExp` emits a copy of the accumulator as its element and
+  discards the bundle with `(r ... -> r (... >> forget))` — the only
+  idiom that drops a segment of unknown width from under a wire (a
+  binder that omits `...` CLOSES the segment to `•` instead).
+- `at` is not a `mapAccumN` selecting on a matching index. Comparison
+  is not the obstacle — `finInt` then `eq?` is fine. The obstacle is
+  that the accumulator must be inhabited before the first element, and
+  the result type `a` is a variable: there is no `a` to start from, and
+  a sum-typed accumulator only moves the problem to the `merge`, whose
+  other track still has to produce an `a`. Also `at` is O(1) and the
+  derivation is O(n).
+- `indicesN` introduces a `Fin(n)` mentioning the bundle's own width,
+  which no user quotation can write. Both index words remain fenced by
+  `design-indices.md`'s witness rule.
+
+Open question 5 (2026-07-30, "the exponent functor has no morphism
+action") is **ANSWERED**: `mapN` is `mapAccumN` with the quotation
+itself as the accumulator, threaded untouched and dropped. `(-)ⁿ` is
+functorial, and its fmap is a prelude def.
+
 ## Open questions
 
 1. Does `unExp`'s nil/cons refinement interact with the persistent

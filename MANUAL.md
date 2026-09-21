@@ -4140,6 +4140,71 @@ The **base** of an exponent may be the terminal object *(2026-09-20)*:
 the bare one does now, which is what makes `•` an exponent base like
 any other segment (§5, `design-exponents.md`).
 
+### 13.1 One catamorphism, four motives *(2026-09-21)*
+
+`Aⁿ` is a stack SEGMENT repeated n times, and the family `n ↦ Aⁿ` is
+the **initial algebra** in `[ℕ, C]` — the functor category of
+width-indexed objects. A catamorphism out of an initial algebra is
+determined by its **motive** (its carrier), and every fold-shaped word
+over a bundle is the same catamorphism at a different one:
+
+| word | motive `n ↦ …` | what that makes it |
+|---|---|---|
+| `foldExp` | `r` (constant) | collapse to one wire |
+| `mapN` | `bⁿ` | rebuild the container |
+| `mapAccumN` | `r ⇒ r bⁿ` | thread state while rebuilding |
+| `unzipN` | `aⁿ bⁿ` | split into two containers |
+
+The family was plural because **Braid cannot write a width-indexed
+motive** — there is no way to say "the carrier at n is `bⁿ`" in a
+scheme. One prim that carries the accumulator explicitly writes all of
+them anyway, because traversal in the State applicative is all of
+traversability for a finitary container (READING, Gibbons & Oliveira;
+Jaskelioff & Rypáček). So `mapAccumN` is the prim and `foldExp`,
+`foldExp2`, `mapN` and `mapN2` are prelude defs with the same schemes.
+
+`unzipN` is the one motive that is NOT reachable that way: its carrier
+is two containers, and a catamorphism whose step returns one wire per
+element cannot produce two bundles. `dupN` is not a catamorphism at
+all — it is the diagonal of the **Naperian** reading, `Aⁿ ≅ A^Fin(n)`
+(READING, Gibbons), which is a second structure on the same object and
+the one `zipN`/`unzipN` come from. The two structures are independent:
+the initial algebra gives the fold, the Naperian view gives the zip.
+
+### 13.2 The one-wire-element discipline
+
+**`mapAccumN`'s accumulator is a WIRE, and so is its element.** That is
+forced by erasure, not taste. The runtime is handed one number — the
+final segment's length — and with a wire accumulator `n = total − 1`,
+so the split is determined. A stack accumulator would leave
+`|ρ| + n = total` with nothing to fix it, and a k-wire element would
+leave `k · n = total` with nothing to fix k. Both are the erasure
+argument that rules out segment variables (`design-segments.md` §6.1).
+
+A wider element therefore **boxes**: `Box : ρ0 ⇒ Box(ρ0)` turns any
+segment into one wire, and `Box(a b)ⁿ` is a bundle of pairs whose
+elements a one-wire word can read (`unBox` inside the step). `zipN`
+merges two lanes straight into that form; `unzipN` splits the flat,
+stack-native `(a b)ⁿ`; so `unzipN >> zipN` is the flat → boxed
+normalizer, and the two-wire twins are one line each over it:
+
+```braid
+def mapN2 = (f ... -> unzipN >> zipN >> [(p -> f (p >> unBox) >> ev)] ... >> mapN)
+```
+
+Two consequences worth knowing. **`b := •` is not reachable**: the
+output element is a WIRE variable and `•` is not a wire, so `foldExp`
+is not `mapAccumN` at an empty output. It emits a copy of the
+accumulator instead and throws the bundle away — and the only idiom
+that can drop a segment of unknown width from under a wire is a group
+that forgets it, `(r ... -> r (... >> forget))`; a binder that simply
+omits `...` closes the segment to `•` rather than discarding it.
+**`at` and `indicesN` stay prims**: `indicesN` introduces a `Fin(n)`
+naming the bundle's own width, which no user quotation can write, and
+`at` would need an accumulator inhabited before the first element —
+there is no `a` to start from. Both are index introductions, fenced by
+the witness rule above (§9, `design-indices.md`).
+
 ## 14. Sharp edges (things the checker will teach you)
 
 **Every refusal says where, and most say which rule** *(2026-09-15)*. A

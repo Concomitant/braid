@@ -12,18 +12,22 @@ ev   : Fn⟨ρ₀ ⇒ ρ₁⟩ ρ₀ ⇒ ρ₁            run a quotation on the
 loop    : Fn⟨Σ ⇒ (Σ|Θ)⟩ Σ ⇒ Θ            Elgot iteration on the segment
 foldExp : Fn⟨b a ⇒ b⟩ b aⁿ ⇒ b           fold a bundle, one wire at a time
 foldExp2: Fn⟨b a c ⇒ b⟩ b (a c)ⁿ ⇒ b     fold a bundle of pairs
+mapAccumN : Fn⟨r a ⇒ r b⟩ r aⁿ ⇒ r bⁿ    fold and rebuild at once
 dupN    : aⁿ ⇒ aⁿ aⁿ                     copy a bundle
 mapN2   : Fn⟨a b ⇒ c⟩ (a b)ⁿ ⇒ cⁿ        map across a PAIR bundle
-zipN    : aⁿ bⁿ ⇒ (a b)ⁿ                 interleave two bundles
-unzipN  : (a b)ⁿ ⇒ aⁿ bⁿ                 de-interleave
+zipN    : aⁿ bⁿ ⇒ Box(a b)ⁿ              pair two bundles, one wire each
+unzipN  : (a b)ⁿ ⇒ aⁿ bⁿ                 split a flat pair bundle
 at      : Fin(n) aⁿ ⇒ a                  index a bundle (0 = deepest)
 indicesN: aⁿ ⇒ (Fin(n) a)ⁿ               tag each wire with its index
 ```
 
-`mapN`/`mapN2` are the lifters: with `zipN` they turn any one- or
-two-wire word into its pointwise bundle version, which is why `addN`,
-`scaleN`, `mulN` and `subN` are prelude defs rather than primitives
-(`def addN = zipN >> [+] ... >> mapN2`).
+Only `mapAccumN`, `dupN`, `zipN`, `unzipN`, `at` and `indicesN` are
+PRIMITIVE *(2026-09-21)*: the four fold-and-map words are `mapAccumN`
+at different motives and live in the prelude (MANUAL §13.1). Elements
+are one wire, so a pair bundle boxes — `unzipN >> zipN` re-chunks a
+flat `(a b)ⁿ` as `Box(a b)ⁿ` and a one-wire step reads it with
+`unBox`. That is why `addN`, `scaleN`, `mulN` and `subN` are prelude
+defs rather than primitives (`def addN = zipN >> [unBox >> +] ... >> mapN`).
 
 `at` and `indicesN` are the index words: `Aⁿ` *is* the function space
 `Fin(n) ⇒ A` stored flat, and a `Fin(n)` is an index into it. Indices
@@ -118,7 +122,7 @@ first argument for exactly this reason.
 1 2 3 4 >> sumN                            # 10       (n = 4)
 sumN                                       # 0        (n = 0: seed)
 1 2 3 >> dupN >> addN                      # 2 4 6    (copy, pointwise add)
-1 2 3 10 20 30 >> zipN                     # 1 10 2 20 3 30
-def dot = zipN ; [(acc a b -> (a b ; *) acc ; +)] 0 ... ; foldExp2
+1 2 3 10 20 30 >> zipN                     # alt1(1, 10) alt1(2, 20) alt1(3, 30)
+def dot = zipN ; [(acc p -> p ; unBox ; (a b -> (a b ; *) acc ; +))] 0 ... ; foldExp
 1 2 3 4 5 6 >> dot                         # 32, and dot : Intⁿ Intⁿ ⇒ Int
 ```
