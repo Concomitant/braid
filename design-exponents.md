@@ -252,6 +252,71 @@ Findings for the record:
   propagate `cs`. Fallout was all good news: `dot` tightened from the
   fake-polymorphic `aⁿ bⁿ ⇒ Int` to the honest `Intⁿ Intⁿ ⇒ Int`.
 
+## Amendment 2026-09-20 — the terminal object has a name
+
+**`one : • ⇒ •`.** The empty stack had a glyph and no word, which meant
+the identity on it had no spelling at all: `1 ; drop` was the only way
+to write the morphism, two atoms with an Int allocated in order to be
+discarded. `pass : ρ0 ⇒ ρ0` is the same morphism at every width and so
+pins NOTHING — `[pass]` cannot stand where `[one] : • ⇒ Fn⟨• ⇒ •⟩` is
+wanted — which is why the word had to be monomorphic and had to be a
+prim (a prelude def would have had to be `1 ; drop`, keeping the
+allocation).
+
+**Why `one` and not the alternatives.** `•` is the TERMINAL object:
+exactly one member, the empty stack. Braid has no initial object and no
+empty sum, so `none`, `nothing` and `empty` would each have named a
+thing the language does not have — the empty type — and named it with
+the one symbol reserved for the thing that has exactly one inhabitant.
+`unit` is taken in practice: `examples/theories.braid` declares a
+Monoid slot `unit : • ⇒ a`, and a prim of that name would shadow a slot
+name people write. `.` is unavailable to the lexer, which already
+answers *Unexpected '.' (did you mean '...'?)*: it is the symbol prefix
+in `.dup` and the ellipsis prefix. `()` is unavailable in both
+positions — *Expected a type expression* in type position, *Expected a
+tensor stage, got: TokRParen* in term position. `one` is left, and it reads correctly in both: the
+type and the word for its identity are the same three letters, so
+`Fn(one -> a)` is `Fn⟨• ⇒ a⟩` and `[one]` inhabits it.
+
+The ambiguity worth saying out loud: **"one" means one INHABITANT, not
+one wire.** `•` is zero wires and one value.
+
+**`•` as an exponent base.** `(•)^n` and `(• )^n` already parsed —
+the exponent parser reads a 1-ary parenthesized sum as a segment, and
+`(•)` is one. The bare `•^n` did not: `•`'s equation in `goStack`
+returned before anything looked for a `^`, so the caret fell through to
+the caller as *Expected '|' or ')' in sum type*. That is fixed, and
+nothing downstream needed to change: `sexp SEnd` is an ordinary
+zero-width base, `•^k` collapses to `•` for literal k through
+`expandCopies`, and `•^n` is the zero-wide bundle.
+
+**Why this is worth its own stage.** It is the **k = 0 case of a single
+width schema**. The N-family as it stands is a pile of words that are
+one word each under a general enough scheme: the whole family reduces
+to `#mapAccum:j,k` plus `#zip:j` (fold, map, scan, unzip and the GLA
+generators are all instances), and those two collapse to ONE WORD EACH
+given three things:
+
+1. **the terminal object as an exponent base** — this stage. `j = 0` and
+   `k = 0` are the cases where a lane is absent, and without `•ⁿ` they
+   are unwritable, so the schema could not be stated at its own
+   boundary;
+2. **a SEGMENT VARIABLE sort** — a variable ranging over *closed
+   segments of unknown fixed width, including zero*. It sits between a
+   wire (`a`) and a stack (`ρ`): a stack variable is a tail and may not
+   be repeated, which is exactly what an exponent base needs to do. With
+   it, `s^n` is the schema's shape and `j`/`k` stop being numerals in
+   the word's name;
+3. **`sⁿ = Σ` as a DEFERRED CONSTRAINT** — solved once `|s|` is fixed by
+   the quotation's type, rather than at the point the exponent is met.
+   This is what lets one word serve every arity: the width of the base
+   is not known when the bundle is split, only when the step function
+   handed alongside it is.
+
+(2) and (3) are **not built** and are not proposed here. They are
+recorded so the reason this stage is small is on the record: it is the
+first of three, and the only one of the three that costs nothing.
+
 ## Open questions
 
 1. Does `unExp`'s nil/cons refinement interact with the persistent

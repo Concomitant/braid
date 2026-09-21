@@ -48,6 +48,7 @@ the current stack is rejected with a message naming the stack.
 | `>=>` `>?>` `>!>` | railway operators (§7) |
 | `^` | exponent in type position (`Int^3`); superscripts `Int³`, `ℝⁿ` also lex |
 | `⟨` `⟩` `⇒` | `Fn` type brackets and arrow (type position): `Fn⟨Σ ⇒ Θ⟩` |
+| `•` , `one` | the empty stack, in **type** position; the identity on it, in **term** position *(2026-09-20)*. Two spellings, one thing, in both positions — the display is `•` for the type and `one` for the word (§5, §9) |
 | `=IO>` , `⇒!` , `->!` | the io manifest label on an arrow (§3); the last two are legacy spellings |
 | `=Recursive>` , `=IO Recursive>` | any written label set, in any order — displayed sorted (§3) |
 | `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, manifest included (§3, §8) |
@@ -425,6 +426,37 @@ Type formers:
 - **`•`** — the empty stack; the terminal object. Constants are points
   `• ⇒ A`; `forget : ρ ⇒ •` is the unique map to it.
 
+  **It has a name, and the name is `one`** *(2026-09-20)*. `one : • ⇒ •`
+  is the identity on the terminal object (§9), and `one` is also `•`'s
+  **ASCII spelling in type position**, so `Fn(one -> a)` and
+  `Fn⟨• ⇒ a⟩` are the same written type. `•` is the second spelling in
+  **term** position, and it dies at the parse: `[•]` and `[one]` are one
+  term, and `reflect`/`unparse` print `one`. Two ways to type it, one
+  spelling per thing — exactly as `->` is typed and `⇒` is displayed.
+  The type displays `•` and the word displays `one`; neither ever
+  displays the other.
+
+  **"One" means ONE INHABITANT, not one wire.** `•` is ZERO wires and
+  one value, and that value is the empty stack. It is not the empty
+  type: Braid has no initial object and no empty sum, so `none`,
+  `nothing` and `empty` would each have named a thing the language does
+  not have.
+
+  What `one` is FOR is pinning. `pass : ρ0 ⇒ ρ0` is the same morphism
+  at every width and therefore constrains nothing, so `[pass]` cannot
+  stand where `[one] : • ⇒ Fn⟨• ⇒ •⟩` is wanted — a quotation whose own
+  type says *nothing in, nothing out*. Before today that quotation was
+  writable only as `[1 ; drop]`: two atoms, with an Int allocated in
+  order to be discarded.
+
+  Where it pins is where a quotation's type is unified. In a **tensor
+  stage** it takes no wires and so constrains nothing — `dup one` is
+  still `a0 ⇒ a0 a0` — and `one ...` is the identity on any stack,
+  `ρ0 ⇒ ρ0`. But a bare `; one ;` in a spine **asserts the stack is
+  empty**: there are no implicit remainders, so `1 ; one` is refused
+  with *Cannot unify stacks: Int vs •*, which is the `1 ; 2` refusal
+  and not a rule of its own (§4, §14).
+
   **Rendering a stack is a word, not a class** *(2026-09-17)*.
   `showStack : ρ0 ⇒ Str` (§9) takes the whole segment and returns the
   wires deepest-first, space separated, each one as `toStr` renders it
@@ -572,7 +604,12 @@ Type formers:
   the elaborator already wrote.
 - **Exponents**: `A^n` (input `Int^3`, `R^n`; display `Int³`, `ℝⁿ`) — a
   segment repeated n times. `n` is erased at runtime; concrete
-  exponents expand away. See §13 and `design-exponents.md`.
+  exponents expand away. **The terminal object is a legal base**
+  *(2026-09-20)*: `•^n` (equivalently `one^n`, or `(•)^n`) is the
+  zero-wide bundle, and `•^k` is `•` for every literal k. Only the
+  parenthesized form parsed before today, for no reason but the order
+  of two equations in the stack parser. See §13 and
+  `design-exponents.md`.
 - **`Fin(n)`** — an index into a bundle of width n. `Aⁿ` *is* the
   function space `Fin(n) ⇒ A`, stored tabulated and flat. The bound is
   a type, erased exactly as every other width: at runtime a `Fin` is a
@@ -2726,8 +2763,8 @@ function that carries its name, and the functor that forgets the name.
 
 **`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
 (Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
-like any type stack (params splice, `•` is empty, `Fn` nests). The
-arrow's shape is part of the type: `⇒` declares a **pure** program and
+like any type stack (params splice, `•` — ASCII `one`, §5 — is empty,
+`Fn` nests). The arrow's shape is part of the type: `⇒` declares a **pure** program and
 rejects an io quotation, `Fn⟨Σ =IO> Θ⟩` (ASCII `Fn(Σ ->! Θ)`) declares an
 io one and demands it (§3, §14). This
 names function-carrier types — `Endo`, `Pred`, State-style monad
@@ -3025,13 +3062,16 @@ one term with two spellings. Derived-but-primitive-looking words
 `lte?`) live in the prelude — the design bet ("primitives span
 everything else in the language itself") is proven in both directions.
 
-**There are 66 primitives** *(2026-09-17: `showStack`, 65 → 66; the
-count had said 60 since 2026-09-14 and was stale)*. The count is of
-**words source can name**, and it therefore **excludes `#fix`**, the
-knot `with Recursive` emits: `#` opens a comment, so no program and no
-reflected atom can spell it. It is a generator of the free category
-all the same — and since 2026-09-18 an irreducible one, because
-nothing else in the language can produce an unbounded knot (§8, §5). A word keeps its place here
+**There are 67 primitives** *(2026-09-20: `one`, 66 → 67; 2026-09-17:
+`showStack`, 65 → 66; the count had said 60 since 2026-09-14 and was
+stale)*. **The count is of words source can name, and it therefore
+EXCLUDES `#fix`**, the knot `with Recursive` emits: `#` opens a
+comment, so no program and no reflected atom can spell it. Every count
+in this manual and in the README is that count; the kernel holds one
+more morphism than any of them reports, and it is always this one.
+`#fix` is a generator of the free category all the same — and since
+2026-09-18 an irreducible one, because nothing else in the language can
+produce an unbounded knot (§8, §5). A word keeps its place here
 only if it is a **structure map** of the doctrine — cartesian
 (`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
 `there`, `merge`), exponential (`ev`), the open
@@ -3071,6 +3111,7 @@ Wiring (cartesian structure):
 | `drop` | `a0 ⇒ •` | |
 | `pass` | `ρ0 ⇒ ρ0` | identity on the whole segment |
 | `forget` | `ρ0 ⇒ •` | terminal morphism |
+| `one` | `• ⇒ •` | the identity ON the terminal object, and the only prim that is monomorphic on purpose: `pass` names the same morphism at every width and so pins nothing, which is why `[pass]` cannot serve where `[one] : • ⇒ Fn⟨• ⇒ •⟩` does. `•` is its glyph spelling in term position; ONE INHABITANT, not one wire (§5). A prim and not a prelude def because it must RUN NOTHING — the def would be `1 ; drop`, which allocates an Int to discard it *(2026-09-20)* |
 
 Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 
@@ -4090,6 +4131,12 @@ at every width. Rules (full version: `guide-open-arity.md`):
 The index words `at` and `indicesN` are exponent-shaped, so rule 1
 holds for them too: final atom of their stage (§9).
 
+The **base** of an exponent may be the terminal object *(2026-09-20)*:
+`•^n` — equivalently `one^n` or `(•)^n` — is the zero-wide bundle, and
+`•^k` is `•` for every literal k. The parenthesized form always parsed;
+the bare one does now, which is what makes `•` an exponent base like
+any other segment (§5, `design-exponents.md`).
+
 ## 14. Sharp edges (things the checker will teach you)
 
 **Every refusal says where, and most say which rule** *(2026-09-15)*. A
@@ -4121,7 +4168,12 @@ corrected in place rather than dated one by one.
   the left-hand stage's output first and the right-hand stage's input
   second, so `• vs Int` reads "nothing left to give, one Int still
   wanted". Count wires. Step over the ones this stage does not touch with `_`, pass
-  the rest along with `...`, or split the stage. ✦ If the failing line
+  the rest along with `...`, or split the stage. This is also what
+  `one` refuses with: `1 ; one` is *Cannot unify stacks: Int vs •*,
+  because there are no implicit remainders — a bare `; one ;` in a
+  spine asserts the stack is **empty**. `one ...` is the whiskered
+  reading, and beside other atoms in a tensor stage `one` constrains
+  nothing (§5). ✦ If the failing line
   begins with `(` or `[` and the line above did not say it was
   unfinished, the hint says so: *a new line is a new stage, so this `(`
   does not continue the line above* — end that line with `\`, or write
@@ -4214,7 +4266,10 @@ corrected in place rather than dated one by one.
   self-applying value, it is not expressible.
 - **`Duplicate definition: n` / `Duplicate parameter: p` / `Duplicate
   type declaration: T` / `Duplicate resource in `with`: R`** — objects
-  are added, never merged. Rename one.
+  are added, never merged. Rename one. A **prim's** name is taken the
+  same way: `def one = …` is this message, and `type one = …` is
+  *Malformed type declaration*, because `one` is a word and a built-in
+  type name since 2026-09-20 (§5, §9).
 - **``` `X` leaves M; call it outside `with M` ```** — an **exit** inside
   a transported scope. Not a type error: a scope error, by slot. Call
   it outside, or write the def's header `in M`, which opens the same
