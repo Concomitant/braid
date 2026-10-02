@@ -128,9 +128,9 @@ def cubicMod with Mod = cubic
 #
 # Both are RIGHT to be refused: Z/7 is not an ordered ring and it is
 # not a field of characteristic zero, so neither `div` nor `lt?` has a
-# well-defined image.  The checker does not know that; it knows that a
-# functor with no value on a generator is not a functor, which is the
-# same refusal for a better reason.
+# well-defined image.  The checker does not reason about that.  It checks
+# that a functor has a value on every generator, which is the same refusal
+# for a better reason.
 
 # ---------------------------------------------------------------------
 # 6. Reduction as a RING HOMOMORPHISM: the claim, and its audit

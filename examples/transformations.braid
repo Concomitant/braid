@@ -36,7 +36,7 @@ model IntSum in Monoid(Int) =
 
 # The samples must correspond too, because `sample` is a generator like any
 # other, and a homomorphism preserves it.  A seven-element list is what
-# `len` sends to IntSum's 7, and stating it that way is the point: the
+# `len` sends to IntSum's 7, and stating it that way says the rest: the
 # evidence a model is audited with is part of what a transformation must
 # respect.
 model ListMonoid in Monoid(List(Int)) =
