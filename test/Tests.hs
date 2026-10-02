@@ -218,6 +218,9 @@ importFailTests =
     -- the inclusion is injective on names or it is an error, and the
     -- error names both files
   , ("clash.braid",   "`double` is already defined in test/imports/util.braid")
+    -- ...and BOTH lines, since a clash is two places to open (2026-10-02)
+  , ("clash.braid",   "test/imports/clash.braid:2: `double` is already \
+                      \defined in test/imports/util.braid:7")
   , ("missing.braid", "import: no such file: nope.braid (looked in \
                       \test/imports/nope.braid and in the current directory)")
     -- a module checked without a file context cannot import
@@ -3529,6 +3532,12 @@ moduleFailTests =
      "line 3, in def h: Unclosed group (expected ')')")
   , ("def dup2 = 1\ndef dup2 = 2\n1 ; print",
      "in def dup2: Duplicate definition: dup2")
+    -- ...and a MODULE-LEVEL declaration refusal names its line too
+    -- (2026-10-02): the scanner knows every declaration's line and now
+    -- passes it on, so `type`, `data`, `theory`, `model`, `table`,
+    -- `import`, `transformation` and `keyword` are placed like a def.
+  , ("type A = Int\ntype A = Str\n1 ; print",
+     "line 2: Duplicate type declaration: A")
   , ("def selfie = 1 ... >> + >> selfie\n1",
      "in def selfie: `selfie` refers to itself")
   ] ++

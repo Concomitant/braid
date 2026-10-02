@@ -524,6 +524,12 @@ atLine (Just n) msg
   | '\SOH' `elem` msg = msg          -- an inner stage already said where
   | otherwise         = locMark n ++ msg
 
+-- ...and from a line that may be the compiler's own.  0 is generated
+-- text, which has no line and must not grow a fake one.
+atSrcLine :: Int -> String -> String
+atSrcLine 0 = id
+atSrcLine n = atLine (Just n)
+
 -- Turn the marker into the thing a reader can act on.  With a map (a
 -- file was loaded) that is `path:line`; without one (a REPL line, a
 -- module checked from a string) it is `line N`, which is still the line
@@ -8154,6 +8160,9 @@ data DeclCall = DeclCall
   , dcBlock :: [String]      -- its indented block, verbatim
   , dcDoc   :: Maybe String
   , dcLine  :: Int           -- the line the BODY starts on
+  , dcHead  :: Int           -- ...and the line the HEAD was written on,
+                             -- which is the line a refusal about the
+                             -- DECLARATION names (2026-10-02)
   }
 
 -- Split a declaration line at its own `=`: the head is the Str, the
@@ -8181,20 +8190,21 @@ declArgsOf w hd body = case dwBody w of
 -- writes, the strings it puts in them and the order they end up in are
 -- the same.
 applyDecl :: DeclCall -> Dict -> Either String Dict
-applyDecl c dk = case dcWord c of
-  "importW"         -> Right dk { dkImports = dcRaw c : dkImports dk }
-  "tableW"          -> Right dk { dkTables  = dcRaw c : dkTables dk }
+applyDecl c dk = first (atSrcLine (dcHead c)) $ case dcWord c of
+  "importW"         -> Right dk { dkImports = (dcRaw c, dcHead c) : dkImports dk }
+  "tableW"          -> Right dk { dkTables  = (dcRaw c, dcHead c) : dkTables dk }
   w | w == "modelW", isJust (doctrineCarrierName (dcRaw c)) ->
         -- `model R in Doctrine = Ty` is a RESOURCE: the same bucket
         -- `resource` wrote to until 2026-09-18, reached by a shape test
         -- on the body rather than by a keyword of its own.
-        Right dk { dkTypes = (dcRaw c, dcDoc c) : dkTypes dk }
+        Right dk { dkTypes = (dcRaw c, dcDoc c, dcHead c) : dkTypes dk }
     | w `elem` ["typeW", "dataW"] ->
-        Right dk { dkTypes = (dcRaw c, dcDoc c) : dkTypes dk }
+        Right dk { dkTypes = (dcRaw c, dcDoc c, dcHead c) : dkTypes dk }
     | w `elem` ["functorW", "transformationW"] ->
-        Right dk { dkBlocks = (dcRaw c, [], dcDoc c) : dkBlocks dk }
+        Right dk { dkBlocks = (dcRaw c, [], dcDoc c, dcHead c) : dkBlocks dk }
     | w `elem` ["theoryW", "modelW"] ->
-        Right dk { dkBlocks = (dcRaw c, dcBlock c, dcDoc c) : dkBlocks dk }
+        Right dk { dkBlocks = (dcRaw c, dcBlock c, dcDoc c, dcHead c)
+                                : dkBlocks dk }
   -- THE OPEN HALF.  `keyword test = testW` names a declaration word,
   -- and the scanner reads the table it just changed.
   "keywordW" -> case dcArgs c of
@@ -8363,12 +8373,16 @@ logicalLines = go 0 []
 data Dict = Dict
   { dkDefs     :: [(String, DefHdr, String, Maybe String, Int)]
     -- ^ `def`: name, header clauses, body source, doc, first body line
-  , dkTypes    :: [(String, Maybe String)]
-    -- ^ `type` / `data` / `resource`: the line, and its doc
-  , dkBlocks   :: [(String, [String], Maybe String)]
-    -- ^ `theory` / `model` / `functor` / `transformation`: head, block, doc
-  , dkImports  :: [String]        -- ^ `import` lines, raw for the loader
-  , dkTables   :: [String]        -- ^ `table` lines, raw for the loader
+  , dkTypes    :: [(String, Maybe String, Int)]
+    -- ^ `type` / `data` / `resource`: the line, its doc, and the file
+    -- line it was written on
+  , dkBlocks   :: [(String, [String], Maybe String, Int)]
+    -- ^ `theory` / `model` / `functor` / `transformation`: head, block,
+    -- doc, and the file line the HEAD sits on.  A block is the run of
+    -- lines immediately under the head, so that one number places every
+    -- line of it (2026-10-02)
+  , dkImports  :: [(String, Int)] -- ^ `import` lines, raw for the loader
+  , dkTables   :: [(String, Int)] -- ^ `table` lines, raw for the loader
   , dkProgram  :: [(Int, String)] -- ^ every line the declarations left
   , dkKeywords :: [(String, String)]
     -- ^ THE OPEN HALF (stage 8): keyword -> the declaration word it
@@ -8387,15 +8401,18 @@ emptyDict = Dict [] [] [] [] [] [] [] []
 -- Every name this dictionary declares, for the checks that are about
 -- names and not about kinds.  A type line's name may carry parameters
 -- (`data Box(a) = a`), so it is cut at the paren.
-dictNames :: Dict -> [String]
+dictNames :: Dict -> [(String, Int)]
 dictNames dk =
-  [ n | (n, _, _, _, _) <- dkDefs dk ]
-    ++ [ headName l | (l, _) <- dkTypes dk ]
-    ++ [ headName h | (h, _, _) <- dkBlocks dk ]
-  where
-    headName l = case drop 1 (words l) of
-      (n : _) -> takeWhile (`notElem` "(:=") n
-      []      -> ""
+  [ (n, k) | (n, _, _, _, k) <- dkDefs dk ]
+    ++ [ (declHeadName l, k) | (l, _, k) <- dkTypes dk ]
+    ++ [ (declHeadName h, k) | (h, _, _, k) <- dkBlocks dk ]
+
+-- The name a declaration head declares.  A type line's name may carry
+-- parameters (`data Box(a) = a`), so it is cut at the paren.
+declHeadName :: String -> String
+declHeadName l = case drop 1 (words l) of
+  (n : _) -> takeWhile (`notElem` "(:=") n
+  []      -> ""
 
 -- `Dict` is the dictionary's own wire, and a module may not declare
 -- it: that is what makes discharge structural rather than a check.
@@ -8404,17 +8421,19 @@ dictReserved dk = do
   -- ...and the declaration words are the compiler's: a keyword line is
   -- parsed into a call of one, so a module that could shadow one could
   -- change what `def` means halfway down a file.
-  case [ n | n <- dictNames dk, Just w <- [declWordNamed n] ] of
-    (n : _) -> Left $ "`" ++ n ++ "` is a declaration word: the keyword `"
+  case [ (n, k) | (n, k) <- dictNames dk, Just w <- [declWordNamed n] ] of
+    ((n, k) : _) -> Left $ atSrcLine k $ "`" ++ n
+                   ++ "` is a declaration word: the keyword `"
                    ++ maybe "?" dwKeyword (declWordNamed n)
                    ++ "` is parsed into a call of it (`" ++ n ++ " : "
                    ++ maybe "" dwArrow (declWordNamed n)
                    ++ "`), so a module may not take the name.  Rename it.  "
                    ++ "MANUAL \167 8."
     []      -> Right ()
-  case [ n | n <- dictNames dk
-           , n `elem` [dictLabel, "un" ++ dictLabel] ] of
-   (n : _) -> Left $ "`" ++ n ++ "` is the dictionary's own wire and may "
+  case [ (n, k) | (n, k) <- dictNames dk
+                , n `elem` [dictLabel, "un" ++ dictLabel] ] of
+   ((n, k) : _) -> Left $ atSrcLine k
+                 $ "`" ++ n ++ "` is the dictionary's own wire and may "
                  ++ "not be declared: `Dict` is the carrier every "
                  ++ "declaration word acts on (`defW : Code Str =Dict> "
                  ++ "\8226`), it is threaded by the loader, and there is "
@@ -8446,7 +8465,10 @@ splitDefs :: String
 splitDefs src = do
   (defs, tys, decls, imps, tbls, progLines) <- splitDefsIx src
   pure ( [ (n, h, b, d) | (n, h, b, d, _) <- defs ]
-       , tys, decls, imps, tbls, intercalate "\n" (map snd progLines) )
+       , [ (l, d) | (l, d, _) <- tys ]
+       , [ (h, b, d) | (h, b, d, _) <- decls ]
+       , map fst imps, map fst tbls
+       , intercalate "\n" (map snd progLines) )
 
 -- ...and the same split with the FILE LINES it came off: each def body
 -- knows the line its first line sits on (a body is a run of consecutive
@@ -8456,10 +8478,10 @@ splitDefs src = do
 -- knows both, which is why it is the only place that has to say so.
 splitDefsIx :: String
             -> Either String ( [(String, DefHdr, String, Maybe String, Int)]
-                             , [(String, Maybe String)]
-                             , [(String, [String], Maybe String)]
-                             , [String]
-                             , [String]
+                             , [(String, Maybe String, Int)]
+                             , [(String, [String], Maybe String, Int)]
+                             , [(String, Int)]
+                             , [(String, Int)]
                              , [(Int, String)] )
 splitDefsIx src = do
   dk <- dictFromSource src
@@ -8494,14 +8516,14 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
       -- a LINE: `type`, `data`, `resource`, `transformation`, `functor`,
       -- `import`, `table`
       | Just w <- wordOf dk l, dwSpan w == SpanLine = do
-          dk' <- applyDecl (call w lineNo l [] doc (inlineOf l)) dk
+          dk' <- applyDecl (call w lineNo lineNo l [] doc (inlineOf l)) dk
           go dk' Nothing rest
       -- `resource` was a keyword until 2026-09-18.  A resource IS the
       -- model of the Doctrine its declaration generated (stage 7b), so
       -- the keyword was a second spelling of a thing the language has
       -- one spelling for.
       | ("resource" : _) <- words l =
-          Left $ "`resource` is gone since 2026-09-18: a resource IS the "
+          Left $ atSrcLine lineNo $ "`resource` is gone since 2026-09-18: a resource IS the "
               ++ "model of the Doctrine its declaration generates (stage "
               ++ "7b) \8212 write `model "
               ++ (case words (takeWhile (/= '=') l) of
@@ -8515,23 +8537,23 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
               ++ "as it did.  CONSTRUCTS.md, MANUAL \167\&8."
       -- `rules` was a keyword until 2026-09-13; it is a model now.
       | ("rules" : _) <- words l =
-          Left $ "`rules` is gone: a rule set is a PARTIAL MODEL of the "
+          Left $ atSrcLine lineNo $ "`rules` is gone: a rule set is a PARTIAL MODEL of the "
               ++ "ambient presentation, so it is written `model Name in "
               ++ "Base = p = q, …` (or one `p = q` per indented line).  "
               ++ "MANUAL §8."
       -- `morphism` was the keyword until 2026-09-14.
       | ("morphism" : _) <- words l =
-          Left $ "`morphism` is spelled `transformation` since 2026-09-14: "
+          Left $ atSrcLine lineNo $ "`morphism` is spelled `transformation` since 2026-09-14: "
               ++ "a map between two models of a theory is a NATURAL "
               ++ "TRANSFORMATION between the functors they are — write `"
               ++ ("transformation " ++ unwords (drop 1 (words l)))
               ++ "`.  MANUAL §8."
       -- `instance` and `mode` were keywords until 2026-09-13.
       | ("instance" : _) <- words l =
-          Left $ "`instance` is spelled `model` since 2026-09-13: write `"
+          Left $ atSrcLine lineNo $ "`instance` is spelled `model` since 2026-09-13: write `"
               ++ ("model " ++ unwords (drop 1 (words l))) ++ "`.  MANUAL §8."
       | ("mode" : _) <- words l =
-          Left $ "`mode` is gone: a model whose theory has a hom-object "
+          Left $ atSrcLine lineNo $ "`mode` is gone: a model whose theory has a hom-object "
               ++ "`k(_, _)` transports when it is APPLIED, so the model IS "
               ++ "the declaration — write `with "
               ++ (case words l of (_ : _ : "=" : i : _) -> i; _ -> "<Model>")
@@ -8548,16 +8570,16 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
               kw            = head (words l)
           if null block && all isSpace (declInline l)
                && isNothing (baseInstanceName l)
-            then Left $ "Empty " ++ kw ++ " body: " ++ l
+            then Left $ atSrcLine lineNo ("Empty " ++ kw ++ " body: " ++ l)
             else do
               let blk = map snd block
                   bodyTxt | null blk  = inlineOf l
                           | otherwise = intercalate "\n" blk
-              dk' <- applyDecl (call w lineNo l blk doc bodyTxt) dk
+              dk' <- applyDecl (call w lineNo lineNo l blk doc bodyTxt) dk
               go dk' Nothing rest'
       -- EITHER, the way `def` has both
       | Just w <- wordOf dk l, dwSpan w == SpanDef = do
-          (name, body) <- defOrKeywordLine w l
+          (name, body) <- first (atSrcLine lineNo) (defOrKeywordLine w l)
           -- a `#` comment on the `=` line is not code: treat a
           -- comment-only body as blank so the block-body form triggers
           if all isSpace (takeWhile (/= '#') body)
@@ -8567,10 +8589,10 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
               -- the body is mid-atom and keeps going.
               let (block, rest') = spanBlock 0 rest
               if null block
-                then Left $ "Empty definition body: " ++ name
+                then Left $ atSrcLine lineNo ("Empty definition body: " ++ name)
                 else do
                   -- a block body starts on the line after the `def`
-                  dk' <- applyDecl (call w (lineNo + 1) l [] doc
+                  dk' <- applyDecl (call w lineNo (lineNo + 1) l [] doc
                                      (intercalate "\n" (map snd block))) dk
                   go dk' Nothing rest'
             else do
@@ -8578,7 +8600,7 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
               -- the following lines belong to it, not to the module
               let (cont, rest') = spanOpen l rest
               -- an inline body starts on the `def` line itself
-              dk' <- applyDecl (call w lineNo l [] doc
+              dk' <- applyDecl (call w lineNo lineNo l [] doc
                                  (intercalate "\n" (body : map snd cont))) dk
               go dk' Nothing rest'
       | otherwise = do
@@ -8613,9 +8635,9 @@ dictFromSource src = finish <$> go emptyDict Nothing (zip [1 ..] (lines src))
 
     -- one call: the word, its arguments read at the word's shapes, and
     -- the text and the line the refusals will need
-    call w bodyLine raw blk doc bodyTxt =
+    call w headLine bodyLine raw blk doc bodyTxt =
       DeclCall (dwWord w) (declArgsOf w (fst (declSplit raw)) bodyTxt)
-               raw blk doc bodyLine
+               raw blk doc bodyLine headLine
 
     -- what a declaration head writes after its own `=`: the INLINE body
     -- form, which every model has (a theory's slots are one per line)
@@ -9931,7 +9953,8 @@ tableGenNames tb = ["load" ++ tbName tb, "header" ++ tbName tb]
 -- the path that closes it.  Paths are relative to the importing file.
 data Load = Load
   { lSeen :: [FilePath]           -- canonical paths already included
-  , lDefs :: [(String, FilePath)] -- def names, and the file that declared them
+  , lDefs :: [(String, FilePath, Int)]
+      -- def names, the file that declared them, and the line
   , lText :: String               -- the source assembled so far
   , lMap  :: LineMap              -- and where each of its lines came from
   }
@@ -9976,36 +9999,46 @@ loadWith isRoot0 root =
               Right src -> loaded stack acc path isRoot canon src
 
     loaded stack acc path isRoot canon src =
-      case splitDefs src >>= \(defs, _, _, imps, tbls, _) ->
-             (,,,) defs tbls <$> mapM parseImportLine imps
-                             <*> mapM parseTableLine tbls of
+      case splitDefsIx src >>= \(defs, _, _, imps, tbls, _) ->
+             (,,,) defs tbls
+               <$> sequence [ (,) k <$> first (atSrcLine k) (parseImportLine l)
+                            | (l, k) <- imps ]
+               <*> sequence [ first (atSrcLine k) (parseTableLine l)
+                            | (l, k) <- tbls ] of
         Left e -> pure (Left (inFile path e))
         Right (defs, tbls, rels, tables) -> do
           -- a TABLE is resolved here too: the same IO boundary, the
           -- same path rule, and the text it stands for is spliced in
           -- under its own declaration line
           blocks <- mapM (tableBlock (takeDirectory path)) tables
-          kids <- mapM (resolve (takeDirectory path)) rels
+          kids <- mapM (\(k, rel) ->
+                          first (inFile path . atSrcLine k)
+                            <$> resolve (takeDirectory path) rel) rels
           r <- foldM (child (canon : stack))
                      (Right acc { lSeen = canon : lSeen acc }) kids
           pure $ do
             acc' <- r
             -- objects are ADDED, never merged: the inclusion is
             -- injective on names or it is an error naming both files
-            case [ (n, f) | (n, _, _, _) <- defs
-                          , (m, f) <- lDefs acc', m == n ] of
-              ((n, f) : _) ->
-                Left $ inFile path ("`" ++ n ++ "` is already defined in "
-                                 ++ f)
+            -- …and the refusal names BOTH lines, so a clash is two
+            -- places a reader can open (2026-10-02)
+            case [ (n, k, f, j) | (n, _, _, _, k) <- defs
+                               , (m, f, j) <- lDefs acc', m == n ] of
+              ((n, k, f, j) : _) ->
+                Left $ inFile path
+                         (atSrcLine k ("`" ++ n ++ "` is already defined in "
+                                    ++ f ++ ":" ++ show j))
               [] -> Right ()
             blks <- first (inFile path) (sequence blocks)
             own  <- first (inFile path) (moduleLinesIx isRoot src)
-            let spliced = spliceTables (zip tbls blks) own
+            let spliced = spliceTables (zip (map fst tbls) blks) own
                 own'    = unlines (map snd spliced)
-                genDefs = [ (n, path)
-                          | tb <- tables, n <- tableGenNames tb ]
-            pure acc' { lDefs = lDefs acc' ++ [ (n, path) | (n, _, _, _) <- defs ]
-                                           ++ genDefs
+                genDefs = [ (n, path, k)
+                          | (tb, k) <- zip tables (map snd tbls)
+                          , n <- tableGenNames tb ]
+            pure acc' { lDefs = lDefs acc'
+                                   ++ [ (n, path, k) | (n, _, _, _, k) <- defs ]
+                                   ++ genDefs
                       , lMap  = lMap acc' ++ [ (path, k) | (k, _) <- spliced ]
                       , lText = lText acc' ++ own' }
 
@@ -10050,7 +10083,12 @@ loadWith isRoot0 root =
             Left _  -> Left ("table " ++ tbName tb ++ ": cannot read " ++ p)
             Right b -> tableSource tb p b
 
-    inFile path e = "in " ++ path ++ ": " ++ e
+    -- WHERE, in the house form: `path:line` when the refusal said which
+    -- line, `path` when it could not.  The loader runs before
+    -- `checkModuleWithAt`, so it resolves its own markers.
+    inFile path e = case takeLocMark e of
+      Just (n, rest) | n > 0 -> path ++ ":" ++ show n ++ ": " ++ stripLoc rest
+      _                      -> path ++ ": " ++ stripLoc e
 
 -- Which slots each of a module's models carries — the table `with`
 -- consults to rename a model's operations.  A session builds it
@@ -10171,21 +10209,23 @@ checkModuleRaw base src = do
   -- the loader resolves imports into the source it hands over, so one
   -- reaching here means there was no file to resolve it against
   case importLines of
-    (l : _) -> Left $ "import: a module can only import when it is loaded "
+    ((l, k) : _) -> Left $ atSrcLine k $ "import: a module can only import when it is loaded "
                    ++ "from a file, and this one was checked without a file "
                    ++ "context: " ++ dropWhile isSpace l
-    []      -> Right ()
+    []           -> Right ()
   -- A `table` line STAYS where it was written and the text it stands
   -- for is spliced in under it, so reaching here with no generated
   -- loader means the loader never ran — there was no file to resolve
   -- the CSV against.
-  tables <- mapM parseTableLine tableLines
-  case [ tb | tb <- tables
-            , ("load" ++ tbName tb) `notElem` [ n | (n, _, _, _) <- defSrcs ] ] of
-    (tb : _) -> Left $ "table: a table can only be declared when the module "
+  tables <- sequence [ first (atSrcLine k) (parseTableLine l)
+                     | (l, k) <- tableLines ]
+  case [ (tb, k) | (tb, k) <- zip tables (map snd tableLines)
+                 , ("load" ++ tbName tb) `notElem` [ n | (n, _, _, _) <- defSrcs ] ] of
+    ((tb, k) : _) -> Left $ atSrcLine k
+                     $ "table: a table can only be declared when the module "
                     ++ "is loaded from a file, and this one was checked "
                     ++ "without a file context: table " ++ tbName tb
-    []       -> Right ()
+    []            -> Right ()
   let tblTypes = map tbName tables
       -- `load…` is the one generated word whose body names a `@`
       -- helper; source cannot claim the exemption, because a def of
@@ -10200,14 +10240,20 @@ checkModuleRaw base src = do
   -- the same `addType` every written line does, so a name collision is
   -- the ordinary duplicate-declaration refusal.
   let ownRes = [ dName d | d <- ownDatasA, dResource d, null (dParams d) ]
+      -- the `model R in Doctrine` line the carrier was generated from,
+      -- so that a refusal about the generated `data` still names the
+      -- line the author wrote
+      resLine r = head ([ k | (l, _, k) <- tyLines
+                            , declHeadName l == r ] ++ [0])
   (env1, runTy, allAliases, allDatas, ownAliases, ownDatas, docs0) <-
     foldM (addType tblTypes)
           (env1a, runTya, allAliasesA, allDatasA, ownAliasesA, ownDatasA, docs0a)
-          [ (resCarrierLine r, Nothing) | r <- ownRes ]
+          [ (resCarrierLine r, Nothing, resLine r) | r <- ownRes ]
   -- ...and the theory it models and the model itself, in the same
   -- bucket a written `theory`/`model` block lands in
   let declLines = declLines0
-                ++ concat [ [ (th, tb, Nothing), (mh, mb, Nothing) ]
+                ++ concat [ [ (th, tb, Nothing, resLine r)
+                            , (mh, mb, Nothing, resLine r) ]
                           | r <- ownRes
                           , let (th, tb) = resTheoryDecl r
                           , let (mh, mb) = resModelDecl r ]
@@ -10219,8 +10265,8 @@ checkModuleRaw base src = do
   -- theories first: a model is checked against its theory, so the
   -- theory must already be known.  Both run before any def, which is
   -- what gives them file-wide scope.
-  ownTheories <- sequence [ parseTheory allAliases sigs h b
-                          | (h, b, _) <- declLines, take 6 h == "theory" ]
+  ownTheories <- sequence [ first (atSrcLine k) (parseTheory allAliases sigs h b)
+                          | (h, b, _, k) <- declLines, take 6 h == "theory" ]
   -- `Base` is the ambient presentation: its generators are every word in
   -- scope, which is not something a user can write down.
   case [ () | th <- ownTheories, thName th == baseTheoryName ] of
@@ -10237,25 +10283,31 @@ checkModuleRaw base src = do
   -- `in D` in a theory head is a CLAIM, and it is checked here, once,
   -- whether or not anything models the theory
   mapM_ (\th -> checkExtends theories th >>= checkBaseSpellings th) ownTheories
-  declared <- sequence [ parseInstance allAliases sigs theories h b
-                       | (h, b, _) <- declLines, take 5 h == "model"
+  declared <- sequence [ first (atSrcLine k)
+                           (parseInstance allAliases sigs theories h b)
+                       | (h, b, _, k) <- declLines, take 5 h == "model"
                        , isNothing (baseInstanceName h) ]
   -- A PARAMETERIZED model is not a model: it is a FAMILY, and the
   -- members the module names are minted below, once each.
   let ownFams = [ i | i <- declared, not (null (inParams i)) ]
       fams    = ownFams ++ mbFamilies base
       insts0  = [ i | i <- declared, null (inParams i) ] ++ mbGenerated base
-  ownFuncs <- sequence [ parseFunctorLine h
-                       | (h, _, _) <- declLines, take 7 h == "functor" ]
-  ownTransformations <- sequence [ parseTransformationLine h
-                        | (h, _, _) <- declLines
+  ownFuncs <- sequence [ first (atSrcLine k) (parseFunctorLine h)
+                       | (h, _, _, k) <- declLines, take 7 h == "functor" ]
+  ownTransformations <- sequence [ first (atSrcLine k) (parseTransformationLine h)
+                        | (h, _, _, k) <- declLines
                         , take 14 h == "transformation" ]
+  -- the line each declaration head sits on, for the refusals that are
+  -- about a NAME two declarations share
+  let declLineOf nm = head ([ k | (h, _, _, k) <- declLines
+                                , declHeadName h == nm ] ++ [0])
   -- A model of `Base` declares a WORD of its own name (so `[Opt]`
   -- is an ordinary quote and `lift2 [Opt]` lifts it at runtime); the
   -- scope itself is the renaming every `with Inst` performs, receipt
   -- included.
-  ownBases0 <- sequence [ parseBaseInstance allAliases sigs theories h b
-                        | (h, b, _) <- declLines, take 5 h == "model"
+  ownBases0 <- sequence [ first (atSrcLine k)
+                            (parseBaseInstance allAliases sigs theories h b)
+                        | (h, b, _, k) <- declLines, take 5 h == "model"
                         , isJust (baseInstanceName h) ]
   -- EVERY MEMBER OF A FAMILY THE MODULE ASKS FOR.  `with Fwd(Floats)`
   -- is an application; the model it applies to is minted here, deepest
@@ -10295,10 +10347,12 @@ checkModuleRaw base src = do
   case [ n | (n, i) <- zip useNames [0 :: Int ..]
            , n `elem` take i useNames ] of
     (n : _) | n `elem` map inName ownBases || n `elem` map inName insts ->
-      Left $ "Duplicate model declaration: " ++ n ++ " (a functor and a "
+      Left $ atSrcLine (declLineOf n)
+          $ "Duplicate model declaration: " ++ n ++ " (a functor and a "
           ++ "model share one namespace — each declares a name a `with` "
           ++ "clause may carry)"
-    (n : _) -> Left $ "Duplicate functor declaration: " ++ n
+    (n : _) -> Left $ atSrcLine (declLineOf n)
+                        ("Duplicate functor declaration: " ++ n)
     []      -> Right ()
   instDefs <- concat <$> mapM (instanceDefs theories) insts
   -- A TRANSFORMATION contributes its component as a word, the two sides of
@@ -10461,7 +10515,8 @@ checkModuleRaw base src = do
   where
     preludeTypeNames = map aName (mbAliases base) ++ map dName (mbDatas base)
 
-    addType tblTypes (env, run, aliasesIn, datasIn, ownAl, ownDt, docs) (line, doc) = do
+    addType tblTypes (env, run, aliasesIn, datasIn, ownAl, ownDt, docs)
+            (line, doc, declLn) = first (atSrcLine declLn) $ do
       decl <- parseTypeLine aliasesIn datasIn line
       let n = either aName dName decl
       if any ((== n) . aName) ownAl || any ((== n) . dName) ownDt
@@ -10541,14 +10596,15 @@ checkModuleRaw base src = do
       let base    = defLine name
           bodyAt k = if base == 0 then 0 else base + k - 1
       if name `elem` elimEmits && M.member name env
-        then Left $ "`" ++ name ++ "` cannot be shadowed: abstraction "
+        then Left $ atSrcLine base $ "`" ++ name
+                 ++ "` cannot be shadowed: abstraction "
                  ++ "elimination EMITS it, so a def of that name would "
                  ++ "capture reflected code that never mentioned it "
                  ++ "(MANUAL §6).  Pick another name."
         else Right ()
       if (M.member name env && name `notElem` shadow)
            || isJust (lookup name tmpls)
-        then Left $ "Duplicate definition: " ++ name
+        then Left $ atSrcLine base ("Duplicate definition: " ++ name)
         else Right ()
       (body0, bodyStart) <- parseProgramFrom bodyAt datas bodySrc
       -- THE TWO HEADER CLAUSES, read here and nowhere else (2026-09-16).

@@ -4268,6 +4268,16 @@ line of it there is nothing to name and nothing is said. A stage carried onto
 the next line by `\`, `;` or `>>` reports the line it **started** on, which is
 the only answer available for a stage that spans lines.
 
+A **declaration** is placed the same way. `type`, `data`, `theory`, `model`,
+`functor`, `transformation`, `table`, `import` and `keyword` each report the
+line their head sits on, and a duplicate declaration reports the line of the
+second one. A name clash between two imported files names **both** lines,
+because a clash is two places to open:
+
+```text
+test/imports/clash.braid:2: `double` is already defined in test/imports/util.braid:7
+```
+
 **Seven shapes also carry a one-line hint** naming the rule and the fix. Each
 fires only on something the checker can read in the source, and says "usually"
 where it is a guess. Each is marked ✦ in the catalogue below, and a ✦ in the
