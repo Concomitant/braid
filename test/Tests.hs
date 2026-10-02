@@ -3532,6 +3532,22 @@ moduleFailTests =
      "line 3, in def h: Unclosed group (expected ')')")
   , ("def dup2 = 1\ndef dup2 = 2\n1 ; print",
      "in def dup2: Duplicate definition: dup2")
+    -- A SLOT BODY and a LAW BODY are user-written, so the generated def
+    -- each becomes reports the line it was written on, and the model it
+    -- belongs to (2026-10-02).
+  , ("theory Mon(a) =\n    op : a a -> a\nmodel Ints in Mon(Int) =\n\
+     \    op = \"x\" ; +\ndef go with Ints = 1 2 ; op\ngo ; print",
+     "line 4, in model Ints, slot op: Cannot unify types: Str vs Int")
+  , ("theory Mon(a) =\n    op : a a -> a\n\
+     \    law bad = 1 1 ; op ; \"x\" ; eq?\n\
+     \model Ints in Mon(Int) =\n    op = +\n\
+     \def go with Ints = 1 2 ; op\ngo ; print",
+     "line 3, in model Ints, law bad: Cannot unify stacks: Int vs \8226")
+    -- ...and a transformation's components report the line its
+    -- declaration sits on
+  , (monoidMod ++ "transformation Nope in ListMonoid \8658 IntSum = toStr\n\
+     \1 >> print",
+     ": transformation Nope: the square for slot 'unit' does not typecheck")
     -- ...and a MODULE-LEVEL declaration refusal names its line too
     -- (2026-10-02): the scanner knows every declaration's line and now
     -- passes it on, so `type`, `data`, `theory`, `model`, `table`,

@@ -530,6 +530,14 @@ atSrcLine :: Int -> String -> String
 atSrcLine 0 = id
 atSrcLine n = atLine (Just n)
 
+-- The lines a declaration's indented block sits on, given the line its
+-- HEAD sits on.  A block is a run of consecutive lines, so one number
+-- places all of it; a generated declaration has no head line and every
+-- line of its block has none either.
+lineFrom :: Int -> [Int]
+lineFrom 0 = repeat 0
+lineFrom k = [k + 1 ..]
+
 -- Turn the marker into the thing a reader can act on.  With a map (a
 -- file was loaded) that is `path:line`; without one (a REPL line, a
 -- module checked from a string) it is `line N`, which is still the line
@@ -554,7 +562,7 @@ locFor lm src msg =
       let body = hinted (Just n) (stripLoc bare)
       in if placed
            then whereAt lm n
-                  ++ (if "in def " `isPrefixOf` body then ", " else ": ")
+                  ++ (if attributed body then ", " else ": ")
                   ++ body
            else body
   where
@@ -750,7 +758,13 @@ resolveLoc lm msg =
     Nothing        -> msg
     Just (n, rest) ->
       let r = stripLoc rest
-      in whereAt lm n ++ (if "in def " `isPrefixOf` r then ", " else ": ") ++ r
+      in whereAt lm n ++ (if attributed r then ", " else ": ") ++ r
+
+-- A message that already names what it is IN reads as one clause with
+-- the location, so the separator is a comma: `file:line, in def f: …`.
+-- Everything else is a sentence of its own: `file:line: …`.
+attributed :: String -> Bool
+attributed msg = any (`isPrefixOf` msg) ["in def ", "in model ", "in theory "]
 
 -- The first marker in a message: its line, and the message without it.
 takeLocMark :: String -> Maybe (Int, String)
@@ -2846,7 +2860,10 @@ data Theory = Theory
   { thName   :: String
   , thParams :: [TyParam]
   , thSlots  :: [(String, Arrow)]    -- declared signatures
-  , thLaws   :: [(String, String)]   -- name, program source
+  , thLaws   :: [(String, String, Int)]
+                                     -- name, program source, and the
+                                     -- file line the law was written on
+                                     -- (0 for a generated theory)
   , thIn     :: Maybe String         -- `theory T(…) in D` — T's slots
                                      -- that D also declares are D's, at
                                      -- D's shape, and D's laws are T's
@@ -2937,7 +2954,10 @@ data Instance = Instance
   { inName     :: String
   , inTheory   :: String
   , inArgs     :: [InstArg]
-  , inBindings :: [(String, String)]  -- slot, program source
+  , inBindings :: [(String, String, Int)]
+      -- slot, program source, and the file line the body was written
+      -- on.  A slot body is USER-WRITTEN, so it has a line, and the
+      -- generated def it becomes reports it (2026-10-02).
   , inParams   :: [ModelParam]
       -- A MODEL PARAMETERIZED BY A MODEL (2026-09-15).  `model Fwd(R :
       -- Smooth(a, g)) : Smooth(Dual(a), a)` is not one model but a
@@ -3058,6 +3078,14 @@ testDefName n = "test@" ++ n
 
 testParts :: String -> Maybe String
 testParts = stripPrefix "test@"
+
+-- a generated SLOT def, and the (model, slot) it came from.  One `@`,
+-- so a law (`M@law@nm`) and a transformation's side (`T@lhs@nm`) are
+-- not read as slots.
+slotNameParts :: String -> Maybe (String, String)
+slotNameParts n = case break (== '@') n of
+  (m, '@' : sl) | not (null m), not (null sl), '@' `notElem` sl -> Just (m, sl)
+  _ -> Nothing
 
 lawParts :: String -> Maybe (String, String)
 lawParts n = case breakOn "@law@" n of
@@ -3449,11 +3477,14 @@ terminalSpellings = ["•", "one"]
 -- itself is in scope for self-reference, which makes the declaration a
 -- nominal data type rather than a transparent alias).
 -- `theory Name(params)` + indented `slot : Σ ⇒ Θ` and `law nm = prog`
-parseTheory :: [Alias] -> [(String, [TyParam])] -> String -> [String]
+parseTheory :: [Alias] -> [(String, [TyParam])] -> String -> Int -> [String]
             -> Either String Theory
-parseTheory aliases dataSigs header body = do
+parseTheory aliases dataSigs header hdLine body = do
   (name, params, ext) <- parseHead
-  entries <- mapM (parseEntry params) (filter (not . blank) body)
+  -- a block is the run of lines under the head, so one number places
+  -- every line of it: a law body reports the line it was written on
+  entries <- mapM (\(k, l) -> parseEntry params k l)
+                  [ e | e@(_, l) <- zip (lineFrom hdLine) body, not (blank l) ]
   let slots = [ (n, a) | Left  (n, a, _) <- entries ]
       laws  = [ e      | Right e         <- entries ]
       reads' = [ (n, w) | Left (n, _, Just w) <- entries ]
@@ -3542,10 +3573,10 @@ parseTheory aliases dataSigs header body = do
     -- table is what makes `embed` definable on a SUBCATEGORY: see
     -- `readTransport`.  It is split on ` = ` with spaces, because `=`
     -- with none is part of a labelled arrow (`=IO>`).
-    parseEntry params l =
+    parseEntry params k l =
       case words l of
         ("law" : nm : "=" : _) ->
-          Right (Right (nm, drop 1 (dropWhile (/= '=') l)))
+          Right (Right (nm, drop 1 (dropWhile (/= '=') l), k))
         _ -> case break (== ':') l of
           (_, ':' : sig0) | ';' `elem` sig0 -> Left (separatorErr "slots")
           (lhs, ':' : sig0)
@@ -3917,8 +3948,8 @@ parseModelHead aliases dataSigs theories header = do
     conHint _ = ""
 
 parseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
-              -> [String] -> Either String Instance
-parseInstance aliases dataSigs theories header body = do
+              -> Int -> [String] -> Either String Instance
+parseInstance aliases dataSigs theories header hdLine body = do
   (nm, ps, th, args, om) <- parseModelHead aliases dataSigs theories header
   -- AN OBJECT MAP IS A `Base` MODEL'S CLAUSE (stage 7c).  A model of a
   -- theory already has an object map — the theory's parameters,
@@ -3937,20 +3968,26 @@ parseInstance aliases dataSigs theories header body = do
   -- head's own `=`, separated by top-level commas, and/or one per
   -- indented line.  Balanced brackets make the comma exact, so `mul =
   -- dup ; *` is one binding whose body composes (2026-09-16).
-  let inline = [ r | r <- splitTopCommas
-                         (drop 1 (dropWhile (/= '=') (takeWhile (/= '#') header)))
-                   , not (blankL r) ]
-  binds <- mapM parseBind (inline ++ filter (not . blankL) body)
+  -- an INLINE binding sits on the head line; a block binding on its own
+  -- line, counted from the head (2026-10-02)
+  let inline = [ (hdLine, r)
+               | r <- splitTopCommas
+                        (drop 1 (dropWhile (/= '=') (takeWhile (/= '#') header)))
+               , not (blankL r) ]
+  binds <- mapM parseBind
+             (inline ++ [ e | e@(_, l) <- zip (lineFrom hdLine) body
+                            , not (blankL l) ])
   pure (Instance nm th args binds ps om [])
   where
     blankL l = all isSpace (takeWhile (/= '#') l)
-    parseBind l =
+    parseBind (k, l) =
       case break (== '=') l of
         (lhs, '=' : rhs)
           | [_] <- words lhs, secondBinding rhs ->
-              Left (separatorErr "bindings")
-          | [nm] <- words lhs -> Right (nm, rhs)
-        _ -> Left $ "Malformed model binding: " ++ dropWhile isSpace l
+              Left (atSrcLine k (separatorErr "bindings"))
+          | [nm] <- words lhs -> Right (nm, rhs, k)
+        _ -> Left $ atSrcLine k ("Malformed model binding: "
+                                   ++ dropWhile isSpace l)
 
 -- A MODEL PARAMETERIZED BY A MODEL, instantiated (2026-09-15).
 --
@@ -6820,7 +6857,8 @@ objTransportT ctx inst = go []
 
     go bound (Prim n)
       | n `elem` bound                          = Right (Prim n)
-      | Just img <- lookup n (inBindings inst)   = imageTerm here datas img
+      | Just img <- lookup n [ (p, q) | (p, q, _) <- inBindings inst ] =
+          imageTerm here datas img
       | isLitOfA n                               =
           Right (Seq 0 (Prim n) (Prim (omVia om)))
       | otherwise = case M.lookup n (ecEnv ctx) of
@@ -7106,14 +7144,14 @@ checkLawType env n = do
 -- scope (so a law may call `op` and mean this model's `op`), which
 -- is the same renaming `with` performs — resolution once, not per call.
 instanceDefs :: [Theory] -> Instance
-             -> Either String [(String, DefHdr, String, Maybe String)]
+             -> Either String [(String, DefHdr, String, Maybe String, Int)]
 instanceDefs theories inst = do
   th <- theoryOf theories (inTheory inst)
   ext <- case thIn th of
            Just d  -> Just <$> theoryOf theories d
            Nothing -> Right Nothing
   let slotNames = map fst (thSlots th)
-      given     = map fst (inBindings inst)
+      given     = [ n | (n, _, _) <- inBindings inst ]
   case [ n | n <- slotNames, n `notElem` given ] of
     (n : _) -> Left $ "model " ++ inName inst ++ ": no binding for '"
                    ++ n ++ "' (declared by theory " ++ thName th ++ ")"
@@ -7138,8 +7176,8 @@ instanceDefs theories inst = do
         []  -> rename
         sc  -> DefHdr Nothing sc
       slots  = [ ( slotDefName (inName inst) n, hdr', body
-                 , Just ("slot '" ++ n ++ "' of " ++ inName inst) )
-               | (n, body) <- inBindings inst ]
+                 , Just ("slot '" ++ n ++ "' of " ++ inName inst), k )
+               | (n, body, k) <- inBindings inst ]
       -- An INHERITED law runs when the model can STATE it: every slot of
       -- the extended theory that the law names is one this theory
       -- declares.  A theory that takes the doctrine's composition and
@@ -7147,14 +7185,14 @@ instanceDefs theories inst = do
       -- naturality, which is exactly what it claimed.
       inherited = case ext of
         Nothing -> []
-        Just dt -> [ l | l@(_, src) <- thLaws dt
+        Just dt -> [ l | l@(_, src, _) <- thLaws dt
                        , all (`elem` slotNames)
                              [ w | w <- lawWords src
                                  , isJust (lookup w (thSlots dt)) ] ]
       laws   = [ ( lawDefName (inName inst) nm, rename, body
                  , Just ("law '" ++ nm ++ "' of " ++ inName inst
-                         ++ " — runs at module start") )
-               | (nm, body) <- thLaws th ++ inherited ]
+                         ++ " — runs at module start"), k )
+               | (nm, body, k) <- thLaws th ++ inherited ]
   pure (slots ++ laws)
 
 -- A NATURAL TRANSFORMATION BETWEEN MODELS:
@@ -8744,8 +8782,8 @@ baseTheoryName = "Base"
 -- `model Nm in Base = p = q, …` plus any indented `p = q` lines —
 -- BOTH forms, exactly as every other model body has both.
 parseBaseInstance :: [Alias] -> [(String, [TyParam])] -> [Theory] -> String
-                  -> [String] -> Either String Instance
-parseBaseInstance aliases dataSigs theories header body = do
+                  -> Int -> [String] -> Either String Instance
+parseBaseInstance aliases dataSigs theories header hdLine body = do
   () <- maybe (Left $ "Malformed model head (want `model Name in Base "
                    ++ "= p = q, …`): " ++ dropWhile isSpace header)
               (const (Right ())) (baseInstanceName header)
@@ -8756,10 +8794,13 @@ parseBaseInstance aliases dataSigs theories header body = do
                    ++ "scope, so there is no theory for an argument to "
                    ++ "model"
     []      -> Right ()
-  let inline = [ r | r <- splitTopCommas (drop 1 (dropWhile (/= '=')
-                                                  (uncomment header)))
-                   , not (all isSpace r) ]
-      pieces = inline ++ [ r | r <- map uncomment body, not (all isSpace r) ]
+  let inline = [ (hdLine, r)
+               | r <- splitTopCommas (drop 1 (dropWhile (/= '=')
+                                               (uncomment header)))
+               , not (all isSpace r) ]
+      pieces = inline ++ [ (k, uncomment r)
+                         | (k, r) <- zip (lineFrom hdLine) body
+                         , not (all isSpace (uncomment r)) ]
   -- A RETRACTION MAKES THE EMPTY TABLE TOTAL (stage 7c): with `via c, r`
   -- every generator the table does not name is DERIVED by conjugation,
   -- so a model with no bindings at all is a complete one and says
@@ -8779,8 +8820,13 @@ parseBaseInstance aliases dataSigs theories header body = do
   -- action on a def is an unfolding, neither of which a rewrite table
   -- can hold — so its images are ordinary PROGRAMS, inlined at each use
   -- and blessed once at the declaration.
-  rs <- mapM (if null om then parseOneBinding nm else parseOneImage nm) pieces
-  case [ p | (p, _) <- rs, length [ () | (p', _) <- rs, p' == p ] > 1 ] of
+  rs <- mapM (\(k, pc) ->
+                (\(p, q) -> (p, q, k))
+                  <$> first (atSrcLine k)
+                        ((if null om then parseOneBinding nm
+                                     else parseOneImage nm) pc))
+             pieces
+  case [ p | (p, _, _) <- rs, length [ () | (p', _, _) <- rs, p' == p ] > 1 ] of
     (p : _) -> Left $ baseHere nm ++ "two bindings give `" ++ p
                    ++ "` an image, and a model sends each generator to "
                    ++ "one thing"
@@ -8811,7 +8857,7 @@ parseOneImage nm piece =
 -- keeps: it is what the generated `Code ⇒ Code` word rewrites with, and
 -- what `with Opt` renames through.
 baseWordTable :: Instance -> [(String, String)]
-baseWordTable i = [ (p, w) | (p, q) <- inBindings i, w <- take 1 (words q) ]
+baseWordTable i = [ (p, w) | (p, q, _) <- inBindings i, w <- take 1 (words q) ]
 
 baseHere :: String -> String
 baseHere nm = "model " ++ nm ++ " in Base: "
@@ -8930,7 +8976,7 @@ checkBaseInstance env datas tmpls thNames slotsOf inst = do
     -- compared AFTER the substitution — `+ : Int Int ⇒ Int` under
     -- `Int ↦ Mod7` is `Mod7 Mod7 ⇒ Mod7`, and nothing about the check
     -- changes but the arrow it is made against.
-    one (p, q) = do
+    one (p, q, bindLn) = first (atSrcLine bindLn) $ do
       scP <- wordScheme p
       let arrP0 = runInfer0 (instantiate scP)
           arrP  = maybe arrP0 (`objArrow` arrP0) om0
@@ -9016,7 +9062,7 @@ objModelDoc ctx inst = do
             ++ (case inBindings inst of
                   [] -> "no bindings: every generator is derived"
                   bs -> intercalate ", " [ p ++ " = " ++ trimSpace q
-                                         | (p, q) <- bs ])
+                                         | (p, q, _) <- bs ])
             ++ ".  "
     decides a b = case sameProgram env run run a b of
                     Right True -> True
@@ -9034,7 +9080,7 @@ objModelDoc ctx inst = do
             ++ " = id` is UNCHECKED — `sameCode` does not decide it — "
             ++ "so " ++ nm ++ " is a DIALECT: the conjugated words are what "
             ++ "the declaration says they are, on the author’s word.  "
-    imageLaw (g, q)
+    imageLaw (g, q, _)
       | g `elem` arts = Right ""
       | otherwise = case M.lookup g run of
           Nothing -> Right ""     -- a prim: no body, so no law to state
@@ -10265,7 +10311,7 @@ checkModuleRaw base src = do
   -- theories first: a model is checked against its theory, so the
   -- theory must already be known.  Both run before any def, which is
   -- what gives them file-wide scope.
-  ownTheories <- sequence [ first (atSrcLine k) (parseTheory allAliases sigs h b)
+  ownTheories <- sequence [ first (atSrcLine k) (parseTheory allAliases sigs h k b)
                           | (h, b, _, k) <- declLines, take 6 h == "theory" ]
   -- `Base` is the ambient presentation: its generators are every word in
   -- scope, which is not something a user can write down.
@@ -10284,7 +10330,7 @@ checkModuleRaw base src = do
   -- whether or not anything models the theory
   mapM_ (\th -> checkExtends theories th >>= checkBaseSpellings th) ownTheories
   declared <- sequence [ first (atSrcLine k)
-                           (parseInstance allAliases sigs theories h b)
+                           (parseInstance allAliases sigs theories h k b)
                        | (h, b, _, k) <- declLines, take 5 h == "model"
                        , isNothing (baseInstanceName h) ]
   -- A PARAMETERIZED model is not a model: it is a FAMILY, and the
@@ -10306,7 +10352,7 @@ checkModuleRaw base src = do
   -- scope itself is the renaming every `with Inst` performs, receipt
   -- included.
   ownBases0 <- sequence [ first (atSrcLine k)
-                            (parseBaseInstance allAliases sigs theories h b)
+                            (parseBaseInstance allAliases sigs theories h k b)
                         | (h, b, _, k) <- declLines, take 5 h == "model"
                         , isJust (baseInstanceName h) ]
   -- EVERY MEMBER OF A FAMILY THE MODULE ASKS FOR.  `with Fwd(Floats)`
@@ -10322,7 +10368,7 @@ checkModuleRaw base src = do
                  ++ [ a | (_, _, b, _) <- defSrcs
                         , a <- modelApps (map inName fams) b ]
                  ++ modelApps (map inName fams) mainSrc0
-                 ++ [ a | i <- insts0, (_, b) <- inBindings i
+                 ++ [ a | i <- insts0, (_, b, _) <- inBindings i
                         , a <- modelApps (map inName fams) b ]
                  ++ [ a | mo <- ownTransformations, n <- [tfFrom mo, tfTo mo]
                         , a <- modelApps (map inName fams) n ])
@@ -10354,7 +10400,8 @@ checkModuleRaw base src = do
     (n : _) -> Left $ atSrcLine (declLineOf n)
                         ("Duplicate functor declaration: " ++ n)
     []      -> Right ()
-  instDefs <- concat <$> mapM (instanceDefs theories) insts
+  instDefs0 <- concat <$> mapM (instanceDefs theories) insts
+  let instDefs = [ (n, h, b, d) | (n, h, b, d, _) <- instDefs0 ]
   -- A TRANSFORMATION contributes its component as a word, the two sides of
   -- every square, and the sampled law for each square the theory's
   -- evidence can decide.  They are ordinary defs, named with the
@@ -10408,7 +10455,18 @@ checkModuleRaw base src = do
       resNames = [ dName d | d <- allDatas, dResource d ]
   -- model bodies come LAST, over an environment that already holds
   -- every module def and every slot's declared signature
-  let addDef' = addDef defLine (tblTypes, tblGen) slotTable funcs thNames trans
+  -- A SLOT BODY IS USER-WRITTEN (2026-10-02).  `add = Dual(x, dx) …` is
+  -- a line in the model block and a law body is a line in the theory
+  -- block, so the def each becomes has a line like any other, and a
+  -- transformation's components report the line its declaration sits on.
+  let genLines = [ (n, k) | (n, _, _, _, k) <- instDefs0, k /= 0 ]
+              ++ [ (n, declLineOf (tfName mo))
+                 | (mo, (parts, _)) <- zip ownTransformations transformationParts
+                 , (n, _, _) <- parts ]
+      defLineGen n = case lookup n genLines of
+                       Just k  -> k
+                       Nothing -> defLine n
+  let addDef' = addDef defLineGen (tblTypes, tblGen) slotTable funcs thNames trans
                        ownBases resNames
                        [ (inName i, inScope i) | i <- insts ] allDatas
                        (RCtx M.empty allDatas allAliases theories)
@@ -10773,7 +10831,13 @@ checkModuleRaw base src = do
               ++ "' does not typecheck (" ++ e ++ ") \8212 the component "
               ++ "must be a word from the source model's carrier to the "
               ++ "target's, and every slot's square must be writable at it"
-          Nothing -> "in def " ++ name ++ ": " ++ e
+          Nothing
+            | Just (m, lw) <- lawParts name, declaredModel m ->
+                "in model " ++ m ++ ", law " ++ lw ++ ": " ++ e
+            | Just (m, sl) <- slotNameParts name, declaredModel m ->
+                "in model " ++ m ++ ", slot " ++ sl ++ ": " ++ e
+            | otherwise -> "in def " ++ name ++ ": " ++ e
+        declaredModel m = m `elem` map fst instScopes
 
 --------------------------------------------------------------------------------
 -- 10.5 Prelude: derived definitions available in every module and REPL
@@ -13212,7 +13276,7 @@ declOfV ctx name =
       Right (VSum 2 [ symOf (thName t)
                     , encodeListV (map reprParamV (thParams t))
                     , encodeListV sl
-                    , encodeListV [ symOf n | (n, _) <- thLaws t ] ])
+                    , encodeListV [ symOf n | (n, _, _) <- thLaws t ] ])
     _ -> Left ("declOf: " ++ name ++ " is not a `data`, `type` or `theory` "
             ++ "declared at this point.  A model, a transformation and a "
             ++ "functor have no rep yet; a `table` reflects as the `data` "
