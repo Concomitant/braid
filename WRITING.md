@@ -24,8 +24,11 @@ the checker does.
 
 An em-dash as a connective. Use a period, a comma, or restructure the
 sentence. One em-dash per paragraph is allowed for a true parenthetical.
-A reference table may keep ` — ` as a fixed separator between a type
-and its gloss; that is a column, not a sentence.
+A catalogue may keep ` — ` as the fixed separator between an entry and
+its gloss, in a reference table's cells, in a list of refusals, or in a
+bibliography; that is a column, not a sentence. Inside the gloss the
+rule applies as everywhere else. Quoted checker output is verbatim and
+is not edited at all.
 
 | banned | write instead |
 |---|---|
