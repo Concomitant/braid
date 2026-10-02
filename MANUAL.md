@@ -2789,7 +2789,7 @@ Each is checked at the arrow the two model heads wrote for *its*
 parameter (`value : Dual ⇒ Float` at `a`, `zeroTangent : Float ⇒ Float`
 at `g`), and the generated squares put the right component at each
 position of the slot's stacks. A parameter whose type is the same in
-both models writes `id` — an ordinary word, not a keyword. Giving the
+both models writes `id`, an ordinary word rather than a keyword. Giving the
 wrong number of them is *theory S has 2 parameters and a natural
 transformation has ONE COMPONENT PER PARAMETER, in order*. The
 transformation's own **word** is the component at the first parameter,
@@ -2797,48 +2797,45 @@ which is the carrier.
 
 Sampling follows the parameters too: a slot's input takes its evidence
 from an entry of *that* parameter (`sample : • ⇒ a` feeds an `a`), and a
-result is observed by an exit of *that* parameter — `observe : a ⇒ Float`
-is not an exit for a `g`, so a `Grad` result is compared with `eq?`
-directly, which is sound because a `Grad` is two Floats and not a
-closure.
+result is observed by an exit of *that* parameter. `observe : a ⇒ Float` is
+not an exit for a `g`, so a `Grad` result is compared with `eq?` directly,
+which is sound because a `Grad` is two Floats rather than a closure.
 
 **Evidence is a generator.** `sample` is a slot like any other, so a
 transformation must preserve it: `len` of `ListMonoid`'s sample must *be*
 `IntSum`'s sample. That is why the example's list has seven elements.
-If that reads as strict, it is the same strictness that makes a model
-an audited model — what the theory declares is what the models owe.
+If that reads as strict, it is the strictness that makes a model an audited
+model: what the theory declares is what the models owe.
 
-**A point is one choice of entry per input wire**. A
-theory's evidence is **every** slot that builds the parameter out of
-nothing — `sample`, `sample2`, `zero`, `unit`, whatever it declared —
-and a slot with two inputs is run at the **cross product**: three
-entries make `add : a a ⇒ a` nine points, and `:transformations` reports
-the nine. The count is capped at **64 points per square**, and the cap
-is said rather than silent — over it the verdict reads `sampled (64 of
-169 points; …)`, so an audit never reports evidence it did not take.
-Until this, a square ran at the theory's **first** nullary entry alone,
-which made the audit a fact about the order the slots were *written* in:
-a theory declaring `zero` before `sample` certified floor-halving as a
-ring homomorphism, because ⌊(0+0)/2⌋ = ⌊0/2⌋ + ⌊0/2⌋ and nothing else
-was ever looked at (`examples/modular.braid` §7).
+**A point is one choice of entry per input wire.** A theory's evidence is
+**every** slot that builds the parameter out of nothing, whether `sample`,
+`sample2`, `zero`, `unit` or whatever else it declared. A slot with two
+inputs is run at the **cross product**, so three entries make
+`add : a a ⇒ a` nine points and `:transformations` reports the nine. The
+count is capped at **64 points per square**, and the cap is said rather than
+silent: over it the verdict reads `sampled (64 of 169 points; …)`, so an
+audit never reports evidence it did not take. Running a square at the
+theory's **first** nullary entry alone would make the audit a fact about the
+order the slots were *written* in. A theory declaring `zero` before `sample`
+would then certify floor-halving as a ring homomorphism, because
+⌊(0+0)/2⌋ = ⌊0/2⌋ + ⌊0/2⌋ (`examples/modular.braid` §7).
 
 **When both models are models of a theory extending `Doctrine`** they
 are internal categories, and a transformation between them is an
-**internal functor**: the squares for `compose` and `embed` are exactly
-functoriality — preserves composition, preserves the image of the base.
+**internal functor**: the squares for `compose` and `embed` are
+functoriality, preserving composition and preserving the image of the base.
 There is no strength square, because the Doctrine has no strength.
-`examples/transformations.braid` has one — a
-function that carries its name, and the functor that forgets the name.
+`examples/transformations.braid` has one, a function that carries its name
+and the functor that forgets the name.
 
-**`Fn` in declarations** — write a reified program as `Fn⟨Σ ⇒ Θ⟩`
-(Unicode, mirrors `:t`) or `Fn(Σ -> Θ)` (ASCII); the inner stacks parse
-like any type stack (params splice, `•` — ASCII `one`, §5 — is empty,
-`Fn` nests). The arrow's shape is part of the type: `⇒` declares a **pure** program and
-rejects an io quotation, `Fn⟨Σ =IO> Θ⟩` (ASCII `Fn(Σ ->! Θ)`) declares an
-io one and demands it (§3, §14). This
-names function-carrier types — `Endo`, `Pred`, State-style monad
-carriers — and, when the recursion runs *through* the `Fn`, gives
-**codata**:
+**`Fn` in declarations.** Write a reified program as `Fn⟨Σ ⇒ Θ⟩` (Unicode,
+mirroring `:t`) or `Fn(Σ -> Θ)` (ASCII). The inner stacks parse like any type
+stack: params splice, `•` is empty (ASCII `one`, §5), and `Fn` nests. The
+arrow's shape is part of the type. `⇒` declares a **pure** program and
+rejects an io quotation; `Fn⟨Σ =IO> Θ⟩` (ASCII `Fn(Σ ->! Θ)`) declares an io
+one and demands it (§3, §14). This names function-carrier types such as
+`Endo`, `Pred` and State-style monad carriers, and when the recursion runs
+*through* the `Fn` it gives **codata**:
 
 ```braid
 data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)   # head + a THUNKED tail
@@ -2847,21 +2844,21 @@ data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)   # head + a THUNKED tail
 The thunk is declared `=Recursive>` because a stream producer is written
 under `with Recursive` (below), and a written arrow means what it says: an unlabelled
 `Fn⟨• ⇒ Stream(a)⟩` refuses the very thunk the producer makes. `Recursive`
-is the honest word for it — the object is **productive** (every force
-returns one cell) but **unbounded** (there is no last cell), and `Recursive`
-claims exactly the second thing.
+is the word for it. The object is **productive**, since every force returns
+one cell, and **unbounded**, since there is no last cell, and `Recursive`
+claims the second thing.
 
-A codata type gets constructor/unroll as usual but **no `foldName`** —
-a structural fold through the thunk would diverge, so it is withheld by
-construction; you observe instead (`unStream`, then `ev` to force
-one cell). Productive corecursion guards its self-call under a quote —
-`def from with Recursive = (n -> n [n 1 >> + >> from] >> Stream)`,
-whose self-call still sits under the thunk — a self-call inside a
-quotation is a **capture**, and abstraction elimination handles it. See
-`examples/stream.braid`. Caveat: a `Fn` type whose stacks carry two
-open stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands, but won't
-display-fold back (the leading-splice match is ambiguous — pin one
-arity if you need the fold).
+A codata type gets constructor and unroll as usual but **no `foldName`**. A
+structural fold through the thunk would diverge, so it is withheld by
+construction, and you observe instead: `unStream`, then `ev` to force one
+cell. Productive corecursion guards its self-call under a quote, as in
+`def from with Recursive = (n -> n [n 1 >> + >> from] >> Stream)`, whose
+self-call sits under the thunk. A self-call inside a quotation is a
+**capture**, and abstraction elimination handles it. See
+`examples/stream.braid`. One caveat: a `Fn` type whose stacks carry two open
+stack-params (`Fn⟨s ⇒ s a⟩`) parses and expands but will not display-fold
+back, the leading-splice match being ambiguous, so pin one arity if you need
+the fold.
 
 ### Declaration words
 
@@ -2892,11 +2889,11 @@ now one **table** saying what a keyword *is*, and it is open.
 | `keyword` | `keywordW` | `Str Str =Dict> •` |
 | *(none, until bound)* | `testW` | `Code Str =Dict> •` |
 
-**The two that read the world say so in the grade.** `importW` and
-`tableW` are `=Dict IO>`; the other nine are `=Dict>`. That is the ONE
-place IO happens before anything is checked — the loader resolves a path
-and reads a file — and the grade is the manifest of exactly that.
-`:t importW` prints it.
+**The two that read the world say so in the grade.** `importW` and `tableW`
+are `=Dict IO>`, and the other nine are `=Dict>`. That is the ONE place IO
+happens before anything is checked: the loader resolves a path and reads a
+file. The grade is the manifest of that and nothing else. `:t importW` prints
+it.
 
 **What an argument may be, exactly.** Three shapes, and the list is
 closed:
@@ -2904,30 +2901,29 @@ closed:
 | shape | what it is | where it comes from |
 |---|---|---|
 | `Code` | an already-parsed program | the parser, for a keyword line; `getCode`, `parse` or a functor's output, for a program |
-| `Str` | a name, a header, a path — text the word *reads*, never parses | a literal, `cat`, `toStr` |
+| `Str` | a name, a header or a path: text the word *reads* and never parses | a literal, `cat`, `toStr` |
 | `TypeRep` | an already-parsed type | the parser; `typeOfWord`, `typeOfCode` (§12) |
 
-All three are **post-parse**, which is exactly the line direction 3
-draws: post-parse `Code` functors only, parsing words never. A reader
-macro would break uniform reading — you could not read a file without
-running it — and it would make hygiene a discipline rather than a
-property of the representation. A word that wanted a fourth shape would
-be asking for one under another name.
+All three are **post-parse**, which is the line the design draws:
+post-parse `Code` functors only, parsing words never. A reader macro would
+break uniform reading, since you could not read a file without running it,
+and it would make hygiene a discipline rather than a property of the
+representation. A word that wanted a fourth shape would be asking for one
+under another name.
 
 **How a line is parsed into them.** Every declaration line is `KEYWORD
-<head> = <body>`, split at its own first `=`, the body running to the
+<head> = <body>`, split at its own first `=`, with the body running to the
 end of the line or into the indented block beneath it. The head is the
-`Str`; the body is read at the word's declared shape; the arguments are
-pushed in that order and the word is called postfix. A keyword whose
-line has no `=` (`import "u.braid"`) takes the head alone.
+`Str`, the body is read at the word's declared shape, the arguments are
+pushed in that order, and the word is called postfix. A keyword whose line
+has no `=`, such as `import "u.braid"`, takes the head alone.
 
-**Locations are untouched.** A call carries the line its *body* starts
-on, exactly as the def bucket carried it before there was a table, and
-every refusal is raised from the same place against the same raw line —
-so `file:line, in def X` says what it always said.
+**Locations are untouched.** A call carries the line its *body* starts on,
+and every refusal is raised from the same place against the same raw line, so
+`file:line, in def X` reads as it always did.
 
-**A program may declare too.** A top-level group is a **declaration
-line** when its **grade** says so — when what it does carries `Dict`:
+**A program may declare too.** A top-level group is a **declaration line**
+when its **grade** says so, which is when what it does carries `Dict`:
 
 ```braid
 ([dup ; *] ; getCode) "square" ; defW      # `def square = dup ; *`
@@ -2954,10 +2950,10 @@ Three rules, each refused by name:
   declare things the module's own defs are checked *against*, and those
   are checked above the program that would declare them.
 
-**The table is open** — `keyword <name> = <a declaration word>`. From
-that line on, `<name> x = …` is a declaration, collected the way a `def`
-is (either an inline body or an indented block) and parsed into `[body]
-"x" <word>`:
+**The table is open**, through `keyword <name> = <a declaration word>`.
+From that line on, `<name> x = …` is a declaration, collected the way a `def`
+is, with either an inline body or an indented block, and parsed into
+`[body] "x" <word>`:
 
 ```braid
 keyword test = testW
@@ -2980,25 +2976,24 @@ double bump = _ 1 ; +          # declares `bump` and `bumpTwice`
 ```
 
 A keyword line for a bound word becomes a **declaration line**, run with
-the module's own declaration program in file order — which is why the
-word may be one the module writes. `keyword` refuses a name the language
-already uses: *`keyword def` is refused: def is already a keyword of the
-language, and a keyword names one declaration word.*
+the module's own declaration program in file order, which is why the word may
+be one the module writes. `keyword` refuses a name the language already uses:
+*`keyword def` is refused: def is already a keyword of the language, and a
+keyword names one declaration word.*
 
 **A keyword word takes already-parsed arguments, and that is all it may
-take.** A bound keyword's line is `<keyword> <name> = <body>` — a `Str`
-and a `Code`, in that order, pushed and the word called postfix. There
-is no form in which a keyword word receives the line's TEXT, because
-that word would be a parsing word, and those are refused permanently.
+take.** A bound keyword's line is `<keyword> <name> = <body>`, a `Str` and a
+`Code` in that order, pushed and the word called postfix. There is no form in
+which a keyword word receives the line's TEXT, because that word would be a
+parsing word, and those are refused permanently.
 
-**Where a programmatic def lands.** Above main and **below** the
-module's written defs — the dictionary a compile-time word sees is the
-dictionary so far, which is the same ordering rule a `functor` obeys. So
-main may call it and a written `def` may not.
+**Where a programmatic def lands.** Above main and **below** the module's
+written defs: the dictionary a compile-time word reads is the dictionary so
+far, which is the ordering rule a `functor` obeys. Main may therefore call it
+and a written `def` may not.
 
-`examples/dictionary.braid` is the whole of this running; `:defs` in a
-session lists the words it declared, and `typeOfWord` answers about them
-like any other.
+`examples/dictionary.braid` runs all of this. `:defs` in a session lists the
+words it declared, and `typeOfWord` answers about them like any other.
 
 ### Modules: `import "path.braid"`
 
@@ -3010,16 +3005,15 @@ import "geometry.braid"
 import "lib/shapes.braid"      # relative to THIS file's directory
 ```
 
-What travels is **declarations** — defs, `type`/`data`,
-`theory`, `model`, `functor`, and their `##` docs. What does not is
-the imported file's **main program**: a library's demo is its own
-business, and the file still runs it when you run that file directly.
-An imported file is checked as part of the composite module, so it has
-to be a valid module on its own.
+What travels is **declarations**: defs, `type` and `data`, `theory`,
+`model`, `functor`, and their `##` docs. What does not travel is the imported
+file's **main program**, since a library's demo is its own business and the
+file still runs it when you run that file directly. An imported file is
+checked as part of the composite module, so it has to be a valid module on
+its own.
 
-The rules, all of which are one rule — an import is the **inclusion**
-of one module's presentation into another, so objects are added and
-never merged:
+The rules are all one rule. An import is the **inclusion** of one module's
+presentation into another, so objects are added and never merged:
 
 - **A clash is an error**, naming both files: *in `b.braid`: `poly` is
   already defined in `a.braid`*. There is no namespacing and no `as` in
@@ -3037,20 +3031,19 @@ never merged:
   directory is tried, so a program read from a pipe (`braid -`) can
   import too. Found in neither, the error names both places.
 
-Nothing above needed machinery of its own: inclusion is textual, and
-the composite is checked as a single module. That is also why a
-`theory` declared in one file and its `model` in another simply
-work. See `examples/imports.braid`.
+None of that needs machinery of its own. Inclusion is textual, and the
+composite is checked as a single module, which is also why a `theory`
+declared in one file and its `model` in another work. See
+`examples/imports.braid`.
 
-Reading the file is the **loader's** IO, at the same boundary that
-reads the program you ran; elaboration still sees only parsed
-declarations and stays pure. A module checked without a file context —
-a REPL line, an embedded source string — has nothing to resolve an
-import against and says so.
+Reading the file is the **loader's** IO, at the same boundary that reads the
+program you ran. Elaboration sees only parsed declarations and stays pure. A
+module checked without a file context, such as a REPL line or an embedded
+source string, has nothing to resolve an import against and says so.
 
-In a session, `:import "path.braid"` does the same thing, and is the
-only way a session gets a `theory`, an `model` or a `functor`, since
-it cannot declare one:
+In a session, `:import "path.braid"` does the same thing, and is the only way
+a session gets a `theory`, a `model` or a `functor`, since it cannot declare
+one:
 
 ```text
 braid> :import "examples/traced.braid"
@@ -3061,9 +3054,8 @@ def poly2 : ∀ . Int =IO Traced> Int
 
 ### Tables: `table Trades = "trades.csv"`
 
-A CSV's header **is a presentation**: it declares a data type. So the
-directing type is written — in a file — and the file at check time is
-source:
+A CSV's header **is a presentation**: it declares a data type. The
+directing type is written in a file, and the file at check time is source:
 
 ```braid
 table Trades = "examples/data/trades.csv"
@@ -3074,16 +3066,16 @@ table Trades = "examples/data/trades.csv"
 
 The **loader** resolves the line, at the same IO boundary `import`
 already uses and nowhere else. It resolves the path by the import rule
-above, reads the **whole file**, and writes Braid text that is included
-exactly as an imported file's declarations are — spliced in under the
-`table` line, which stays where it was written. Nothing about `table`
-runs: the generated text is the only thing that does.
+above, reads the **whole file**, and writes Braid text that is included as
+an imported file's declarations are, spliced in under the `table` line, which
+stays where it was written. Nothing about `table` runs; the generated text is
+the only thing that does.
 
 - **The names** come from the header, sanitized: each space, tab and
   `-` becomes `_`, and the first letter is lowercased. What that leaves
-  must be a word — a letter, then letters, digits or `_` — and a header
-  that is not one, or that clashes with a word already in scope, is an
-  error naming the fix (the schema form, below).
+  must be a word, a letter followed by letters, digits or `_`. A header that
+  is not one, or that clashes with a word already in scope, is an error
+  naming the fix, which is the schema form below.
 - **The types are read off the data**: `Int` if every cell in the
   column is an Int literal, else `Float` if every cell is a Float or an
   Int literal, else `Str`. The whole file is read, so nothing is
@@ -3108,113 +3100,113 @@ because renaming a column and giving it a type are the same act:
 naming it. `Str`, `Int` and `Float` are the three types a column may
 have; a column of anything else is a join, and a join is a program.
 
-A table crosses a file boundary like everything else: `import` of a
-file with a `table` line (and `:import` of one in a session) runs the
-loader for it, and the CSV resolves against that file's directory, then
-the current one. A module checked **without** a file context — a REPL
-line, an embedded source string — has nothing to resolve the CSV
-against and says so. See `examples/frame.braid`.
+A table crosses a file boundary like everything else. `import` of a file
+with a `table` line, and `:import` of one in a session, runs the loader for
+it, and the CSV resolves against that file's directory and then the current
+one. A module checked **without** a file context, such as a REPL line or an
+embedded source string, has nothing to resolve the CSV against and says so.
+See `examples/frame.braid`.
 
 ## 9. Primitive reference
 
 *Last changed 2026-09-21.*
 
-**The kernel admits three presentations** (each derives the others,
-verified): the single-wire generators `{_, dup, swap, drop}`; binders
-(`dup = (x -> x x)` …), which abstraction elimination compiles back
-into the generators; and the segment tier (`dup = (x -> x >> dupN)`,
-`drop = (x -> x >> forget)` — the
-generators are the width-1 shadows of the open-width words). The
-single-wire basis stays primitive because it is the normal-form
-alphabet reflected `Code` is written in. `pass` is not merely
-equivalent to `...` — the remainder marker *denotes* `pass`; they are
-one term with two spellings. Derived-but-primitive-looking words
-(`odd?`-family, `pack`/`pack2`, `sumN`, `mapN`, `foldExp`, `dupN`,
-`id`, `loop`, `gt?`/`gte?`/`lte?`) live in the prelude — the design bet ("primitives span
-everything else in the language itself") is proven in both directions.
+**The kernel admits three presentations**, each deriving the others: the
+single-wire generators `{_, dup, swap, drop}`; binders (`dup = (x -> x x)`
+and so on), which abstraction elimination compiles back into the generators;
+and the segment tier (`dup = (x -> x >> dupN)`, `drop = (x -> x >> forget)`),
+where the generators are the width-1 shadows of the open-width words. The
+single-wire basis stays primitive because it is the normal-form alphabet
+reflected `Code` is written in. `pass` is not merely equivalent to `...`: the
+remainder marker *denotes* `pass`, and they are one term with two spellings.
+Words that look primitive and are not live in the prelude, including the
+`odd?` family, `pack` and `pack2`, `sumN`, `mapN`, `foldExp`, `dupN`, `id`,
+`loop`, and `gt?`, `gte?` and `lte?`. The design bet, that primitives span
+everything else in the language itself, is proven in both directions.
 
-**There are 64 primitives.** **The count is of words source can name, and it therefore
-EXCLUDES `#fix`**, the knot `with Recursive` emits: `#` opens a
-comment, so no program and no reflected atom can spell it. Every count
-in this manual and in the README is that count; the kernel holds one
-more morphism than any of them reports, and it is always this one.
-`#fix` is a generator of the free category all the same — and since
-2026-09-18 an irreducible one, because nothing else in the language can
-produce an unbounded knot (§8, §5). A word keeps its place here
-only if it is a **structure map** of the doctrine — cartesian
-(`_`/`dup`/`swap`/`drop`/`pass`/`forget`), coproduct (`alt1…altN`,
-`there`, `merge`), exponential (`ev`), the open
-coproduct (`into`), the ONE eliminator over `Aⁿ` and its Naperian
-rewirings — or if it
-**touches the implementation**: arithmetic and strings, `eq?`, the four
-io edges, reflection (`parse`/`unparse`/`reflect`/`evalAs`/`sameCode`/
-`sameCodeC`/`interpose`/`rewrite`), and the type-level `weaken`/`finInt`. Everything else is
-a prelude def with its derivation visible.
+**There are 64 primitives.** **The count is of words source can name, and it
+therefore EXCLUDES `#fix`**, the knot `with Recursive` emits: `#` opens a
+comment, so no program and no reflected atom can spell it. Every count in
+this manual and in the README is that count, and the kernel holds one more
+morphism than any of them reports, always this one. `#fix` is a generator of
+the free category all the same, and an irreducible one, because nothing else
+in the language can produce an unbounded knot (§8, §5).
 
-**`asFloat?` and `split` are implementation prims**, and they are in the kernel on the same criterion `cat`, `toStr`
-and `asInt?` are: a `Str` is a machine string, and nothing in the
-language can take one apart. `split` is the general cutter, so there is
-no separate `lines` — one spelling per thing, and a newline is a
-separator like any other. They arrived with `examples/frame.braid`,
-which has to read a CSV.
+A word keeps its place in the kernel on one of two grounds. It is a
+**structure map** of the doctrine: cartesian (`_`, `dup`, `swap`, `drop`,
+`pass`, `forget`), coproduct (`alt1…altN`, `there`, `merge`), exponential
+(`ev`), the open coproduct (`into`), or the one eliminator over `Aⁿ` and its
+Naperian rewirings. Or it **touches the implementation**: arithmetic and
+strings, `eq?`, the four io edges, reflection (`parse`, `unparse`, `reflect`,
+`evalAs`, `sameCode`, `sameCodeC`, `interpose`, `rewrite`), and the
+type-level `weaken` and `finInt`. Everything else is a prelude def with its
+derivation visible.
 
-**The eleven Float words are implementation prims**, in the kernel for exactly the reason the Int arithmetic and the
-four io edges are: a double is a machine number and nothing in the
-language can build one. They span no structure — they are the machine,
-written down. `fneg` and `fabs` are *not* among them: negation is
-`0.0` minus, absolute value is one comparison, so both are prelude defs
-(§10), and equality is the polymorphic `eq?`, which already reaches a
-Float. There is no second spelling of equality and no `feq?`. **Recursion left this list
-on 2026-09-14** (48 → 47): the knot is spelled `#fix`, which source
-cannot write, and `with Recursive` is the only thing that emits it —
-so `fix` is a prelude def (§10) like `loop`.
+**`asFloat?` and `split` are implementation prims**, in the kernel on the
+criterion `cat`, `toStr` and `asInt?` meet: a `Str` is a machine string, and
+nothing in the language can take one apart. `split` is the general cutter, so
+there is no separate `lines`; one spelling per thing, and a newline is a
+separator like any other. Both arrived with `examples/frame.braid`, which has
+to read a CSV.
+
+**The eleven Float words are implementation prims**, in the kernel for the
+reason the Int arithmetic and the four io edges are: a double is a machine
+number and nothing in the language can build one. They span no structure and
+are the machine, written down. `fneg` and `fabs` are not among them, since
+negation is `0.0` minus and absolute value is one comparison, so both are
+prelude defs (§10). Equality is the polymorphic `eq?`, which already reaches
+a Float, so there is no second spelling of equality and no `feq?`. Recursion
+is not on this list either: the knot is spelled `#fix`, which source cannot
+write, and `with Recursive` is the only thing that emits it, so `fix` is a
+prelude def (§10) like `loop`.
 
 Wiring (cartesian structure):
 
 | word | type | note |
 |---|---|---|
-| `_` | `a0 ⇒ a0` | the identity: the section hole, marking where the incoming wire goes. `id` is the WORD for the same morphism and is a **prelude def** (`def id = _`) — one morphism, one prim |
+| `_` | `a0 ⇒ a0` | the identity: the section hole, marking where the incoming wire goes. `id` is the WORD for the same morphism and is a **prelude def** (`def id = _`): one morphism, one prim |
 | `swap` | `a0 a1 ⇒ a1 a0` | |
 | `dup` | `a0 ⇒ a0 a0` | Δ |
 | `drop` | `a0 ⇒ •` | |
 | `pass` | `ρ0 ⇒ ρ0` | identity on the whole segment |
 | `forget` | `ρ0 ⇒ •` | terminal morphism |
-| `one` | `• ⇒ •` | the identity ON the terminal object, and the only prim that is monomorphic on purpose: `pass` names the same morphism at every width and so pins nothing, which is why `[pass]` cannot serve where `[one] : • ⇒ Fn⟨• ⇒ •⟩` does. `•` is its glyph spelling in term position; ONE INHABITANT, not one wire (§5). A prim and not a prelude def because it must RUN NOTHING — the def would be `1 ; drop`, which allocates an Int to discard it |
+| `one` | `• ⇒ •` | the identity ON the terminal object, and the only prim that is monomorphic on purpose: `pass` names the same morphism at every width and so pins nothing, which is why `[pass]` cannot serve where `[one] : • ⇒ Fn⟨• ⇒ •⟩` does. `•` is its glyph spelling in term position, and it counts inhabitants rather than wires (§5). A prim rather than a prelude def because it must RUN NOTHING; the def would be `1 ; drop`, which allocates an Int to discard it |
 
 Arithmetic & strings (all exact; `-`, `div`, `mod` are bottom-op-top):
 
 | word | type |
 |---|---|
 | `+` `-` `*` `div` `mod` | `Int Int ⇒ Int` |
-| `fadd` `fsub` `fmul` `fdiv` | `Float Float ⇒ Float` — Float arithmetic (2026-09-14). One scheme, `f` + the operation spelled out: a symbolic family (`f+ f- f*`) cannot be had, because `-` is not an identifier character, so `f-` is two atoms — and a scheme that breaks on subtraction is not a scheme |
+| `fadd` `fsub` `fmul` `fdiv` | `Float Float ⇒ Float` — Float arithmetic. One scheme, `f` plus the operation spelled out: a symbolic family (`f+ f- f*`) cannot be had, because `-` is not an identifier character, so `f-` is two atoms, and a scheme that breaks on subtraction is not a scheme |
 | `fexp` `fsin` `fcos` `fsqrt` | `Float ⇒ Float` |
 | `toFloat` | `Int ⇒ Float` — the only way up |
-| `floor` | `Float ⇒ Int` — the only way down; the mathematical floor (`-2.7 ; floor` is `-3`) |
+| `floor` | `Float ⇒ Int` — the only way down, and the mathematical floor (`-2.7 ; floor` is `-3`) |
 | `cat` | `Str Str ⇒ Str` |
 | `toStr` | `a0 ⇒ Str` |
-| `showStack` | `ρ0 ⇒ Str` — the whole segment, deepest wire first, space separated, each wire as `toStr` renders it and as the REPL's `:s` prints it. A RENDERER, NOT A CLASS: nothing hooks a user-defined rendering into it. Consuming and open-tailed on `forget`'s convention: the whole segment as the final atom of its stage, the empty one anywhere else. A binder aims it at part of a stack — `dup ; _ (b -> b ; unBox ; showStack)` |
+| `showStack` | `ρ0 ⇒ Str` — the whole segment, deepest wire first, space separated, each wire as `toStr` renders it and as the REPL's `:s` prints it. A RENDERER, NOT A CLASS: nothing hooks a user-defined rendering into it. Consuming and open-tailed on `forget`'s convention: the whole segment as the final atom of its stage, the empty one anywhere else. A binder aims it at part of a stack, as in `dup ; _ (b -> b ; unBox ; showStack)` |
 | `asInt?` | `Str ⇒ (Int \| Str)` |
-| `asFloat?` | `Str ⇒ (Float \| Str)` — reads exactly the SOURCE notation for a Float literal (optional `-`, digits, point, digits), which is also what the display prints, so `toStr ; asFloat?` is the identity on every finite Float |
-| `split` | `Str Str ⇒ List(Str)` — `s sep ; split`: n+1 pieces for n occurrences, so pieces and separators rebuild the original exactly, empty pieces included. An empty separator cuts nothing |
+| `asFloat?` | `Str ⇒ (Float \| Str)` — reads the SOURCE notation for a Float literal (optional `-`, digits, point, digits), which is what the display prints, so `toStr ; asFloat?` is the identity on every finite Float |
+| `split` | `Str Str ⇒ List(Str)` — `s sep ; split` gives n+1 pieces for n occurrences, so pieces and separators rebuild the original, empty pieces included. An empty separator cuts nothing |
 | `symStr` | `Sym ⇒ Str` |
 | `print` | `a0 =IO> •` — io (§3) |
 | `true` / `false` | `• ⇒ Bool` |
 
-Routers (the primitive comparators; hit = track 1 — the predicate
-routers `odd?` `even?` `zero?` `negative?` are DERIVED prelude words
-now, via `mod`/`equals`/`less` and the `(n | n)` re-routing pattern):
+Routers are the primitive comparators, with the hit on track 1. The
+predicate routers `odd?`, `even?`, `zero?` and `negative?` are derived
+prelude words, built from `mod`, `equals` and `less` with the `(n | n)`
+re-routing pattern:
 
 | word | type |
 |---|---|
 | `eq?` | `a0 a0 ⇒ (a0 a0 \| a0 a0)` — structural equality, any value |
 | `lt?` | `Int Int ⇒ (Int Int \| Int Int)` — the only primitive order on `Int`. `gt?` `gte?` `lte?` are **prelude defs** derived from it (§10), with identical schemes |
-| `flt?` | `Float Float ⇒ (Float Float \| Float Float)` — the same, on `Float` (2026-09-14). The Float comparators that mirror `gt?`/`gte?`/`lte?` are not in the prelude: `swap`, `not` and a two-track row derive each in one stage where it is wanted |
+| `flt?` | `Float Float ⇒ (Float Float \| Float Float)` — the same, on `Float`. The Float comparators mirroring `gt?`, `gte?` and `lte?` are not in the prelude: `swap`, `not` and a two-track row derive each in one stage where it is wanted |
 
 Sums & control:
 
 | word | type |
 |---|---|
-| `alt1`…`altN`, `ok`/`here`/`again`, `miss`/`done` | `ρ0 ⇒ (… \| ρ0 \| σ0)` — spelled `in1`…`inN` before 2026-09-12; renamed (one spelling, **no `inN` alias**) because `[h >> alt1] into` read badly and `in` is the prefix `into` lives beside |
+| `alt1`…`altN`, `ok`/`here`/`again`, `miss`/`done` | `ρ0 ⇒ (… \| ρ0 \| σ0)` — one spelling, with **no `inN` alias**, because `[h >> alt1] into` read badly and `in` is the prefix `into` lives beside |
 | `there` | `(σ0) ⇒ (ρ0 \| σ0)` |
 | `merge` | `(ρ0 \| ρ0) ⇒ ρ0` |
 | `into` | `Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 \| σ0) ⇒ (σ0)` — the **open** eliminator (§6): the copairing `[h, id]`, handling the first alternative into the remaining row and shifting the rest. Not derivable: over a residual it is the only copairing there is. |
@@ -3236,15 +3228,15 @@ Metaprogramming & IO (railway-typed edges):
 | `readFile` | `Str =IO> (Str \| Str)` — io |
 | `writeFile` | `Str Str =IO> (• \| Str)` — io; hit is the empty success, miss carries the error |
 
-These three and `print` are the **whole** io surface: nothing else is
-marked, every other grade is inferred (§3). `reflect` and `parse` stay
-pure — `reflect` READS a quotation, it never runs it — and so does
-`evalAs`, which takes its grade from its witness: a pure witness admits
-only pure code and stays pure, an io witness permits io. That is the
-sandbox — what runtime-loaded code may do is bounded by the type you
-were willing to write for it. Handing a pure witness io code rides the
-miss track: `Cannot unify effects: IO vs pure (the expected type fixes
-the grade; this code must stay pure)`. See `examples/witness.braid`.
+These three and `print` are the **whole** io surface. Nothing else is
+marked, and every other grade is inferred (§3). `reflect` and `parse` stay
+pure, because `reflect` READS a quotation and never runs it. So does
+`evalAs`, which takes its grade from its witness: a pure witness admits only
+pure code and stays pure, and an io witness permits io. That is the sandbox,
+and what runtime-loaded code may do is bounded by the type you were willing
+to write for it. Handing a pure witness io code rides the miss track:
+`Cannot unify effects: IO vs pure (the expected type fixes the grade; this
+code must stay pure)`. See `examples/witness.braid`.
 
 Exponent tier (widths erased; see §13):
 
@@ -3257,34 +3249,30 @@ Exponent tier (widths erased; see §13):
 | `at` | `Fin(n) a0ⁿ ⇒ a0` — index the bundle; 0 is the DEEPEST wire |
 | `indicesN` | `a0ⁿ ⇒ (Fin(n) a0)ⁿ` — tag every wire with its own index |
 
-**`zipN >> unzipN` and `unzipN >> zipN` are both the identity**
-. They were not while `unzipN` took the flat `(a0 a1)ⁿ`:
-`zipN` boxes, so the flat splitter could not consume what `zipN`
-produced and the two were not inverse. Both sides box now, and the
-flat chunker keeps working under its own name, `splitN` — which is
-what `foldExp2`, `mapN2` and `indicesN`'s output are shaped like.
+**`zipN >> unzipN` and `unzipN >> zipN` are both the identity.** Both sides
+box, so each consumes what the other produces. The flat chunker works under
+its own name, `splitN`, which is the shape `foldExp2`, `mapN2` and
+`indicesN`'s output take.
 
-**`foldExp`, `foldExp2`, `mapN` and `mapN2` left this list on
-2026-09-21** (67 → 64), and `dupN` followed them the same day when
-`unzipN` boxed (`splitN` took its seat, so the count held at 64): all
-five are `mapAccumN` at a different motive and are now prelude defs
-with character-for-character the schemes they had (§13). `mapAccumN`
-rebuilds a bundle as it folds, which is what lets you **lift an
-ordinary word pointwise**. `addN` and `scaleN` are prelude defs too —
-and so is any lift you need:
+**`foldExp`, `foldExp2`, `mapN`, `mapN2` and `dupN` are prelude defs**, not
+prims. All five are `mapAccumN` at a different motive, and they carry
+character-for-character the schemes they had (§13). `mapAccumN` rebuilds a
+bundle as it folds, which is what lets you **lift an ordinary word
+pointwise**. `addN` and `scaleN` are prelude defs too, as is any lift you
+need:
 
 ```braid
 def addN  = zipN >> [unBox >> +] ... >> mapN    # the bundle monoid ∇
-def mulN  = zipN >> [unBox >> *] ... >> mapN    # NOT linear — outside the GLA set
+def mulN  = zipN >> [unBox >> *] ... >> mapN    # NOT linear: outside the GLA set
 def maxN  = zipN >> [(p -> p >> unBox >> (x y -> (x y >> less) [y] [x] ... >> cond))] ... >> mapN
 def negN  = [0 _ >> -] ... >> mapN
 ```
 
 **Indices.** `Aⁿ` *is* the function space `Fin(n) ⇒ A`, stored
-tabulated and flat; `Fin(n)` is an index into a bundle of width n. The
-bound is a type and is erased like every other width — at runtime a
-`Fin` is a bare `Int`. `at` and `indicesN` (above) are the
-exponent-shaped half; the rest:
+tabulated and flat, and `Fin(n)` is an index into a bundle of width n. The
+bound is a type and is erased like every other width, so at runtime a `Fin`
+is a bare `Int`. `at` and `indicesN` above are the exponent-shaped half, and
+these are the rest:
 
 | word | type |
 |---|---|
@@ -3293,15 +3281,15 @@ exponent-shaped half; the rest:
 | `finInt` | `Fin(n) ⇒ Int` — runtime identity; forgets the bound |
 | `fin0`, `fin1`, `fin2`, … | `• ⇒ Fin(n+k+1)` — index literals, like `altN` |
 
-**Every index introduction's `n` must be forced by a relevant input** —
-a literal's offset, or a live bundle on the stack. Hence two modes.
-**Static**: a literal's offset *is* the proof that k is in range, and
+**Every index introduction's `n` must be forced by a relevant input**,
+either a literal's offset or a live bundle on the stack. That gives two
+modes. **Static**: a literal's offset *is* the proof that k is in range, and
 `weaken` maintains it, so `at` needs no runtime check. **Dynamic**:
 `checkedAt` tests an `Int` against the live segment's actual width and
-ROUTES — the hit track is the witness, the same move `odd?` makes for
-parity. There is deliberately no `tabulate` and no bare `asFin`: an
-output-only `n` has no witness, exactly as for `zeroN` (§13). The full
-argument is `design-indices.md`.
+ROUTES, with the hit track as the witness, the move `odd?` makes for parity.
+There is deliberately no `tabulate` and no bare `asFin`, because an
+output-only `n` has no witness, as for `zeroN` (§13). The full argument is
+`design-indices.md`.
 
 ```braid
 1 2 3 >> indicesN            # • ⇒ Fin(3) Int Fin(3) Int Fin(3) Int
@@ -3319,19 +3307,19 @@ fin1 10 20 30 >> at          # 20
 **Lists**: `nil` `cons` `uncons` `fold` (left fold) `foldList`
 (structural) `map` `filter` `reverse` `append` `concat` `single`
 `flatMap` `len` `sum` `product` `range` `downFrom` `take` `skip` `zip`
-(`List(a) List(b) ⇒ List(a b)`) `unzip` (its inverse, `List(Box(a b)) ⇒
-List(a) List(b)` — 2026-09-14) `nth` (`Int List(a) ⇒ Maybe(a)`,
-counting from 0 — 2026-09-14) `all` `any` `partitionSum` `sequence`
-(List over the sum monad) `printAll`.
+(`List(a) List(b) ⇒ List(a b)`) `unzip` (its inverse,
+`List(Box(a b)) ⇒ List(a) List(b)`) `nth` (`Int List(a) ⇒ Maybe(a)`,
+counting from 0) `all` `any` `partitionSum` `sequence` (List over the sum
+monad) `printAll`.
 
 **Router algebra** (quoted predicates as values): `not` (track swap)
 `negate` `both` `either` `equals?` `less?` `equalsTo` `lessThan`
 `else?` (always-hit) `assocL`/`assocR` (re-nest a sum);
 `splice : (ρ0 | (σ0)) ⇒ (ρ0 | σ0)` (flatten one level of nesting into
 the parent row, any inner arity); the ladder steps `settle :
-(ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)` (guard ladder — fold an agreeing answer
-into the pile) and `settleR : ((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)` (its
-validation mirror). See `examples/settle.braid`.
+(ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)` (a guard ladder folds an agreeing answer
+into the pile) and `settleR : ((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)` (its validation
+mirror). See `examples/settle.braid`.
 
 **Float**: `fneg : Float ⇒ Float` (`0.0` minus) and
 `fabs : Float ⇒ Float` (one `flt?` and a two-track row). Everything
@@ -3348,8 +3336,8 @@ else about a double is a machine fact and therefore a prim (§9).
 
 **Knots** (derived): `fix :
 Fn⟨Fn⟨ρ0 =Recursive> ρ1⟩ ρ0 ⇒ ρ1⟩ =Recursive> Fn⟨ρ0 =Recursive> ρ1⟩` is
-the parameterized (Conway) fixpoint on `Fn`, for **open** recursion —
-a body someone else wrote (§8). It is a prelude def under the marker,
+the parameterized (Conway) fixpoint on `Fn`, for **open** recursion over a
+body someone else wrote (§8). It is a prelude def under the marker,
 eta-expanded because Braid is call-by-value:
 
 ```braid
@@ -3358,9 +3346,9 @@ def fix with Recursive = (b -> [(b >> fix >> id) ... >> b ... >> ev])
 
 The `id` says the knot is **one wire**: a grouped atom in non-final
 position is closed (§4), and closing would otherwise erase the knot's
-own arity. Its arrow carries `Recursive` where the old primitive's was
-pure — the derived word runs the knot's `ev`, and the scope it is
-written under tied one, so it minted (§3).
+own arity. Its arrow carries `Recursive` because the derived word runs the
+knot's `ev` and the scope it is written under tied one, so that scope minted
+(§3).
 
 **Loops** (all derived): `loop :
 Fn⟨ρ0 ⇒ (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1` is the **Elgot dagger**, and it is
@@ -3372,75 +3360,72 @@ def loop with Recursive = (f ... -> f ... >> ev >> (f ... >> loop | pass) >> mer
 
 `f† = ∇ ∘ (f† + id) ∘ f`, written out: the body routes into
 `(continue | done)`, the continue track re-enters through the knot, the
-done track falls out, and `merge` — the codiagonal ∇ — joins them. Note
-it needs **no `into`**: the row is closed and two-track, so the
-copairing `[f†, id]` is just `(f† | pass) >> merge`; `into` (§6) is for
-the open case. `Recursive` is the marker's receipt, and it sits on
-`loop`'s **own** arrow, because the knot is what recurses and the body
-is asked for nothing (§3: composition joins). A written
-pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` therefore goes straight in. Cost measured:
-100 000 iterations in 3.2 s against 1.9 s for the builtin, and no
-growth in memory.
+done track falls out, and `merge`, the codiagonal ∇, joins them. It needs
+**no `into`**: the row is closed and two-track, so the copairing `[f†, id]`
+is `(f† | pass) >> merge`, and `into` (§6) is for the open case. `Recursive`
+is the marker's receipt, and it sits on `loop`'s **own** arrow, because the
+knot is what recurses and the body is asked for nothing (§3, composition
+joins). A written pure `Fn⟨Σ ⇒ (Σ|Θ)⟩` therefore goes straight in.
 
 `while` `until` (+ `whileFn`/`untilFn`) are three-line defs over it:
 `while : Fn⟨ρ0 ⇒ (ρ1 | ρ2)⟩ Fn⟨ρ1 ⇒ ρ0⟩ ρ0 =Recursive> ρ2`.
 
-**The identity and the order**: `def id = _` — `_` is
-the identity prim (the positional spelling), `id` the word for it.
-`def gt? = swap >> lt? >> (swap | swap)`, `def gte? = lt? >> not >>
-(pass | pass)`, `def lte? = gt? >> not >> (pass | pass)` — one
-primitive order, `lt?`, and the other three read off it. The trailing
-closed 2-row is not decoration: `not` is built from injections, which
-are open, so `(pass | pass)` re-closes the row and makes the derived
-schemes **identical** to the prims' (`Int Int ⇒ (Int Int | Int Int)`).
+**The identity and the order.** `def id = _`, where `_` is the identity
+prim in its positional spelling and `id` the word for it. `def gt? = swap >>
+lt? >> (swap | swap)`, `def gte? = lt? >> not >> (pass | pass)` and
+`def lte? = gt? >> not >> (pass | pass)` read three orders off the one
+primitive order, `lt?`. The trailing closed 2-row is not decoration: `not` is
+built from injections, which are open, so `(pass | pass)` re-closes the row
+and makes the derived schemes **identical** to the prims'
+(`Int Int ⇒ (Int Int | Int Int)`).
 
-**Bundles**: `sumN : Intⁿ ⇒ Int`; `pack : aⁿ ⇒ List(a)` and `pack2`
-(derived from their own eliminators — `foldExp` + `cons`/`reverse`,
+**Bundles**: `sumN : Intⁿ ⇒ Int`, and `pack : aⁿ ⇒ List(a)` with `pack2`,
+derived from their own eliminators (`foldExp` with `cons` and `reverse`,
 Church-style for `pack2`).
 
-**The closed structure**: `curry : Fn⟨a ρ0 ⇒ ρ1⟩ ⇒
-Fn⟨a ⇒ Fn⟨ρ0 ⇒ ρ1⟩⟩` — λ, the other half of the exponential whose
-counit is the prim `ev` (§9). It is a **prelude def**, not a prim:
-`def curry = (f -> [(x -> [x ... >> f ... >> ev])])`, and its own body
-is the one binder-into-quote that abstraction elimination takes as a
-generator rather than eliminating (§6). From it: `capture : a
-Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` (partial application — `curry` then `ev`),
+**The closed structure.** `curry : Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a ⇒ Fn⟨ρ0 ⇒ ρ1⟩⟩` is
+λ, the other half of the exponential whose counit is the prim `ev` (§9). It
+is a **prelude def** rather than a prim:
+`def curry = (f -> [(x -> [x ... >> f ... >> ev])])`, and its own body is the
+one binder-into-quote that abstraction elimination takes as a generator
+rather than eliminating (§6). From it come
+`capture : a Fn⟨a ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩`, which is `curry` then `ev`,
 and the distributivity family `dist2 : a (ρ0 | ρ1) ⇒ (a ρ0 | a ρ1 | σ0)`
 with its inverse `undist2 : (a ρ0 | a ρ1) ⇒ a (ρ0 | ρ1 | σ0)`, plus
 `dist3`/`dist4`/`undist3`/`undist4`. Distributivity is a **theorem**
 here, not an axiom: `P × –` is a left adjoint (that *is* `curry`), left
-adjoints preserve coproducts, and `dist2`'s body is that proof — capture
-the wire into one handler per track, then `case2`. `undist` needs no
-closed structure: it is the map any category with coproducts has.
-`distN` follows `caseN`'s arity family and, like `caseN`, the sums
-**nest** — polymorphism does not reach a row's width.
+adjoints preserve coproducts, and `dist2`'s body is that proof: capture the
+wire into one handler per track, then `case2`. `undist` needs no closed
+structure, being the map any category with coproducts has. `distN` follows
+`caseN`'s arity family, and like `caseN` the sums **nest**, because
+polymorphism does not reach a row's width.
 `examples/distributive.braid` runs seven laws over two models.
 
-**Strength**: `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` — run a program
-one wire deeper, the wire beneath untouched; compose it once per
-context wire (`[dup >> *] >> lift >> lift : • ⇒ Fn⟨a0 a1 Int ⇒ a0 a1
-Int⟩`). This is tensorial strength, the action of `(A ⊗ −)` on a
-morphism, and it is exactly what threads a resource past a pure stage —
-so ambient threading (§6) needs no machinery for the pure case, only
-the counting. `def lift = (f -> [_ (f ... >> ev)])`.
+**Strength.** `lift : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨a0 ρ0 ⇒ a0 ρ1⟩` runs a program one
+wire deeper with the wire beneath untouched, and composes once per context
+wire (`[dup >> *] >> lift >> lift : • ⇒ Fn⟨a0 a1 Int ⇒ a0 a1 Int⟩`). This is
+tensorial strength, the action of `(A ⊗ −)` on a morphism, and it is what
+threads a resource past a pure stage, so ambient threading (§6) needs no
+machinery for the pure case, only the counting.
+`def lift = (f -> [_ (f ... >> ev)])`.
 
-**Code** (§12): `getCode : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Code` (`reflect`, or `nil`
-when `reflect` misses); `stagewise : Fn⟨Stage ⇒ Code⟩ Code ⇒ Code` —
-the EXTENSION of a graph morphism to a whole spine, which is what a
-`functor` declaration applies (§8) — and `atomwise : Fn⟨Atom ⇒ Stage⟩
-Code ⇒ Code`, the same one level down (`flatMap` on the spine, both);
-`interpose : Code ⇒ Fn⟨Stage ⇒ Code⟩`, which BUILDS the graph morphism
-that inserts a checked stage after every generator, and `interposeRaw`
-(same, unchecked) with the prim `checkedStage : Code ⇒ Code` between
-them; `lift2 : Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` — any
-`Code ⇒ Code` word applied at runtime, the program its own witness and
-its own fallback; `box`.
+**Code** (§12). `getCode : Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Code` is `reflect`, or `nil` when
+`reflect` misses. `stagewise : Fn⟨Stage ⇒ Code⟩ Code ⇒ Code` is the EXTENSION
+of a graph morphism to a whole spine, which is what a `functor` declaration
+applies (§8), and `atomwise : Fn⟨Atom ⇒ Stage⟩ Code ⇒ Code` is the same one
+level down; both are `flatMap` on the spine.
+`interpose : Code ⇒ Fn⟨Stage ⇒ Code⟩` BUILDS the graph morphism that inserts
+a checked stage after every generator, with `interposeRaw` the unchecked form
+and the prim `checkedStage : Code ⇒ Code` between them.
+`lift2 : Fn⟨Code ⇒ Code⟩ Fn⟨ρ0 ⇒ ρ1⟩ ⇒ Fn⟨ρ0 ⇒ ρ1⟩` applies any
+`Code ⇒ Code` word at runtime, the program being its own witness and its own
+fallback. And `box`.
 
 ## 11. Control flow — the idioms
 
-Two tiers of predicate: **routers** (`odd?`, keep + route — branches
-receive the data) and **verdicts** (`odd`, forget to `Bool`).
-`verdict` converts. Then, by situation:
+Two tiers of predicate. A **router** such as `odd?` keeps and routes, so the
+branches receive the data. A **verdict** such as `odd` forgets to `Bool`.
+`verdict` converts between them. Then, by situation:
 
 ```braid
 # bound subject + word ladder (the general elif chain)
@@ -3485,112 +3470,105 @@ def double100 with Recursive = _ 100 >> less? >> (2 _ >> * >> double100 | _) >> 
 [(self ... -> _ 100 >> less? >> (2 _ >> * >> self ... >> ev | _) >> merge)] ... >> fix ... >> ev
 ```
 
-There is **no guard syntax in the parser** — every idiom above is
-prelude defs plus core forms. See `examples/ladder.braid` and
+There is **no guard syntax in the parser**. Every idiom above is prelude
+defs plus core forms. See `examples/ladder.braid` and
 `design-control-flow.md` for the full inventory and the reasoning.
 
 ## 12. Metaprogramming
 
 *Last changed 2026-09-18.*
 
-Metaprogramming in Braid is a **ladder of declarations**, and reading it
-in order is most of learning it. `Code` is the *bottom* rung, not the
+Metaprogramming in Braid is a **ladder of declarations**, and reading it in
+order is most of learning it. `Code` is the *bottom* rung rather than the
 first: it is what you reach for when nothing above it fits.
 
-**1. A theory is a presentation** (§8). `theory Monoid(a) = unit : • ⇒
-a ; op : a a ⇒ a` names generators and their types, and laws that run.
-Nothing is dispatched and nothing is inferred: a theory is a
-vocabulary with a signature.
+**1. A theory is a presentation** (§8).
+`theory Monoid(a) = unit : • ⇒ a ; op : a a ⇒ a` names generators, their
+types, and laws that run. Nothing is dispatched and nothing is inferred; a
+theory is a vocabulary with a signature.
 
-**1¼. A model may map the OBJECTS too**. `model Mod in
-Base(Int ↦ Mod7 via reduce)` is a functor on the ambient presentation
-whose action on objects is the substitution `Int := Mod7`; `via` gives
-the literal family its image, the table gives the generators theirs, a
-def with neither is **unfolded** (`F(def) = F(body)`, cached as
-`M@def`), and a word that mentions the mapped type with none of the
-three is refused by name. `examples/modular.braid` runs one polynomial
-over `Int` and over Z/7 without writing it twice, and — in the same
-file — shows that this is *not* the same claim as being a ring
-homomorphism, which is what `transformation` is for.
+**1¼. A model may map the OBJECTS too.**
+`model Mod in Base(Int ↦ Mod7 via reduce)` is a functor on the ambient
+presentation whose action on objects is the substitution `Int := Mod7`. `via`
+gives the literal family its image, the table gives the generators theirs, a
+def with neither is **unfolded** (`F(def) = F(body)`, cached as `M@def`), and
+a word that mentions the mapped type with none of the three is refused by
+name. `examples/modular.braid` runs one polynomial over `Int` and over Z/7
+without writing it twice, and in the same file shows that this is a weaker
+claim than being a ring homomorphism, which is what `transformation` is for.
 
-**1½. A model may be built out of another model**.
-`model Fwd(Smooth(a, g)) in Smooth(Dual(a), a)` is a **family** — a
-functor Mod(Smooth) → Mod(Smooth) — and `with Fwd(Floats)` applies it,
-minting a model whose name is the application. It is the *presentation*
-level of the same move `functor` makes at the *code* level: a functor
-rewrites a program, a family rewrites a model. Neither is a dictionary
-and neither is inferred. Laws cannot be checked for the family (that
-would need equality modulo the parameter theory's laws); they are
-checked at each instantiation (§8).
+**1½. A model may be built out of another model.**
+`model Fwd(Smooth(a, g)) in Smooth(Dual(a), a)` is a **family**, a functor
+Mod(Smooth) → Mod(Smooth), and `with Fwd(Floats)` applies it, minting a model
+whose name is the application. It is the *presentation* level of the move
+`functor` makes at the *code* level: a functor rewrites a program, a family
+rewrites a model. Neither is a dictionary and neither is inferred. Laws
+cannot be checked for the family, which would need equality modulo the
+parameter theory's laws, so they are checked at each instantiation (§8).
 
-**2. `in T` declares a morphism of it** — a **template**. `def fold1
-in Monoid = [op] unit ... ; foldExp` is a body written in the
+**2. `in T` declares a morphism of it**, a **template**.
+`def fold1 in Monoid = [op] unit ... ; foldExp` is a body written in the
 theory's vocabulary, waiting for a model. It applies nothing and mints
-nothing; it is not even a def until a model arrives.
+nothing, and it is not even a def until a model arrives.
 
-**3. `with X` applies** — one rule, every kind: *what follows is written
-in the domain of X, and X is applied to it.* An **model** points
-*into* the base (`with IntSum ; fold1` renames slot names to that
-model's words and re-infers); a **model with a carrier**, a
-**resource** and a **functor** point *out* of it (`with Circuits`
-transports composition itself into the category that model presents;
-`with Fuel` writes the routing;
-`with Traced` extends a graph morphism along the wiring). A model of
-`Base` — `model Opt in Base = dupInt = dup` — is the base
-reinterpreting itself, and is where optimizers live (§8).
+**3. `with X` applies**, by one rule for every kind: what follows is written
+in the domain of X, and X is applied to it. A **model** points *into* the
+base, so `with IntSum ; fold1` renames slot names to that model's words and
+re-infers. A **model with a carrier**, a **resource** and a **functor** point
+*out* of it: `with Circuits` transports composition itself into the category
+that model presents, `with Fuel` writes the routing, and `with Traced`
+extends a graph morphism along the wiring. A model of `Base`, such as
+`model Opt in Base = dupInt = dup`, is the base reinterpreting itself, and is
+where optimizers live (§8).
 
-**4. Every `with` leaves a receipt.** The label on the arrow is
-inference's record of what the elaborated code went through:
-`total : Intⁿ⁰ =IntSum> Int`, `easy : Int =Circuits Recursive> Int`,
-`poly : Int =Opt> Int`. Markers are **written** (the `with`), receipts
-are **inferred** (the label); only a `with` mints, and every `with` does.
-A written type must carry the label too, so an unlabelled witness
-refuses instrumented code exactly as a pure one refuses io — which is
-the whole difference between an optimizer you can audit and one you
-must trust.
+**4. Every `with` leaves a receipt.** The label on the arrow is inference's
+record of what the elaborated code went through: `total : Intⁿ⁰ =IntSum> Int`,
+`easy : Int =Circuits Recursive> Int`, `poly : Int =Opt> Int`. Markers are
+**written**, the `with` itself; receipts are **inferred**, the label. Only a
+`with` mints, and every `with` does. A written type must carry the label too,
+so an unlabelled witness refuses instrumented code as a pure one refuses io.
+That is the difference between an optimizer you can audit and one you must
+trust.
 
-**5. A functor over `Code` — instrumentation and retrofit.** Everything
-above is by generators, checked once, and free at every use. So is
-this, and that is the change of 2026-09-18: `functor F = <graph
-morphism>` gives ONE IMAGE PER GENERATOR, `Fn⟨Stage ⇒ Code⟩`, and the
-extension along a spine is computed rather than written — a functor out
-of a free category *is* a graph morphism, so functoriality is the
-universal property and not a promise. What is still untyped is the
-middle: the image is a program on syntax, spliced and re-inferred, so
-the IMAGES are unchecked even though the functor is one. Reach for it
-when what you want is not a model of anything — a tracer, a meter, a
-rewrite over the shape of a spine rather than over its words — and read
-*Functors, and the ones known to type* below for where the guarantees
+**5. A functor over `Code` is instrumentation and retrofit.** Everything
+above is by generators, checked once, and free at every use, and so is this.
+`functor F = <graph morphism>` gives ONE IMAGE PER GENERATOR,
+`Fn⟨Stage ⇒ Code⟩`, and the extension along a spine is computed rather than
+written. A functor out of a free category *is* a graph morphism, so
+functoriality is the universal property rather than a promise. What is
+untyped is the middle: the image is a program on syntax, spliced and
+re-inferred, so the IMAGES are unchecked even though the functor is one.
+Reach for it when what you want is not a model of anything, such as a tracer,
+a meter, or a rewrite over the shape of a spine rather than over its words.
+*Functors, and the ones known to type*, below, says where the guarantees
 stop.
 
-There is no longer a whole-spine escape hatch: a `Code ⇒ Code` word may
-not head a `with` (§8). Its two homes are `lift2 [w]` — the runtime
-lift, checked per program — and a declaration program, for code that is
-generated rather than rewritten.
+There is no whole-spine escape hatch: a `Code ⇒ Code` word may not head a
+`with` (§8). Its two homes are `lift2 [w]`, the runtime lift checked per
+program, and a declaration program, for code that is generated rather than
+rewritten.
 
-**The worked example of rungs 1–3 is `examples/autodiff.braid`**
-, and it is worth reading precisely for what it does
-*not* contain: no `Code`, no `functor`, no `getCode`, and no chain
-rule. Differentiation is a functor into pairs of a value and a linear
+**The worked example of rungs 1 to 3 is `examples/autodiff.braid`**, and
+what it does *not* contain is the part to notice: no `Code`, no `functor`, no
+`getCode`, and no chain rule. Differentiation is a functor into pairs of a value and a linear
 map (Elliott; §16), a model of a theory *is* a functor out of the free
-category on the theory's generators, so the chain rule is the
-statement that composition goes to composition — which is what a model
-already promises. The file writes `theory Smooth(a, g)` (a ring with
-`exp`, `sin` and `cos`), three models of it — `Floats` evaluates, `Fwd`
-carries a tangent, `Rev` carries the transpose of the same linear map
-as a continuation — and one body per program, written `in Smooth`
-and read by all three. Each slot says what the derivative of **one**
-operation is; nothing composes derivatives by hand, because `;` does.
-`transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent` is
-the sentence *AD computes the right value*, and all ten of its squares
-are **proved** by the normalizer rather than sampled; `transformation
-Transpose : Fwd(Floats) ⇒ Rev` is
-the sentence *forward and reverse are one linear map*, and its
-verdicts are mixed — three proved, seven sampled through the
-exit.
+category on the theory's generators, so the chain rule is the statement that
+composition goes to composition, which is what a model already promises. The
+file writes `theory Smooth(a, g)`, a ring with `exp`, `sin` and `cos`, and
+three models of it: `Floats` evaluates, `Fwd` carries a tangent, and `Rev`
+carries the transpose of the same linear map as a continuation. One body per
+program is written `in Smooth` and read by all three. Each slot says what the
+derivative of **one** operation is, and nothing composes derivatives by hand,
+because `;` does.
+`transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent` is the
+sentence *AD computes the right value*, and all ten of its squares are
+**proved** by the normalizer rather than sampled.
+`transformation Transpose : Fwd(Floats) ⇒ Rev` is the sentence *forward and
+reverse are one linear map*, and its verdicts are mixed: three proved, seven
+sampled through the exit.
 
-`Fwd` is a **family** — `model Fwd(Smooth(a, g)) in
-Smooth(Dual(a), a)` — so `with Fwd(Fwd(Floats))` differentiates the same
+`Fwd` is a **family**, `model Fwd(Smooth(a, g)) in Smooth(Dual(a), a)`, so
+`with Fwd(Fwd(Floats))` differentiates the same
 three templates **twice** and the file prints second derivatives. That
 is also why the theory declares `cos`: a theory closed under `Fwd` must
 be able to write each generator's derivative in its **own** vocabulary,
@@ -3609,117 +3587,106 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 ```
 
 `Frame` models the same `Doctrine` `Circuits` does. Its hom-object
-`Col(ρ, σ)` is a **function between columns** — a row program of any
-width, because the arguments are whole stacks — `embed` is `map` and
-`compose` is composition. "The other columns ride past" is what the
-base's own `...` already means, so the two-wire stage `px qty` carries
-with no strength to say it again. The model's laws are `map`'s functor
-laws, and the doctrine's five run over them before the file prints
-anything. The row store inside is a `List(Box(ρ))`, one list of boxed
-rows: a *stack of lists* is the non-injective column store — three
-columns of ten and ten columns of three are the same stack of Ints —
-and it must not enter the type.
+`Col(ρ, σ)` is a **function between columns**, a row program of any width,
+because the arguments are whole stacks. `embed` is `map` and `compose` is
+composition. "The other columns ride past" is what the base's own `...`
+already means, so the two-wire stage `px qty` carries with no strength to say
+it again. The model's laws are `map`'s functor laws, and the doctrine's five
+run over them before the file prints anything. The row store inside is a
+`List(Box(ρ))`, one list of boxed rows. A *stack of lists* would be the
+non-injective column store, since three columns of ten and ten columns of
+three are the same stack of Ints, and it must not enter the type.
 
 **The columns are the field words.** `sym`, `px` and `qty` are the
-projections the `data` declaration generated (§5) — ordinary
-definitions, so a column name composes, quotes and reflects like any
-other word. Nothing in the type system knows a column is called `px`;
-the header travels as runtime data, a `List(Str)` handed to the
-printer.
+projections the `data` declaration generated (§5), ordinary definitions, so a
+column name composes, quotes and reflects like any other word. Nothing in the
+type system records that a column is called `px`; the header travels as
+runtime data, a `List(Str)` handed to the printer.
 
-**What stays at frame level, and why.** A functor cannot drop a row.
-`map` preserves the index pointwise, so a transported row program
-cannot move a row, drop one, or see its neighbours — which is exactly
-right, and exactly why `keep`, `groupBy`, `sortBy`, `join` and the
-aggregations are written **once**, on columns, outside any scope. The
-division of labour is not a convention; it is what the model is.
+**What stays at frame level, and why.** A functor cannot drop a row. `map`
+preserves the index pointwise, so a transported row program cannot move a
+row, drop one, or see its neighbours. That is why `keep`, `groupBy`, `sortBy`,
+`join` and the aggregations are written **once**, on columns, outside any
+scope. The division of labour is what the model is rather than a convention.
 
-**The index reading.** A frame *is* a map from an index to a row —
-`Fn⟨I ⇒ row⟩` with its key set — and the file represents it as
-`List(row)` with an implicit positional index `0 … n−1`, which is
-`Fin(n) ⇒ row` stored tabulated and flat (§13). The implicit index is
-what makes `map` index-preserving and `zip` meaningful; making it
-explicit would want a key type in the hom-object, and `k(..., ...)`
-takes two.
+**The index reading.** A frame *is* a map from an index to a row,
+`Fn⟨I ⇒ row⟩` with its key set, and the file represents it as `List(row)` with
+an implicit positional index `0 … n−1`, which is `Fin(n) ⇒ row` stored
+tabulated and flat (§13). The implicit index is what makes `map`
+index-preserving and `zip` meaningful. Making it explicit would want a key
+type in the hom-object, and `k(..., ...)` takes two.
 
-**The one thing the doctrine cannot carry** is a *filter written as a
-row program*: `row ⇒ (row | •)` transports a SUM, and the Doctrine has
-no choice slot (`ArrowChoice`'s `left`). `keep` sidesteps it — the
-deciding is a column, which a functor may compute, and the dropping is
-frame level.
+**The one thing the doctrine cannot carry** is a *filter written as a row
+program*. `row ⇒ (row | •)` transports a SUM, and the Doctrine has no choice
+slot, `ArrowChoice`'s `left`. `keep` sidesteps it: the deciding is a column,
+which a functor may compute, and the dropping is frame level.
 
-**The third worked example is `examples/prob.braid`** —
-**probability as a Markov category**, and it is the one that shows what
-a model is *for*. A Markov category (Fritz; §16) is a monoidal category
-in which every wire can be copied and discarded and **copying is not
-natural**: copy after a coin flip gives two equal bits, two coin flips
-give two independent ones. Braid's base is cartesian, so `dup` there
-*is* natural — `examples/laws.braid` has the normalizer **prove**
-`dup ; f f = f ; dup` for an arbitrary word — and a model of the
-`Doctrine` whose hom-object is a **stochastic map** is the Markov
-category `with M` maps into. So the distinction is drawn structurally:
+**The third worked example is `examples/prob.braid`**, probability as a
+Markov category, and it is the one that shows what a model is *for*. A Markov
+category (Fritz; §16) is a monoidal category in which every wire can be
+copied and discarded and **copying is not natural**: copy after a coin flip
+gives two equal bits, and two coin flips give two independent ones. Braid's
+base is cartesian, so `dup` there *is* natural, and `examples/laws.braid` has
+the normalizer **prove** `dup ; f f = f ; dup` for an arbitrary word. A model
+of the `Doctrine` whose hom-object is a **stochastic map** is the Markov
+category `with M` maps into, so the distinction is drawn structurally:
 
 ```braid
 def twoEqualE with Enum = half ; flip ; dup        -- ONE flip, copied
 def twoIndepE with Enum = twoBiases ; bothFlipE    -- TWO flips
 ```
 
-and the two `report`s differ — `{HH: ½, TT: ½}` against four cells of
-¼ — in **all three models**. Nothing in the file declares that they
-should; `dup` is transported by the functor, and the disagreement is
-what the model *is*.
+The two `report`s differ in **all three models**: `{HH: ½, TT: ½}` against
+four cells of ¼. Nothing in the file declares that they should. `dup` is
+transported by the functor, and the disagreement is what the model *is*.
 
-**A generator is an ENTRY at a kernel.** A hom-object `k(a, b)` names
-one object on each side and there is no `k(•, b)`, because `•` is not a
-wire. So a distribution is written as the kernel it is —
-`flip : • ⇒ k(Float, Bool)` — and the bias arrives on the wire the
-kernel consumes, produced by an ordinary base stage *inside* the
-transported scope (`half = (n -> 0.5)`, one wire in, one wire out, so
-the functor embeds it). Nothing special-cases a parameter. `report :
-k(Int, b) ⇒ d(b)` is the **exit**, and its result is a theory
-parameter — a *constructor* parameter this time, `d(_)`, since what a
-model hands back about a kernel is `Weighted(b)`, `Draws(b)` or
-`Reach(b)`. `Int` stands in for the monoidal unit the Doctrine has no
-name for, and `report` runs at 0.
+**A generator is an ENTRY at a kernel.** A hom-object `k(a, b)` names one
+object on each side and there is no `k(•, b)`, because `•` is not a wire. A
+distribution is therefore written as the kernel it is,
+`flip : • ⇒ k(Float, Bool)`, and the bias arrives on the wire the kernel
+consumes, produced by an ordinary base stage *inside* the transported scope
+(`half = (n -> 0.5)`, one wire in and one wire out, so the functor embeds
+it). Nothing special-cases a parameter. `report : k(Int, b) ⇒ d(b)` is the
+**exit**, and its result is a theory parameter, a *constructor* parameter
+`d(_)` this time, since what a model hands back about a kernel is
+`Weighted(b)`, `Draws(b)` or `Reach(b)`. `Int` stands in for the monoidal
+unit the Doctrine has no name for, and `report` runs at 0.
 
-**Three models**: `Enum` (the finite distribution monad's Kleisli
-category — `compose` is bind with the weights multiplied, exact),
-`Sampler` (a seed threaded as a resource, a 48-bit LCG written in
-Braid, so every printed count is reproducible), `Nondet` (the support
-— a weight is a bit). The doctrine's five category laws run for all
-three, at *stochastic* evidence, before the file prints. `Prob` also
-declares a strength of its **own**, `under : k(a, b) ⇒ k(c a, c b)`,
-because a Markov category's generators are carriers at a fixed width
-and nothing in the base can widen a carrier; there is no pairing in it,
-because over stacks whiskering is concatenation.
+**Three models.** `Enum` is the finite distribution monad's Kleisli category,
+where `compose` is bind with the weights multiplied, exactly. `Sampler`
+threads a seed as a resource, a 48-bit LCG written in Braid, so every printed
+count is reproducible. `Nondet` is the support, where a weight is a bit. The
+doctrine's five category laws run for all three, at *stochastic* evidence,
+before the file prints. `Prob` also declares a strength of its **own**,
+`under : k(a, b) ⇒ k(c a, c b)`, because a Markov category's generators are
+carriers at a fixed width and nothing in the base can widen a carrier. There
+is no pairing in it, because over stacks whiskering is concatenation.
 
 **And what it refuses.** `transformation Expect in Enum ⇒ anything` is
 not declarable and the reason is mathematics, not machinery:
 E[g(X)] ≠ g(E[X]), so expectation does not preserve composition.
 What it *is* a homomorphism of is the convex structure, and that is a
-second, one-carrier theory in the same file (`theory Convex(m)`, the
-fair mixture) with `transformation Expect in Mixtures ⇒ Means` checked
-at four squares. `Sampler ⇒ Enum` has no component at all — a sample
-is not a function of the distribution. `Support : Enum ⇒ Nondet` is
-mathematically a homomorphism and is *still* refused, at the `under`
-square, for a reason worth knowing: a component must be generic in the
-hom-object's arguments, so it can never **run** the carrier, and the
-two sides are then closures that only the normalizer could weigh. See
-§14.
+second, one-carrier theory in the same file: `theory Convex(m)`, the fair
+mixture, with `transformation Expect in Mixtures ⇒ Means` checked at four
+squares. `Sampler ⇒ Enum` has no component at all, since a sample is not a
+function of the distribution. `Support : Enum ⇒ Nondet` is mathematically a
+homomorphism and is still refused at the `under` square, for a reason worth
+knowing: a component must be generic in the hom-object's arguments, so it can
+never **run** the carrier, and the two sides are then closures that only the
+normalizer could weigh. See §14.
 
 ### `Code`: reflection and splicing
 
 `reflect` turns a quotation into its **spine**: `Code = List(Stage)`,
 `Stage = List(Atom)`, `data Atom = (prim | int | str | sym | quote |
-row | group)`. Lambdas reflect as pure wiring (abstraction
-elimination) — **every** binder, open ones and the naming form
-included, and whatever the body contains: injections, `merge`, open
-groups. The parameter block is treated as a *resource* for the body's
-duration — parked as the deepest wires, exactly where `with` parks a
-resource, and every body stage routed over it with a leading `_` per
-parameter; open-arity atoms eat upward and never reach it, a fetch is
-a `dup` on the block swapped up into place, and the block is dropped
-once at the end. **True closures reflect too**: a
+row | group)`. Lambdas reflect as pure wiring, by abstraction elimination,
+and that covers **every** binder, open ones and the naming form included,
+whatever the body contains: injections, `merge`, open groups. The parameter
+block is treated as a *resource* for the body's duration. It is parked as the
+deepest wires, where `with` parks a resource, and every body stage is routed
+over it with a leading `_` per parameter. Open-arity atoms eat upward and
+never reach it, a fetch is a `dup` on the block swapped up into place, and
+the block is dropped once at the end. **True closures reflect too**: a
 parameter used inside a quotation becomes a `capture` and one used
 inside a row becomes a `dist2` — or, for a wider row or one with a
 residual, the generator `#dist:K` (§6) — so `reflect` is **total on
@@ -3731,13 +3698,13 @@ witness and runs it; failures ride the miss track *with the untouched
 segment as evidence*. `unparse`/`parse` + `readFile`/`writeFile`
 round-trip code through disk (`examples/io.braid`).
 `box : Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩` defers instead of
-running — the other half of `reflect`'s round trip.
+running, which is the other half of `reflect`'s round trip.
 
-**Cut soundness** (`examples/cuts.braid`): Braid is not
-token-concatenative, but at spine granularity the concatenative
-property is a runnable theorem — every stage-boundary cut yields two
-runnable pieces with `run(prefix) ; run(suffix) = run(whole)`, atom
-slices within a stage are runnable sub-tensors, and any slice boxes.
+**Cut soundness** (`examples/cuts.braid`). Braid is not token-concatenative,
+and at spine granularity the concatenative property is a runnable theorem:
+every stage-boundary cut yields two runnable pieces with
+`run(prefix) ; run(suffix) = run(whole)`, atom slices within a stage are
+runnable sub-tensors, and any slice boxes.
 
 ### The splice check
 
@@ -3745,8 +3712,8 @@ Code that will only exist at runtime has no type the checker can
 discover, so `evalAs` asks you to write one. Its first operand is a
 **witness**: an ordinary program whose *arrow* is the expectation the
 loaded code must meet. The witness is never applied. It is spelled as a
-value because Braid has no type syntax inside terms — a program at the
-type you mean is the way to name that type.
+value because Braid has no type syntax inside terms, so a program at the type
+you mean is the way to name that type.
 
 ```braid
 [dup ; *] c (7) ; evalAs      -- "I expect Int ⇒ Int"
@@ -3759,14 +3726,14 @@ composable. When the splice runs, the loaded code's inferred scheme must
 not unification, and the difference is the soundness of the whole
 mechanism: types are erased by then, so the check cannot know which
 instantiation of a polymorphic witness the context chose, and must
-demand code that handles every one. Under a witness `[_]` (`a ⇒ a`),
-code that is merely `Int ⇒ Int` is refused — unification would have
-accepted it at `a := Int` and then run it on a `Str`.
+demand code that handles every one. Under a witness `[_]` (`a ⇒ a`), code
+that is merely `Int ⇒ Int` is refused, because unification would have accepted
+it at `a := Int` and then run it on a `Str`.
 
-A mismatch rides the miss track with the untouched input segment as
-evidence — no crash, same error path as `parse` or `readFile`. And
-because the witness is a real program, it is also the fallback: on a
-miss it is still sitting there to run.
+A mismatch rides the miss track with the untouched input segment as evidence.
+There is no crash, and the error path is `parse`'s and `readFile`'s. Because
+the witness is a real program, it is also the fallback: on a miss it is still
+sitting there to run.
 
 `box` defers the run the same way, witness and all:
 
@@ -3774,91 +3741,82 @@ miss it is still sitting there to run.
 box : Fn⟨ρ0 ⇒ ρ1⟩ Code ⇒ Fn⟨ρ0 ⇒ (ρ1 | Str ρ0)⟩
 ```
 
-Cutting a program (`examples/cuts.braid`) is where this is felt: a cut
-names an intermediate type the whole program never mentions, and it
-differs per cut. Each cut states its own witnesses. That obligation is
-the honest price — the type between the halves is a fact about the cut,
-not about the program, so someone has to say it.
+Cutting a program (`examples/cuts.braid`) is where this is felt. A cut names
+an intermediate type the whole program never mentions, and it differs per cut,
+so each cut states its own witnesses. That is the price of cutting: the type
+between the halves is a fact about the cut rather than about the program, so
+someone has to say it.
 
-The code runs in the *witness's* scope — the words it may call are the
-ones the witness could — so a prelude word that splices on your behalf
-(`box`, `lift2`) still runs your code among your defs.
+The code runs in the *witness's* scope, so the words it may call are the ones
+the witness could, and a prelude word that splices on your behalf (`box`,
+`lift2`) still runs your code among your defs.
 
-**Transport is the "models" row applied to composition itself**
-. `with Inst` replaces a theory's *generators* by a
-model's words and is known to type because `checkInstance` compared
-each slot to its declared signature. When the theory has a hom-object
-(§8), `with M` replaces the *composition* as well — `;` becomes M's
-composition and each stage becomes M's embedding of that stage — and it
-is known to type for exactly the same reason, plus the shape reading at
-the `model` line. A functor out of a free category is determined on
-generators; transport is what you get when you let it move the
-composition too, and the price is that the result lives in the model's
-hom-objects rather than in the base. The receipt records which category
-you are in, and the carrier is what the label adds to the objects (§3).
+**Transport is the models row applied to composition itself.** `with Inst`
+replaces a theory's *generators* by a model's words, and is known to type
+because `checkInstance` compared each slot to its declared signature. When
+the theory has a hom-object (§8), `with M` replaces the *composition* as
+well: `;` becomes M's composition and each stage becomes M's embedding of
+that stage. It is known to type for the same reason, plus the shape reading
+at the `model` line. A functor out of a free category is determined on
+generators, and transport is what you get when you let it move the
+composition too. The price is that the result lives in the model's
+hom-objects rather than in the base. The receipt records which category you
+are in, and the carrier is what the label adds to the objects (§3).
 
 See `examples/cuts.braid` for splices in context.
 
 ### Functors, and the ones known to type
 
-A **functor** (§8) is a pure GRAPH MORPHISM — `Fn⟨Stage ⇒ Code⟩`, one
-image per generator — extended along a scope's wiring by `with`. A
-functor out of a free category *is* a graph morphism, so the extension
-is the declaration's meaning and is computed rather than written
-(`stagewise`); the extension is also a word `F : Code ⇒ Code`, which is
-what `lift2 [F]` applies at run time. `reflect` forgets types — it goes from typed programs
-down to `Code` — so a functor works on the untyped floor, and typing
-its output is a *lifting* problem: does a typing exist over this
-rewritten program? Braid answers it the only honest way, by
-re-inferring the expansion at the splice (principal types; nothing is
-trusted), and when no typing exists the error is reported inside code
-you did not write — every such message carries the expansion. That is
-the design's one real fragility, and the answer to it is a short list
-of functors whose lifts are **guaranteed**, checked once rather than
-per use:
+A **functor** (§8) is a pure GRAPH MORPHISM, `Fn⟨Stage ⇒ Code⟩` with one
+image per generator, extended along a scope's wiring by `with`. A functor out
+of a free category *is* a graph morphism, so the extension is the
+declaration's meaning and is computed rather than written (`stagewise`). The
+extension is also a word `F : Code ⇒ Code`, which is what `lift2 [F]` applies
+at run time. `reflect` forgets types, going from typed programs down to
+`Code`, so a functor works on the untyped floor and typing its output is a
+*lifting* problem: does a typing exist over this rewritten program? Braid
+answers by re-inferring the expansion at the splice, with principal types and
+nothing trusted. When no typing exists, the error is reported inside code you
+did not write, so every such message carries the expansion. That is the
+design's one real fragility, and the answer to it is a short list of functors
+whose lifts are **guaranteed**, checked once rather than per use:
 
 | functor | what it is | checked by |
 |---|---|---|
 | a quotation transformer `Fn⟨a ⇒ b⟩ ⇒ Fn⟨…⟩` (`lift`, `logged`, `compose`) | level 1: never leaves the typed world | ordinary inference, at the def |
-| `with E` for a resource `E` (or the routing inferred without one) | tensoring, `E ⊗ –` — the model `model E in Doctrine` generates, transported in fused form; and a binder's parameter block is the same functor, `P ⋉ –` (§12 above) | the elaborator's routing, which is that model's evaluator |
+| `with E` for a resource `E` (or the routing inferred without one) | tensoring, `E ⊗ –`: the model `model E in Doctrine` generates, transported in fused form. A binder's parameter block is the same functor, `P ⋉ –` (§12 above) | the elaborator's routing, which is that model's evaluator |
 | `functor F = η ; interpose` | whiskering: `η` after every cut, `η : ρ ⇒ ρ` or `E ρ ⇒ E ρ` | `checkedStage`, by subsumption, inside `interpose` |
 | `with Inst` for a model | a model of the theory: every generator replaced by a typed image | `checkInstance` (§8) |
 | a model of `Base`, `model Opt in Base = p = q, …` | a typed generator image, applied atomwise | `subsumes`, once per binding at the declaration (§8) |
-| an **object-mapped** model of `Base`, `model Mod in Base(Int ↦ Mod7 via reduce)` | the same, with the OBJECT half written: a substitution on types, `via` on literals, unfolding on defs — so it changes the arrow and not just the words | `subsumes` at the generator's arrow **with the substitution applied**, once per binding; and a word that mentions the mapped type with no image is refused by name at the scope (§8) |
+| an **object-mapped** model of `Base`, `model Mod in Base(Int ↦ Mod7 via reduce)` | the same, with the OBJECT half written: a substitution on types, `via` on literals, unfolding on defs, so it changes the arrow as well as the words | `subsumes` at the generator's arrow **with the substitution applied**, once per binding; and a word that mentions the mapped type with no image is refused by name at the scope (§8) |
 | a **transport** `with Circuits` on a model whose theory is declared `in Doctrine` | a model applied to COMPOSITION: a stage ↦ the embedding, `;` ↦ the composition | `checkInstance` on the slots, once, plus the doctrine's claim checked at the `theory` line (§8) |
 | `lift2 [m]` on any `Code ⇒ Code` `m` | the runtime lift | per program, at run time; never fails — it falls back |
 
-Everything not in the table — delete a stage, reorder, reverse,
-choose by neighbour — is re-inferred and may fail. Such functors are
-not wrong; they are **audited** rather than **guaranteed** (laws over
-`Code`, `sameCode` on expansions, §12).
+Everything not in the table is re-inferred and may fail: deleting a stage,
+reordering, reversing, choosing by neighbour. Such functors are not wrong.
+They are **audited** rather than **guaranteed**, through laws over `Code` and
+`sameCode` on expansions (§12).
 
-**The closure gate is lifted** *(2026-09-12; it read "one limit is on
-the floor, not on any row").* `reflect` used to refuse a binder
-parameter captured in a quotation or a row component, and a knot (§8)
-arrives as exactly such a parameter — so a `with F` scope
-containing a knot *itself* was refused before any functor ran
-(*`with Traced`: Unknown primitive: self*). Abstraction elimination now
-has wiring to translate a capture into: `capture` under a quote,
-`dist2` over a row (§6, §10). That is table row 2 (`P ⋉ –`) over the
-cartesian **closed** structure rather than the cartesian one, and it is
-a derivation, not three new primitives —
-`design-macros.md`, the 2026-09-12 amendment. The two corners it left
-open — a **residual** row `(p | q | ---)`, and a flat row of three or
-more tracks — closed the same day with the generator `#dist:K` (§6), so
-`reflect` is now total on binder code, full stop.
-`sameCode` caught up on 2026-09-13: it now runs
-elimination first, so two spellings of a capturing binder are
-*decided*, and it agrees with `sameCodeC` on every program (§12.9).
+**Captures reflect.** A binder parameter captured in a quotation or a row
+component reflects like any other, and so does a knot (§8), which arrives as
+exactly such a parameter. Abstraction elimination has wiring to translate a
+capture into: `capture` under a quote, `dist2` over a row (§6, §10). That is
+table row 2 (`P ⋉ –`) over the cartesian **closed** structure rather than the
+cartesian one, and it is a derivation rather than three new primitives
+(`design-macros.md`). A **residual** row `(p | q | ---)` and a flat row of
+three or more tracks are covered by the generator `#dist:K` (§6), so
+`reflect` is total on binder code. `sameCode` runs elimination first, so two
+spellings of a capturing binder are *decided*, and it agrees with
+`sameCodeC` on every program (§12.9).
 
-**Why `interpose` checks what it checks.** The stage it inserts must
-type at *every* cut, and the cuts have different widths. A stage that
-touches no wire is `∀ρ. ρ ⇒ ρ` — an endomorphism of the unit, whiskered
-by whatever the cut carries; with a resource routed deepest, `E ρ ⇒ E
-ρ` (`burn : • =Fuel> •` is literally one). The check is **subsumption**
-against `ρ ⇒ ρ` with `ρ` rigid, not unification: unifying would bless
-`Int ρ ⇒ Int ρ` at `ρ := Int ρ'`, a stage that needs a wire and dies
-at the first empty cut. Refusals name the stage and its real type:
+**Why `interpose` checks what it checks.** The stage it inserts must type at
+*every* cut, and the cuts have different widths. A stage that touches no wire
+is `∀ρ. ρ ⇒ ρ`, an endomorphism of the unit whiskered by whatever the cut
+carries; with a resource routed deepest it is `E ρ ⇒ E ρ`, and
+`burn : • =Fuel> •` is one. The check is **subsumption** against `ρ ⇒ ρ` with
+`ρ` rigid rather than unification: unifying would bless `Int ρ ⇒ Int ρ` at
+`ρ := Int ρ'`, a stage that needs a wire and dies at the first empty cut.
+Refusals name the stage and its real type:
 
 ```text
 interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a
