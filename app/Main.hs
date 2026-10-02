@@ -96,7 +96,7 @@ repl :: IO ()
 repl = do
   hSetBuffering stdout NoBuffering
   putStrLn "Braid REPL — each line runs against the current stack."
-  putStrLn "Commands: :t <prog> type (:t! raw), :tc <prog> the type of the Code it leaves, :doc <name>, :import \"f.braid\", :s stack, :defs, :transformations, :clear, :q quit"
+  putStrLn "Commands: :t <prog> type (:t! raw), :tc <prog> the type of the Code it leaves, :doc <name>, :import \"f.braid\" [as F], :s stack, :defs, :transformations, :clear, :q quit"
   runInputT defaultSettings (loop initialState)
 
 -- haskeline supplies line editing, history (up-arrow), and ctrl-d;
@@ -398,7 +398,8 @@ typeOfCodeWith st src =
                     ++ either ("error: " ++) id
                          (typeOfCodeV (replRCtx st) c >>= showTypeV (replRCtx st))
 
--- `:import "path.braid"` — the file's DECLARATIONS, in this session's
+-- `:import "path.braid"`, or `:import "path.braid" as F` — the file's
+-- DECLARATIONS, in this session's
 -- scope.  Its main program is not run (a library's demo is its own
 -- business), and its own imports are resolved first, exactly as in a
 -- file.  This is also the only way a session gets a theory, a model
@@ -407,8 +408,8 @@ importLine :: ReplState -> String -> IO ReplState
 importLine st arg =
   case parseImportLine ("import " ++ arg) of
     Left err -> putStrLn ("error: " ++ err) >> pure st
-    Right path -> do
-      loaded <- loadDecls path
+    Right (path, pre) -> do
+      loaded <- loadDeclsAs pre path
       case loaded of
         Left err -> putStrLn ("error: " ++ err) >> pure st
         Right (src, lmap) ->
@@ -451,7 +452,8 @@ importLine st arg =
                                             , fst r `notElem`
                                                 map fst (modRouted m) ]
                     }
-              putStrLn $ "imported " ++ path ++ "   ("
+              putStrLn $ "imported " ++ path
+                       ++ maybe "" (\q -> " as " ++ q) pre ++ "   ("
                        ++ intercalate ", " (filter (not . null)
                             [ count (length names) "def"
                             , count (length (modDatas m) + length (modAliases m)) "type"
@@ -602,7 +604,7 @@ handleLine st line =
               envClean
                 | redecl    = M.delete n
                                 (M.delete ("un" ++ n)
-                                  (M.delete ("fold" ++ n) (rsEnv st)))
+                                  (M.delete (derived "fold" n) (rsEnv st)))
                 | otherwise = rsEnv st
           if M.member n envClean || M.member ("un" ++ n) envClean
             then report $ "Type " ++ n

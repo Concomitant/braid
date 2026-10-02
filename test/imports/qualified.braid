@@ -1,0 +1,38 @@
+## THE SAME LIBRARY, QUALIFIED.  `as U` puts every name util.braid
+## provides in the `U` scope, so this file keeps its own `double` and
+## reaches the library's as `U/double`.  A slot name is the THEORY's and
+## is not qualified: `with U/Loud` is what says which model `emit` means.
+import "util.braid" as U
+## ...and a second prefix is a second renaming, so it is a second copy
+## with disjoint names
+import "util.braid" as V
+
+## the name that clashes when the import is unqualified
+def double = dup >> *
+
+def quadruple = U/double >> U/double
+
+def scored with U/Tally U/Loud U/Same =
+    emit
+    U/double
+
+## the imported template, instantiated on this side of the boundary
+def loudTwice with U/Loud = U/emitTwice
+
+## the imported model of `Base`, applied on this side of the boundary
+def optimised with U/Opt =
+    U/dupInt
+    +
+
+## the imported category, entered here: `runP` is the exit, called
+## outside the scope
+def inK  with U/Funcs = U/double >> U/double
+def outK in U/Funcs = inK >> _ 5 >> runP
+
+4 >> double >> print
+7 >> quadruple >> print
+6 >> optimised >> print
+3 >> loudTwice >> print
+(0 >> U/Tally) 5 >> scored >> _ print >> U/unTally >> print
+outK >> print
+5 >> V/double >> print

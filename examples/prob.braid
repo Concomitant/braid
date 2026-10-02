@@ -35,14 +35,14 @@
 # Binders and destructuring throughout.
 #
 # The DataFrame library is this file's client.  `import` below brings
-# `groupBy`, `sumF`, `keep` and `printFrame` in, and every distribution
+# `F/groupBy`, `F/sumF` and `F/printFrame` in, and every distribution
 # printed is a frame of outcome and weight, with the weights summed per
-# outcome by `groupBy`.  A posterior is a frame operation.
+# outcome by `F/groupBy`.  A posterior is a frame operation.
 
-import "frame.braid"
-#   There is no `Pair` to import.  Products in Braid are FLAT, since the
-#   stack is the product, and the hom-object names a whole stack on each
-#   side, so nothing packs.
+import "frame.braid" as F
+#   The prefix is why `says` can be this file's word as well as the
+#   library's: a qualified import puts every name the file provides in
+#   the `F` scope, so nothing of the library's lands here unasked.
 
 # ---------------------------------------------------------------------
 # 1. The theory: a Markov category, presented
@@ -366,41 +366,41 @@ def twoIndepN with Nondet = twoBiases ; bothFlipN
 #   is entered from the base, and each model enters its own.
 
 ## reading a distribution as a FRAME of outcome and weight, with the
-## weights summed per outcome by the frame library's `groupBy`
+## weights summed per outcome by the frame library's `F/groupBy`
 def showBits = (a b -> (a "H" "T" ; select) (b "H" "T" ; select) ; cat)
 def tallyW =
     sh w ->
     w ; unWeighted
       ; (es -> ((es ; [(b -> b ; unBox ; (y p -> sh ; _ (y ; unBox) ; ev))] ... ; map) \
-                (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map) ; groupBy) \
-             ; [(g -> (g ; key) ((g ; part ; sumF) ; toStr) ; pack)] ... ; map)
+                (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map) ; F/groupBy) \
+             ; [(g -> (g ; F/key) ((g ; F/part ; F/sumF) ; toStr) ; pack)] ... ; map)
 def tallyD =
     sh d ->
     d ; unDraws
-      ; (ys -> ((ys ; [(y -> sh ; _ (y ; unBox) ; ev)] ... ; map) ys ; groupBy) \
-             ; [(g -> (g ; key) ((g ; part ; len) ; toStr) ; pack)] ... ; map)
+      ; (ys -> ((ys ; [(y -> sh ; _ (y ; unBox) ; ev)] ... ; map) ys ; F/groupBy) \
+             ; [(g -> (g ; F/key) ((g ; F/part ; len) ; toStr) ; pack)] ... ; map)
 def distHead  = "outcome" "weight" ; pack
 def countHead = "outcome" "draws" ; pack
 
 "" ; print
 "== one flip, copied — `with Enum = half ; flip ; dup` ==" ; print
-distHead ([showBits] (twoEqualE ; eReport) ; tallyW) ; printFrame
+distHead ([showBits] (twoEqualE ; eReport) ; tallyW) ; F/printFrame
 #   HH | 0.5      the coin, and the same bit twice
 #   TT | 0.5
 
 "" ; print
 "== two flips — `with Enum = twoBiases ; bothFlipE` ==" ; print
-distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; printFrame
+distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; F/printFrame
 #   HH | 0.25     HT | 0.25     TH | 0.25     TT | 0.25
 #   1/2 · 1/2 four times, and every weight is exact
 
 "" ; print
 "== the same two programs, SAMPLED (200 draws, seed 20260915) ==" ; print
-countHead ([showBits] (twoEqualS ; sReport) ; tallyD) ; printFrame
+countHead ([showBits] (twoEqualS ; sReport) ; tallyD) ; F/printFrame
 #   TT | 98    HH | 102: two cells, and the other two are ABSENT rather
 #   than small, because a copied bit cannot disagree with itself at any seed
 "" ; print
-countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
+countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; F/printFrame
 #   TH | 61   HT | 49   TT | 38   HH | 52: four cells, 200 draws, and
 #   50 expected in each.  The seed is fixed, so these ten numbers are
 #   the program's output and not a report about a run of it.
@@ -447,7 +447,7 @@ def showCH =
 
 "" ; print
 "== Monty Hall: the joint distribution of (car, host) ==" ; print
-distHead ([showCH] (montyE ; eReport) ; tallyW) ; printFrame
+distHead ([showCH] (montyE ; eReport) ; tallyW) ; F/printFrame
 #   car 0, host 1 | 0.16666666666666666    1/3 · 1/2
 #   car 0, host 2 | 0.16666666666666666    1/3 · 1/2
 #   car 1, host 2 | 0.3333333333333333     1/3, the coin summed away
@@ -475,7 +475,7 @@ def montyPostE with Enum =
 def renorm =
     w ->
     w ; unWeighted
-      ; (es -> (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map ; sumF) \
+      ; (es -> (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map ; F/sumF) \
              ; (m -> es ; [(b -> b ; unBox ; (y p -> y (p m ; fdiv) ; Box))] ... ; map \
                         ; Weighted))
 ## the outcome, unboxed, since a `Weighted(σ)` stores each outcome in a Box
@@ -483,7 +483,7 @@ def showCar = (n -> "car " (n ; toStr) ; cat)
 
 "" ; print
 "== …given the host opened door 1 — the posterior over the car ==" ; print
-distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; printFrame
+distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; F/printFrame
 #   car 0 | 0.3333333333333333    (1/6) / (1/2), staying wins 1/3
 #   car 2 | 0.6666666666666666    (1/3) / (1/2), SWITCHING WINS 2/3
 
@@ -524,7 +524,7 @@ def sensorPostE with Enum =
 
 "" ; print
 "== a noisy sensor: the joint of (rain, alarm) ==" ; print
-distHead ([showRA] (sensorE ; eReport) ; tallyW) ; printFrame
+distHead ([showRA] (sensorE ; eReport) ; tallyW) ; F/printFrame
 #   rain, alarm yes | 0.21875     1/4 · 7/8
 #   rain, alarm no  | 0.03125     1/4 · 1/8
 #   dry,  alarm yes | 0.09375     3/4 · 1/8
@@ -532,7 +532,7 @@ distHead ([showRA] (sensorE ; eReport) ; tallyW) ; printFrame
 
 "" ; print
 "== …given the alarm — the posterior over rain ==" ; print
-distHead ([showRain] (sensorPostE ; eReport ; renorm) ; tallyW) ; printFrame
+distHead ([showRain] (sensorPostE ; eReport ; renorm) ; tallyW) ; F/printFrame
 #   rain | 0.7      0.21875 / 0.3125 = 7/10, and 7/32 ÷ 5/16 is exact
 #   dry  | 0.3      0.09375 / 0.3125 = 3/10
 
@@ -559,7 +559,7 @@ def walkN with Recursive =
 
 "" ; print
 "== a 10-step random walk, 200 draws (seed 20260915) ==" ; print
-countHead ([toStr] ((10 ; walkN) ; sReport) ; tallyD) ; printFrame
+countHead ([toStr] ((10 ; walkN) ; sReport) ; tallyD) ; F/printFrame
 #   -2 | 43   4 | 32   -4 | 19   2 | 33   0 | 52   10 | 1
 #    6 |  9  -6 |  9    8 |  2
 #   Ten steps from 0, so every endpoint is even and in [-10, 10], and
@@ -588,18 +588,18 @@ countHead ([toStr] ((10 ; walkN) ; sReport) ; tallyD) ; printFrame
 # rather than Markov, and Bayes' rule is the renormalizing that puts the
 # mass back.
 
-## `says` comes from the frame library too: a Bool, spelled
+## `F/says` is the frame library's: a Bool, spelled
 def weightsOf = (w -> w ; unWeighted ; [(b -> b ; unBox ; (y p -> p))] ... ; map)
-def massOf   = (c -> c ; eReport ; weightsOf ; sumF)
+def massOf   = (c -> c ; eReport ; weightsOf ; F/sumF)
 def sameDist = (u v -> (u ; eReport ; unWeighted) (v ; eReport ; unWeighted) ; eq? ; verdict)
 
 "" ; print
 "== copy is natural in the BASE — decided, for every word ==" ; print
-[dup ; toStr toStr] [toStr ; dup] ; sameCode ; says ; print      # true — PROVED
-[toStr ; dup] [dup ; toStr _] ; sameCode ; says ; print          # false — and it
+[dup ; toStr toStr] [toStr ; dup] ; sameCode ; F/says ; print      # true — PROVED
+[toStr ; dup] [dup ; toStr _] ; sameCode ; F/says ; print          # false — and it
                                                                  # really discriminates
 "== …and NOT under the functor — decided at the distributions ==" ; print
-twoEqualE twoIndepE ; sameDist ; says ; print                    # false
+twoEqualE twoIndepE ; sameDist ; F/says ; print                    # false
 
 "" ; print
 "== discard is natural: every kernel has mass 1 ==" ; print

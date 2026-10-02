@@ -209,6 +209,12 @@ importTests =
   , ("diamond.braid",   ["7", "8", "10"], "")
     -- a library file still runs as a program, main and all
   , ("util.braid",      ["util.braid's own main — NOT run when imported"], "")
+    -- QUALIFIED (2026-10-02): `as U` places every name the file provides
+    -- in the `U` scope, so the importer keeps its own `double`; a type,
+    -- a resource, a theory, a model, a functor, a model of `Base`, a
+    -- template and a transporting model all cross under the prefix; and
+    -- a second prefix is a second copy with disjoint names.
+  , ("qualified.braid", ["16", "28", "12", "81", "50", "0", "20", "10"], "")
   ]
 
 -- (path, expected error fragment)
@@ -225,6 +231,13 @@ importFailTests =
                       \test/imports/nope.braid and in the current directory)")
     -- a module checked without a file context cannot import
   , ("bad-syntax.braid", "Malformed import")
+    -- a prefix names a SCOPE, so it is spelled like one
+  , ("bad-prefix.braid",
+     "`lower` is not capitalized: a prefix names a SCOPE")
+    -- ...and the bare name a qualified import did NOT bring in says
+    -- where it went
+  , ("unqualified-use.braid",
+     "`double` is `U/double` here: it was imported as U")
     -- LOCATIONS (2026-09-15).  A refusal in an imported file names THAT
     -- file and THAT line, not the assembled source the loader built.
   , ("uses-broken.braid",
@@ -3532,6 +3545,8 @@ moduleFailTests =
      "line 3, in def h: Unclosed group (expected ')')")
   , ("def dup2 = 1\ndef dup2 = 2\n1 ; print",
      "in def dup2: Duplicate definition: dup2")
+  , ("def idF = [(s -> s >> pack)]\nfunctor Bad = 1\n1 ; print",
+     "line 2: functor Bad: 1 must be a GRAPH MORPHISM")
     -- A TRANSPORTED STAGE names the line the author wrote (2026-10-02).
     -- `with` rebuilds the spine, writing several stages per written one;
     -- each carries the written stage's line, so the refusal places

@@ -1703,6 +1703,122 @@ data Token
       -- written manifest, in any order; display sorts them.
   deriving (Eq, Show)
 
+--------------------------------------------------------------------------------
+-- 6.0¼ QUALIFIED NAMES (2026-10-02)
+--
+-- `import "frame.braid" as F` places every declaration the file provides
+-- in scope under `F/name`.  THE SEPARATOR IS `/`, and it costs the lexer
+-- nothing: `/` is already an identifier character, so `F/says` lexes as
+-- one `TokIdent` today and must lex as one after.  `.` was unavailable
+-- (it is the symbol prefix, so `.dup` is a symbol), `:` types a slot and
+-- heads a REPL command, and `@` is the compiler's own namespace, refused
+-- wherever source is walked.  `/` is written nowhere in the language:
+-- division is `div` and `fdiv`, words like any other, so no program can
+-- collide with it — and it reads as what it is, a path into a module,
+-- spelled with the character the import's own path uses.
+--
+-- A qualified name is just a name.  Nothing downstream asks whether a
+-- name has a prefix; the one place the prefix means something is a
+-- DERIVED name, where `un` of `F/Pair` must be `F/unPair` and never
+-- `unF/Pair`: the prefix names the scope and `unPair` is the word in it.
+--------------------------------------------------------------------------------
+
+qualSep :: Char
+qualSep = '/'
+
+-- a name's prefix (with its separator) and the word inside it.  The LAST
+-- separator, so a prefix may itself be qualified.
+splitQual :: String -> (String, String)
+splitQual n = case [ i | (i, c) <- zip [0 :: Int ..] n, c == qualSep ] of
+  [] -> ("", n)
+  is -> let i = last is in (take (i + 1) n, drop (i + 1) n)
+
+qualify :: String -> String -> String
+qualify pre n = pre ++ [qualSep] ++ n
+
+-- A DERIVED word of `n`, in `n`'s own scope: `derived "un" "F/Pair"` is
+-- `F/unPair`.  Every generated name a declaration contributes goes
+-- through this, which is the whole of what a prefix costs.
+derived :: String -> String -> String
+derived pre n = let (q, base) = splitQual n in q ++ pre ++ base
+
+-- the characters a declared NAME may hold.  The separator is one of
+-- them, because a qualified name is a name.
+isNameChar :: Char -> Bool
+isNameChar ch = isAlphaNum ch || ch `elem` ("_\'?!" ++ [qualSep] :: String)
+
+-- THE PREFIX, APPLIED.  `import "f.braid" as F` is the inclusion
+-- composed with a RENAMING: every name the file declares is rewritten
+-- where the file writes it, and nothing else is touched.  The table is
+-- the renaming, in the shape `renameWordsT` takes — the same table `with
+-- M` hands it to rename a model's slot names — and this is its action on
+-- the text an import includes, because an import includes text.
+--
+-- The scan is a word at a time, by the lexer's own `isIdentChar`, so
+-- "what a word is" has one definition and `op)` is not the word `op`.
+-- A string literal, a comment and a symbol (`.dup`, whose `.` is the
+-- prefix) are copied through.
+qualifySource :: [(String, String)] -> String -> String
+qualifySource tbl = go
+  where
+    go [] = []
+    go s@(c : cs)
+      | c == '"'      = let (lit, r) = str cs in '"' : lit ++ go r
+      | c == '#'      = let (cm, r) = span (/= '\n') s in cm ++ go r
+      | c == '.'      = let (w, r) = span isIdentChar cs in '.' : w ++ go r
+      | isIdentChar c = let (w, r) = span isIdentChar s
+                        in fromMaybe w (lookup w tbl) ++ go r
+      | otherwise     = c : go cs
+
+    -- up to and including the closing quote, with the lexer's escapes
+    str ('\\' : e : r) = first (\t -> '\\' : e : t) (str r)
+    str ('"' : r)      = ("\"", r)
+    str (x : r)        = first (x :) (str r)
+    str []             = ("", [])
+
+-- EVERY NAME A FILE PROVIDES, as that renaming.  Read off the file's own
+-- declarations: the names it declares and the words each declaration
+-- generates.  It over-approximates on purpose — a name the file never
+-- writes costs nothing, and a name it writes that this list missed would
+-- be left pointing outside the scope.
+qualifyTable :: String -> String -> Either String [(String, String)]
+qualifyTable pre src = do
+  dk <- dictFromSource src
+  let tyLines = [ l | (l, _, _) <- dkTypes dk ]
+      names = [ n | (n, _, _, _, _) <- dkDefs dk ]
+           ++ concat [ [ n, derived "un" n, derived "merge" n
+                       , derived "fold" n ]
+                     | l <- tyLines, let n = declHeadName l, not (null n) ]
+           ++ [ declHeadName h | (h, _, _, _) <- dkBlocks dk ]
+           ++ concat [ [ n, derived "load" n, derived "header" n ]
+                     | (l, _) <- dkTables dk, let n = declHeadName l
+                     , not (null n) ]
+           ++ [ kw | (kw, _) <- dkKeywords dk ]
+      fields = [ nm | l <- tyLines
+                    , p <- splitTopLevel ','
+                             (stripOuterParens (trimSpace (declRhs l)))
+                    , Just (nm, _) <- [leadingFieldName p] ]
+  pure (nub ([ (n, qualify pre n) | n <- names, not (null n) ]
+               -- a field is WRITTEN `name:`, and `:` is an identifier
+               -- character, so the declaration's own spelling is in the
+               -- table beside the projection word it generates
+               ++ concat [ [ (nm, qualify pre nm)
+                           , (nm ++ ":", qualify pre nm ++ ":") ]
+                         | nm <- fields ]))
+  where
+    declRhs l = drop 1 (dropWhile (/= '=') (takeWhile (/= '#') l))
+
+-- WHAT A WORD IS: one definition, shared by the lexer and by the
+-- renaming an `as` import applies to a file's declarations (2026-10-02).
+-- A word is a maximal run of these; everything else is punctuation.
+isIdentChar :: Char -> Bool
+isIdentChar ch =
+  not (isSpace ch) && isNothing (unSupChar ch)
+    && ch `notElem` (">.[](),-|#\"^;\8230\10216\10217\8658" :: String)
+
+unSupChar :: Char -> Maybe Char
+unSupChar ch = lookup ch (zip "⁰¹²³⁴⁵⁶⁷⁸⁹ⁿᵐᵏⁱʲ" "0123456789nmkij")
+
 tokenize :: String -> Either String [Token]
 tokenize = go 1
   where
@@ -1853,11 +1969,7 @@ tokenize = go 1
       | all isDigit plain = TokInt (read plain)
       | otherwise         = TokIdent plain
 
-    unSup ch = lookup ch (zip "⁰¹²³⁴⁵⁶⁷⁸⁹ⁿᵐᵏⁱʲ" "0123456789nmkij")
-
-    isIdentChar ch =
-      not (isSpace ch) && isNothing (unSup ch)
-        && ch `notElem` (">.[](),-|#\"^;\8230\10216\10217\8658" :: String)
+    unSup = unSupChar
 
     -- After a `=`: is this the head of a written manifest arrow?  It is
     -- iff what follows is one or more capitalized label names separated
@@ -2123,7 +2235,7 @@ expandPatterns start tbl = go start Nothing
         (body, tl) = splitScope after
         stages =
           [ replicate (sum (take (j - 1) ws)) (TokIdent "_")
-              ++ [TokIdent ("un" ++ c)]
+              ++ [TokIdent (derived "un" c)]
               ++ replicate (n - j) (TokIdent "_")
           | (j, PSPat c _) <- zip [1 :: Int ..] slots ]
 
@@ -2392,9 +2504,13 @@ headerWords = ["in", "with"]
 
 -- A name a clause can carry: a declaration's name, never punctuation —
 -- so a quotation's `=` ends the run rather than joining it.
+-- ...and a QUALIFIED name is one (2026-10-02): `with F/Frame` names the
+-- model an `as` import placed in the `F` scope, and a prefix is a name
+-- with the separator in it.
 isHeaderName :: String -> Bool
 isHeaderName n = not (null n) && (isAlpha (head n) || head n == '_')
-              && all (\c -> isAlphaNum c || c `elem` ("_'?!" :: String)) n
+              && all (\c -> isAlphaNum c
+                              || c `elem` ("_'?!" ++ [qualSep] :: String)) n
 
 -- A body is a pure SPINE (2026-09-16): every header word is refused
 -- there, and each refusal names the clause to write instead.
@@ -3142,10 +3258,11 @@ dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
   ( [ (dName d,          Forall tvs svs rvs nvs [] [] (Arrow bodyStack namedStack effPure))
-    , ("un" ++ dName d,  Forall tvs svs rvs nvs [] [] (Arrow namedStack bodyStack effPure)) ]
+    , (derived "un" (dName d), Forall tvs svs rvs nvs [] []
+                                 (Arrow namedStack bodyStack effPure)) ]
       ++ mergeSchemes ++ foldSchemes ++ map fst fieldArts
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
-    , ("un" ++ dName d, (1, False, unrollTerm)) ]
+    , (derived "un" (dName d), (1, False, unrollTerm)) ]
       ++ mergeRuns ++ foldRuns ++ map snd fieldArts )
   where
     fieldArts  = dataFieldArtifacts d
@@ -3166,10 +3283,10 @@ dataDeclArtifacts d =
     (mergeSchemes, mergeRuns) =
       case dBody d of
         TSum row | k >= 2 ->
-          ( [ ("merge" ++ dName d
+          ( [ (derived "merge" (dName d)
             , Forall [] [SV "ρ"] [] [] [] []
                 (arrPure (SCons (TSum uniformRow) SEnd) (STail (SV "ρ")))) ]
-          , [ ("merge" ++ dName d, (1, False, Prim "merge")) ] )
+          , [ (derived "merge" (dName d), (1, False, Prim "merge")) ] )
           where
             k = rowLen row
             uniformRow =
@@ -3255,7 +3372,7 @@ dataFoldArtifact d
         TSum row -> do
           alts <- rowAlts row
           if null alts then Nothing else Just ()   -- no alternatives, no points
-          let fname    = "fold" ++ dName d
+          let fname    = derived "fold" (dName d)
               selfTy   = TData (dName d) (map paramStack (dParams d))
               tvs0     = [ tv | PWire tv  <- dParams d ]
               svs0     = [ sv | PStack sv <- dParams d ]
@@ -3950,7 +4067,7 @@ parseModelHead aliases dataSigs theories header = do
     -- name a type with it: `model R in Doctrine` writes `model R in R@t(R@k)`
     -- (stage 7b).  Source cannot reach those names \8212 `elabHeaders`
     -- refuses `@` in a term \8212 so admitting it here costs nothing.
-    isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!@" :: String)
+    isIdentish ch = isAlphaNum ch || ch `elem` ("_'?!@" ++ [qualSep] :: String)
     conHint "Fn" = " (`Fn` is built in and takes an arrow, not wires; "
                 ++ "wrap it — `data Arr(a, b) = Fn⟨a ⇒ b⟩` — to name it here)"
     conHint c | isJust (lookupAlias c aliases) =
@@ -4221,7 +4338,10 @@ leadingFieldName p =
   case span isFieldChar (trimSpace p) of
     (nm, ':' : rest) | not (null nm) -> Just (nm, rest)
     _                                -> Nothing
-  where isFieldChar ch = isAlphaNum ch || ch `elem` ("_'?!" :: String)
+  -- a field name may be QUALIFIED, because an `as` import rewrites the
+  -- field words of the data declaration it brings in (2026-10-02)
+  where isFieldChar ch =
+          isAlphaNum ch || ch `elem` ("_'?!" ++ [qualSep] :: String)
 
 -- how many wires a parsed body stands for; Nothing when it is open
 -- (a stack parameter or an exponent), which a named field list cannot
@@ -5705,6 +5825,19 @@ inferTermInAt ln env = fmap fst . inferTermSubAt ln env
 -- GENERALIZE the result (a def, a runtime `evalAs` check).  A caller
 -- that only wants to read the arrow can drop them: they relate rows
 -- the display hides anyway.
+-- ...and if the name is in scope QUALIFIED, the refusal names the fix.
+-- A library imported `as F` puts every name it provides in the `F`
+-- scope, and a program that writes the bare name has the prefix to add
+-- (2026-10-02).
+qualifiedHint :: Env -> String -> String
+qualifiedHint env n =
+  case [ q | q <- M.keys env, (pre, base) <- [splitQual q]
+           , not (null pre), base == n ] of
+    []      -> ""
+    (q : _) -> let pre = init (fst (splitQual q))
+               in ".  `" ++ n ++ "` is `" ++ q ++ "` here: it was imported "
+                  ++ "as " ++ pre
+
 inferTermSub :: Env -> Term -> Either String (Arrow, [EffSub])
 inferTermSub = inferTermSubAt 0
 
@@ -5720,7 +5853,8 @@ inferTermSubAt ln0 env term =
                , Nothing <- [finIndex n]
                , Nothing <- [receiptLabel n]
                , Nothing <- [distPrimArity n] ] of
-    (n : _) -> Left $ atLine (whichStage n) ("Unknown primitive: " ++ n)
+    (n : _) -> Left $ atLine (whichStage n)
+                        ("Unknown primitive: " ++ n ++ qualifiedHint env n)
     [] -> do
       let (arr, cs0) = runInfer0 (infer env term)
           cs           = stampAt ln0 cs0
@@ -7042,7 +7176,7 @@ inferRouting env resources body =
       , let run = leadingRes resources i
       , not (null run)
       , run == leadingRes resources o
-      , and [ c `notElem` named | r <- run, c <- [r, "un" ++ r] ] ]
+      , and [ c `notElem` named | r <- run, c <- [r, derived "un" r] ] ]
 
 -- THE RESOURCE MODEL'S FUSED EVALUATOR (stage 7b restates this).
 --
@@ -7074,7 +7208,7 @@ elabScope env rs body = do
   -- receipt is composed INTO the claim's own atom: one stage, one
   -- unit, and the label is on it.
   let assert = [ (0, [ Seq 0 (Prim (receiptName r))
-                             (Seq 0 (Prim ("un" ++ r)) (Prim r))
+                             (Seq 0 (Prim (derived "un" r)) (Prim r))
                      | r <- rs ]
                       ++ [Prim "pass"]) | not (null rs) ]
   pure (chainLines (assert ++ concat stages))
@@ -9589,12 +9723,13 @@ resModelDefs r =
              ++ " \8212 a base stage with the " ++ r
              ++ " wire whiskered underneath") )
   , ( resComposeName r, noHdr
-    , "(c e -> [c ... >> un" ++ k ++ " ... >> ev >> e ... >> un" ++ k
+    , "(c e -> [c ... >> " ++ unk ++ " ... >> ev >> e ... >> " ++ unk
         ++ " ... >> ev] >> " ++ k ++ ")"
     , Just ("generated by `model " ++ r ++ " in " ++ doctrineName
              ++ "`: the Doctrine's `" ++ doctrineCompose ++ "` at " ++ r
              ++ " \8212 base composition of representatives") ) ]
-  where k = resCarrierName r
+  where k   = resCarrierName r
+        unk = derived "un" k
 
 -- ...and what `:doc Dict` shows.  `Dict` is a resource like any other
 -- and is declared by nobody, so the thing to print is the shape it
@@ -9692,14 +9827,46 @@ quotedArg s =
         _ -> Left "the path is not closed"
     _ -> Left "the path must be a quoted string"
 
--- `import "path.braid"` — the one declaration the loader handles.
-parseImportLine :: String -> Either String FilePath
+-- `import "path.braid"`, or `import "path.braid" as F` — the one
+-- declaration the loader handles.  The prefix is the scope the file's
+-- declarations are placed in; without one they are placed in this file's
+-- own scope, which is what an import has always done.
+parseImportLine :: String -> Either String (FilePath, Maybe String)
 parseImportLine l =
-  first bad (quotedArg (drop 6 (dropWhile isSpace l)))
+  first bad (quotedArgAs (drop 6 (dropWhile isSpace l)))
   where
-    bad why = "Malformed import (want `import \"path.braid\"`): "
+    bad why = "Malformed import (want `import \"path.braid\"`, or "
+           ++ "`import \"path.braid\" as F` to qualify it): "
            ++ trimLine l ++ " — " ++ why
     trimLine = dropWhile isSpace
+
+-- `"path.braid"`, and the prefix an `as` clause names.
+quotedArgAs :: String -> Either String (FilePath, Maybe String)
+quotedArgAs s =
+  case dropWhile isSpace s of
+    '"' : rest ->
+      case break (== '"') rest of
+        (path, '"' : after)
+          | null path -> Left "the path is empty"
+          | otherwise -> (,) path <$> asClause (takeWhile (/= '#') after)
+        _ -> Left "the path is not closed"
+    _ -> Left "the path must be a quoted string"
+  where
+    asClause a = case words a of
+      []        -> Right Nothing
+      ["as", q] -> Just <$> prefixOK q
+      ("as" : _) -> Left "`as` names ONE prefix, and a prefix is one word"
+      _         -> Left "there is text after the path"
+    prefixOK q
+      | not (all isNameChar q) =
+          Left ("`" ++ q ++ "` is not a word, so it cannot be a prefix")
+      | qualSep `elem` q =
+          Left ("`" ++ q ++ "` already has a `" ++ [qualSep]
+             ++ "` in it, and a prefix is one name")
+      | not (isUpper (head q)) =
+          Left ("`" ++ q ++ "` is not capitalized: a prefix names a SCOPE, "
+             ++ "like a theory or a model, so it begins with a capital")
+      | otherwise = Right q
 
 -- Remove an in-order subsequence of lines, taking the doc-comment run
 -- immediately above each removed line with it (a `##` above a main line
@@ -9826,7 +9993,8 @@ parseTableLine l =
     parseHead h = do
       let (nm, rest) = span (\c -> not (isSpace c) && c /= '(') h
       if null nm then Left (bad "the table has no name") else Right ()
-      if isUpper (head nm) && all (\c -> isAlphaNum c || c == '_') nm
+      if isUpper (head nm)
+           && all (\c -> isAlphaNum c || c `elem` ('_' : [qualSep])) nm
         then Right ()
         else Left (bad ("`" ++ nm ++ "` is not a type name: a table "
                      ++ "declares a row type, so its name begins with a "
@@ -9843,7 +10011,9 @@ parseTableLine l =
     col c = case break (== ':') c of
       (f, ':' : t)
         | [fw] <- words f, [tw] <- words t ->
-            if not (tableWord fw)
+            -- a column a SCHEMA names may be qualified: an `as` import
+            -- rewrites the field words of the table it brings in
+            if not (tableWord (snd (splitQual fw)))
               then Left (bad ("`" ++ fw ++ "` is not a word: a column "
                            ++ "name is a letter, then letters, digits "
                            ++ "or `_`"))
@@ -9955,7 +10125,8 @@ tableText nm cols hcells = unlines $
   [ "data " ++ nm ++ " = ("
       ++ intercalate ", " [ f ++ ": " ++ t | (f, t) <- cols ] ++ ")"
   , "## the CSV's header line, verbatim — runtime data, for a printer"
-  , "def header" ++ nm ++ " = " ++ unwords (map show hcells) ++ " ; pack"
+  , "def " ++ derived "header" nm ++ " = "
+      ++ unwords (map show hcells) ++ " ; pack"
   , "def " ++ q "badRow" ++ " = (n -> \"bad row on line \" (n ; toStr) ; cat)"
   , "def " ++ q "cellAt" ++ " = (i cells -> i cells ; nth ; (pass | \"\") ; merge)"
   ]
@@ -9973,7 +10144,7 @@ tableText nm cols hcells = unlines $
       ++ q "keepRow?" ++ "] ... ; filter ; [(e -> e ; unBox ; " ++ q "parseRow"
       ++ ")] ... ; map ; sequence ; (pass | pass))"
   , "## read " ++ nm ++ "'s CSV: the rows, or the first bad row's line"
-  , "def load" ++ nm ++ " = (path -> path ; readFile ; ((body -> body ; "
+  , "def " ++ derived "load" nm ++ " = (path -> path ; readFile ; ((body -> body ; "
       ++ q "parseRows" ++ ") | (e -> e ; miss)) ; merge ; (pass | pass))"
   ]
   where
@@ -10010,14 +10181,16 @@ spliceTables bs@((raw, blk) : bs') (p@(k, l) : ls)
 -- let through; source cannot claim the exemption, because a def of that
 -- name would collide with the generated one.
 tableGenNames :: TableDecl -> [String]
-tableGenNames tb = ["load" ++ tbName tb, "header" ++ tbName tb]
+tableGenNames tb = [ derived "load" (tbName tb), derived "header" (tbName tb) ]
 
 -- Resolve a file's imports into one source text: depth-first, in file
 -- order, each file included exactly once (a diamond includes it once,
 -- which is what keeps the clash rule meaningful), a cycle reported by
 -- the path that closes it.  Paths are relative to the importing file.
 data Load = Load
-  { lSeen :: [FilePath]           -- canonical paths already included
+  { lSeen :: [(FilePath, Maybe String)]
+      -- canonical paths already included, each with the prefix it was
+      -- included under: two prefixes are two renamings, so both land
   , lDefs :: [(String, FilePath, Int)]
       -- def names, the file that declared them, and the line
   , lText :: String               -- the source assembled so far
@@ -10034,36 +10207,48 @@ emptyLoad = Load [] [] "" []
 type LineMap = [(FilePath, Int)]
 
 loadSource :: FilePath -> IO (Either String (String, LineMap))
-loadSource = loadWith True
+loadSource = loadWith True Nothing
 
 -- the same, as a DEPENDENCY: declarations only, main dropped.  This is
 -- what an `import` line pulls in, and what the REPL's `:import` runs.
 loadDecls :: FilePath -> IO (Either String (String, LineMap))
-loadDecls = loadWith False
+loadDecls = loadWith False Nothing
 
-loadWith :: Bool -> FilePath -> IO (Either String (String, LineMap))
-loadWith isRoot0 root =
-  fmap (fmap (\a -> (lText a, lMap a))) (load [] emptyLoad root isRoot0)
+-- ...and the same under a PREFIX, which is what `:import "f.braid" as F`
+-- runs: a session qualifies an import exactly as a file does.
+loadDeclsAs :: Maybe String -> FilePath
+            -> IO (Either String (String, LineMap))
+loadDeclsAs = loadWith False
+
+loadWith :: Bool -> Maybe String -> FilePath
+         -> IO (Either String (String, LineMap))
+loadWith isRoot0 pre0 root =
+  fmap (fmap (\a -> (lText a, lMap a)))
+       (load [] emptyLoad (root, pre0) isRoot0)
   where
     -- `path` is already resolved: the root is what the user named, an
     -- import is what `resolve` found.  The root is never checked for
     -- existence — it may be /dev/stdin or another thing a program is
     -- entitled to be — so its read failure reports itself.
-    load stack acc path isRoot = do
+    load stack acc (path, pre) isRoot = do
       canon <- canonicalizePath path
       if canon `elem` stack
         then pure (Left ("import cycle: "
                       ++ intercalate " → " (map takeFileName
                            (reverse (canon : stack)))))
-        else if canon `elem` lSeen acc
+        -- ONCE PER (FILE, PREFIX).  Two prefixes are two renamings of
+        -- one file, so they are two copies with disjoint names and both
+        -- are included; the same file under the same prefix is one
+        -- inclusion, which is what keeps a diamond a diamond.
+        else if (canon, pre) `elem` lSeen acc
           then pure (Right acc)
           else do
             r <- try (readFile path) :: IO (Either IOException String)
             case r of
               Left _ -> pure (Left ("cannot read " ++ path))
-              Right src -> loaded stack acc path isRoot canon src
+              Right src -> loaded stack acc path pre isRoot canon src
 
-    loaded stack acc path isRoot canon src =
+    loaded stack acc path pre isRoot canon src =
       case splitDefsIx src >>= \(defs, _, _, imps, tbls, _) ->
              (,,,) defs tbls
                <$> sequence [ (,) k <$> first (atSrcLine k) (parseImportLine l)
@@ -10076,33 +10261,46 @@ loadWith isRoot0 root =
           -- same path rule, and the text it stands for is spliced in
           -- under its own declaration line
           blocks <- mapM (tableBlock (takeDirectory path)) tables
-          kids <- mapM (\(k, rel) ->
-                          first (inFile path . atSrcLine k)
+          kids <- mapM (\(k, (rel, q)) ->
+                          fmap (\p -> (p, q))
+                            . first (inFile path . atSrcLine k)
                             <$> resolve (takeDirectory path) rel) rels
           r <- foldM (child (canon : stack))
-                     (Right acc { lSeen = canon : lSeen acc }) kids
+                     (Right acc { lSeen = (canon, pre) : lSeen acc }) kids
           pure $ do
             acc' <- r
+            blks <- first (inFile path) (sequence blocks)
+            own  <- first (inFile path) (moduleLinesIx isRoot src)
+            let spliced0 = spliceTables (zip (map fst tbls) blks) own
+            -- THE PREFIX IS APPLIED HERE, to the lines this file
+            -- contributes and to nothing else: a table's generated text
+            -- is spliced in first, so its row type and its two words are
+            -- renamed with the rest (2026-10-02).
+            rename <- case pre of
+              Nothing -> Right id
+              Just q  -> qualifySource
+                           <$> first (inFile path)
+                                 (qualifyTable q (unlines (map snd spliced0)))
+            let spliced = [ (k, rename l) | (k, l) <- spliced0 ]
+                own'    = unlines (map snd spliced)
+                qn      = maybe id qualify pre
+                genDefs = [ (qn n, path, k)
+                          | (tb, k) <- zip tables (map snd tbls)
+                          , n <- tableGenNames tb ]
             -- objects are ADDED, never merged: the inclusion is
             -- injective on names or it is an error naming both files
             -- …and the refusal names BOTH lines, so a clash is two
             -- places a reader can open (2026-10-02)
-            case [ (n, k, f, j) | (n, _, _, _, k) <- defs
+            case [ (n, k, f, j) | (n0, _, _, _, k) <- defs, let n = qn n0
                                , (m, f, j) <- lDefs acc', m == n ] of
               ((n, k, f, j) : _) ->
                 Left $ inFile path
                          (atSrcLine k ("`" ++ n ++ "` is already defined in "
                                     ++ f ++ ":" ++ show j))
               [] -> Right ()
-            blks <- first (inFile path) (sequence blocks)
-            own  <- first (inFile path) (moduleLinesIx isRoot src)
-            let spliced = spliceTables (zip (map fst tbls) blks) own
-                own'    = unlines (map snd spliced)
-                genDefs = [ (n, path, k)
-                          | (tb, k) <- zip tables (map snd tbls)
-                          , n <- tableGenNames tb ]
             pure acc' { lDefs = lDefs acc'
-                                   ++ [ (n, path, k) | (n, _, _, _, k) <- defs ]
+                                   ++ [ (qn n, path, k)
+                                      | (n, _, _, _, k) <- defs ]
                                    ++ genDefs
                       , lMap  = lMap acc' ++ [ (path, k) | (k, _) <- spliced ]
                       , lText = lText acc' ++ own' }
@@ -10285,7 +10483,8 @@ checkModuleRaw base src = do
   tables <- sequence [ first (atSrcLine k) (parseTableLine l)
                      | (l, k) <- tableLines ]
   case [ (tb, k) | (tb, k) <- zip tables (map snd tableLines)
-                 , ("load" ++ tbName tb) `notElem` [ n | (n, _, _, _) <- defSrcs ] ] of
+                 , derived "load" (tbName tb)
+                     `notElem` [ n | (n, _, _, _) <- defSrcs ] ] of
     ((tb, k) : _) -> Left $ atSrcLine k
                      $ "table: a table can only be declared when the module "
                     ++ "is loaded from a file, and this one was checked "
@@ -10501,7 +10700,8 @@ checkModuleRaw base src = do
   -- (`runFunctor`, the ordering rule); this is the declaration that
   -- nothing applies, and it is still a declaration.
   let envA = (\(e, _, _, _, _, _, _, _) -> e) stA
-  mapM_ (uncurry (checkFunctorWord envA allDatas)) ownFuncs
+  mapM_ (\(n, gm) -> first (atSrcLine (declLineOf n))
+                       (checkFunctorWord envA allDatas n gm)) ownFuncs
   -- ...and the EXTENSION of each is a word of the functor's own name,
   -- so that the same functor is a value: `[Traced]` is a quote and
   -- `lift2 [Traced]` applies it at runtime.  Same source as the one
@@ -10616,11 +10816,12 @@ checkModuleRaw base src = do
               envC
                 | n `elem` preludeTypeNames =
                     foldr M.delete env
-                          ([n, "un" ++ n, "merge" ++ n, "fold" ++ n]
+                          ([n, derived "un" n, derived "merge" n
+                             , derived "fold" n]
                              ++ shadowed)
                 | otherwise = env
-          if M.member n envC || M.member ("un" ++ n) envC
-               || M.member ("merge" ++ n) envC
+          if M.member n envC || M.member (derived "un" n) envC
+               || M.member (derived "merge" n) envC
             then Left $ "Type " ++ n
                      ++ ": constructor name collides with an existing definition"
             else Right ()
@@ -10630,7 +10831,8 @@ checkModuleRaw base src = do
           -- or a prim.
           case [ f | f <- dFields dd
                    , M.member f envC
-                     || f `elem` [n, "un" ++ n, "merge" ++ n, "fold" ++ n] ] of
+                     || f `elem` [n, derived "un" n, derived "merge" n
+                                 , derived "fold" n] ] of
             (f : _) ->
               Left $ "Type " ++ n ++ ": field name '" ++ f
                   ++ "' is already a word in scope.  A field name becomes "
@@ -11527,7 +11729,7 @@ symTy ctx v = unwrap (8 :: Int) =<< own
     -- The scheme of `unName` is where the body still is.
     unwrap 0 t = Just t
     unwrap d t@(TData n _)
-      | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup ("un" ++ n)
+      | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup (derived "un" n)
                                                             (ncEnv ctx)
       , Just [u] <- closedWires o = unwrap (d - 1) u
       | otherwise = Just t
@@ -11552,7 +11754,7 @@ sumTracks ctx v = case v of
     -- which the normalizer has already inlined away (it is the
     -- identity); the scheme of `unName` is where the row still is
     fromTy (TData n _) = do
-      Forall _ _ _ _ _ _ (Arrow _ o _) <- M.lookup ("un" ++ n) (ncEnv ctx)
+      Forall _ _ _ _ _ _ (Arrow _ o _) <- M.lookup (derived "un" n) (ncEnv ctx)
       t <- stackWireAt 0 o
       case t of
         TSum row -> fromTy (TSum row)
@@ -11875,7 +12077,7 @@ mergeTy env a b = case (a, b) of
 
 unwrapTy :: Env -> Ty -> Maybe Ty
 unwrapTy env (TData n _)
-  | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup ("un" ++ n) env
+  | Just (Forall _ _ _ _ _ _ (Arrow _ o _)) <- M.lookup (derived "un" n) env
   , Just [u] <- closedWires o = Just u
 unwrapTy _ _ = Nothing
 
