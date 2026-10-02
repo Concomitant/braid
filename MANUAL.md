@@ -4276,7 +4276,12 @@ blocks, so a refusal in one names that line and which slot or law it is in,
 `in model Fwd, slot add` where a def reads `in def f`. A transformation's
 components and squares report the line its declaration sits on. A refused
 destructuring pattern names its line too, though the rewrite runs before there
-is a parse tree: it counts the line breaks it walks past. A name clash between two imported files names **both** lines,
+is a parse tree: it counts the line breaks it walks past.
+
+A `with` scope and a binder both **rebuild** the spine, writing several stages
+for each one the author wrote. Each rebuilt stage carries the written stage's
+line, so a refusal inside `with Circuits` or inside `(a b -> …)` names the
+stage rather than the def's first line. A name clash between two imported files names **both** lines,
 because a clash is two places to open:
 
 ```text

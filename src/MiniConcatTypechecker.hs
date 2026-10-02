@@ -6069,10 +6069,11 @@ runTransport ctx tp body = do
   -- A word of ANOTHER model is a stage that builds that model's carrier
   -- out of nothing, and an embedding embeds programs, not carriers.  Say
   -- so here: inference would only say `Cannot unify stacks: • vs a16`.
-  case [ (n, k) | [Prim n] <- stages, Just k <- [lookup n (ecKWords ctx)]
-                , k /= nm ] of
-    ((n, k) : _) ->
-      Left $ "`with " ++ nm ++ "`: " ++ n ++ " is a word of " ++ k
+  case [ (n, k, ln) | (ln, [Prim n]) <- stages
+                    , Just k <- [lookup n (ecKWords ctx)], k /= nm ] of
+    ((n, k, ln) : _) ->
+      Left $ atSrcLine ln
+          $ "`with " ++ nm ++ "`: " ++ n ++ " is a word of " ++ k
           ++ ", so it builds a carrier rather than being a program "
           ++ fromMaybe "the embedding" (tpEmbed tp) ++ " could embed.  A "
           ++ "category is entered from the BASE: compose " ++ n
@@ -6083,11 +6084,15 @@ runTransport ctx tp body = do
     []       -> Left $ "`with " ++ nm ++ "`: the scope is empty, and a "
                     ++ "transported scope must build a " ++ tpCarrier tp
     (s : ss) ->
-      pure (chainTerm (concat (zipWith (step embW thenW)
-                                       (True : repeat False) (s : ss))))
+      pure (chainLines (concat (zipWith (step embW thenW)
+                                        (True : repeat False) (s : ss))))
   where
     nm     = tpName tp
-    stages = filter (not . null) (spineOf body)
+    -- WITH EACH SOURCE STAGE'S LINE (2026-10-02).  The rebuild below
+    -- writes several stages per written one; each carries the line of
+    -- the stage it came from, so a refusal inside a transported scope
+    -- names the stage the author wrote rather than the def's first line.
+    stages = [ s | s@(_, ats) <- spineLines body, not (null ats) ]
     exits  = [ (slotDefName nm e, e) | e <- tpExits tp ]
     -- a stage that is one atom and is ALREADY a carrier is left alone:
     -- a def written under `with M` or `in M`, or one of the theory's
@@ -6103,9 +6108,10 @@ runTransport ctx tp body = do
       | kword s   = [s]
       | otherwise = [[Quote (chainTerm [s])], [Prim embW]]
 
-    step embW thenW first s =
+    step embW thenW first (ln, s) =
       let cs = carrierOf embW s
-      in if first then cs else map (Prim "_" :) cs ++ [[Prim thenW]]
+      in map ((,) ln)
+           (if first then cs else map (Prim "_" :) cs ++ [[Prim thenW]])
 
     noEmbed = "`with " ++ nm ++ "`: theory " ++ tpTheory tp ++ " takes "
            ++ doctrineName ++ "'s `" ++ doctrineCompose ++ "` and not its `"
@@ -6178,12 +6184,12 @@ readTransport ctx tp body = do
     [] -> Left $ "`with " ++ nm ++ "`: the scope is empty, and a "
               ++ "transported scope must build a " ++ tpCarrier tp
     ss -> do
-      cs <- mapM carrierOf ss
-      pure (chainTerm (concat (zipWith step (True : repeat False) cs)))
+      cs <- mapM (\(ln, s) -> (,) ln <$> carrierOf ln s) ss
+      pure (chainLines (concat (zipWith step (True : repeat False) cs)))
   where
     nm     = tpName tp
     thenW  = slotDefName nm (fromMaybe doctrineCompose (tpCompose tp))
-    stages = filter (not . null) (spineOf body)
+    stages = [ s | s@(_, ats) <- spineLines body, not (null ats) ]
     exits  = [ (slotDefName nm e, e) | e <- tpExits tp ]
     enters = map (slotDefName nm) (tpEnters tp)
     kword [Prim n] = lookup n (ecKWords ctx) == Just nm || n `elem` enters
@@ -6191,7 +6197,9 @@ readTransport ctx tp body = do
 
     -- a carrier already on the stack is put underneath and composed,
     -- exactly as the stage-wise path does
-    step first cs = if first then cs else map (Prim "_" :) cs ++ [[Prim thenW]]
+    step first (ln, cs) =
+      map ((,) ln)
+        (if first then cs else map (Prim "_" :) cs ++ [[Prim thenW]])
 
     -- THE CHECK, at the first USE rather than at the declaration:
     -- declarations are hoisted above defs, so a theory's base spelling
@@ -6220,9 +6228,9 @@ readTransport ctx tp body = do
     -- and there is nothing to send it to — a hom-object over stacks
     -- writes only one of the two whiskerings, so `m \8855 n` is not
     -- constructible from a theory's own slots (MANUAL \167\&8).
-    carrierOf s
+    carrierOf ln s
       | kword s   = Right [s]
-      | otherwise = do
+      | otherwise = first (atSrcLine ln) $ do
           named <- mapM readAtom s
           let gens = [ sl | (_, sl, Just _)  <- named ]
               whs  = [ sl | (_, sl, Nothing) <- named ]
@@ -13445,8 +13453,12 @@ data AtomInfo = AtomInfo Int [(Int, Int)] Term
 -- BELOW its input; the block is dropped at the end.
 compileAbs :: Env -> [String] -> [String] -> Term -> Either String Term
 compileAbs env outer ps body = do
-  stages <- mapM rewriteStage (spineOf body)
-  pure (chainTerm (concat stages ++ [finalStage]))
+  -- EACH SOURCE STAGE'S LINE RIDES THROUGH (2026-10-02).  One written
+  -- stage becomes several routed ones; they all report the line it was
+  -- written on, and the block drop at the end is the compiler's.
+  stages <- mapM (\(ln, ats) -> map ((,) ln) <$> rewriteStage ats)
+                 (spineLines body)
+  pure (chainLines (concat stages ++ [(0, finalStage)]))
   where
     n = length ps
 

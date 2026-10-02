@@ -3532,6 +3532,18 @@ moduleFailTests =
      "line 3, in def h: Unclosed group (expected ')')")
   , ("def dup2 = 1\ndef dup2 = 2\n1 ; print",
      "in def dup2: Duplicate definition: dup2")
+    -- A TRANSPORTED STAGE names the line the author wrote (2026-10-02).
+    -- `with` rebuilds the spine, writing several stages per written one;
+    -- each carries the written stage's line, so the refusal places
+    -- itself inside the scope rather than at the def's first line.
+  , (glaReadSrc ++ "def bad with Dense =\n    copy\n    fmul\n\
+     \bad ; app ... ; _ 1.0 ; ev ; print",
+     "line 22, in def bad: `with Dense`: `fmul` has no image under GLA")
+    -- ...and so does a stage inside a BINDER, which abstraction
+    -- elimination rebuilds the same way
+  , ("def bad = (a b ->\n    a b ; +\n    \"s\"\n    _ 1 ; +)\n\
+     \1 2 ; bad ; print",
+     "line 3, in def bad: Cannot unify stacks: Int vs \8226")
     -- A REFUSED PATTERN names its line (2026-10-02).  The destructuring
     -- rewrite runs on a token list before there is a parse tree to
     -- stamp, so it counts the newline tokens it walks past.
