@@ -2959,8 +2959,8 @@ keyword test = testW
 test squareIs25 = (5 ; square) (25) ; eq? ; verdict
 ```
 
-`testW` is a declaration word the kernel ships with **no keyword of its
-own**, which is what makes the binding worth having: it registers a
+`testW` is a declaration word the kernel provides with **no keyword of
+its own**, which is what makes the binding worth having: it registers a
 **check**, and a check runs at module start beside the laws and must
 answer `true`. A check that is not `• ⇒ Bool` is refused at the
 declaration, the same courtesy a law gets.
