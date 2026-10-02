@@ -23,7 +23,7 @@ def sign =
 # wire, `elif` probes only while undecided, `else` closes. One `_` per
 # continuation line passes the running wire along (the frame tax,
 # constant). Equivalent railway spelling: chain `>> if` lines with
-# >?> and close with >!> — no `_` (the miss track is empty, so lane
+# >?> and close with >!>, with no `_` (the miss track is empty, so lane
 # pushes are free there).
 def sign2 =
     x ->
@@ -36,7 +36,7 @@ def sign2 =
 7  >> sign2 >> print    # 7
 
 # Deeper ladder in the headline style; conditions are arbitrary Bool
-# expressions. (For lazy answers, quote them and `decide >> ev` —
+# expressions. (For lazy answers, quote them and `decide >> ev`:
 # or use the word chain with `otherwise` and a quoted default.)
 def grade =
     x ->
@@ -63,8 +63,8 @@ def classify =
 -4 >> classify >> print   # 0
 6  >> classify >> print   # 6
 
-# The product form: lanes laid FLAT as (condition, action) pairs —
-# default FIRST, then (Bool Fn)ⁿ — and firstTrue folds the bundle. All
+# The product form: lanes laid FLAT as (condition, action) pairs, with the
+# default FIRST and then (Bool Fn)ⁿ, and firstTrue folds the bundle. All
 # conditions are probed; the first true lane's action runs; exactly one
 # action ever runs. Guard count is just stack width (the exponent).
 def sign3 =

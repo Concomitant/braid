@@ -478,7 +478,7 @@ transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent
 
 # A TANGENT BECOMES THE LINEAR MAP THAT SCALES BY IT.  That is the
 # sentence "forward and reverse are two representations of the same
-# linear map", and it is a declaration too, since 2026-09-14.
+# linear map", and it is a declaration too.
 def transpose = Dual(x, dx) -> x (dx ; scaleK) ; Rev
 #   transpose : Dual(Float) ⇒ Rev
 

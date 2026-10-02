@@ -14,7 +14,7 @@
 theory Monoid(a) =
     unit   : • ⇒ a
     op     : a a ⇒ a
-    # A law over a PARAMETRIC theory cannot invent a value of `a` — there
+    # A law over a PARAMETRIC theory cannot invent a value of `a`: there
     # is no way to write a literal at an unknown type. So the theory
     # asks for one. That is not a workaround: an audited model supplies
     # the evidence its audit runs on.
@@ -41,17 +41,17 @@ model StrCat in Monoid(Str) =
 # ---- generic code, written once --------------------------------------
 # A def whose header is `in THEORY` is a TEMPLATE: it is a morphism of
 # the theory, its body waits for a model, and it is not a def at all
-# until one arrives. A def whose `with` names a MODEL supplies one —
+# until one arrives. A def whose `with` names a MODEL supplies one, and
 # the body is expanded there, renamed by that model, and re-inferred
 # there.  `in` declares; `with` applies.
 def fold1 in Monoid = [op] unit ... ; foldExp
 
-# so each instantiation has its OWN principal type — `total` is
-# `Intⁿ⁰ =IntSum> Int` and `joined` is `Strⁿ⁰ =StrCat> Str` — with no
+# so each instantiation has its OWN principal type: `total` is
+# `Intⁿ⁰ =IntSum> Int` and `joined` is `Strⁿ⁰ =StrCat> Str`, with no
 # dictionary passed and no rank-1 wall met.  The label is the scope's
 # RECEIPT: a `with` mints when it changed the code, and renaming
 # `fold1`'s slots to this model's words is a change, so the arrow
-# records which model read the template.  `in Monoid` mints nothing —
+# records which model read the template.  `in Monoid` mints nothing,
 # it applied nothing.
 def total with IntSum = fold1
 def prod with IntProd = fold1
@@ -72,5 +72,5 @@ def joined with StrCat = fold1
 # the theory, not a missing word:
 #   fold1 needs a model of Monoid in scope (`with <model>` before
 #   calling it)
-# and `IntSum@op` — the compiler's own spelling of a slot — is refused
+# and `IntSum@op`, the compiler's own spelling of a slot, is refused
 # in source: a slot is reached with `with IntSum`, or not at all.

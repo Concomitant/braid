@@ -16,7 +16,7 @@ data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)
 def headS = Stream(h, t) -> h                    # observe the first cell
 def tailS = Stream(h, t) -> t >> ev            # force one step
 
-# the integers upward from n — the self-call sits UNDER a quote, so the
+# the integers upward from n.  The self-call sits UNDER a quote, so the
 # stream is produced lazily, one cell per force.  A self-call inside a
 # quotation is a CAPTURE, and abstraction elimination handles it like
 # any other captured wire; guardedness (and so productivity) is the
@@ -24,7 +24,7 @@ def tailS = Stream(h, t) -> t >> ev            # force one step
 def from with Recursive =
   (n -> n [n 1 >> + >> from] >> Stream)
 
-# a constant stream — same shape, different generator
+# a constant stream: same shape, different generator
 def repeat with Recursive =
   (x -> x [x >> repeat] >> Stream)
 

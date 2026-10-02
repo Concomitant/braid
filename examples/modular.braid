@@ -36,7 +36,7 @@ data Mod7 = Int
 
 def reduce = (x -> x 7 ; mod ; Mod7)
 
-# `mod` is Euclidean here, so the representative is always in 0..6 —
+# `mod` is Euclidean here, so the representative is always in 0..6, and
 # including for a negative argument (-3 mod 7 = 4).
 -3 7 ; mod ; print                                    # 4
 
@@ -80,7 +80,7 @@ def polyMod with Mod = poly
 # changes everything.  By hand at x = 9: reduce 9 = 2, and
 # 2*2 = 4, 2*3 = 6, 4 + 6 = 10 = 3, 3 + 2 = 5.
 
-#   polyMod : Mod7 =Mod> Mod7 — the RECEIPT, one label per model,
+#   polyMod : Mod7 =Mod> Mod7, the RECEIPT, one label per model,
 #   exactly as a family's application leaves one.
 
 # APPLYING IT TWICE IS THE IDENTITY THE SECOND TIME.  After `with Mod`
@@ -117,7 +117,7 @@ def cubicMod with Mod = cubic
 #
 #   def bad with Mod = 2 ... ; div
 #     `div` has no image under model Mod: Mod maps Int ↦ Mod7, and
-#     `div : Int Int ⇒ Int` mentions Int — so the functor has nothing
+#     `div : Int Int ⇒ Int` mentions Int, so the functor has nothing
 #     to send it to.  Add `div = …` to `model Mod`, declare a
 #     retraction (`via reduce, r` with `r : Mod7 ⇒ Int`) so it is
 #     derived by conjugation, or do not call it here.
@@ -133,20 +133,19 @@ def cubicMod with Mod = cubic
 # same refusal for a better reason.
 
 # ---------------------------------------------------------------------
-# 6. Reduction as a RING HOMOMORPHISM — the claim, and its audit
+# 6. Reduction as a RING HOMOMORPHISM: the claim, and its audit
 # ---------------------------------------------------------------------
 # An object map makes `reduce` a functor on the AMBIENT presentation.
 # That it is a homomorphism of RINGS is a further and stronger claim,
-# and `transformation` is where it is made and checked — square by
+# and `transformation` is where it is made and checked, square by
 # square, one per generator, exactly as for any two models of a theory.
 # EVERY slot that builds an `a` out of nothing is evidence, and a slot
 # with two inputs is audited at every COMBINATION of them: `Ring` below
 # declares three (`sample`, `sample2`, `zero`), so `add` and `mul` are
 # each run at nine points and `neg` at three.  The order the slots are
-# written in decides nothing.  (Until 2026-09-17 a square reached for
-# the FIRST such slot only, which made the audit a fact about the
-# declaration order rather than about the models — §7 is the
-# counterexample that says why that was not good enough.)
+# written in decides nothing.  A square that reached for the FIRST such
+# slot only would make the audit a fact about the declaration order rather
+# than about the models, and §7 is the counterexample that says why.
 theory Ring(a) =
     sample  : • ⇒ a
     sample2 : • ⇒ a
@@ -185,10 +184,10 @@ transformation Reduce in Ints ⇒ Mods = reduce
 #     neg      sampled (3 points) zero     sampled
 #
 #   The two sample squares are PROVED because `reduce` of the Int one
-#   IS the Mod7 one, as free programs — `Mods@sample` is literally
+#   IS the Mod7 one, as free programs: `Mods@sample` is literally
 #   `7 ; reduce`.  The other four are SAMPLED: they are true only by the
 #   arithmetic of `mod`, and `sameCode` treats `+`, `*` and `mod` as
-#   uninterpreted words.  That is the same honest boundary
+#   uninterpreted words.  That is the same boundary
 #   `optimizer.braid` §3 and `laws.braid` draw.
 
 "-- reduce is a ring homomorphism --" ; print
@@ -200,7 +199,7 @@ transformation Reduce in Ints ⇒ Mods = reduce
 # ---------------------------------------------------------------------
 # 7. THE CONTRAST: an object map that is NOT a homomorphism
 # ---------------------------------------------------------------------
-# Floor-halving is a perfectly good object map — every generator it
+# Floor-halving is a legitimate object map, since every generator it
 # names has an image at the substituted type, so `with Halve` elaborates
 # and runs.  It is NOT a ring homomorphism, and nothing in the object
 # map could have said so.
@@ -223,8 +222,8 @@ def polyHalf with Halve = poly
 
 # READ THE ANSWER CAREFULLY.  It is NOT p(4) = 30: the LITERALS were
 # transported too, so `3` is ⌊3/2⌋ = 1 and `2` is ⌊2/2⌋ = 1, and what
-# runs is 4*4 + 4*1 + 1 = 21.  That is what a functor does — it maps
-# every generator, and a literal is a generator — and it is the clearest
+# runs is 4*4 + 4*1 + 1 = 21.  That is what a functor does: it maps every
+# generator, and a literal is a generator.  It is the clearest
 # possible sign that `with Halve` is a reinterpretation of the whole
 # program and not a change of representation.
 9 ; halve ; polyHalf ; unHalf ; print                 # 16 + 4 + 1 = 21
@@ -248,12 +247,12 @@ model Halves in Ring(Half) =
 # By hand, at the theory's own sample 7:  ⌊(7+7)/2⌋ = 7, but
 # ⌊7/2⌋ + ⌊7/2⌋ = 3 + 3 = 6.  The object map typed; the homomorphism
 # did not hold; and the two are checked by two different declarations,
-# which is the whole point of having both.
+# which is the reason to have both.
 #
 # Note WHICH point catches it.  At (0, 0) floor-halving IS additive, and
 # at (0, 7) and (7, 0) it is too; only (7, 7) is false.  That is why the
 # square is run at every combination of the theory's entries rather than
-# at the first one — a theory that declared `zero` first would otherwise
+# at the first one, because a theory that declared `zero` first would
 # have certified this as a ring homomorphism (`test/Tests.hs`,
 # `zeroFirstRingMod`).
 (7 7 ; + ; halve ; unHalf) (7 7 ; halve halve ; addH ; unHalf) ; eq? ; verdict ; says ; print   # false
@@ -262,7 +261,7 @@ model Halves in Ring(Half) =
 # 8. A NOMINAL source, a retraction, and the conjugated table
 # ---------------------------------------------------------------------
 # `A` need not be a base type.  When it is a `data` name there are no
-# literals of it at all, so `via c` is not the literal family's image —
+# literals of it at all, so `via c` is not the literal family's image but
 # it is the map on values, and it earns its keep the other way: declare
 # a RETRACTION beside it and every generator the table does not name is
 # DERIVED by conjugation, one `r` per `A` input wire and one `c` per `A`
@@ -293,8 +292,8 @@ runMm ; unMm     ; print                              # 6000
 # and `Milli@stretch : Mm ⇒ Mm` is the conjugate the two together make.
 #
 # `:doc Milli` says what is PROVED and what is not.  Here the retraction
-# law `toMm ; toM = id` is TRUE — (m·1000) div 1000 = m for every Int m
-# — and `sameCode` does not decide it, because `*` and `div` are
+# law `toMm ; toM = id` is TRUE, since (m·1000) div 1000 = m for every Int
+# m, and `sameCode` does not decide it, because `*` and `div` are
 # uninterpreted words in the free category.  So `Milli` is recorded as a
 # DIALECT: the conjugated words are what the declaration says they are,
 # on the author's word.  That is the same line `optimizer.braid` draws

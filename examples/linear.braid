@@ -97,24 +97,24 @@ data Mat(a..., b...) = Fn⟨a ⇒ b⟩ Fn⟨b ⇒ a⟩ Code
 #
 # `under` is the theory's OWN strength, for the reason
 # `examples/prob.braid` declares one: a base stage of any width embeds
-# as itself, but a GENERATOR is not a base stage — `copy` is a carrier
-# at the fixed width `k(Float, Float Float)`, and nothing in the base
-# can widen it.  One wire rides UNDER.
+# as itself, and a GENERATOR is not a base stage: `copy` is a carrier at
+# the fixed width `k(Float, Float Float)`, and nothing in the base can
+# widen it.  One wire rides UNDER.
 #
 # WHAT IS NOT HERE, and cannot be: the monoidal product `m ⊗ n`.  A
 # stack variable may only sit in tail position, so `k(c a, c b)` is
-# spellable and `k(a c, b c)` is refused — *The stack parameter 'a'
+# spellable and `k(a c, b c)` is refused with *The stack parameter 'a'
 # must be the last thing in its stack*.  The stack-shaped hom-object
 # writes exactly ONE of the two whiskerings, and the symmetry at
 # general stacks (`k(a c, c a)`) is unwritable for the same reason.
-# `sym` therefore ships at the one concrete width that generates the
-# rest in a PROP, and `m ⊗ id` — a generator with wires riding ABOVE —
-# is out of reach.  The consequence is stated where it bites: the
+# `sym` is therefore declared at the one concrete width that generates the
+# rest in a PROP, and `m ⊗ id`, a generator with wires riding ABOVE, is
+# out of reach.  The consequence is stated where it bites: the
 # bialgebra law proper needs `copy ⊗ copy`, so the laws below are its
 # unit, counit and scalar corollaries and not the four-wire equation
 # itself.
 #
-# `app` and `diagram` are EXITS — carrier in, base out — read off their
+# `app` and `diagram` are EXITS, carrier in and base out, read off their
 # declared arrows.  `app` is what makes a matrix READ LIKE A FUNCTION:
 # it hands back the real `Fn`, and `ev` runs it.
 #
@@ -123,18 +123,18 @@ data Mat(a..., b...) = Fn⟨a ⇒ b⟩ Fn⟨b ⇒ a⟩ Code
 # not on a model, and that is the design decision: which base programs
 # are linear is a property of the PRESENTATION, and two models of one
 # theory must not be able to disagree about it.  Put the table on a
-# reference model instead — `with Dense via Funcs` — and `B_lin` would
-# depend on which model you named; and the inverse asked for would be
-# the inverse of a model whose slot bodies are PROGRAMS, which is not a
-# table at all.  Beside the signature, where the generator is.
+# reference model instead, `with Dense via Funcs`, and `B_lin` would depend
+# on which model you named, while the inverse asked for would be the inverse
+# of a model whose slot bodies are PROGRAMS, which is not a table at all.
+# It goes beside the signature, where the generator is.
 #
 # `scale` gets NO spelling, and the refusal that enforces it is written
 # out in the theory checker: a base spelling is only for a slot that
 # builds a carrier out of nothing or whiskers one, and `scale` takes a
 # `Float`, so it is one generator PER VALUE and no single word names
-# it.  That is the AFFINE TRAP pinned at the declaration: no literal can
-# enter the table, so `x ; 1.0 ; fadd` — an affine map, not a linear one
-# — has nothing to be read as.
+# it.  That is the AFFINE TRAP caught at the declaration: no literal can
+# enter the table, so `x ; 1.0 ; fadd`, which is an affine map rather than
+# a linear one, has nothing to be read as.
 theory GLA(k(..., ...)) in Doctrine =
     compose : k(a, b) k(b, c) ⇒ k(a, c)
     copy    : • ⇒ k(Float, Float Float)       = dup
@@ -157,8 +157,8 @@ theory GLA(k(..., ...)) in Doctrine =
     law trUnitExchange = (zero ; tr ; diagram) (discard ; diagram) ; sameCodeC
     ## SAMPLED, through `app`: these relate two DIFFERENT diagrams that
     ## denote the same matrix, which is what a bialgebra law is, and no
-    ## normalizer decides that — `copy ; add` normalizes to `dup >>
-    ## fadd` and `2.0 ; scale` to a closure over a literal.
+    ## normalizer decides that: `copy ; add` normalizes to `dup >> fadd`
+    ## and `2.0 ; scale` to a closure over a literal.
     law bialgebraDouble = ((copy add ; compose) ; app ... ; _ 3.0 ; ev) ((2.0 ; scale) ; app ... ; _ 3.0 ; ev) ; equals
     law comonoidCounit = ((copy (discard ; under) ; compose) ; app ... ; _ 3.0 ; ev) 3.0 ; equals
     law monoidUnit = (((zero ; under) add ; compose) ; app ... ; _ 3.0 ; ev) 3.0 ; equals
@@ -177,10 +177,10 @@ theory GLA(k(..., ...)) in Doctrine =
 # once.
 #
 # `fzero` is the base word for the monoid's unit.  It exists so that
-# the DIAGRAM's atom for `zero` is a WORD and not a literal — `0.0`
-# read as an atom is a `Sym` like any other word (Code has no Float
-# alternative), and a generator that dualizes to `drop` wants a name
-# that dualizes back.
+# the DIAGRAM's atom for `zero` is a WORD rather than a literal.  `0.0`
+# read as an atom is a `Sym` like any other word, Code having no Float
+# alternative, and a generator that dualizes to `drop` wants a name that
+# dualizes back.
 def orNil = ((c -> c) | drop ; nil) ; merge
 def fzero = 0.0
 
@@ -194,7 +194,7 @@ def dualAtom = [(s -> s ; dualSym ; alt1 ; Atom)] [(n -> n ; alt2 ; Atom)] [(t -
 ## exchange.  Atoms WITHIN a stage are not reversed, because `f ⊗ g`
 ## transposes to `fᵀ ⊗ gᵀ` with the order kept.  This is
 ## `examples/transpose.braid`'s `transposeC`, at Float and with the
-## monoid's unit added — and here it is a SLOT BODY with laws over it
+## monoid's unit added, and here it is a SLOT BODY with laws over it
 ## rather than a runtime fold nobody checks.
 def dualC = reverse ; [[dualAtom] ... ; map] ... ; map
 
@@ -205,7 +205,7 @@ def wordC = (s -> s ; symStr ; parse ; orNil)
 ## leading `_`
 def padC = [(st -> (._ ; alt1 ; Atom) st ; cons)] ... ; map
 
-## composition of two witnesses, at any width — `examples/reified.braid`
+## composition of two witnesses, at any width.  `examples/reified.braid`
 ## writes the same four atoms, and `ev` is what makes it possible at all
 def thenFn = (f g -> [f ... ; ev ; g ... ; ev])
 
@@ -213,8 +213,8 @@ def composeM =
     m n ->
     m ; unMat ; (f f' p -> n ; unMat ; (g g' q ->
         (f g ; thenFn) (g' f' ; thenFn) (p q ; append) ; Mat))
-#   the dual composes the other way round — contravariance, written
-#   into the slot body rather than checked after the fact
+#   the dual composes the other way round, which is contravariance,
+#   written into the slot body rather than checked after the fact
 
 def copyM    = [dup] [fadd] (.dup ; wordC) ; Mat
 def addM     = [fadd] [dup] (.fadd ; wordC) ; Mat
@@ -223,10 +223,10 @@ def discardM = [drop] [fzero] (.drop ; wordC) ; Mat
 def symM     = [swap] [swap] (.swap ; wordC) ; Mat
 
 ## A SCALAR HAS NO ONE-STAGE BASE SPELLING, and that is the affine trap
-## in miniature.  `_ 2.0 ; fmul` is TWO stages — a constant (`• ⇒
-## Float`, which is not linear) and a multiplication (`Float Float ⇒
-## Float`, which is not linear in both arguments) — and reversing two
-## stages does not transpose them.  So the scalar's diagram is one
+## in miniature.  `_ 2.0 ; fmul` is TWO stages, a constant (`• ⇒ Float`,
+## which is not linear) and a multiplication (`Float Float ⇒ Float`, which
+## is not linear in both arguments), and reversing two stages does not
+## transpose them.  So the scalar's diagram is one
 ## stage that NAMES the generator and carries its value, `scale 2.0`,
 ## and the price is paid in the open: `sameCodeC` refuses any diagram
 ## containing it (*`scale` has no closed arity*), which is why every
@@ -251,9 +251,9 @@ model Dense in GLA(Mat) =
     app     = appM
     diagram = diagramM
 
-# The eleven slots are checked against the theory and the eight laws
-# above RUN — four decided by `sameCodeC`, four sampled through `app` —
-# before anything below prints.
+# The eleven slots are checked against the theory and the eight laws above
+# RUN before anything below prints: four decided by `sameCodeC`, four
+# sampled through `app`.
 
 # ---------------------------------------------------------------------
 # 4. Morphisms, built by hand
@@ -262,7 +262,7 @@ model Dense in GLA(Mat) =
 # builds ONE carrier out of nothing, `• ⇒ Mat(a, b)`, which is what a
 # word of the category is; the header is the written claim and the
 # elaborator checks it against the arrow.  No receipt is minted,
-# because `in` applied nothing — the type prints unfolded.
+# because `in` applied nothing, so the type prints unfolded.
 
 ## x ↦ x + x.  Δ then ∇, the diagram the bialgebra law is about.
 def dbl in Dense = copy add ; compose
@@ -303,8 +303,8 @@ def r5 in Dense = row11 ; app ... ; _ 4.0 5.0 ; ev
 r5 ; print                          # 9.0  — [1 1] · (4, 5)
 
 # the 2×1 column applied: one in, two out.  A stage must cover the
-# stack it is handed, so printing two wires is `_ print ; print` — the
-# top one first, then the one that was riding below it.
+# stack it is handed, so printing two wires is `_ print ; print`: the top
+# one first, then the one that was riding below it.
 def r6 in Dense = col11 ; app ... ; _ 7.0 ; ev
 r6 ; _ print ; print                # 7.0 then 7.0 — the column (1, 1) at 7
 
@@ -341,7 +341,7 @@ def r8 in Dense = fan ; tr ; app ... ; _ 1.0 2.0 ; ev
 r8 ; print                          # 6.0 — 2·(1 + 2)
 
 # ---------------------------------------------------------------------
-# 7. `;` AS COMPOSITION — `embed` on a subcategory
+# 7. `;` AS COMPOSITION: `embed` on a subcategory
 # ---------------------------------------------------------------------
 # Everything above composes with a WORD, `f g ; compose`, because a
 # `with` scope needs an embedding and the embedding is the thing this
@@ -355,8 +355,8 @@ r8 ; print                          # 6.0 — 2·(1 + 2)
 # each STAGE opaquely; this reads each ATOM into a slot, so `dup ; fadd`
 # becomes `copy add ; compose` and every generator in the composite is
 # one the theory named.  A stage is `_`… followed by exactly one
-# generator — the `_`s are `under` and the generator is the carrier they
-# ride beneath — because only one whiskering is spellable (§2), so two
+# generator, where the `_`s are `under` and the generator is the carrier
+# they ride beneath, because only one whiskering is spellable (§2).  Two
 # generators side by side is a TENSOR and is refused by name.
 
 "" ; print
@@ -364,8 +364,8 @@ r8 ; print                          # 6.0 — 2·(1 + 2)
 
 ## written once, as an ordinary base program would be...
 def dbl2 with Dense = dup ; fadd
-#   dbl2 : Float =Dense> Float — a RECEIPT, because the scope changed
-#   the code; `dbl` above carries none, because `in` applied nothing.
+#   dbl2 : Float =Dense> Float, a RECEIPT, because the scope changed the
+#   code.  `dbl` above carries none, because `in` applied nothing.
 
 ## ...and it composes in the category like any other word of it
 def quad with Dense = dbl2 ; dbl2
@@ -383,8 +383,8 @@ def t4 in Dense = triple ; tr ; app ... ; _ 5.0 ; ev
 t4 ; print                          # 15.0 — [3]ᵀ = [3]
 def t5 in Dense = triple ; tr ; diagram
 t5 ; unparse ; print                # dup >> _ dup >> _ fadd >> fadd
-#   x ↦ 3x is symmetric, so its diagram transposes to itself — the `_`s
-#   are self-dual and the comonoid/monoid exchange puts the tree back.
+#   x ↦ 3x is symmetric, so its diagram transposes to itself: the `_`s are
+#   self-dual and the comonoid-monoid exchange puts the tree back.
 
 ## and a hand-built morphism composes with a transported one inside the
 ## same scope, because `in Dense` put it in the same word table: `cu`
@@ -415,8 +415,8 @@ t6 ; print                          # 12.0 — 3 ⇒ 6 ⇒ 6 ⇒ 12
 #
 #   def tensored with Dense = dup dup
 #     the stage `dup dup` puts two of GLA's generators side by side,
-#     which is their TENSOR — and a hom-object over stacks writes only
-#     one of the two whiskerings, so GLA has nothing to send it to.
+#     which is their TENSOR, and a hom-object over stacks writes only one
+#     of the two whiskerings, so GLA has nothing to send it to.
 #
 # The middle one is the AFFINE TRAP, and it is worth seeing why it is
 # not a special case in the elaborator: the theory checker refuses a
@@ -428,12 +428,12 @@ t6 ; print                          # 12.0 — 3 ⇒ 6 ⇒ 6 ⇒ 12
 # WHAT IS STILL NOT REACHABLE.  A transported program cannot scale,
 # because a scalar has no one-word base spelling (§3); `two`, `fan` and
 # every scalar law above are hand-built for that reason.  And `m ⊗ n`
-# is not constructible at all, in either half, because only one
-# whiskering is spellable — which is why the bialgebra law proper is
-# absent and its corollaries are what the theory states.
+# is not constructible at all, in either half, because only one whiskering
+# is spellable, which is why the bialgebra law proper is absent and its
+# corollaries are what the theory states.
 #
 # AND `examples/transpose.braid` STAYS.  Its `linear?` asks this file's
-# question of code that arrives at RUN TIME — from `parse`, from
-# `evalCode` — and no scope can be put around a string read from a
-# file.  One spelling for the static question, which is this file; one
-# for the dynamic one, which is that one.
+# question of code that arrives at RUN TIME, from `parse` or `evalCode`,
+# and no scope can be put around a string read from a file.  One spelling
+# for the static question, which is this file, and one for the dynamic
+# question, which is that one.

@@ -9,6 +9,6 @@
 5 >> (2 >> odd) [dup >> *] ... >> when >> print    # 5   (skipped)
 
 # Contrast: when the TESTED value is what the branches need, the
-# router form stays better — min keeps its data attached:
+# router form stays better, since min keeps its data attached:
 def min = lt? >> (_ drop | drop ...) >> merge
 3 7 >> min >> print                                 # 3

@@ -12,7 +12,7 @@ def fromInt with Recursive =
 def toInt = [0] [1 ... >> +] ... >> foldNat
 
 ## addition by structural recursion on the second argument: that is
-## what foldNat IS, so add needs no knot — zero maps to m, successor
+## what foldNat IS, so add needs no knot: zero maps to m, successor
 ## to s on the result
 def add = (m n -> n >> [m] [s] ... >> foldNat)
 

@@ -34,7 +34,7 @@ model IntSum in Monoid(Int) =
     op     = +
     sample = 7
 
-# The samples must correspond too — `sample` is a generator like any
+# The samples must correspond too, because `sample` is a generator like any
 # other, and a homomorphism preserves it.  A seven-element list is what
 # `len` sends to IntSum's 7, and stating it that way is the point: the
 # evidence a model is audited with is part of what a transformation must
@@ -47,7 +47,7 @@ model ListMonoid in Monoid(List(Int)) =
 def len = [(acc x -> acc ; _ 1 ; +)] 0 ... ; fold
 
 transformation Len in ListMonoid ⇒ IntSum = len
-#   Len : List(a) ⇒ Int — the component is an ordinary word, so it is
+#   Len : List(a) ⇒ Int.  The component is an ordinary word, so it is
 #   usable in base code under its own name.  It is FORWARD-DECLARED at
 #   `List(Int) ⇒ Int`, the type the two model heads wrote, so a def may
 #   name it wherever the declaration sits; its own type is `len`'s, and
@@ -60,7 +60,7 @@ transformation Len in ListMonoid ⇒ IntSum = len
 # whose arrow is not closed (a fold APPLIES its handler, and the
 # handler's arrow is open), and the sample square stops at `pack`,
 # which has no closed arity.  All three are decided at the theory's
-# samples instead — which is exactly what the `sample` slot is for, and
+# samples instead, which is what the `sample` slot is for, and
 # why a theory without one gets a refusal naming the slot it could not
 # decide.  `:transformations` prints the reason beside the verdict:
 #
@@ -73,8 +73,8 @@ transformation Len in ListMonoid ⇒ IntSum = len
 # When the two models are models of a theory that extends `Doctrine`,
 # they are internal categories, and a transformation between them is an
 # INTERNAL FUNCTOR: the squares for `compose` and `embed` are exactly
-# functoriality — preserves composition, preserves the image of the
-# base.  There is no strength square, because since 2026-09-16 there is
+# functoriality: it preserves composition and the image of the
+# base.  There is no strength square, because there is
 # no strength: a hom-object names a whole STACK on each side, so a wide
 # stage embeds as itself.
 #
@@ -128,18 +128,18 @@ namedSq ; Forget ; observeP ; print            # 28 — 3·4 + 4·4
 # Both models run the doctrine's five laws at their own samples, and
 # the four squares above are checked besides.  `embed` and `sample` are
 # PROVED; `compose` and `observe` are SAMPLED, and the reason is the
-# 2026-09-16 move itself:
+# stack-shaped hom-object itself:
 #
 #     embed    proved
 #     compose  sampled (2 points; ev of an open wire)
 #     observe  sampled (1 point; ev of an open wire)
 #     sample   proved
 #
-# Until that date a hom-object pinned its own `Fn⟨a ⇒ b⟩` to ONE WIRE
+# A one-wire hom-object would fix its own `Fn⟨a ⇒ b⟩` at ONE WIRE
 # on each side, so applying it was a neutral application and the
 # normalizer followed all five squares.  Over STACKS the witness is
 # `Fn⟨ρ ⇒ σ⟩` with ρ open, and `ev` of an open wire has no closed
-# arity — the same wall `Len` has always stood at, reached now by the
+# arity, the same wall `Len` stands at, reached here by the
 # carrier models too.  That is what flat products cost here, said out
 # loud: the pairing, the `data Pair` and the routing pass went, and two
 # of these four verdicts went with them.  What would buy them back is a

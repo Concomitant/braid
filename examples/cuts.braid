@@ -19,9 +19,9 @@ def c = [1 2 >> + >> dup >> *] ; getCode          # 4 stages: [1 2] [+] [dup] [*
 # The CUT TYPE is the interesting part.  Splitting a program names an
 # intermediate the whole program never mentions, and it differs per cut:
 # after 1 stage the wires are Int Int, after 2 just Int.  So each cut
-# states its own pair of witnesses — the prefix's expectation and the
-# suffix's — and both are checked when the halves run.  That obligation
-# is the honest price of cutting: the type between the halves is a fact
+# states its own pair of witnesses, the prefix's expectation and the
+# suffix's, and both are checked when the halves run.  That obligation
+# is the price of cutting: the type between the halves is a fact
 # about the cut, not about the program, so someone has to say it.
 def cutAt =
     pre suf k ->
@@ -39,16 +39,16 @@ def stage0 = c ; uncons ; (nil | (s r -> s)) ; merge      # the stage [1, 2]
 [1] (1 stage0 ; take ; single) ; evalAs ; (print | forget) ; merge    # 1
 [2] (1 stage0 ; skip ; single) ; evalAs ; (print | forget) ; merge    # 2
 
-# a consuming stage cuts too: [dup drop] : a b ⇒ a a — take just [dup],
+# a consuming stage cuts too: [dup drop] : a b ⇒ a a, so take just [dup],
 # now a program of its own (: a ⇒ a a), cut free of its stage-mate
 def s2 = ([dup drop] ; getCode) ; uncons ; (nil | (s r -> s)) ; merge
 7 ; [dup] (1 s2 ; take ; single) ... ; evalAs
     (_ print ; print | forget) ; merge                    # 7 7
 
 # ---- boxing: cut a slice, box it, use it LATER as a value ------------
-# Deferring the RUN no longer costs the result's TYPE.  `box` takes the
+# Deferring the RUN does not cost the result's TYPE.  `box` takes the
 # WITNESS beside the code, so the boxed program is ordinarily typed and
-# its result is ordinarily usable — `print`, not just `forget`.  The
+# its result is ordinarily usable, so `print` rather than just `forget`.  The
 # witness is never applied; it is the expectation the code must meet,
 # spelled as a value because there is no type syntax inside terms.  It
 # is also the fallback: on a miss it is still sitting there to run.

@@ -33,11 +33,11 @@ model Opt in Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
 # The refusals, each with its reason.  Uncomment one to see it:
 #
 #   model No : Base = dup = dupInt
-#     dup is used at a0 ⇒ a0 a0 but dupInt is Int ⇒ Int Int — the
+#     dup is used at a0 ⇒ a0 a0 but dupInt is Int ⇒ Int Int.  The
 #     image is narrower, so a Str program would stop typing.
 #
 #   model No : Base = two = dup   (with `def two = drop 1 1`)
-#     two is used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0 — this one
+#     two is used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0.  This one
 #     would RUN on an Int, and narrows `a ⇒ Int` to `Int ⇒ Int`
 #     everywhere else.  The parametricity message refuses it.
 #
@@ -48,13 +48,13 @@ model Opt in Base = dupSwap = dup, copyDrop = id, dupInt = dup, twice = double
 #
 # A model of `Base` whose images are PROVABLY EQUAL to the
 # generators is an OPTIMIZER; one whose images merely satisfy the laws
-# is a REINTERPRETATION — a dialect.  Section 3 is exactly that line.
+# is a REINTERPRETATION, a dialect.  Section 3 is that line.
 
 # ---------------------------------------------------------------------
 # 3. What is PROVED, and what is merely typed.
 #
 # A binding's type check says the rewrite keeps programs typing.  It
-# does NOT say it keeps them MEANING the same thing — that is a law,
+# does NOT say it keeps them MEANING the same thing, which is a law,
 # and `sameCode` decides it for the wiring fragment: programs built from
 # id/_/dup/drop/swap/pass, composition and juxtaposition, over words
 # treated as uninterpreted.  Two of our four rules are inside it.
@@ -69,10 +69,10 @@ def proved = ("proved" | "NOT proved — see below") >> merge
 
 # The last two are TRUE and not provable here.  `dup ; _ _ 0 ; _ +` is
 # `dup` only because `x + 0 = x`, and `dup ; +` is `2 _ ; *` only
-# because doubling is adding to itself — both need Int arithmetic, and
+# because doubling is adding to itself.  Both need Int arithmetic, and
 # `sameCode` treats `+` and `*` as uninterpreted words.  Deciding them
 # means normalizing modulo an equational theory rather than a free one.
-# That is the honest boundary, and it is the same one laws.braid draws.
+# That is the boundary, and it is the one laws.braid draws.
 
 # ---------------------------------------------------------------------
 # 4. Applying the set, and the receipt.
@@ -101,7 +101,7 @@ def sumTo with Opt Recursive =
 0 5 >> sumTo >> print                     # 15
 
 # THE RECEIPT.  `with Opt` leaves `Opt` on the manifest of everything it
-# rewrote — `poly : Int =Opt> Int`, `sumTo : Int Int =Opt Recursive> Int` —
+# rewrote: `poly : Int =Opt> Int`, `sumTo : Int Int =Opt Recursive> Int`.
 # and a written type must carry it too, so an unlabelled witness refuses
 # optimized code exactly as a pure one refuses io.  That is the whole
 # difference between an optimizer you can audit and one you must trust.
@@ -116,8 +116,8 @@ def optimized = [with Opt = dupInt ; +]
 # ---------------------------------------------------------------------
 # 5. Two functors to compare it with.
 # ---------------------------------------------------------------------
-# A `functor` takes a GRAPH MORPHISM — `Fn⟨Stage ⇒ Code⟩`, one image
-# per generator — and extends it by the universal property, so the
+# A `functor` takes a GRAPH MORPHISM, `Fn⟨Stage ⇒ Code⟩` with one image
+# per generator, and extends it by the universal property, so the
 # declaration says what happens to a generator and nothing more.  The
 # extension is in scope as a word of the functor's own name, which is
 # what the laws below name and what `lift2 [Spaced]` would lift.
@@ -135,7 +135,7 @@ functor Doubled = [(s -> (s >> pack) (s >> pack) >> append)]
 #
 #    `sameCodeC` is `sameCode` over Code values.  Code is what a functor
 #    RETURNS, so a law about a functor can be stated in no other way.
-#    Since 2026-09-13 the two words are ONE procedure: `sameCode` runs
+#    The two words are ONE procedure: `sameCode` runs
 #    abstraction elimination first, so both decide binders, quotations
 #    and rows alike (§12.9).
 # ---------------------------------------------------------------------
@@ -145,11 +145,11 @@ theory Functor
     sample2 : • ⇒ Code
     ## F(id) = id
     law preservesId = (nil >> ap) nil >> sameCodeC
-    ## F(p ; q) = F(p) ; F(q) — composition of Code is `append`
+    ## F(p ; q) = F(p) ; F(q), where composition of Code is `append`
     law functorial  = ((sample sample2 >> append) >> ap) ((sample >> ap) (sample2 >> ap) >> append) >> sameCodeC
 
 ## An optimizer is a functor that reaches a normal form.  Idempotence is
-## a FUNCTOR law — it is about F, at every program — and it is what makes
+## a FUNCTOR law, about F at every program, and it is what makes
 ## the image assertions below mean anything.
 theory Optimizer
     ap     : Code ⇒ Code
@@ -158,7 +158,7 @@ theory Optimizer
     law idempotent  = (sample >> ap >> ap) (sample >> ap) >> sameCodeC
 
 ## An INTERACTION law: two functors that commute at a sample.  This is
-## a naturality square with both sides fixed — the graded-distributive-
+## a naturality square with both sides fixed: the graded-distributive-
 ## law question, as something a model must pass.
 theory Commuting
     apF    : Code ⇒ Code
@@ -207,7 +207,7 @@ model OptSpacedCommute in Commuting
 #     model must be an audited model of its theory
 
 # ---------------------------------------------------------------------
-# 7. Image membership — a PROGRAM assertion, not a functor law.
+# 7. Image membership: a PROGRAM assertion rather than a functor law.
 #
 # For an idempotent F, "p is in the image of F" ⟺ `F(p) = p`.  That is a
 # claim about a particular program, so it is written where the program
@@ -221,7 +221,7 @@ def inImage = sameCodeC >> ("in the image of Opt" | "NOT in the image of Opt") >
 ([twice]  >> getCode >> Opt) ([twice]  >> getCode) >> inImage >> print
 
 # Read that carefully.  `twice` is `dup ; +` and `double` is `2 _ ; *`,
-# and they agree on every Int — but not in the FREE category, where `+`
+# and they agree on every Int, and not in the FREE category, where `+`
 # and `*` are uninterpreted, so the rewrite is visible there and `twice`
 # is outside the image.  Image membership is decided wherever program
 # equality is decided, and inherits its boundary exactly.
@@ -230,9 +230,9 @@ def inImage = sameCodeC >> ("in the image of Opt" | "NOT in the image of Opt") >
 # 8. Transport of recursion: F(fix b) = fix (F b).
 #
 # It holds for `Opt` because the engine recurses into quotes, so it
-# meets the body where the body is.  Since 2026-09-13 the normalizer
-# enters quotations, and `fix` — a prelude def since 2026-09-14, held
-# OPAQUE because it ties a knot — has a closed arity, so `[b] ; fix` is
+# meets the body where the body is.  The normalizer
+# enters quotations, and `fix`, a prelude def held OPAQUE because it ties
+# a knot, has a closed arity, so `[b] ; fix` is
 # an uninterpreted operator applied to a value whose BODY is compared in
 # normal form.  Transport is therefore DECIDED for a fix body that does
 # not call itself:
@@ -246,9 +246,9 @@ def fastFix = [[drop ... >> dup    >> +] ... >> fix ...]
 (slowFix >> getCode >> Opt) (fastFix >> getCode) >> sameMorphism >> print
 (slowFix >> getCode)        (fastFix >> getCode) >> sameMorphism >> print
 
-# The SELF-CALLING body is the honest boundary, and since 2026-09-13 it
+# The SELF-CALLING body is the boundary, and it
 # is one word narrower than it was.  `ev` of a WIRE is decided when the
-# wire's arrow is CLOSED — the normalizer gives it the arity the type
+# wire's arrow is CLOSED, so the normalizer gives it the arity the type
 # wrote down.  The knot is a binder parameter, so abstraction
 # elimination turns it into a wire whose type is `Fn⟨Σf =Recursive> Θf⟩`,
 # and Σf is an open stack variable: no arity, and nothing to decide
@@ -281,8 +281,8 @@ def fastLoop = [[self ... -> _ 100 >> lt? >> (_ drop | _ drop) >> (dup     >> + 
 # `lift2` applies a Code ⇒ Code word to a program at RUNTIME: the
 # program is its own witness and its own fallback, so a rewrite the
 # witness refuses leaves the original running.  A DECLARED rule set can
-# never narrow — that is what section 2 checked — but a hand-rolled
-# table can, and the fallback is what keeps that honest.
+# never narrow, which is what section 2 checked, and a hand-rolled
+# table can, and the fallback is what keeps that true.
 # ---------------------------------------------------------------------
 def two    = drop 1 1                                   # a ⇒ Int Int
 def narrow = (c -> (.two >> pack) (.dup >> pack) c >> rewrite)

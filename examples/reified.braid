@@ -25,7 +25,7 @@ data Coded(a..., b...) = Fn⟨a ⇒ b⟩ Code
 #
 # `observe` and `sample` are the doctrine's evidence slots, and taking
 # them is what puts this model under the SAME five category laws that
-# `examples/circuits.braid` runs — over a carrier that is a program and
+# `examples/circuits.braid` runs, over a carrier that is a program and
 # its Code.  `observe` runs the witness at 3 and at 4 through the exit,
 # so the laws are finite tests here too.
 theory Reflective(k(..., ...)) in Doctrine =
@@ -37,8 +37,8 @@ theory Reflective(k(..., ...)) in Doctrine =
 
 # ---- what the prelude lacks ------------------------------------------
 # Composition of two WITNESSES, at any width.  The prelude has `lift`
-# and `around` but no `Fn ; Fn` — it is four atoms, and `ev` is what
-# makes it possible at all (the closure gate, 5a¾).  `f ...` slides the
+# and `around` but no `Fn ; Fn`: it is four atoms, and `ev` is what
+# makes it possible at all.  `f ...` slides the
 # witness UNDER the segment it is about to run on, which is how every
 # open word takes its fixed arguments (guide-open-arity.md, Rule 2).
 def composeFn = (f g -> [f ... ; ev ; g ... ; ev])
@@ -47,7 +47,7 @@ def orNil     = ((c -> c) | drop ; nil) ; merge
 # ---- the model -------------------------------------------------------
 # The embedding is the whole idea: take the program, ask it for its
 # Code, and keep both.  `getCode` works here because what `with` hands
-# the embedding is a literal quotation of the stage — not a closure.
+# the embedding is a literal quotation of the stage rather than a closure.
 def embedC = (f -> f (f ; getCode) ; Coded)
 
 # Composition composes the witnesses and APPENDS the spines, which is
@@ -56,13 +56,13 @@ def embedC = (f -> f (f ; getCode) ; Coded)
 def composeC = (c d -> c ; unCoded ; (f p -> d ; unCoded ; (g q -> (f g ; composeFn) (p q ; append) ; Coded)))
 
 # There is no strength, and this file is where its absence is VISIBLE.
-# Until 2026-09-16 `first` had to route the Code as well as the
-# witness — a program on the deepest wire of a pair was re-emitted as
+# A one-wire hom-object would need `first` to route the Code as well as the
+# witness, because a program on the deepest wire of a pair was re-emitted as
 # source, `unPair >> [p] ... >> onFirst >> Pair`, parsed back, and
-# spliced — because the hom-object named one wire on each side and a
+# spliced, because the hom-object named one wire on each side and a
 # wide stage had to be packed to fit.  Over STACKS the spine that comes
 # out is the spine that went in, which is why `w`'s Code below reads
-# `dup >> add1 ... >> *` and used to read three times that.
+# `dup >> add1 ... >> *`.
 #
 # The exit runs the SPINE against the witness, which is `evalAs`: the
 # witness is the ascription and the re-inference at the splice is the
@@ -94,7 +94,7 @@ def sq5 in Reified = sq ; _ 5 ; run
 sq5 ; orZero ; print    # 25
 
 # And the whiskering is real, not decoration.  `add1 ...` acts on the
-# deepest wire and the one above it rides along — in the BASE, inside
+# deepest wire and the one above it rides along, in the BASE, inside
 # the quotation, before `embed` ever sees it.  Nothing routes anything;
 # the Code stays runnable because it was never rewritten.
 def add1 = _ 1 ; +

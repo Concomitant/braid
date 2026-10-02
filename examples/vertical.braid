@@ -7,7 +7,7 @@
 # each router arm injects into the SAME flat sum, merge collapses.
 
 def route3 = negative? >> (alt1 | zero? >> (alt2 | alt3) >> merge) >> merge
-## route3 : Int ⇒ (Int | Int | Int)   — negative / zero / positive
+## route3 : Int ⇒ (Int | Int | Int)   negative / zero / positive
 
 def describe =
     route3
@@ -22,7 +22,7 @@ def describe =
 7  >> describe    # 7
 
 # any track can be worked on across several lines while the others
-# flow by — here the positive track is squared then rendered, in two
+# flow by.  Here the positive track is squared then rendered, in two
 # steps, without the neighbors ever being mentioned:
 
 def enrich =

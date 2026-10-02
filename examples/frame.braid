@@ -57,10 +57,10 @@
 ## stacks, which is what the doctrine's `k(..., ...)` asks for.
 data Col(a..., b...) = Fn⟨List(Box(a)) =Recursive> List(Box(b))⟩
 
-## run a column function on a boxed frame — the carrier's own spelling
+## run a column function on a boxed frame, the carrier's own spelling
 def runColB = (c rows -> c ; unCol ; _ rows ; ev)
 
-## run a column function on a frame — the base word, used outside every
+## run a column function on a frame: the base word, used outside every
 ## `with Frame` scope.  It boxes on the way in and unboxes on the way
 ## out, so a one-column-in, one-column-out program (which is every one
 ## below) reads exactly as it did.
@@ -92,10 +92,10 @@ model Frame in Columns(Col) =
     observe = cobserve
     sample  = [dup ; +] ; cembed
 
-# All FOUR doctrine slots are declared, so all FIVE of its laws run —
-# leftId, rightId, assoc, embedFunctor, embedWide — and they are
-# exactly the functor laws of `map` read at the hom-object.  They run before this file prints anything, and a
-# model whose `compose` is wrong stops the file with
+# All FOUR doctrine slots are declared, so all FIVE of its laws run:
+# leftId, rightId, assoc, embedFunctor and embedWide.  They are the functor
+# laws of `map` read at the hom-object, they run before this file prints
+# anything, and a model whose `compose` is wrong stops the file with
 # `law 'leftId' fails for model Frame`.
 
 # ---------------------------------------------------------------------
@@ -120,17 +120,17 @@ polyOut   ; print       # 26 — [3, 8, 15]     summed: x + x·(x+1)
 wiringOut ; print       # 9  — [2, 3, 4]      summed: dup, +1, swap, drop
 
 # ---------------------------------------------------------------------
-# 3. Frame-level words — everything a functor may NOT do
+# 3. Frame-level words: everything a functor may NOT do
 # ---------------------------------------------------------------------
 # These take columns and give columns.  They are written once, here,
 # because each of them moves, drops or reorders rows, and the index
 # reading says a transported word cannot.
 
-## keep the rows a Bool column marks.  A MASK, not a predicate: the
-## filter a row program would want is `row ⇒ (row | •)`, and a sum
-## under transport needs a choice slot the Doctrine does not have
-## (design-macros.md, 2026-09-14).  The mask sidesteps it — the
-## deciding is a column, and the dropping is frame-level.
+## keep the rows a Bool column marks.  It is a MASK rather than a
+## predicate: the filter a row program would want is `row ⇒ (row | •)`,
+## and a sum under transport needs a choice slot the Doctrine does not
+## have (design-macros.md).  The mask sidesteps it, because the deciding
+## is a column and the dropping is frame-level.
 def keep with Recursive =
     (mask rows -> mask ; unList ; (nil \
       | (b bs -> rows ; unList ; (nil \
@@ -148,8 +148,8 @@ def distinct =
 ## the rows whose key equals k
 def rowsAt = (k keys rows -> (keys ; [(y -> k y ; equals)] ... ; map) rows ; keep)
 
-## a group is a key and the frame of rows under it — a COLUMN OF
-## FRAMES, which is what `groupBy` hands back
+## a group is a key and the frame of rows under it, a COLUMN OF FRAMES,
+## which is what `groupBy` hands back
 data Group(k, a) = (key: k, part: List(a))
 
 def groupBy =
@@ -157,7 +157,7 @@ def groupBy =
     (keys ; distinct) ; [(k -> k (k keys rows ; rowsAt) ; Group)] ... ; map
 
 ## insertion sort over `Box(key row)` elements, by a quoted router on
-## keys — `[flt?]` for ascending Floats, `[lt?]` for Ints
+## keys: `[flt?]` for ascending Floats, `[lt?]` for Ints
 def keyOf = (e -> e ; unBox ; (k r -> k))
 def rowOf = (e -> e ; unBox ; (k r -> r))
 
@@ -182,22 +182,22 @@ def join =
                               ; [(b -> a b ; Box)] ... ; map))] ... ; map)
     ; concat
 
-## the aggregations — ordinary folds over a column.  `count` is the
-## prelude's `len`: a frame IS its rows, so the list word already is
-## the aggregation, and a second spelling would be a second name for
-## one thing.
+## the aggregations, which are ordinary folds over a column.  `count` is
+## the prelude's `len`: a frame IS its rows, so the list word already is
+## the aggregation, and a second spelling would be a second name for one
+## thing.
 def sumF  = [fadd] 0.0 ... ; fold
 def meanF = (col -> (col ; sumF) (col ; len ; toFloat) ; fdiv)
 
 ## ONE-OFFS, outside a scope: `[f] rows ; column` embeds a row word and
-## runs it.  It is written in the model's words on purpose — `column`
+## runs it.  It is written in the model's words on purpose: `column`
 ## denotes the same function `map` does, and that it does is `embed`'s
 ## defining equation rather than a coincidence.
 def column in Frame = (f rows -> (f ; embed) rows ; runCol)
 
 ## join a column of strings with a separator, and print a frame under a
-## header the CALLER supplies.  The header is runtime data — a
-## `List(Str)` — because column names are words, not types.
+## header the CALLER supplies.  The header is runtime data, a
+## `List(Str)`, because column names are words rather than types.
 def joinWith =
     sep col ->
     col ; unList
@@ -210,45 +210,44 @@ def printFrame =
     ; rows ; [(r -> " | " r ; joinWith)] ... ; map ; printAll
 
 # ---------------------------------------------------------------------
-# 4. The loader — one DECLARATION
+# 4. The loader: one DECLARATION
 # ---------------------------------------------------------------------
-# A CSV's header IS a presentation: it declares a data type.  So this
-# line is the whole loader (2026-09-15, MANUAL §8):
+# A CSV's header IS a presentation: it declares a data type.  This line is
+# the whole loader (MANUAL §8):
 
 table Trades = "examples/data/trades.csv"
 
-# The LOADER — Haskell, at the same IO boundary `import` already uses —
-# resolves the path by the import rule, reads the WHOLE file at check
-# time, and writes Braid text that is included exactly as an imported
-# file's declarations are.  What it wrote here is what stood in this
-# section by hand until 2026-09-15:
+# The LOADER is Haskell, at the same IO boundary `import` already uses.  It
+# resolves the path by the import rule, reads the WHOLE file at check time,
+# and writes Braid text that is included as an imported file's declarations
+# are.  What it writes here is:
 #
 #   data Trades = (sym: Str, px: Float, qty: Int)
 #     sym : Trades ⇒ Str   px : Trades ⇒ Float   qty : Trades ⇒ Int
-#     — the column types READ OFF THE DATA: `Int` if every cell is an
+#     The column types are READ OFF THE DATA: `Int` if every cell is an
 #       Int literal, else `Float` if every cell is a Float or an Int
 #       literal, else `Str`.  The whole file is read, so nothing is
 #       guessed about a row that was not looked at.
 #   headerTrades : • ⇒ List(Str)
-#     — the header line verbatim, runtime data, for `printFrame`
+#     The header line verbatim, runtime data, for `printFrame`.
 #   loadTrades : Str =IO Recursive> (List(Trades) | Str)
-#     — a bad row goes to the miss track carrying its LINE NUMBER,
-#       counted in the file (the header is line 1), so the shape is the
+#     A bad row goes to the miss track carrying its LINE NUMBER, counted
+#       in the file, where the header is line 1, so the shape is the
 #       ordinary railway and the whole load is `sequence` over the rows.
 #       Its helpers are named `Trades@…`, the compiler's spelling, which
 #       source may not write: a table puts exactly two words in scope.
 #
 # Nothing about `table` runs.  The generated text is the only thing that
-# does, and it re-reads the file — so a CSV that changed since the check
+# does, and it re-reads the file, so a CSV that changed since the check
 # puts its first bad row on the miss track, by line number.
 
 # ---------------------------------------------------------------------
 # 5. The row programs, and the words that present them
 # ---------------------------------------------------------------------
 
-## THE ROW PROGRAM.  `px qty` is a two-wire stage — two column names
-## side by side — and it embeds as itself, at two wires.  No `List`, no
-## index, no loop, and nothing here knows there is more than one row.
+## THE ROW PROGRAM.  `px qty` is a two-wire stage, two column names side
+## by side, and it embeds as itself at two wires.  No `List`, no index, no
+## loop, and nothing here knows there is more than one row.
 def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 #   notional : Trades =Frame Recursive> Float
 
@@ -267,7 +266,7 @@ def totalsOf =
     rows ->
     (([sym] rows ; column) (rows ; notionalOf) ; groupBy) ; [totalOf] ... ; map
 
-## reorder by a key column — ascending, since `flt?` hits on less-than
+## reorder by a key column, ascending, since `flt?` hits on less-than
 def sortedTotals = (ts -> [flt?] ([tval] ts ; column) ts ; sortBy)
 
 ## a second, tiny frame to join against.  NFLX has no trade and TSLA no
@@ -276,26 +275,24 @@ def sectorSyms  = "AAPL" "MSFT" "GOOG" "NFLX" ; pack
 def sectorNames = "Hardware" "Software" "Ads" "Media" ; pack
 def withSector  = (ts -> ([tsym] ts ; column) ts sectorSyms sectorNames ; join)
 
-## cells — a row becomes the `List(Str)` the printer takes.
+## cells: a row becomes the `List(Str)` the printer takes.
 ##
-## `tradeCells` is DERIVED (2026-09-16), and this is the whole of it: a
-## row printer is a function of the DECLARATION and of nothing else, so
-## writing one by hand is writing out what `table Trades` already said.
-## `declOf` hands back that declaration as data, `cellsFor` (the
-## prelude) turns it into the printer's `Code` — `(r -> (r ; sym)
-## (r ; px ; toStr) (r ; qty ; toStr) ; pack)`, read off the field names
-## and their types — and `evalAs` runs that Code against a WITNESS whose
-## arrow it must meet.  The output below is byte for byte what the
-## hand-written line printed.
+## `tradeCells` is DERIVED, and this is the whole of it.  A row printer is
+## a function of the DECLARATION and of nothing else, so writing one by
+## hand is writing out what `table Trades` already said.  `declOf` hands
+## back that declaration as data, the prelude's `cellsFor` turns it into
+## the printer's `Code`, `(r -> (r ; sym) (r ; px ; toStr)
+## (r ; qty ; toStr) ; pack)` read off the field names and their types,
+## and `evalAs` runs that Code against a WITNESS whose arrow it must meet.
+## The output below is what the hand-written line printed, cell for cell.
 ##
 ## The witness is one column wide: it says `Trades ⇒ List(Str)` and
-## nothing more, which is exactly the expectation the derived printer
-## has to satisfy.  What is missing is a way to DECLARE a def from Code:
-## a `functor` would splice this at ELABORATION and cost nothing at run
-## time, but a `with` that rewrites mints a receipt, and
-## `Trades =Cells> List(Str)`
-## no longer fits `embed`'s `Fn⟨a ⇒ b⟩`.  That gap is stage 8's
-## (MANUAL §12, design-macros.md 2026-09-16).
+## nothing more, which is the expectation the derived printer has to
+## satisfy.  A declaration-time program can declare a def whose body was
+## computed (`examples/typerep.braid` §4), and this derivation cannot use
+## it: `Trades` is declared by a `table`, which reads a CSV at check time,
+## and a declaration line may do no IO.  So this one happens later, at run
+## time, against a witness (MANUAL §12).
 def cellsWitness = (r -> (r ; sym) ; single)
 def tradesCode   = "Trades" ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge
 def tradeCells   =
@@ -308,7 +305,7 @@ def symNotional =
       ; [(e -> e ; unBox ; (s v -> s (v ; toStr) ; pack))] ... ; map
 
 # ---------------------------------------------------------------------
-# 6. A FRAME-LEVEL LAW — one that is not a functor law
+# 6. A FRAME-LEVEL LAW, one that is not a functor law
 # ---------------------------------------------------------------------
 # The doctrine audits the model.  `keep` is not part of the model, so
 # nothing audits it; here is the law it owes, stated as a program.
@@ -317,13 +314,13 @@ def symNotional =
 #
 # That is a real theorem about `keep` and it is decidable at any frame
 # by `eq?`, since a `Trades` row is three scalars.  The other one worth
-# wanting — `groupBy` then concatenating the groups is a PERMUTATION of
-# the frame — is NOT statable this way: "is a permutation" needs a
-# canonical order on rows, which needs an ordering on rows, which this
-# language does not have (`eq?` is structural, `lt?` is Int).  What IS
-# statable is its shadow: grouping preserves the ROW COUNT, no row
-# lost, none duplicated.  Stating the shadow and saying what the full
-# claim would cost is the honest position.
+# wanting, that `groupBy` then concatenating the groups is a PERMUTATION
+# of the frame, is NOT statable this way.  "Is a permutation" needs a
+# canonical order on rows, which needs an ordering on rows, and this
+# language does not have one: `eq?` is structural and `lt?` is Int.  What
+# IS statable is its shadow, that grouping preserves the ROW COUNT with no
+# row lost and none duplicated, and the full claim's cost is said here
+# instead.
 
 def allTrue     = (rows -> [(x -> true)] rows ; column)
 def keepIdentity = (rows -> ((rows ; allTrue) rows ; keep) rows ; eq? ; verdict)
@@ -382,7 +379,7 @@ def says = (b -> b "true" "false" ; select)
         #   AAPL | 82347.5 | Hardware
         #   MSFT | 123150.0 | Software
         #   GOOG | 22466.25 | Ads
-        #   — NFLX has no trade and TSLA no sector, so both are dropped
+        #   NFLX has no trade and TSLA no sector, so both are dropped
 
     "" ; print
     "-- the frame-level laws, run --" ; print
@@ -394,8 +391,8 @@ def says = (b -> b "true" "false" ; select)
 # ---------------------------------------------------------------------
 # 8. A second table, and the SCHEMA form
 # ---------------------------------------------------------------------
-# `examples/data/sectors.csv` has a header cell that is not a word —
-# `Ticker Name` — and a weight column whose cells all look like Ints.
+# `examples/data/sectors.csv` has a header cell that is not a word,
+# `Ticker Name`, and a weight column whose cells all look like Ints.
 # Left to itself the declaration would read
 #
 #     data Sector = (ticker_Name: Str, sector: Str, weight: Int)
@@ -416,7 +413,7 @@ def sectorCells = (r -> (r ; ticker) (r ; sector) (r ; weight ; toStr) ; pack)
 ; (pass | (e -> e ; print ; nil)) ; merge
 ; (rows ->
     headerSector ([sectorCells] rows ; column) ; printFrame
-    #   the header printed is the FILE's line, verbatim — `Ticker Name`
+    #   the header printed is the FILE's line, verbatim, `Ticker Name`
     #   included.  The WORDS are `ticker`, `sector` and `weight`: the
     #   header is a presentation, and the schema is what the program
     #   calls it.
@@ -426,31 +423,30 @@ def sectorCells = (r -> (r ; ticker) (r ; sector) (r ; weight ; toStr) ; pack)
     #   them, and `sumF` is a Float fold.
 
 # ---------------------------------------------------------------------
-# 9. What is NOT built, plainly
+# 9. What is NOT built
 # ---------------------------------------------------------------------
 # THE INDEX IS IMPLICIT.  A frame here is `List(row)` and its keys are
 # `0 … n−1`.  The `Fn⟨I ⇒ row⟩` reading with an explicit key set would
 # make `join` a map union rather than a nested scan, and would let two
 # frames share an index without being the same length.  It needs a key
-# type in the carrier — `Col(i, a, b)` — and that is a three-parameter
+# type in the carrier, `Col(i, a, b)`, and that is a three-parameter
 # hom-object, which the Doctrine's `k(_, _)` does not admit.
 #
 # NO COLUMN STORE.  `Col(a, b)` is a function between columns and the
-# frame is stored as rows.  The column-store representation — the
-# frame as a STACK of columns rather than a list of rows — would be a
-# second model of the same theory, and then `transformation Columnar :
-# RowStore ⇒ ColStore` is an ordinary declaration the checker decides.
-# It waits on a stack-shaped carrier (design-macros.md, "not admitted:
-# a stack-shaped embedding").
+# frame is stored as rows.  The column-store representation, the frame as a
+# STACK of columns rather than a list of rows, would be a second model of
+# the same theory, and then
+# `transformation Columnar : RowStore ⇒ ColStore` is an ordinary
+# declaration the checker decides.  It waits on a stack-shaped carrier
+# (design-macros.md, "not admitted: a stack-shaped embedding").
 #
 # NO FILTER INSIDE A SCOPE.  A row program that decides whether its row
-# survives is `row ⇒ (row | •)`, and transporting a SUM needs a choice
-# slot in the Doctrine — ArrowChoice' `left`.  `keep` sidesteps it: the
-# deciding is a column (a functor may compute a Bool), the dropping is
+# survives is `row ⇒ (row | •)`, and transporting a SUM needs a choice slot
+# in the Doctrine, ArrowChoice' `left`.  `keep` sidesteps it: the deciding
+# is a column, which a functor may compute, and the dropping is
 # frame-level.
 #
 # THE HEADER IS RUNTIME DATA.  `printFrame` takes the names as a
-# `List(Str)` from the caller, and `headerTrades` is where they now come
-# from — the CSV's own header line, verbatim, read at check time and
-# emitted as a definition.  Nothing above the loader changed when the
-# hand-written one became a `table` line.
+# `List(Str)` from the caller, and `headerTrades` is where they come from:
+# the CSV's own header line, verbatim, read at check time and emitted as a
+# definition.

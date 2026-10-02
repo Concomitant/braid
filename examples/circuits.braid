@@ -82,8 +82,8 @@ data Arr(a..., b...) = Fn⟨a ⇒ b⟩
 # `observe` and `sample` are the audit's evidence, and they are the
 # doctrine's slots too. A circuit is codata, so it cannot be compared,
 # only OBSERVED; the doctrine asks for the observation, which is what
-# keeps its laws honest about being finite tests of an infinite object.
-# A theory that declares neither gets no laws — see `Vault` below.
+# keeps its laws finite tests of an infinite object.
+# A theory that declares neither gets no laws; see `Vault` below.
 theory Arrow(k(..., ...)) in Doctrine =
     embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
     compose : k(a, b) k(b, c) =Recursive> k(a, c)
@@ -93,14 +93,14 @@ theory Arrow(k(..., ...)) in Doctrine =
 # ---- model one: circuits ---------------------------------------------
 # A circuit consumes an input and returns an output AND ITS SUCCESSOR.
 # Recursion through Fn is what makes it codata (cf. examples/stream.braid).
-# One step, boxed — the carrier's own spelling — and one step at the
+# One step, boxed in the carrier's own spelling, and one step at the
 # width the user sees, which boxes and unboxes around it.
 def stepB = (c x -> c ; unCircuit ; _ x ; ev)
 def stepC = _ Box ; stepB ; swap ; _ unBox
 #   stepC : Circuit(ρ, σ) ρ =Recursive> Circuit(ρ, σ) σ
 
 # `arr` and `>>>`.  No `first`: a wide stage is an ordinary stage now,
-# and the identity is `embed [pass]` — which needs no slot and never
+# and the identity is `embed [pass]`, which needs no slot and never
 # did.
 def arrC with Recursive = (g -> [(x -> x ; unBox ; g ... ; ev ; Box ; _ (g ; arrC))] ; Circuit)
 def compC with Recursive = (f g -> [(x -> f x ; stepB ; (y f2 -> g y ; stepB ; (z g2 -> z (f2 g2 ; compC))))] ; Circuit)
@@ -111,7 +111,7 @@ def idC = [pass] ; arrC
 def sumFrom with Recursive = (n -> [(x -> n (x ; unBox) ; + ; dup ; (s t -> (s ; Box) (t ; sumFrom)))] ; Circuit)
 def scale with Recursive = (n -> [(x -> ((n (x ; unBox) ; *) ; Box) (n ; scale))] ; Circuit)
 
-# feed 3 then 4, and report both outputs summed — two steps, because one
+# feed 3 then 4, and report both outputs summed: two steps, because one
 # step cannot tell a stateful circuit from a stateless one
 def probe = (c -> c 3 ; stepC ; (c2 y -> c2 4 ; stepC ; (c3 z -> (y z ; +) (c3 ; drop))))
 
@@ -122,7 +122,7 @@ model Circuits in Arrow(Circuit) =
     sample  = 0 ; sumFrom
 
 # ---- model two: plain functions --------------------------------------
-# The boring model, and the point of having one: the same seven laws
+# The boring model, and the reason for having one: the same five laws
 # run again over a carrier with no state at all.
 def arrA     = Arr
 def runA     = unArr ... ; ev
@@ -137,7 +137,7 @@ model Funcs in Arrow(Arr) =
 
 # ---- generic code, written once --------------------------------------
 # The body is the same twice; only the model differs.  `in` puts the
-# model's slot words in scope and APPLIES NOTHING — resolution once per
+# model's slot words in scope and APPLIES NOTHING, so resolution is once per
 # scope, never a dictionary per call.
 def twiceC in Circuits = sample sample ; compose ; observe
 def twiceA in Funcs = sample sample ; compose ; observe
@@ -159,8 +159,8 @@ drop
 # goes one step further and takes over `;`.
 #
 # The theory above DECLARES that: `in Doctrine`, plus the two structure
-# slots at the doctrine's signatures — `compose` is `k(ρ,σ) k(σ,τ) ⇒
-# k(ρ,τ)`, `embed` is `Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ,σ)` — and that is the whole
+# slots at the doctrine's signatures, so `compose` is `k(ρ,σ) k(σ,τ) ⇒
+# k(ρ,τ)` and `embed` is `Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ,σ)`, and that is the whole
 # test.  The names are the
 # doctrine's, which is why they are these names and not others: one
 # spelling per thing.  `with Circuits` is then the functor out of the free
@@ -168,7 +168,7 @@ drop
 # every `;` to the composition.  It is a LABEL WITH A CARRIER: it mints
 # the receipt `Circuits` exactly as any functor scope does, and the
 # carrier is the hom-object `Circuit(a, b)`.  The display folds the two
-# together — a transported word is `• ⇒ Circuit(Int, Int)` carrying
+# together: a transported word is `• ⇒ Circuit(Int, Int)` carrying
 # `Circuits` at the base, and prints `Int =Circuits Recursive> Int`.  Objects
 # are shared with the base category; composition is the model's own.
 
@@ -182,7 +182,7 @@ def easy with Circuits = add1 ; dbl
 #   easy : Int =Circuits Recursive> Int
 
 # ENTERING is a marker, LEAVING is a model.  `observe` takes the carrier
-# and returns base — an EXIT, read off its declared arrow — so it is
+# and returns base, an EXIT read off its declared arrow, so it is
 # refused inside `with Circuits` ("`observe` leaves Circuits") and called
 # under `in Circuits`, where nothing is transported.  That rule is what
 # makes the word table exact: every word written under `with` or `in`
@@ -213,12 +213,12 @@ pairOut ; print             # 40 — the same composite, spelled by hand
 # ---- wider stages: there is nothing to say ---------------------------
 # A hom-object `k(ρ, σ)` names a whole STACK on each side, so a
 # transported spine is one carrier wire whose two objects are the base
-# stacks themselves.  A stage of any width embeds as ITSELF — `embed
-# [dup]` is `Circuit(Int, Int Int)` — and the base's own discipline
+# stacks themselves.  A stage of any width embeds as ITSELF, so `embed
+# [dup]` is `Circuit(Int, Int Int)`, and the base's own discipline
 # (every stage covers the stack it is handed; `_` and `...` say how)
 # rides through the functor untouched.
 #
-# Until 2026-09-16 this paragraph described a packing and a whiskering
+# A one-wire hom-object would need a packing and a whiskering
 # loop.  Both existed because the carrier was one wire.
 #
 # So `dup ; *` transports, and squares:
@@ -229,7 +229,7 @@ sqOut ; print               # 25 — 3² + 4²
 
 # three wires, and a stage on a wire that is not the deepest
 def poly with Circuits = dup ; _ dup ; _ _ add1 ; _ * ; +
-#   poly : Int =Circuits Recursive> Int — x + x·(x+1)
+#   poly : Int =Circuits Recursive> Int, which is x + x·(x+1)
 def polyOut in Circuits = poly ; observe
 polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 
@@ -242,14 +242,14 @@ polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 # what a word is.
 #
 # `in Circuits` is the written declaration that closes it.  It applies
-# nothing — no embedding, no composition, no transport — it says "this
+# nothing, with no embedding, no composition and no transport.  It says "this
 # def is a morphism of the category Circuits presents", and the
 # elaborator CHECKS the claim against the def's arrow: a word of a
 # category builds one carrier out of nothing.  The claim is written, the
 # check is mechanical, and the def joins the model's word table beside
 # the ones `with Circuits` transported.
 def sum0 in Circuits = 0 ; sumFrom
-#   sum0 : • =Recursive> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
+#   sum0 : • =Recursive> Circuit(Int, Int), UNFOLDED and with no `Circuits` on it.
 #
 # A receipt is PROVENANCE: `=Circuits>` says the code went through the
 # functor.  `sum0` did not.  It is a circuit no base program denotes,
@@ -275,8 +275,8 @@ def scale3 in Circuits = 3 ; scale
 
 def byHand in Circuits = sum0 scale3 ; compose
 def byUse with Circuits = sum0 ; scale3
-#   byHand : • =Recursive> Circuit(Int, Int)   — no label: nothing was applied
-#   byUse  : Int =Circuits Recursive> Int      — transported, so it folds
+#   byHand : • =Recursive> Circuit(Int, Int)   no label: nothing was applied
+#   byUse  : Int =Circuits Recursive> Int      transported, so it folds
 
 def handObs in Circuits = byHand ; observe
 def useObs in Circuits = byUse  ; observe
@@ -310,7 +310,7 @@ model Sealed in Vault(Capsule) =
 
 def guarded with Sealed = add1 ; dbl
 def guarded2 with Sealed = guarded ; add1
-#   guarded2 : Int =Sealed> Int — and the only consumer of a Sealed
+#   guarded2 : Int =Sealed> Int, and the only consumer of a Sealed
 #   word, inside the category's vocabulary, is another Sealed word.
 #
 # `Vault` takes the doctrine's `compose` and `embed`, which is the whole

@@ -11,14 +11,14 @@
 def dot = zipN ; [(acc p -> p ; unBox ; (a b -> (a b ; *) acc ; +))] 0 ... ; foldExp
 
 # ---- the syllabus ------------------------------------------------------
-# homework 20%, midterm 30%, final 50% — weights are just wires
+# homework 20%, midterm 30%, final 50%: weights are just wires
 def weighted =
     h m f ->
     2 3 5 h m f ; dot ; _ 10 ; div
 
 # ---- the verdict -------------------------------------------------------
 # one lane per line: condition, answer, "and so on…"; the last lane is
-# the default; decide folds the product — first true lane wins.
+# the default; decide folds the product, and the first true lane wins.
 def letter =
     p ->
     (89 p ; less) "A" ...
@@ -37,13 +37,13 @@ def grade = weighted ; letter
 40 50 30   ; grade ; print     # F
 
 # ---- the audit ---------------------------------------------------------
-# Laws are programs. Fairness of the weighting is dot's symmetry —
+# Laws are programs. Fairness of the weighting is dot's symmetry,
 # scores against weights, weights against scores, same number. Run it.
 2 3 5 95 90 95 ; dot ; print   # 935
 95 90 95 2 3 5 ; dot ; print   # 935
 
 # And a curve is just linear algebra: doubling extra credit is the
-# bialgebra law — copy-then-add IS scale-by-two, checkably.
+# bialgebra law: copy-then-add IS scale-by-two, checkably.
 def doubled  = dupN ; addN
 def doubled' = 2 ... ; scaleN
 10 15 5 ; doubled  ; sumN ; print   # 60

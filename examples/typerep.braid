@@ -31,7 +31,7 @@ def say = ((t -> t ; showType) | (e -> e)) ; merge
 ("fold : " ("fold" ; typeOfWord ; say) ; cat) ; print
 ("and  : " ("and" ; typeOfWord ; say) ; cat) ; print       # Bool Bool ⇒ Bool
 #   `and`'s rep is a structural sum; the display folds it back to
-#   `Bool`, because the display is the REPL's own — one renderer for a
+#   `Bool`, because the display is the REPL's own: one renderer for a
 #   type, reached two ways.
 
 "" ; print
@@ -39,7 +39,7 @@ def say = ((t -> t ; showType) | (e -> e)) ; merge
 ("pack : " ("pack" ; typeOfWord ; say) ; cat) ; print       # a0ⁿ⁰ ⇒ List(a0)
 #   `Aⁿ` is a stack SEGMENT repeated n times, so its rep stands in a
 #   STACK beside the open end rather than being a wire, and the width
-#   beside it is a `WidthRep` — a literal, or a variable at an offset.
+#   beside it is a `WidthRep`: a literal, or a variable at an offset.
 #   A width is its own sort, and keeping it one is what stops two
 #   different types from becoming equal: a CONCRETE width reflects
 #   expanded, because the checker itself expands it (`Int³` IS three
@@ -48,20 +48,20 @@ def say = ((t -> t ; showType) | (e -> e)) ; merge
 ("weaken : " ("weaken" ; typeOfWord ; say) ; cat) ; print   # Fin(n0) ⇒ Fin(n0+1)
 
 # ---------------------------------------------------------------------
-# 1. DIAGRAM CUTS — what runs beside what
+# 1. COMPONENTS: what runs beside what
 # ---------------------------------------------------------------------
 # A spine is a string diagram.  Its ATOMS are nodes and its WIRES are
 # edges, so "which parts of this program are independent of which" is a
-# question about connected components — and the arities that say which
-# wire an atom eats come from `typeOfCode`, one atom at a time.
+# question about connected components.  The arities that say which wire an
+# atom eats come from `typeOfCode`, one atom at a time.
 #
 # `components : Code ⇒ List(Code)` splits a spine into those components.  Two
 # halves of a tensor with no wire between them come back separately;
 # what remains between components is the dependency structure, which is
 # to say none.
 #
-# WHAT THIS IS AND IS NOT.  It is ANALYSIS, not runtime parallelism —
-# nothing here runs anything anywhere.  What it licenses is a reading:
+# WHAT THIS IS AND IS NOT.  It is ANALYSIS rather than runtime
+# parallelism, and nothing here runs anything anywhere.  What it licenses is a reading:
 # a component whose grade is ∅ is CENTRAL (interchange holds for it),
 # so it may be reordered against anything and run wherever it likes; a
 # component carrying a label may not, because the label is exactly the
@@ -162,7 +162,7 @@ def components =
 # is read off the wires rather than off the layout.
 
 # ---------------------------------------------------------------------
-# 2. A TYPE-LEVEL FUNCTION — as a word
+# 2. A TYPE-LEVEL FUNCTION, as a word
 # ---------------------------------------------------------------------
 # `Cols` is the column store's object map: a pair of columns is a pair
 # of column-stores, and anything else becomes a column of itself.
@@ -173,10 +173,10 @@ def components =
 # NON-INJECTIVE: from `Cols a ~ Cols b` you cannot conclude `a ~ b`, so
 # unification can no longer solve for a variable underneath one, and
 # principal types go with it.  Here it is an ORDINARY WORD on `TypeRep`
-# values — it may branch, recurse, fail, print — and it never enters
-# unification at all.  That is the whole rule (design-macros.md,
-# 2026-09-16): a type-level function is a Braid word run at
-# elaboration, producing a declaration or a program.
+# values, so it may branch, recurse, fail or print, and it never enters
+# unification at all.  That is the whole rule (design-macros.md): a
+# type-level function is a Braid word run at elaboration, producing a
+# declaration or a program.
 
 data P(a, b) = a b
 
@@ -197,7 +197,7 @@ def colsOf with Recursive =
         | (b w -> t ; listOf) \
         | (w -> t ; listOf) ) ; mergeTypeRep
 
-## the OUTPUT side of an arrow rep, and its first wire — how a word's
+## the OUTPUT side of an arrow rep, and its first wire: how a word's
 ## result type is got at without any type syntax in the term
 def arrOut =
     [(s -> nil)] [(s -> nil)] [(nm as -> nil)] [(x -> nil)] \
@@ -229,7 +229,7 @@ def anInt = (x -> x 1 ; +)
 # about the function is missing; what is missing is a door.
 
 # ---------------------------------------------------------------------
-# 3. THE BOOTSTRAP SEED — a differential check
+# 3. THE BOOTSTRAP SEED, a differential check
 # ---------------------------------------------------------------------
 # `envOf` is every word in scope with its scheme.  For each of them
 # there are TWO ways to ask what its type is: look the word up
@@ -241,14 +241,13 @@ def anInt = (x -> x 1 ; +)
 #   2. a Braid CHECKER for a fragment of Braid, written on `TypeRep`
 #   3. the two run against each other over the corpus
 #   4. self-application: the Braid checker checks itself
-#   5. optionally, a switch — the host checker becomes one
+#   5. optionally, a switch, where the host checker becomes one
 #      implementation of a specification written in the language it
 #      checks
 #
-# Only rung 1 is claimed.  It is the honest first one, and the rep was
-# designed to carry the rest of the climb: structural, TOTAL — the
-# width tier joined it on 2026-09-16 — normalizing, and with `eq?` for
-# equality.
+# Only rung 1 is claimed.  The rep is designed to carry the rest of the
+# climb: structural, TOTAL over the width tier too, normalizing, and with
+# `eq?` for equality.
 
 def sameShown =
     e ->
@@ -280,7 +279,7 @@ def failing = (f l -> l ; [(e -> f e ; ev ; (b -> b nil (e ; nameOf ; single) ; 
 "displayed disagreements: " ; print
 [sameShown] envOf ; failing ; [(n -> "  " n ; cat)] ... ; map ; printAll
 #   The one name that cannot agree is `#fix`, and it cannot for a good
-#   reason: since 2026-09-14 no source can NAME it (`#` opens a
+#   reason: no source can NAME it (`#` opens a
 #   comment), so `parse "#fix"` has nothing to parse.  `with Recursive`
 #   emits it and nothing else does.
 #
@@ -289,35 +288,32 @@ def failing = (f l -> l ; [(e -> f e ; ev ; (b -> b nil (e ; nameOf ; single) ; 
 # EFFECT TAIL: a prim's scheme is written with a closed pure row
 # (`arrPure`), while an inferred scheme's row is open (a fresh ε that
 # later constraints may fill).  The display hides effect tails on
-# purpose, so it hides exactly this.  It is a real difference — "pure,
-# full stop" is a stronger claim than "pure so far" — and the honest
-# report is both numbers rather than a comparison rigged to agree.
+# purpose, so it hides this.  The difference is real, because "pure, full
+# stop" is a stronger claim than "pure so far", and the report is both
+# numbers rather than a comparison rigged to agree.
 
 # ---------------------------------------------------------------------
-# 4. DERIVING AT ELABORATION — a declaration whose body is COMPUTED
+# 4. DERIVING AT ELABORATION: a declaration whose body is COMPUTED
 # ---------------------------------------------------------------------
 # The reflection words are pure and read the PREFIX SCOPE, so a
 # DECLARATION-TIME PROGRAM may call them: `declOf` answers with a
-# declaration, `cellsFor` turns it into a printer, and `defW` — the word
-# every `def` line is parsed into — declares the result.  Nothing runs
+# declaration, `cellsFor` turns it into a printer, and `defW`, the word
+# every `def` line is parsed into, declares the result.  Nothing runs
 # at run time: what `rowCells` contains IS the derived program, checked
 # by ordinary inference like any other.
 #
-# THIS WAS A `functor` UNTIL 2026-09-18, and that was the wrong home.
-# `cellsOfCode` discarded the body it was handed but for one symbol and
-# emitted a printer from a declaration: code GENERATION, not a
-# rewriting.  Its honest type is `Sym ⇒ Code` — not a graph morphism,
-# not a functor of anything — and it wore a `with` scope only for want
-# of "a declaration form whose body is computed", which is the gap this
-# very section used to report.  Stage 8's declaration substrate IS that
-# form.  So the derivation is a declaration now, and the receipt that
-# had to be there when a scope did it is gone with the scope: `rowCells`
-# is `Row ⇒ List(Str)`, an ordinary word that fits an ordinary `Fn`.
+# THIS IS A DECLARATION RATHER THAN A `functor`.  A functor rewrites code;
+# this emits a printer from a declaration, which is code GENERATION.  Its
+# type is `Sym ⇒ Code`, not a graph morphism and not a functor of anything,
+# and a `with` scope around it would mint a receipt for a scope that
+# rewrote nothing.  The declaration substrate is the form it wants, so
+# `rowCells` is `Row ⇒ List(Str)`, an ordinary word that fits an ordinary
+# `Fn`.
 
 data Row = (label: Str, n: Int)
 
 def cellsOfSym = (s -> s ; symStr ; declOf ; ((d -> d ; cellsFor) | drop ; nil) ; merge)
-#   cellsOfSym : Sym ⇒ Code — the printer a named declaration implies
+#   cellsOfSym : Sym ⇒ Code, the printer a named declaration implies
 
 (.Row ; cellsOfSym) "rowCells" ; defW
 #   A DECLARATION LINE: its grade carries `Dict`, so it is lifted above
@@ -332,25 +328,24 @@ def cellsOfSym = (s -> s ; symStr ; declOf ; ((d -> d ; cellsFor) | drop ; nil) 
 
 # WHAT `frame.braid` STILL PAYS FOR, and why.  `tradeCells` there is
 # derived through a runtime `evalAs` against a witness, because its
-# declaration depends on a CSV read at check time by `table` — a
-# declaration line can do no IO, so the derivation happens later.  The
-# gap this section reported is closed; that one is a different gap, and
-# it is the loader's.
+# declaration depends on a CSV read at check time by `table`, and a
+# declaration line can do no IO, so that derivation happens later.  The gap
+# is the loader's rather than the declaration form's.
 
 # ---------------------------------------------------------------------
 # 5. WHAT IS NOT ADMITTED, on its own merits
 # ---------------------------------------------------------------------
 # There is no `∀a. a ⇒ TypeRep`.  Every word above takes a NAME or
-# CODE — both static, both settled before the program runs — and none
-# of them takes a WIRE.  That is what keeps the free theorems: `∀a.
+# CODE, both static and both settled before the program runs, and none of
+# them takes a WIRE.  That is what keeps the free theorems: `∀a.
 # a ⇒ a` is still the identity, because nothing inside it can ask what
 # `a` is.  Such a word is not refused; it is UNWRITABLE, because no
 # atom produces a `TypeRep` from a value.
 #
 # And a derivation triggered by the manifest of the def BEING declared
 # is impossible by construction: the declaration line runs before there
-# is a def to have a type.  What it can read is the prefix scope —
-# `Row`, `dup`, `cellsFor` — which was settled before the line was
+# is a def to have a type.  What it can read is the prefix scope, so
+# `Row`, `dup` and `cellsFor`, which was settled before the line was
 # reached.  That is what "prefix scope" means, and it is the same
 # property that lets a functor be RUN while the module is still being
 # checked.

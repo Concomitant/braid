@@ -13,12 +13,12 @@ def compFn   = (p q -> [p ... ; ev ; q ... ; ev])
 ([dup ; *] [2 _ ; *] ; compFn ; fmapList) (1 2 3 ; pack) ; ev ; print                 # list(2, 8, 18)
 (([dup ; *] ; fmapList) ([2 _ ; *] ; fmapList) ; compFn) (1 2 3 ; pack) ; ev ; print  # list(2, 8, 18)
 
-# functor composition is ; — lift twice, act two layers deep
+# functor composition is `;`: lift twice, act two layers deep
 ([dup ; *] ; fmapList ; fmapList) ((1 2 ; pack) (3 ; pack) ; pack) ; ev ; print   # list(list(1, 4), list(9))
 
 # A monad is (fmap, return, join) as three VALUES. List's return and
 # join were already in the prelude: single and concat. Kleisli
-# composition, generic over ANY such triple — dictionary-passing, and
+# composition, generic over ANY such triple, which is dictionary-passing, and
 # the dictionary is data (pick a monad at runtime if you like):
 def kcomp = (fm jn f g -> (f (fm g ; ev) ; compFn) jn ; compFn)
 

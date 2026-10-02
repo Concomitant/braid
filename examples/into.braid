@@ -52,22 +52,22 @@ def bump = unCase ; (1 ... ; + | ---) ; Case     # act on track 1, pass the rest
 #
 #     loop f  =  f >> [loop f] into          (up to un-summing)
 #
-# This is the iteration axiom — stage 5a½ could state it and not run it,
+# This is the iteration axiom, and it is run here rather than only stated,
 # because the right-hand side needs an eliminator for an OPEN row. With
 # `into` it is an ordinary program, and the two sides are compared at
 # sample points below.
 #
-# HONEST STATUS: RUNNABLE, NOT DECIDED — and since 2026-09-13 that is a
+# STATUS: RUNNABLE, NOT DECIDED, and that is a
 # statement about `fix`, not about rows. `sameCode` now enters rows and
 # quotations, and `into`'s own two equations are DECIDED below. What it
 # cannot decide is this one, because `loop` is `fix` and a fixpoint
 # equation is not an equation of the free distributive category: it is
 # the axiom of an iteration theory. Asked directly, the normalizer says
-# so rather than guessing —
+# so rather than guessing:
 #
 #   sameCode: outside the structural fragment: `loop` has no closed arity
 #
-# Note too that the CLOSED two-track copairing needs no `into` at all —
+# Note too that the CLOSED two-track copairing needs no `into` at all:
 # it is `(h | pass) ; merge`; `into` earns its keep when what remains is
 # a residual, or more than one track.
 
@@ -86,7 +86,7 @@ def sameAt = (n -> (n ; iterate) (n ; unroll) ; agree ; print)
 # ---------------------------------------------------------------------
 # 4. `into`'s OWN two equations, decided.
 #
-# `into` is the copairing [h, id], and a copairing is pinned by what it
+# `into` is the copairing [h, id], and a copairing is determined by what it
 # does to each injection.  Both sides of each line below are normalized
 # to a case tree and compared; `same` is a proof for every input, not a
 # check at one (§12.9).

@@ -14,8 +14,8 @@ def orNil = ((c -> c) | drop ; nil) ; merge
 # the marker for one stage, built as text and parsed back to Code
 def markStage = (s -> "\"after " (s ; pack ; unparse) ; cat ; _ "\" ... ; print ..." ; cat ; parse ; orNil)
 
-# A `functor` takes a GRAPH MORPHISM — one image per generator,
-# `Fn⟨Stage ⇒ Code⟩` — and a functor out of a free category IS a graph
+# A `functor` takes a GRAPH MORPHISM, one image per generator at
+# `Fn⟨Stage ⇒ Code⟩`, and a functor out of a free category IS a graph
 # morphism, so the extension to every spine is what the declaration
 # MEANS rather than something written here.  This one sends the stage s
 # to s followed by markStage(s).
@@ -29,7 +29,7 @@ def poly with Traced =
 "-- every stage announces itself --" ; print
 5 ; poly ; print                       # after dup … after +, then 51
 
-# A binder body is wiring too, so it traces stage by stage — all of it,
+# A binder body is wiring too, so it traces stage by stage, all of it,
 # including the routing of its parameter block.
 def clamp with Traced =
     (lo hi x -> lo x ; lt? ; (drop _ | _ drop) ; merge ; _ hi ; lt? ; (_ drop | drop _) ; merge)
@@ -38,7 +38,7 @@ def clamp with Traced =
 0 10 37 ; clamp ; print                # fifteen markers, then 10
 
 # The same insertion with a FIXED marker is `interpose`, which BUILDS
-# the graph morphism — `interpose : Code ⇒ Fn⟨Stage ⇒ Code⟩` — and the
+# the graph morphism, `interpose : Code ⇒ Fn⟨Stage ⇒ Code⟩`, and the
 # check is what makes it a functor you can trust: a stage that reads a
 # wire is refused by name, at elaboration, before it is inserted
 # anywhere.
@@ -55,7 +55,7 @@ def twice with Ticked =
 # THE RECEIPT.  `with Traced` leaves `Traced` on the manifest of
 # everything it elaborated: `poly : Int =Traced> Int`, and every caller
 # of `poly` inherits it by row unification.  The label is minted by the
-# scope and by nothing else — `with@Traced` written by hand is refused —
+# scope and by nothing else, since `with@Traced` written by hand is refused,
 # so a manifest is evidence about how a word was built, not a claim its
 # author made.  Two ways to see it from inside a program:
 def quoted = [with Ticked = dup ; +]

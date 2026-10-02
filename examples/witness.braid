@@ -5,7 +5,7 @@
 def getCode = reflect ; ((c -> c) | drop ; nil) ; merge
 
 # the program under study: a binder, two branches, two merges, and a
-# parameter fetched after them — all of it compiles to wiring, so all
+# parameter fetched after them.  All of it compiles to wiring, so all
 # of it is data
 def clamp = [(lo hi x -> lo x ; lt? ; (drop _ | _ drop) ; merge ; _ hi ; lt? ; (_ drop | drop _) ; merge)]
 
@@ -30,8 +30,8 @@ clamp ((clamp ; getCode ; len) 2 ; - ; _ (clamp ; getCode) ; take) (0) (10) (37)
 # 4. instrument a program: a trace after every stage, then run THAT.
 # The trace prints the deepest wire, so trace a point-free program
 # whose working value sits there.  (Trace `clamp` instead and you see
-# `lo` fourteen times: the parameter block is the deepest segment — a
-# resource — for the whole body.)
+# `lo` fourteen times: the parameter block is the deepest segment, a
+# resource, for the whole body.)
 def poly   = [dup ; * ; dup ; + ; _ 1 ; +]                # 2x² + 1
 def trace  = dup ... ; print ...
 def weave  = (f h -> [(s -> (s ; pack) h ; append)] f ; flatMap)

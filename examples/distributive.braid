@@ -68,7 +68,7 @@ def g100 = _ 100 >> *
 [router >> (alt1 | alt2) >> merge] [router] >> sameCode >> v >> print
 "distMerge " >> print
 [_ router >> dist2 >> merge] [_ router >> _ merge] >> sameCode >> v >> print
-# and the track swap, which is NOT the identity — the procedure answers,
+# and the track swap, which is NOT the identity, so the procedure answers
 # it does not merely fail to object
 "track swap" >> print
 [router >> (alt2 | alt1) >> merge] [router] >> sameCode >> v >> print

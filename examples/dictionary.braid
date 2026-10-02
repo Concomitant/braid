@@ -31,8 +31,8 @@ def arrowOf   = (w -> w ; showsType ; (t -> w " : " ; cat ; _ t ; cat))
 "theoryW" ; arrowOf ; print
 
 # THE TWO THAT READ THE WORLD say so in the grade.  This is the one
-# place IO happens before anything is checked — the loader resolves a
-# path and reads a file — and `=Dict IO>` is the manifest of exactly
+# place IO happens before anything is checked, where the loader resolves a
+# path and reads a file, and `=Dict IO>` is the manifest of exactly
 # that.  Eight of the ten are `=Dict>`.
 "importW" ; arrowOf ; print
 "tableW"  ; arrowOf ; print
@@ -44,7 +44,7 @@ def square = dup ; *
 
 # ...and the call the line above is parsed into, written out.  `[body]`
 # is a typed quotation in SOURCE and the word takes `Code`, so a program
-# supplies the erasure the way it supplies any Code — `getCode`.
+# supplies the erasure the way it supplies any Code, through `getCode`.
 ([dup ; *] ; getCode) "squared" ; defW
 
 "-- one declaration, two spellings --" ; print
@@ -54,13 +54,13 @@ def square = dup ; *
 # WHERE IT LANDS.  A declaration line runs above main and BELOW the
 # module's written defs, because that is the dictionary a compile-time
 # word sees: the one so far.  So `squared` is a word main may call, and
-# a written `def` above it may not — `Unknown primitive: squared` — for
+# a written `def` above it may not, reporting `Unknown primitive: squared`, for
 # the same reason a `functor` must be runnable before its first use.
 
 # ---------------------------------------------------------------------
 # 3. PROGRAMMATIC DECLARATION: a loop that defines words
 # ---------------------------------------------------------------------
-# A top-level line is a DECLARATION LINE when its GRADE says so — when
+# A top-level line is a DECLARATION LINE when its GRADE says so, which is when
 # what it does carries `Dict`.  Not when it happens to name `defW`: the
 # loop below names it three levels down, inside `declare`, and the grade
 # is the only thing that knows.  That is what a manifest is for.
@@ -78,7 +78,7 @@ def declare = (n -> (n ; bodyFor) (n ; nameFor) ; defW)
 
 # They are DEFS, not a trick: the checker has them, with schemes, and
 # `:defs` lists them in a session.  Here the reflection words say the
-# same thing — which is the read side of the dictionary, the declaration
+# same thing, which is the read side of the dictionary, the declaration
 # words being the write side.
 "-- and the checker has them --" ; print
 "add1" ; arrowOf ; print
@@ -91,8 +91,8 @@ def declare = (n -> (n ; bodyFor) (n ; nameFor) ; defW)
 # from that line on `<name> x = …` is a declaration.  It is itself a
 # declaration line, so it is a row of the table like the others.
 #
-# `testW` is a declaration word the kernel ships with NO keyword of its
-# own — which is what makes the binding worth having.  It registers a
+# `testW` is a declaration word the kernel provides with NO keyword of its
+# own, which is what makes the binding worth having.  It registers a
 # runnable check, and a check runs at module start, beside the laws: a
 # claim a module makes about itself is worth as much as the moment it is
 # decided, and that moment is before anything prints.
@@ -136,7 +136,7 @@ double bump = _ 1 ; +
 # ---------------------------------------------------------------------
 # 5. What a declaration line may and may not be
 # ---------------------------------------------------------------------
-# A declaration line runs at CHECK TIME, above main and below the defs —
+# A declaration line runs at CHECK TIME, above main and below the defs, so
 # the dictionary a compile-time word sees is the dictionary so far.  So:
 #
 #   * it must take nothing and leave nothing (`• =Dict> •`), because
@@ -163,6 +163,6 @@ double bump = _ 1 ; +
 #         this one yet … Write the keyword line.
 #
 # `Dict` itself is a resource the loader threads, and a program cannot
-# discharge it — there is no `Dict` to seed one with and no `unDict` to
+# discharge it: there is no `Dict` to seed one with and no `unDict` to
 # open one with, because the name may not be declared at all.  `:doc
 # Dict` says so.

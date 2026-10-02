@@ -42,7 +42,7 @@ def until100 with Recursive =
 def sumTo with Recursive =
   (a n -> n >> zero? >> ((z -> a) | (m -> (a m >> +) (m >> decr) >> sumTo)) >> merge)
 
-# TWO CALLS, one of them inside a group — the knot is a wire like any
+# TWO CALLS, one of them inside a group: the knot is a wire like any
 # other, so it needs no special placement.
 #   fib : Int =Recursive> Int
 def fib with Recursive =
@@ -56,10 +56,10 @@ def fib with Recursive =
 
 # A parameter NAMED LIKE THE DEF shadows it, exactly as it shadows any
 # other word: `fac` below is the binder's wire, and nothing recurses.
-# And there is NO LABEL — a receipt says what the scope CHANGED, and
+# And there is NO LABEL, because a receipt says what the scope CHANGED, and
 # this scope changed nothing: with no self-reference to rewrite there
 # was no knot to tie, so `with Recursive` here is a header that did not
-# apply (2026-09-18).  The arrow is the honest one: this word cannot
+# apply.  The arrow says what is true: this word cannot
 # recurse, and nothing on it says it can.
 #   fac : Int ⇒ Int
 def fac with Recursive = (fac -> fac 1 >> +)
@@ -69,8 +69,8 @@ def fac with Recursive = (fac -> fac 1 >> +)
 # `fix`, for open recursion
 #
 # The marker ties a def's own knot. When the BODY is a value someone
-# hands you — a memoizing `self`, a logging `self`, a body you built at
-# runtime — the fixpoint combinator is the word for it, and it is
+# hands you, a memoizing `self`, a logging `self`, or a body you built at
+# runtime.  The fixpoint combinator is the word for it, and it is
 # ordinary derived code (MANUAL §10):
 #
 #   fix : Fn⟨Fn⟨ρ0 =Recursive> ρ1⟩ ρ0 ⇒ ρ1⟩ =Recursive> Fn⟨ρ0 =Recursive> ρ1⟩
@@ -85,8 +85,8 @@ def facBody = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m >> decr >> self .
 # tie it the plain way…
 def facPlain = facBody ... >> fix ... >> ev
 
-# …or wrap the body first, so every re-entry says so — the same body,
-# a different knot, which is the whole point of leaving the body open
+# …or wrap the body first, so every re-entry says so: the same body,
+# a different knot, which is the reason to leave the body open
 def loud = (b -> [(self ... -> ("step" >> print) ... >> self ... >> b ... >> ev)])
 
 def facLoud = facBody ... >> loud ... >> fix ... >> ev
@@ -97,7 +97,7 @@ def facLoud = facBody ... >> loud ... >> fix ... >> ev
 # ---------------------------------------------------------------------
 # `loop`, for iteration
 #
-# The Elgot dagger is derived under the same marker — `loop f` runs `f`
+# The Elgot dagger is derived under the same marker, where `loop f` runs `f`
 # until it lands on the second track (MANUAL §11):
 #
 #   loop : Fn⟨ρ0 =Recursive> (ρ0 | ρ1)⟩ ρ0 =Recursive> ρ1

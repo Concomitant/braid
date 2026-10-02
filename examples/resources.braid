@@ -32,7 +32,7 @@ def scoreByHand =
 # ---- with `with`: the same program, none of the arithmetic ------------
 # `with` opens an ambient scope; the elaborator writes every `_` and
 # `...` above from the resource signatures alone. It also ASSERTS the
-# claim — the incoming wires must really be a Log and a Counter.
+# claim: the incoming wires must really be a Log and a Counter.
 def score with Log Counter =
     dup ; *
     bump
@@ -53,7 +53,7 @@ print                                  # 2401 — 7 squared, twice
 # ---- strength is an ordinary word ------------------------------------
 # What `with` does to a PURE stage is exactly `lift`: run a program one
 # wire deeper. It is the action of (A ⊗ −) on a morphism, and it needs
-# no compiler support — compose it once per context wire.
+# no compiler support; compose it once per context wire.
 (":" ; Log) 7
 ([dup ; *] ; lift) ...
 ev
@@ -64,7 +64,7 @@ unLog _ ; print print                  # ":" untouched, 49
 # carries the state, the macro installs and discharges it, the theory
 # says what the operations must satisfy. `with Log` is the entering half;
 # this is the leaving half. It seeds a Log, applies the program, and
-# unrolls the wire — so the arrow LOSES `=Log>` across it, with no
+# unrolls the wire, so the arrow LOSES `=Log>` across it, with no
 # language construct at all. (Plotkin–Pretnar: a handler is a model, and
 # Braid's models already are models, so discharge is a wrapping
 # functor rather than a form.)
@@ -82,7 +82,7 @@ print print                            # "squared " then 49
 
 # ---- and once, for every resource ------------------------------------
 # The handler above is per-resource BY NAME. A template is over a
-# THEORY, never over a resource name — a resource scope is routing, and
+# THEORY, never over a resource name, because a resource scope is routing and
 # a body waiting for a resource would be waiting for an arity rather
 # than for a name. Naming the two operations a handler actually needs
 # makes it one theory plus a two-line model per resource, and the

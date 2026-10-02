@@ -24,7 +24,7 @@ def sqIfEven =             # even → square, else keep  (leading | keeps track 
 5 >> sqIfEven >> print      # 5
 
 # Deferred branches: each stage (its own line) peels one case off the
-# sum and passes the rest down. The sum threads down the page — you
+# sum and passes the rest down. The sum threads down the page, so you
 # don't have to decide every branch in one row.
 def classify =
     negative?                                          # (neg | nonneg)
@@ -39,7 +39,7 @@ def classify =
 # The same idea with NO >> and NO parens: bare rows, the | a central
 # spine, two tracks as two columns. Each line is a complete row; a
 # newline is a strict >>, so the rows just stack. An empty arm is `pass`
-# — a trailing `|` passes track 2, a leading `|` passes track 1 — so a
+# a trailing `|` passes track 2 and a leading `|` passes track 1, so a
 # blank side is a wire flowing straight through. Read a column top to
 # bottom for that track's path.
 def label =

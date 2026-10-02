@@ -24,8 +24,8 @@ def counted with Ticked =
 
 6 ; counted ; print                     # tick after every stage, then 37
 
-# so is the word its declaration generates — the extension of the graph
-# morphism `ticked` — and every other def in that file
+# so is the word its declaration generates, the extension of the graph
+# morphism `ticked`, and every other def in that file
 [dup ; +] ; getCode ; Ticked ; unparse ; print
 
 # an imported def keeps the elaboration it was given: `poly` was written

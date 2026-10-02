@@ -16,11 +16,11 @@ samples >> lhs >> _ (samples >> rhs) >> eq? >> verdict >> print   # alt1() = law
 # Some laws can be DECIDED instead. A program built from wiring
 # (id/_/dup/drop/swap/pass), composition and juxtaposition, over words
 # treated as uninterpreted, is a morphism of the free cartesian category
-# on those words — and that category's word problem is solvable. So
+# on those words, and that category's word problem is solvable. So
 # `sameCode` normalizes both sides and compares, which proves the law
-# for every input and every interpretation at once. (Since 2026-09-13
-# the fragment is the free BICARTESIAN CLOSED category: quotations and
-# rows are in it too. The last section shows one.)
+# for every input and every interpretation at once. (The fragment is the
+# free BICARTESIAN CLOSED category: quotations and rows are in it too, and
+# the last section shows one.)
 
 def verdict2 = ("proved" | "not proved") ; merge
 
@@ -33,14 +33,14 @@ def verdict2 = ("proved" | "not proved") ; merge
 # No amount of sampling can say this, because it ranges over programs.
 [dup ; toStr toStr] [toStr ; dup] ; sameCode ; verdict2 ; print   # proved
 
-# and it really discriminates — applying a word to one copy is not
+# and it really discriminates: applying a word to one copy is not
 # applying it to both
 [toStr ; dup] [dup ; toStr _] ; sameCode ; verdict2 ; print       # not proved
 
-# ---- the honest boundary ---------------------------------------------
+# ---- the boundary ----------------------------------------------------
 # `double = 2 _ ; *` and `dup ; +` agree on every Int. They are NOT the
 # same morphism of the free category, because `*` and `+` are only
-# words here — some interpretation tells them apart. So:
+# words here, because some interpretation tells them apart. So:
 #
 #   proved      = equal under EVERY interpretation (a theorem)
 #   not proved  = NOT a counterexample at any particular type
@@ -50,9 +50,9 @@ def verdict2 = ("proved" | "not proved") ; merge
 # modulo an equational theory (AC, ACU, a field) rather than a free one.
 [double] [dup ; +] ; sameCode ; verdict2 ; print                  # not proved
 
-# ---- and the coproduct, decided the same way (2026-09-13) ------------
+# ---- and the coproduct, decided the same way ------------------------
 # A row over a sum whose injection nobody knows is normalized to a CASE
-# TREE — one branch per track — so the coproduct's own laws are proved
+# TREE, one branch per track, so the coproduct's own laws are proved
 # rather than sampled. `eq? : a a => (a a | a a)` supplies the unknown
 # sum; nothing below mentions a sample point.
 

@@ -19,7 +19,7 @@ def say  = unBooks _ ; (log n s -> (log s ; cat) n) ; Books
 def hire = unBooks ; _ (1 ... ; +) ; Books
 
 # ---- the policy ------------------------------------------------------
-# The law is the point: a policy that charges for zero hours is not a
+# The law is what matters: a policy that charges for zero hours is not a
 # model of this theory, and the module will not start. `Salaried` with
 # `pay = drop ; 5000` is rejected at module start with
 #   law 'nothingForNothing' fails for model Salaried: a model
@@ -40,7 +40,7 @@ model Overtime in Policy(Int) =
 # ---- one timesheet ---------------------------------------------------
 # Inside `with` nothing is threaded by hand: `pay` is pure, `say` and
 # `hire` touch Books, and the elaborator writes every `_` and `...`.
-# The scope names a resource AND a model in one header — the
+# The scope names a resource AND a model in one header, since
 # resource contributes a wire, the model contributes a renaming.
 def step with Books Hourly =
     pay
@@ -54,7 +54,7 @@ def rush with Books Overtime =
 
 # ---- the pass --------------------------------------------------------
 # `step` consumes one timesheet and returns the books, which is exactly
-# a fold's step function — so folding it over a list is the ordinary
+# a fold's step function, so folding it over a list is the ordinary
 # `fold`, with the empty books as the seed.
 def payroll  = [step] ("" 0 ; Books) ... ; fold
 def rushJob  = [rush] ("" 0 ; Books) ... ; fold

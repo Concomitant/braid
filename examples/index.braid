@@ -16,7 +16,7 @@ def qtys   = 2 5 1 3
 prices qtys ; mulN ; sumN ; print       # 600+600+450+600 = 2250, line total
 
 # ---- row numbers -------------------------------------------------------
-# indicesN pairs every wire with its position — a keyed column, and the
+# indicesN pairs every wire with its position, a keyed column, and the
 # only way indices are ever born: out of a bundle that witnesses n.
 10 20 30 ; indicesN ; print print print print print print   # 0 10 1 20 2 30
 
@@ -25,7 +25,7 @@ def withRow = indicesN ; [(i v -> (i ; finInt) v ; +)] ... ; mapN2
 100 200 300 ; withRow ; sumN ; print     # 100+0 + 200+1 + 300+2 = 603
 
 # ---- reading one row ---------------------------------------------------
-# fin0 is the DEEPEST wire — the same leftmost-is-deepest alignment
+# fin0 is the DEEPEST wire, the same leftmost-is-deepest alignment
 # atoms use. The literal's bound is n+1, so `at` is checked statically.
 fin1 prices ; at ; print                 # 120
 
@@ -36,7 +36,7 @@ def lookup = checkedAt ; (at ; print | forget ; "out of range" ; print) ; merge
 9 prices ; lookup                        # out of range
 
 # ---- argmax: a witnessed index, derived --------------------------------
-# The accumulator is a Maybe, because an empty bundle has no argmax —
+# The accumulator is a Maybe, because an empty bundle has no argmax, and
 # and the type says so rather than a sentinel saying it.
 def argmaxN =
     indicesN
@@ -61,7 +61,7 @@ def gather =
 
 # ---- a permutation is just data ----------------------------------------
 # Fin(n)ⁿ is a permutation of an n-bundle. The identity permutation is
-# indicesN's own index column — so gathering by it is a law you can run.
+# indicesN's own index column, so gathering by it is a law you can run.
 def idPerm = indicesN ; [(i v -> v ; drop ; i)] ... ; mapN2
 
 (prices ; Box) (prices ; idPerm) ; gather ; sumN ; print     # 1070 = prices summed

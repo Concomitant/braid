@@ -40,7 +40,7 @@ def audited =
 
 # ---- a label outlives its wire ------------------------------------------
 # The wire is still on the stack, so mentioning the name is a `dup` in
-# diagram terms — and the name survives the wire being consumed.
+# diagram terms, and the name survives the wire being consumed.
 7 -> x -> drop                     # the wire goes...
 x x ; * ; print                    # ...the name remains: 49
 
@@ -51,7 +51,7 @@ x x ; * ; print                    # ...the name remains: 49
 tag ; print                        # .foo — named without naming 1 or "a"
 
 # ---- it is wiring, and you can see it -----------------------------------
-# reflect compiles the names away into dup/swap/drop — no environment,
+# reflect compiles the names away into dup/swap/drop, with no environment,
 # no special form. The label above is a `dup` placed early.
 [-> x -> drop ; x ...] ; reflect ; (unparse ; print | print) ; forget
 
