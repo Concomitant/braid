@@ -78,11 +78,11 @@ theory Smooth(a, g) =
     observe : a ⇒ Float
     gradient : a ⇒ g
     # The ring laws, at the theory's own evidence.  They are exact at
-    # these points — 1.5, 2.0 and 3.0 are dyadic rationals with small
-    # mantissas, so every sum and product below is a double with no
+    # these points, because 1.5, 2.0 and 3.0 are dyadic rationals with
+    # small mantissas, so every sum and product below is a double with no
     # rounding.  At other points they would NOT be exact: `Float`
-    # arithmetic is a ring only up to rounding, and stating the laws at
-    # samples is the only honest way to state them at all.
+    # arithmetic is a ring only up to rounding, so stating the laws at
+    # samples is the only way to state them at all.
     law addComm  = (sample (2.0 ; lit) ; add ; observe) ((2.0 ; lit) sample ; add ; observe) ; eq? ; verdict
     law addAssoc = ((sample (2.0 ; lit) ; add) (3.0 ; lit) ; add ; observe) (sample ((2.0 ; lit) (3.0 ; lit) ; add) ; add ; observe) ; eq? ; verdict
     law mulComm  = (sample (2.0 ; lit) ; mul ; observe) ((2.0 ; lit) sample ; mul ; observe) ; eq? ; verdict
@@ -95,21 +95,21 @@ theory Smooth(a, g) =
 # THE COSINE, DEFINED.  A quarter turn along the sine: one template
 # over the theory, so every model gets it and no model binds it.  This
 # is what "closed under differentiation" costs when the closure is a
-# DEFINITION rather than a generator — nothing.
+# DEFINITION rather than a generator: nothing.
 def quarterTurn = 1.5707963267948966
 def cosOf in Smooth = (x -> x (quarterTurn ; lit) ; add ; sin)
 #   cosOf : a ⇒ a, at whichever model reads it
 
 # ---------------------------------------------------------------------
-# 2. Evaluation — the model everything else is compared against
+# 2. Evaluation: the model everything else is compared against
 # ---------------------------------------------------------------------
 # The carrier is `Float` itself, so `lit` and `observe` are both the
 # identity.  This is the model that says what the programs MEAN.
 
 # ...and its gradient is the ZERO MAP.  `Floats` carries no dependence
 # on anything: every carrier value it holds is a constant, and the
-# derivative of a constant is 0.  That is not a placeholder — it is what
-# makes `Value` below a homomorphism at `g` as well as at `a`:
+# derivative of a constant is 0.  That is not a placeholder.  It is what
+# makes `Value` below a homomorphism at `g` as well as at `a`, because
 # forgetting a tangent zeroes it.
 def zeroTangent = (d -> 0.0)
 
@@ -133,43 +133,42 @@ def fcosOf = (a -> a quarterTurn ; fadd ; fsin)
 #   fcosOf : Float ⇒ Float
 
 # ---------------------------------------------------------------------
-# 3. Forward mode — the value, paired with a tangent, over ANY model
+# 3. Forward mode: the value, paired with a tangent, over ANY model
 # ---------------------------------------------------------------------
 # `Dual(a)` is (value, tangent) OVER A CARRIER: the value of the
 # expression and its derivative along ONE seeded direction, both held at
 # whatever type the model underneath uses.  Each slot says what the
-# derivative of that one operation is, LOCALLY — `d(a·b) = a·db + da·b`
-# is written once, in `mul`, and nothing anywhere composes derivatives
-# by hand.
+# derivative of that one operation is, LOCALLY: `d(a·b) = a·db + da·b` is
+# written once, in `mul`, and nothing anywhere composes derivatives by
+# hand.
 #
 # `model Fwd(Smooth(a, _))` is A MODEL PARAMETERIZED BY A MODEL, and
 # it is not one model: it is a FAMILY, a functor Mod(Smooth) →
 # Mod(Smooth) (Kiselyov's interpreter transformers; ML's higher-order
 # functors; the ring construction R ↦ R[ε]/ε²).  `with Fwd(Floats)`
-# applies it and mints the member — an ordinary model named
-# `Fwd(Floats)`, with ordinary slots and the theory's laws run at its
-# own evidence.
+# applies it and mints the member, an ordinary model named `Fwd(Floats)`
+# with ordinary slots and the theory's laws run at its own evidence.
 #
 # INSIDE A SLOT BODY EVERY THEORY NAME IS R'S.  The bodies are TEMPLATES
 # over the parameter's theory, so `add` in `add`'s own body is R's `add`
-# and nothing else — the slot being defined is not in scope in its own
+# and nothing else.  The slot being defined is not in scope in its own
 # body, which is what makes `add = … add …` unambiguous with no
 # self-reference rule to learn.
 #
-# THE TANGENT OF A LITERAL IS `0.0 ; lit`, not a new `zero` slot.  The
-# theory already names its zero, and `law addUnit` above already pins it
-# — `(sample (0.0 ; lit) ; add ; observe)` is `sample`.  A `zero : • ⇒ a`
+# THE TANGENT OF A LITERAL IS `0.0 ; lit` rather than a new `zero` slot.
+# The theory already names its zero, and `law addUnit` above already fixes
+# it: `(sample (0.0 ; lit) ; add ; observe)` is `sample`.  A `zero : • ⇒ a`
 # slot would be a second spelling of a thing the theory has, and at
 # `Fwd(Fwd(Floats))` the two spellings must agree anyway: `0.0 ; lit` at
 # `Fwd(Floats)` is `Dual(0.0, 0.0)`, which is exactly the zero of the
 # first-order duals.
 #
-# THE GRADIENT TYPE FALLS OUT.  `Fwd(R)`'s `g` is R's CARRIER, not R's
-# `g`: the head reads `Smooth(Dual(a), a)`, and the `gradient` slot is
-# the projection `Dual(v, t) -> t`.  At `Fwd(Floats)` that is `Float`,
-# the same exit the hand-written model had; at `Fwd(Fwd(Floats))` it is
-# `Dual(Float)` — a first derivative that carries its own tangent, which
-# is the second derivative, and §6 reads it with `tangent ; tangent`.
+# THE GRADIENT TYPE FALLS OUT.  `Fwd(R)`'s `g` is R's CARRIER rather than
+# R's `g`: the head reads `Smooth(Dual(a), a)`, and the `gradient` slot is
+# the projection `Dual(v, t) -> t`.  At `Fwd(Floats)` that is `Float`, the
+# exit a hand-written model would have.  At `Fwd(Fwd(Floats))` it is
+# `Dual(Float)`, a first derivative that carries its own tangent, which is
+# the second derivative, and §6 reads it with `tangent ; tangent`.
 # Nothing has to be asked of R for this: a tangent lives in the carrier.
 #
 # Seed the input with tangent `1.0 ; lit` and the tangent that comes out
@@ -185,8 +184,8 @@ model Fwd(Smooth(a, _)) in Smooth(Dual(a), a) =
     lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)
     # d(exp x) = exp x · dx, and the value is shared with the tangent
     exp = Dual(x, dx) -> (x ; exp) ; (e -> e (e dx ; mul) ; Dual)
-    # d(sin x) = cos x · dx, and the cosine is `cosOf` — the theory's
-    # own sine, a quarter turn along.  So the theory needs no `cos`
+    # d(sin x) = cos x · dx, and the cosine is `cosOf`, the theory's own
+    # sine a quarter turn along.  The theory therefore needs no `cos`
     # generator, and `Fwd` reaches for no word R does not have.
     sin = Dual(x, dx) -> (x ; sin) ((x ; cosOf) dx ; mul) ; Dual
     sample  = sample (1.0 ; lit) ; Dual
@@ -195,18 +194,18 @@ model Fwd(Smooth(a, _)) in Smooth(Dual(a), a) =
 
 def value   = Dual(v, t) -> v
 def tangent = Dual(v, t) -> t
-#   value, tangent : Dual(a) ⇒ a — ordinary words over any carrier
+#   value, tangent : Dual(a) ⇒ a, ordinary words over any carrier
 
 # THE DERIVATIVE OF A ONE-INPUT PROGRAM, as a word.  Seed the input
 # with tangent 1, run the program, keep the tangent: that is the whole
 # of forward mode, and it is three stages.  `f` is a QUOTATION, so any
-# `Dual(Float) ⇒ Dual(Float)` goes in — `polyD`, `waveD`, `[wave]` read
+# `Dual(Float) ⇒ Dual(Float)` goes in: `polyD`, `waveD`, or `[wave]` read
 # by whatever model is in scope.
 def derivative = (f x -> x 1.0 ; Dual ; f ... ; ev ; tangent)
 #   derivative : Fn⟨Dual(Float) ⇒ Dual(Float)⟩ Float ⇒ Float
 
 # ---------------------------------------------------------------------
-# 4. Reverse mode — the value, paired with the TRANSPOSE of that map
+# 4. Reverse mode: the value, paired with the TRANSPOSE of that map
 # ---------------------------------------------------------------------
 # `Grad` is a FIXED TWO-SLOT gradient record.  A gradient wants to be a
 # map from input names to partials; Braid has no such data structure
@@ -215,15 +214,15 @@ def derivative = (f x -> x 1.0 ; Dual ; f ... ; ev ; tangent)
 # for a two-input function and it is exactly as far as it goes.
 #
 # A `Rev` is the value and a CONTINUATION `Float ⇒ Grad`: given the
-# adjoint of this node (∂output/∂here), it returns the gradient of the
-# INPUTS.  That is the transpose of the linear map `Fwd` carries —
-# forward pushes a tangent along the arrow, reverse pulls an adjoint
-# back — and the slots build it during the forward pass.
+# adjoint of this node, ∂output/∂here, it returns the gradient of the
+# INPUTS.  That is the transpose of the linear map `Fwd` carries.  Forward
+# pushes a tangent along the arrow, reverse pulls an adjoint back, and the
+# slots build it during the forward pass.
 #
 # FAN-OUT NEEDS NO SPECIAL CASE.  Every continuation is LINEAR, so a
-# value used twice contributes twice, and calling its continuation
-# twice and adding is exactly right.  `k2` below is where that happens
-# and it is the whole of it: no tape, no node ids, no visit counting.
+# value used twice contributes twice, so calling its continuation twice
+# and adding is right.  `k2` below is where that happens, and it is the
+# whole of it: no tape, no node ids, no visit counting.
 
 data Grad = Float Float
 data Rev  = Float Fn⟨Float ⇒ Grad⟩
@@ -245,8 +244,8 @@ def rmul = Rev(a, ka) Rev(b, kb) -> (a b ; fmul) \
     [(d -> ka (d b ; fmul) kb (d a ; fmul) ; k2)] ; Rev
 def rneg = Rev(a, ka) -> (a ; fneg) [(d -> ka (d ; fneg) ; ev)] ; Rev
 # a literal depends on no input: its continuation is the ZERO linear
-# map, which is `scaleK` at 0.0 — the same map `[(d -> gzero)]` is, and
-# the same CODE the `lit` square's other side normalizes to (§8)
+# map, which is `scaleK` at 0.0, the same map `[(d -> gzero)]` is and the
+# same CODE the `lit` square's other side normalizes to (§8)
 def rlit = (c -> c (0.0 ; scaleK) ; Rev)
 def rexp = Rev(a, ka) -> (a ; fexp) ; (e -> e [(d -> ka (d e ; fmul) ; ev)] ; Rev)
 def rsin = Rev(a, ka) -> (a ; fsin) [(d -> ka (d (a ; fcosOf) ; fmul) ; ev)] ; Rev
@@ -255,19 +254,15 @@ def rvalue = Rev(v, k) -> v
 # THE EXIT PROBLEM, and how it is resolved.
 #
 # A theory's exit is a SLOT, so it has ONE type for every model.  `Rev`
-# has two things to hand back — the value and the gradient — and until
-# 2026-09-14 the theory could not ask for the second: `observe : a ⇒
-# Float` fits `Fwd`'s tangent and not `Rev`'s `Grad`, so the gradient
-# was read by an ordinary base word OUTSIDE the theory, and the
-# gradient half of `Transpose` was not machine-checked at all.
+# has two things to hand back, the value and the gradient, and
+# `observe : a ⇒ Float` fits `Fwd`'s tangent and not `Rev`'s `Grad`.
 #
-# The answer is not a per-model slot type; it is that the exit's RESULT
-# is a theory parameter.  `gradient : a ⇒ g` is one slot with one type,
-# and `g` is filled per model — `Float` for `Fwd`, `Grad` for `Rev`.
-# `backward` is now that slot's binding for `Rev`: it runs the
-# accumulated continuation at adjoint 1.0 — "the derivative of the
-# output with respect to itself is 1" — and that is the whole of the
-# reverse sweep.
+# The answer is not a per-model slot type.  It is that the exit's RESULT
+# is a theory parameter: `gradient : a ⇒ g` is one slot with one type, and
+# `g` is filled per model, `Float` for `Fwd` and `Grad` for `Rev`.
+# `backward` is that slot's binding for `Rev`, and it runs the accumulated
+# continuation at adjoint 1.0, since the derivative of the output with
+# respect to itself is 1.  That is the whole of the reverse sweep.
 def backward = Rev(v, k) -> k 1.0 ; ev
 
 # the two input seeds: x is "the thing whose adjoint lands in slot 1"
@@ -313,7 +308,7 @@ def fxyD with Fwd(Floats) = fxy
 def fxyR with Rev = fxy
 #   polyF : Float =Floats> Float,
 #   polyD : Dual(Float) =Fwd(Floats)> Dual(Float),
-#   polyR : Rev =Rev> Rev — one body, three principal types, and the
+#   polyR : Rev =Rev> Rev.  One body, three principal types, and the
 #   label on each arrow is the RECEIPT of the model that read it.
 
 "-- p(x) = x^3 - 2x + 1, at x = 2 --" ; print
@@ -345,12 +340,12 @@ def fxyR with Rev = fxy
                                           # 2.583853163452858, then 2.0
 
 # ---------------------------------------------------------------------
-# 6. SECOND DERIVATIVES — the same family, applied to itself
+# 6. SECOND DERIVATIVES: the same family, applied to itself
 # ---------------------------------------------------------------------
 # `Fwd` is a functor Mod(Smooth) → Mod(Smooth), so it can be applied to
 # a model it made.  `with Fwd(Fwd(Floats))` mints the model whose carrier
-# is `Dual(Dual(Float))` and reads the SAME three templates — `poly`,
-# `wave` and `fxy` are not touched, and nothing below knows there is a
+# is `Dual(Dual(Float))` and reads the SAME three templates.  `poly`,
+# `wave` and `fxy` are untouched, and nothing below knows there is a
 # second derivative in the world.
 #
 # HOW TO READ A NESTED DUAL.  The outer level's value is the whole
@@ -364,8 +359,8 @@ def fxyR with Rev = fxy
 # derivative, printed rather than asserted.
 #
 # THE SEED IS THE SAME SENTENCE TWICE: "this wire is the one I am
-# differentiating along".  At the inner level that is tangent `1.0`; at
-# the outer level it is tangent `Dual(1.0, 0.0)` — the constant one,
+# differentiating along".  At the inner level that is tangent `1.0`, and
+# at the outer level it is tangent `Dual(1.0, 0.0)`, the constant one,
 # whose own derivative is zero.
 def seed2 = (x -> (x 1.0 ; Dual) (1.0 0.0 ; Dual) ; Dual)
 #   seed2 : Float ⇒ Dual(Dual(Float))
@@ -373,7 +368,7 @@ def seed2 = (x -> (x 1.0 ; Dual) (1.0 0.0 ; Dual) ; Dual)
 def polyDD with Fwd(Fwd(Floats)) = poly
 def waveDD with Fwd(Fwd(Floats)) = wave
 def fxyDD  with Fwd(Fwd(Floats)) = fxy
-#   polyDD : Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float)) —
+#   polyDD : Dual(Dual(Float)) =Fwd(Fwd(Floats))> Dual(Dual(Float)),
 #   ONE receipt, `Fwd(Fwd(Floats))`, because ONE model read the
 #   template.  `Floats` never saw it.
 
@@ -409,7 +404,7 @@ def seedYY = (y -> (y 0.0 ; Dual) (1.0 0.0 ; Dual) ; Dual)
 "-- d2/dxdy of f(x, y) = x*y + sin x, at (2, 3) --" ; print
 (2.0 ; seedXX) (3.0 ; seedYY) ; fxyDD ; tangent ; tangent ; print   # 1.0
 (2.0 ; seed2) (3.0 ; seedYY) ; fxyDD ; value ; value ; print
-                                          # 6.909297426825682 — the value
+                                          # 6.909297426825682, the value
                                           #   §5 printed, unchanged by how
                                           #   the tangents were seeded
 
@@ -417,10 +412,10 @@ def seedYY = (y -> (y 0.0 ; Dual) (1.0 0.0 ; Dual) ; Dual)
 # checked once for the family: that would need equality modulo the
 # parameter theory's laws, and the checker has no such thing.  They are
 # checked AT EACH INSTANTIATION, on the instantiated model's own
-# evidence — `Fwd(Floats)` runs the eight ring laws at `Dual(1.5, 1.0)`
+# evidence: `Fwd(Floats)` runs the ring laws at `Dual(1.5, 1.0)`
 # and `Fwd(Fwd(Floats))` runs them again at `Dual(Dual(1.5, 1.0),
 # Dual(1.0, 0.0))`.  A false family is therefore refused at its FIRST
-# instantiation, and the refusal names the member — `law 'mulAssoc'
+# instantiation, and the refusal names the member: `law 'mulAssoc'
 # fails for model Fwd(Floats)` names the family and the argument at
 # once, because the applied form IS the name.
 
@@ -428,10 +423,10 @@ def seedYY = (y -> (y 0.0 ; Dual) (1.0 0.0 ; Dual) ; Dual)
 # 7. Newton's method, under `Fwd`
 # ---------------------------------------------------------------------
 # x ← x − p(x)/p′(x), with BOTH numbers coming out of one evaluation of
-# `polyD` — which is the reason to have a derivative at all.  `use
-# Recursive` puts `newton` in scope in its own body; the tolerance test
-# is `fabs` and `flt?`, because `eq?` on Floats is exact and exactness
-# is not what a root finder wants.
+# `polyD`, which is the reason to have a derivative at all.
+# `with Recursive` puts `newton` in scope in its own body, and the
+# tolerance test is `fabs` and `flt?`, because `eq?` on Floats is exact
+# and exactness is not what a root finder wants.
 
 def step = Dual(v, d) -> v d ; fdiv
 
@@ -455,7 +450,7 @@ def newton with Recursive =
                                #   exactly what it says it is.
 
 # ---------------------------------------------------------------------
-# 8. The transformations — two declarations, and what their squares
+# 8. The transformations: two declarations, and what their squares
 #    establish
 # ---------------------------------------------------------------------
 # FORGETTING THE TANGENT IS A HOMOMORPHISM.  That single declaration is
@@ -464,15 +459,15 @@ def newton with Recursive =
 #
 #     Fwd(Floats)@s ; Value  =  Value…Value ; Floats@s
 #
-# commutes.  All NINE of them — add, mul, neg, lit, exp, sin,
-# sample, observe and gradient — are PROVED by the normalizer, for every input, not
-# sampled.  A `Dual` is two Float wires with a roll around it, so
-# `unDual` partitions into one track and the whole square normalizes.
+# commutes.  All NINE of them (add, mul, neg, lit, exp, sin, sample,
+# observe and gradient) are PROVED by the normalizer, for every input,
+# rather than sampled.  A `Dual` is two Float wires with a roll around it,
+# so `unDual` partitions into one track and the whole square normalizes.
 
 transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent
-#   A TRANSFORMATION NAMES A MODEL, and `Fwd(Floats)` is a model — which
-#   is the reason the instantiation spelling is an APPLICATION and not a
-#   scope stack: the applied form is the model's NAME, so it is writable
+#   A TRANSFORMATION NAMES A MODEL, and `Fwd(Floats)` is a model, which
+#   is the reason the instantiation spelling is an APPLICATION rather than
+#   a scope stack: the applied form is the model's NAME, so it is writable
 #   here, printable on an arrow, and the same in both places.
 #
 #   ONE COMPONENT PER THEORY PARAMETER, in the theory's order: `value :
@@ -489,32 +484,30 @@ def transpose = Dual(x, dx) -> x (dx ; scaleK) ; Rev
 
 transformation Transpose in Fwd(Floats) ⇒ Rev = transpose, gx
 #   at `g`, Fwd's tangent `Float` becomes Rev's `Grad`, and the map is
-#   `gx` — the tangent was seeded at x, so the gradient it represents is
+#   `gx`: the tangent was seeded at x, so the gradient it represents is
 #   the one with that partial in slot 1.  Nothing new is defined for it.
 
 # What its NINE squares establish (`:transformations` in the REPL
 # prints the verdicts): `lit`, `sample` and `observe` are PROVED by the
-# normalizer, for every input — which is why `rlit` builds the ZERO
-# LINEAR MAP `(0.0 ; scaleK)` rather than `[(d -> gzero)]`: the two are
-# the same map and only the first is the same CODE, and `lit`'s input
-# is a `Float` rather than the carrier, so no `sample` reaches it and a
-# proof is the only verdict available.  The other six — `add`, `mul`,
-# `neg`, `exp`, `sin` and `gradient` — are SAMPLED at the theory's
-# evidence.  `:transformations` says WHY each needed the samples:
-# `differ in the free category`.  `sameCode` does not refuse them — it
-# DECIDES them false, because the two sides are equal only up to
-# associativity and distributivity of `fadd` and `fmul`, and those are
-# uninterpreted words to the normalizer.  A `false` about the free
-# category is not a `false` about a ring, which is exactly what the
-# theory's evidence is for.
+# normalizer, for every input, which is why `rlit` builds the ZERO LINEAR
+# MAP `(0.0 ; scaleK)` rather than `[(d -> gzero)]`.  The two are the same
+# map and only the first is the same CODE, and `lit`'s input is a `Float`
+# rather than the carrier, so no `sample` reaches it and a proof is the
+# only verdict available.  The other six, `add`, `mul`, `neg`, `exp`,
+# `sin` and `gradient`, are SAMPLED at the theory's evidence.
+# `:transformations` says WHY each needed the samples: `differ in the free
+# category`.  `sameCode` does not refuse them.  It DECIDES them false,
+# because the two sides are equal only up to associativity and
+# distributivity of `fadd` and `fmul`, and those are uninterpreted words to
+# the normalizer.  A `false` about the free category is not a `false` about
+# a ring, which is what the theory's evidence is for.
 #
-# The `gradient` square is the one that was missing until 2026-09-14,
-# and it is the interesting half: `tangent ; gx` against `transpose ;
-# backward` says that Fwd's tangent and Rev's accumulated continuation
-# ARE the same linear map, read two ways.  It is compared at `Grad`
-# rather than through an exit — a `Grad` is two Floats and `eq?`
-# reaches them — where the five carrier squares go through `observe`,
-# since a `Rev` holds a closure and `eq?` on a closure is syntactic.
+# The `gradient` square is the interesting half: `tangent ; gx` against
+# `transpose ; backward` says that Fwd's tangent and Rev's accumulated
+# continuation ARE the same linear map, read two ways.  It is compared at
+# `Grad` rather than through an exit, because a `Grad` is two Floats and
+# `eq?` reaches them, where the carrier squares go through `observe`, a
+# `Rev` holding a closure and `eq?` on a closure being syntactic.
 
 # ---------------------------------------------------------------------
 # 9. The same functor with the adjoint THREADED
@@ -571,13 +564,13 @@ def gradPoly with Gradient =
     tseedX
     polyT
     discharge
-#   gradPoly : Float ρ0 =RevThread Gradient> ρ0 — TWO receipts on one
+#   gradPoly : Float ρ0 =RevThread Gradient> ρ0, with TWO receipts on one
 #   arrow: which model read the template, and which resource the scope
 #   threaded.  The tail is open because a routed scope pads with `...`.
 
 "-- the same gradient, threaded instead of summed --" ; print
 (gzero ; Gradient) 2.0 ; gradPoly ; unGradient ; unGrad ; print ... ; print
-                                          # 10.0, then 0.0 — the same two
+                                          # 10.0, then 0.0, the same two
                                           # numbers §5 printed for polyR
 # installed at the site with `gzero`, discharged with `unGradient`.
 # There is no handler keyword: a resource is installed by rolling one
@@ -586,12 +579,6 @@ def gradPoly with Gradient =
 # ---------------------------------------------------------------------
 # 10. What is NOT built, plainly
 # ---------------------------------------------------------------------
-# (SECOND DERIVATIVES used to be listed here.  They wanted `Fwd` to be
-# a model of `Smooth(Dual(a))` for ANY model of `Smooth(a)` — a model
-# PARAMETERIZED BY A MODEL — and a `model` head named a declared type,
-# not a model variable.  Since 2026-09-15 a head takes a parameter
-# clause and `with Fwd(Fwd(Floats))` is the whole of it: §6.)
-#
 # A KLEISLI CATEGORY, as the same construction over a monad.  `model
 # Kleisli(M : Monad(m)) : Arrow(Kl(m))` wants two things this file's
 # family does not: a `data` declaration with a CONSTRUCTOR parameter
@@ -599,16 +586,16 @@ def gradPoly with Gradient =
 # with a VARIABLE in head position), and a PARTIALLY applied
 # constructor as a theory argument (`Arrow(Kl(m))`, where a
 # constructor argument is a bare name).  Both are type-level
-# application, which the substitution discipline here exists to avoid;
-# `design-macros.md` (2026-09-15) records the two refusals verbatim.
-# A family whose carrier is `C(a)` for a WIRE parameter — this one —
-# needs neither.
+# application, which the substitution discipline here exists to avoid, and
+# `design-macros.md` records the two refusals verbatim.  A family whose
+# carrier is `C(a)` for a WIRE parameter, which is this one, needs
+# neither.
 #
 # THE PER-NODE ACCUMULATOR.  Wang & Rompf's shift/reset backpropagator
 # (READING) gives each node ONE accumulator cell visited once, rather
-# than a continuation called once per use.  That wants a reified graph
-# — a map from node ids to partial sums — which is a data structure,
-# and no data structure is built here.  §9's resource threads ONE
+# than a continuation called once per use.  That wants a reified graph, a
+# map from node ids to partial sums, which is a data structure, and no data
+# structure is built here.  §9's resource threads ONE
 # accumulator for the whole sweep, which is the same trick at the
 # leaves and not at the nodes.
 #
@@ -616,11 +603,6 @@ def gradPoly with Gradient =
 # real gradient is indexed by the inputs; `examples/index.braid` has
 # the machinery (`Fin(n)`, `at`, bundles) and joining it to this is a
 # different piece of work.
-#
-# (THE GRADIENT HALF OF THE TRANSPOSE used to be listed here as not
-# machine-checked.  It is checked since 2026-09-14: `gradient : a ⇒ g`
-# is a slot whose result type is a theory parameter, and its square is
-# decided like any other — §8.)
 #
 # `examples/transpose.braid` is the linear-algebra view of the same
 # operation: reversing a diagram and dualizing each generator

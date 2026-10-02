@@ -2683,7 +2683,7 @@ commute at the theory's samples*.
 `sameCode` answering **false** means *different as programs of the free
 category*, which is a real answer about the free category and not an answer
 about the model: the model's words satisfy the theory's laws, and the
-normalizer has none of them. `Transpose`'s five sampled squares are that
+normalizer has none of them. `Transpose`'s six sampled squares are that
 case, with the two sides equal only up to the arithmetic of `fadd` and
 `fmul`, which are uninterpreted here. A square the normalizer decided false
 is therefore sampled, like a square it refused. A square it decided **false
@@ -2710,7 +2710,7 @@ before declaring one:
   the carrier holds a function, `eq?` is syntactic — declare an exit
   `observe` in the theory*.
 - **A sampled square establishes its claim AT THE EXIT.** `Transpose`'s exit
-  is the value, so its five sampled squares check that forward and reverse
+  is the value, so its six sampled squares check that forward and reverse
   agree on the value. The gradient is read by a word outside the theory (the
   exit problem, below).
 
@@ -3560,10 +3560,10 @@ program is written `in Smooth` and read by all three. Each slot says what the
 derivative of **one** operation is, and nothing composes derivatives by hand,
 because `;` does.
 `transformation Value in Fwd(Floats) ⇒ Floats = value, zeroTangent` is the
-sentence *AD computes the right value*, and all ten of its squares are
+sentence *AD computes the right value*, and all nine of its squares are
 **proved** by the normalizer rather than sampled.
 `transformation Transpose : Fwd(Floats) ⇒ Rev` is the sentence *forward and
-reverse are one linear map*, and its verdicts are mixed: three proved, seven
+reverse are one linear map*, and its verdicts are mixed: three proved, six
 sampled through the exit.
 
 `Fwd` is a **family**, `model Fwd(Smooth(a, g)) in Smooth(Dual(a), a)`, so
@@ -4906,7 +4906,7 @@ of the table together, and the one to read after `theories.braid`.
 `examples/autodiff.braid` declares `theory Smooth(a)`, three `data` carriers,
 three models (evaluation, forward mode, reverse mode), three programs written
 `in Smooth` and read by all three, and two `transformation`s, one with every
-square proved and one decided three ways proved and five at the samples. It
+square proved and one decided three ways proved and six at the samples. It
 adds Newton's method under `with Recursive`, and a fourth model in which the
 adjoint is threaded through a resource instead of summed. It contains no
 `Code`, no `functor` and no chain rule, because the chain rule is what a model

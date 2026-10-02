@@ -40,48 +40,45 @@
 # outcome by `groupBy`.  A posterior is a frame operation.
 
 import "frame.braid"
-#   There is no `Pair` to import any more (2026-09-16).  Products in
-#   Braid are FLAT — the stack is the product — and the one place they
-#   used to nest was the hom-object, which now names a whole stack on
-#   each side.  `Pair` existed to be the packing; nothing packs.
+#   There is no `Pair` to import.  Products in Braid are FLAT, since the
+#   stack is the product, and the hom-object names a whole stack on each
+#   side, so nothing packs.
 
 # ---------------------------------------------------------------------
 # 1. The theory: a Markov category, presented
 # ---------------------------------------------------------------------
 # `in Doctrine` is the declaration that `compose` and `embed` are the
-# prelude doctrine's, at its signatures — so `with M` of a model
-# transports base programs into the category M presents, and the
+# prelude doctrine's, at its signatures, so `with M` of a model
+# transports base programs into the category M presents and the
 # doctrine's five category laws are inherited.
 #
 # The GENERATORS are the distributions, and each is an ENTRY: a slot
 # that builds a carrier out of nothing, `• ⇒ k(_, _)`, read off its
-# declared arrow.  That is the answer to "how does `flip` take its
-# Float?" — it does NOT take one.  A distribution is written as the
-# KERNEL it is, `flip : k(Float, Bool)`, the bias arriving on the wire
-# the kernel consumes.  (`k(•, Bool)` is now perfectly spellable — a
-# hom-object's arguments are stacks and `•` is a stack — but it would
-# say something else: a generator with no domain, which is not how a
-# parameterized distribution is presented.)
-# The bias is then an ordinary base stage INSIDE the transported scope
-# — `half = (n -> 0.5)` is one wire in, one wire out, so it embeds —
+# declared arrow.  That answers "how does `flip` take its Float?": it
+# does NOT take one.  A distribution is written as the KERNEL it is,
+# `flip : k(Float, Bool)`, with the bias arriving on the wire the kernel
+# consumes.  `k(•, Bool)` is spellable, since a hom-object's arguments
+# are stacks and `•` is a stack, but it says something else: a generator
+# with no domain, which is not how a parameterized distribution is
+# presented.  The bias is an ordinary base stage INSIDE the transported
+# scope, `half = (n -> 0.5)`, one wire in and one wire out, so it embeds,
 # and the composition of the scope routes it into `flip`'s domain.
 # Nothing special-cases a parameter.
 #
-# `report` is the EXIT, and its result is a THEORY PARAMETER: what a
-# model hands back about a kernel is not one type — `Enum` gives a
-# weighted list, `Sampler` a list of draws, `Nondet` a support — so
-# `d(_)` is a CONSTRUCTOR parameter the model fills, the same rule
+# `report` is the EXIT, and its result is a THEORY PARAMETER, because
+# what a model hands back about a kernel is not one type: `Enum` gives a
+# weighted list, `Sampler` a list of draws, and `Nondet` a support.
+# `d(_)` is therefore a CONSTRUCTOR parameter the model fills, the rule
 # `examples/autodiff.braid` uses for `gradient : a ⇒ g` one kind up
-# (2026-09-15, MANUAL §8).  It is declared at `k(Int, b)` because a
-# kernel must be run SOMEWHERE: `Int` is the stand-in for the monoidal
-# unit the Doctrine has no name for, and `report` runs at 0.  Every
-# program below therefore begins by ignoring an Int.
+# (MANUAL §8).  It is declared at `k(Int, b)` because a kernel must be
+# run SOMEWHERE: `Int` is the stand-in for the monoidal unit the Doctrine
+# has no name for, and `report` runs at 0.  Every program below therefore
+# begins by ignoring an Int.
 #
-# `condition` is the sub-Markov generator: it takes a Bool beside a
-# value and keeps the branch, at weight 1, or kills it.  A category
-# with it is AFFINE rather than Markov — §9 prints the mass that says
-# so — and Bayes' rule is `condition` plus renormalizing, which is a
-# frame operation.
+# `condition` is the sub-Markov generator: it takes a Bool beside a value
+# and keeps the branch, at weight 1, or kills it.  A category with it is
+# AFFINE rather than Markov, and §9 prints the mass that says so.  Bayes'
+# rule is `condition` plus renormalizing, which is a frame operation.
 #
 # Every slot is `=Recursive>`: `Sampler`'s `report` folds a draw over a
 # range and `Enum`'s `compose` walks a list, and a slot declares the
@@ -99,7 +96,7 @@ theory Prob(k(..., ...), d(...)) in Doctrine =
     report    : k(Int, b) =Recursive> d(b)
 
 # ---------------------------------------------------------------------
-# 2. Model one: `Enum` — exact enumeration
+# 2. Model one: `Enum`, exact enumeration
 # ---------------------------------------------------------------------
 # The hom-object is a function into a WEIGHTED LIST: the Kleisli
 # category of the finite distribution monad.  `compose` is bind with
@@ -107,8 +104,8 @@ theory Prob(k(..., ...), d(...)) in Doctrine =
 # mass.  That is the entire model, and every law it obeys it obeys
 # because those three lines are what they are.
 
-## An OUTCOME is a whole stack, so it rides in a `Box` — the prelude's
-## anonymous product — and the weight beside it.  `Weighted(σ)`'s
+## An OUTCOME is a whole stack, so it rides in a `Box`, the prelude's
+## anonymous product, with the weight beside it.  `Weighted(σ)`'s
 ## argument is the bare stack; the box is how the list stores it, the
 ## way `examples/frame.braid`'s column store boxes a row.
 data Weighted(b...) = List(Box(Box(b) Float))
@@ -116,7 +113,7 @@ data Kern(a..., b...)  = Fn⟨a =Recursive> Weighted(b)⟩
 
 ## run a kernel at a point, down to the bare list of (outcome, weight)
 def atK   = unKern ... ; ev ; unWeighted
-## the point mass — `embed`'s whole content, and `dirac` is its name
+## the point mass, which is `embed`'s whole content, and `dirac` names it
 def dirac = Box ; _ 1.0 ; Box ; single ; Weighted
 
 def eEmbed = (f -> [f ... ; ev ; dirac] ; Kern)
@@ -128,7 +125,7 @@ def eCompose =
                   ; (y w -> (e (y ; unBox) ; atK)
                           ; [(e2 -> w e2 ; scaleBy)] ... ; map))] ... ; map
        ; concat ; Weighted] ; Kern
-## the STRENGTH, and it is this theory's own — see the note below the
+## the STRENGTH, and it is this theory's own; see the note below the
 ## model.  A wire rides UNDER the kernel's domain and is re-attached to
 ## every outcome; no pairing appears, because a hom-object over stacks
 ## has nothing to pair.
@@ -155,8 +152,8 @@ def eSample =
     [(x -> (((x ; _ 1 ; + ; Box) 0.5 ; Box) ((x 2 ; * ; Box) 0.5 ; Box) ; pack) ; Weighted)] ; Kern
 
 ## the expected value of a weighted list of Ints, and the doctrine's
-## `observe` built from it — two points, scaled and floored, because
-## the doctrine asks an exit for an `Int`
+## `observe` built from it: two points, scaled and floored, because the
+## doctrine asks an exit for an `Int`
 def eExpect =
     w ->
     w ; unWeighted
@@ -180,9 +177,9 @@ model Enum in Prob(Kern, Weighted) =
     report    = eReport
 
 # ---------------------------------------------------------------------
-# 3. Model two: `Sampler` — a random-number RESOURCE, threaded
+# 3. Model two: `Sampler`, a random-number RESOURCE, threaded
 # ---------------------------------------------------------------------
-# The hom-object is a function that threads an `Rng` — a seed — so a
+# The hom-object is a function that threads an `Rng`, a seed, so a
 # kernel is `Rng a ⇒ Rng b` and composition is the ordinary threading
 # `examples/metered.braid` does for Fuel.  The generator is a linear
 # congruential one, written in Braid over Int, so it is DETERMINISTIC:
@@ -193,7 +190,7 @@ model Rng in Doctrine = Int
 data Draws(b...)      = List(Box(b))
 data Samp(a..., b...) = Fn⟨Rng a =Recursive> Rng b⟩
 
-## A 48-bit linear congruential generator — the whole source of
+## A 48-bit linear congruential generator, the whole source of
 ## randomness in this file, four atoms wide.  An Int in Braid is exact
 ## at any width, so the modulus is written as the number it is.
 def stepRng = unRng ; (s -> ((s 25214903917 ; *) 11 ; +) 281474976710656 ; mod)
@@ -229,8 +226,8 @@ def theSeed  = 20260915
 def sOnce    = (c x -> c (theSeed ; Rng) x ; runS ; (r y -> y))
 def sObserve = (c -> c 3 ; sOnce ; (y -> c 4 ; sOnce ; (z -> y z ; +)))
 
-## `report` draws 200 samples, threading ONE seed through all of them —
-## which is what makes the tally below a tally and not 200 copies of
+## `report` draws 200 samples, threading ONE seed through all of them,
+## which is what makes the tally below a tally rather than 200 copies of
 ## one number.
 data Acc(b) = Int List(b)
 def drawsWanted = 200
@@ -256,7 +253,7 @@ model Sampler in Prob(Samp, Draws) =
     report    = sReport
 
 # ---------------------------------------------------------------------
-# 4. Model three: `Nondet` — the support, and nothing else
+# 4. Model three: `Nondet`, the support and nothing else
 # ---------------------------------------------------------------------
 # The possibilistic Markov category: a weight is a bit, so the
 # hom-object is a function into a plain list and `compose` is `flatMap`.
@@ -265,8 +262,8 @@ model Sampler in Prob(Samp, Draws) =
 # word, and the copy/two-flips distinction SURVIVES: `twoEqual`'s
 # support is {HH, TT} and `twoIndep`'s is {HH, HT, TH, TT}, which is
 # the possibilistic shadow of the same fact.  A model with no numbers
-# in it still tells copying from sampling — what the numbers add is
-# HOW MUCH, not WHETHER.
+# in it still tells copying from sampling.  What the numbers add is HOW
+# MUCH rather than WHETHER.
 
 data Reach(b...)      = List(Box(b))
 data Poss(a..., b...) = Fn⟨a =Recursive> Reach(b)⟩
@@ -301,36 +298,35 @@ model Nondet in Prob(Poss, Reach) =
 # ---------------------------------------------------------------------
 # 5. The words a Markov program needs, and where they come from
 # ---------------------------------------------------------------------
-# `under` is THIS THEORY'S OWN STRENGTH, and the note is worth the
-# space (2026-09-16).  The Doctrine has none any more: a base stage of
-# any width embeds as itself, because a hom-object `k(ρ, σ)` names a
-# whole stack on each side.  But a GENERATOR is not a base stage — an
-# entry slot like `flip` is a carrier at a FIXED width, `k(Float,
-# Bool)`, and nothing in the base can widen it.  A Markov category is
-# exactly a theory that has such generators, so `Prob` declares the
+# `under` is THIS THEORY'S OWN STRENGTH.  The Doctrine has none: a base
+# stage of any width embeds as itself, because a hom-object `k(ρ, σ)`
+# names a whole stack on each side.  A GENERATOR is not a base stage,
+# though.  An entry slot like `flip` is a carrier at a FIXED width,
+# `k(Float, Bool)`, and nothing in the base can widen it.  A Markov
+# category is a theory that has such generators, so `Prob` declares the
 # widening itself, as an ordinary slot of its own:
 #
 #     under : k(a, b) ⇒ k(c a, c b)
 #
-# One wire rides UNDER the kernel's domain.  There is no pairing in
-# that signature and there is nothing to unpack: over stacks the
-# strength is whiskering and whiskering is concatenation.  `c` is a
-# wire rather than a stack because a stack variable can only sit in
-# tail position — `c a` is spellable and `a c` is a splice — which is
-# the same rule every declaration in the language obeys.
+# One wire rides UNDER the kernel's domain.  There is no pairing in that
+# signature and nothing to unpack: over stacks the strength is whiskering
+# and whiskering is concatenation.  `c` is a wire rather than a stack
+# because a stack variable can only sit in tail position, so `c a` is
+# spellable and `a c` is a splice, which is the rule every declaration in
+# the language obeys.
 #
-# Acting on the DEEPER wire instead is `swap ; under ; swap`, and the
-# swap is an ordinary base program embedded — which is the whole
-# construction of the monoidal product `f ⊗ g` out of a strength.
+# Acting on the DEEPER wire instead is `swap ; under ; swap`, where the
+# swap is an ordinary base program embedded.  That is the construction of
+# the monoidal product `f ⊗ g` out of a strength.
 #
-# It is WRITTEN ONCE, over the THEORY (2026-09-16).  A def whose `in`
-# clause names `Prob` is a morphism of what `Prob` presents, in `Prob`'s
-# vocabulary; `with Enum` on such a def INSTANTIATES it — the slot names
-# become Enum's words and the `;` stays base composition, because a
-# morphism of B[Prob] composes like the base.
+# It is WRITTEN ONCE, over the THEORY.  A def whose `in` clause names
+# `Prob` is a morphism of what `Prob` presents, in `Prob`'s vocabulary,
+# and `with Enum` on such a def INSTANTIATES it: the slot names become
+# Enum's words and the `;` stays base composition, because a morphism of
+# B[Prob] composes like the base.
 #
-# `second` is gone with the pairing: acting on the wire above ONE wire
-# riding below IS `under`, so it has no second spelling.
+# There is no `second`.  Acting on the wire above ONE wire riding below IS
+# `under`, so it has no second spelling.
 
 ## two independent flips, as `flip ⊗ flip`: the strength twice, with a
 ## swap between.  This is the word the thesis turns on.
@@ -340,9 +336,9 @@ def bothFlip in Prob =
     _ (flip ; under) ; compose
 def bothFlipE in Prob with Enum    = bothFlip
 def bothFlipS in Prob with Sampler = bothFlip
-#   bothFlipE : • ⇒ Kern(Float Float, Bool Bool) — a word
-#   of the category, built out of the theory's own slots, and it
-#   composes inside a `with Enum` scope like any transported stage.
+#   bothFlipE : • ⇒ Kern(Float Float, Bool Bool), a word of the category,
+#   built out of the theory's own slots, and it composes inside a
+#   `with Enum` scope like any transported stage.
 
 ## the biases, as ordinary base stages: one wire in, one wire out, so
 ## the functor embeds them and nothing knows they are parameters
@@ -350,14 +346,14 @@ def half      = (n -> 0.5)
 def twoBiases = (n -> 0.5 0.5)
 
 # ---------------------------------------------------------------------
-# 6. COPY IS NOT NATURAL — the two programs, and the two distributions
+# 6. COPY IS NOT NATURAL: the two programs, and the two distributions
 # ---------------------------------------------------------------------
 
 def twoEqualE with Enum = half ; flip ; dup
 def twoIndepE with Enum = twoBiases ; bothFlipE
 #   twoEqualE : Int =Enum Recursive> Bool Bool
-#   twoIndepE : Int =Enum Recursive> Bool Bool — the SAME type,
-#   and `with Enum` is the only reason either of them is a kernel at all.
+#   twoIndepE : Int =Enum Recursive> Bool Bool, the SAME type, and
+#   `with Enum` is the only reason either of them is a kernel at all.
 
 def twoEqualS with Sampler = half ; flip ; dup
 def twoIndepS with Sampler = twoBiases ; bothFlipS
@@ -369,7 +365,7 @@ def twoIndepN with Nondet = twoBiases ; bothFlipN
 #   rather than being a program the embedding could embed".  A category
 #   is entered from the base, and each model enters its own.
 
-## reading a distribution as a FRAME — outcome, weight — with the
+## reading a distribution as a FRAME of outcome and weight, with the
 ## weights summed per outcome by the frame library's `groupBy`
 def showBits = (a b -> (a "H" "T" ; select) (b "H" "T" ; select) ; cat)
 def tallyW =
@@ -396,16 +392,16 @@ distHead ([showBits] (twoEqualE ; eReport) ; tallyW) ; printFrame
 "== two flips — `with Enum = twoBiases ; bothFlipE` ==" ; print
 distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; printFrame
 #   HH | 0.25     HT | 0.25     TH | 0.25     TT | 0.25
-#   — 1/2 · 1/2 four times, and every weight is exact
+#   1/2 · 1/2 four times, and every weight is exact
 
 "" ; print
 "== the same two programs, SAMPLED (200 draws, seed 20260915) ==" ; print
 countHead ([showBits] (twoEqualS ; sReport) ; tallyD) ; printFrame
-#   TT | 98    HH | 102 — two cells, and the other two are ABSENT, not
-#   small: a copied bit cannot disagree with itself at any seed
+#   TT | 98    HH | 102: two cells, and the other two are ABSENT rather
+#   than small, because a copied bit cannot disagree with itself at any seed
 "" ; print
 countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
-#   TH | 61   HT | 49   TT | 38   HH | 52 — four cells, 200 draws,
+#   TH | 61   HT | 49   TT | 38   HH | 52: four cells, 200 draws, and
 #   50 expected in each.  The seed is fixed, so these ten numbers are
 #   the program's output and not a report about a run of it.
 
@@ -420,19 +416,19 @@ countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; printFrame
 # The car is uniform on three doors, the guess is door 0, and the host
 # opens a door that is neither.  When the car IS behind door 0 the host
 # has a free choice and flips for it; otherwise the door is forced.
-# That dependence is the whole problem, and writing it needs the coin
-# to land beside the car — which is `flip ; under`, the strength put to
-# the one job it exists for.
+# That dependence is the problem, and writing it needs the coin to land
+# beside the car, which is `flip ; under`, the strength put to the job it
+# exists for.
 #
-# (Conditioning a UNIFORM host on "the host missed the car" is a
-# different problem — Monty *Fall* — and it answers 1/2.  The model has
-# to say what the host does; `condition` cannot repair a wrong one.)
+# Conditioning a UNIFORM host on "the host missed the car" is a different
+# problem, Monty *Fall*, and it answers 1/2.  The model has to say what the
+# host does, and `condition` cannot repair a wrong one.
 
 def coinSnd in Prob = (([half] ; embed) flip ; compose) ; under
 def coinSndE in Prob with Enum    = coinSnd
 def coinSndS in Prob with Sampler = coinSnd
-#   coinSndE : • ⇒ Kern(c Int, c Bool) — flip a fair coin
-#   ON TOP of whatever is riding below
+#   coinSndE : • ⇒ Kern(c Int, c Bool), flipping a fair coin ON TOP of
+#   whatever is riding below
 
 def three    = (n -> 3)
 def hostFrom =
@@ -444,7 +440,7 @@ def montyE with Enum =
     dup
     coinSndE
     hostFrom
-#   montyE : Int =Enum Recursive> Int Int — the JOINT of (car, host)
+#   montyE : Int =Enum Recursive> Int Int, the JOINT of (car, host)
 
 def showCH =
     car h -> (("car " (car ; toStr) ; cat) ", host " ; cat) (h ; toStr) ; cat
@@ -456,8 +452,8 @@ distHead ([showCH] (montyE ; eReport) ; tallyW) ; printFrame
 #   car 0, host 2 | 0.16666666666666666    1/3 · 1/2
 #   car 1, host 2 | 0.3333333333333333     1/3, the coin summed away
 #   car 2, host 1 | 0.3333333333333333     1/3, likewise
-#   — 1/3 is 0.3333333333333333 as a double and its half is exact,
-#     so the two 1/6 rows really are the same number
+#   1/3 is 0.3333333333333333 as a double and its half is exact, so the
+#     two 1/6 rows really are the same number
 
 ## the evidence: the host opened door 1.  `condition` takes a Bool
 ## beside the value it is keeping, so the stage before it PAIRS the
@@ -472,8 +468,8 @@ def montyPostE with Enum =
     hostFrom
     keepHost1
     condition
-#   montyPostE : Int =Enum Recursive> Int — the car, on the branches
-#   where the host opened door 1, at their UNNORMALIZED weights
+#   montyPostE : Int =Enum Recursive> Int, the car on the branches where
+#   the host opened door 1, at their UNNORMALIZED weights
 
 ## Bayes' rule, as a frame operation: divide every weight by the mass.
 def renorm =
@@ -482,17 +478,17 @@ def renorm =
       ; (es -> (es ; [(b -> b ; unBox ; (y p -> p))] ... ; map ; sumF) \
              ; (m -> es ; [(b -> b ; unBox ; (y p -> y (p m ; fdiv) ; Box))] ... ; map \
                         ; Weighted))
-## the outcome, unboxed — a `Weighted(σ)` stores each outcome in a Box
+## the outcome, unboxed, since a `Weighted(σ)` stores each outcome in a Box
 def showCar = (n -> "car " (n ; toStr) ; cat)
 
 "" ; print
 "== …given the host opened door 1 — the posterior over the car ==" ; print
 distHead ([showCar] (montyPostE ; eReport ; renorm) ; tallyW) ; printFrame
-#   car 0 | 0.3333333333333333    (1/6) / (1/2) — staying wins 1/3
-#   car 2 | 0.6666666666666666    (1/3) / (1/2) — SWITCHING WINS 2/3
+#   car 0 | 0.3333333333333333    (1/6) / (1/2), staying wins 1/3
+#   car 2 | 0.6666666666666666    (1/3) / (1/2), SWITCHING WINS 2/3
 
 # ---------------------------------------------------------------------
-# 8. A NOISY SENSOR, under `Enum` — the same three lines, different
+# 8. A NOISY SENSOR, under `Enum`: the same three lines, different
 #    numbers
 # ---------------------------------------------------------------------
 # Prior: rain with probability 1/4.  The sensor cries rain with
@@ -512,7 +508,7 @@ def sensorE with Enum =
     dup
     biasOf2
     flipSndE
-#   sensorE : Int =Enum Recursive> Bool Bool — (rain?, alarm?)
+#   sensorE : Int =Enum Recursive> Bool Bool, which is (rain?, alarm?)
 
 def showRA =
     r a -> ((r ; showRain) ", alarm " ; cat) (a "yes" "no" ; select) ; cat
@@ -532,7 +528,7 @@ distHead ([showRA] (sensorE ; eReport) ; tallyW) ; printFrame
 #   rain, alarm yes | 0.21875     1/4 · 7/8
 #   rain, alarm no  | 0.03125     1/4 · 1/8
 #   dry,  alarm yes | 0.09375     3/4 · 1/8
-#   dry,  alarm no  | 0.65625     3/4 · 7/8   — and they sum to 1.0
+#   dry,  alarm no  | 0.65625     3/4 · 7/8   and they sum to 1.0
 
 "" ; print
 "== …given the alarm — the posterior over rain ==" ; print
@@ -545,8 +541,8 @@ distHead ([showRain] (sensorPostE ; eReport ; renorm) ; tallyW) ; printFrame
 # ---------------------------------------------------------------------
 # A random walk on the integers: at each step flip a fair coin and move
 # one either way.  `walkN` builds the n-step kernel by COMPOSING the
-# one-step kernel n times — composition in the category, so the knot
-# never sees a sample, only an arrow.
+# one-step kernel n times, composing in the category, so the knot never
+# receives a sample, only an arrow.
 
 def idS in Sampler = [_] ; embed
 def thenS in Sampler = compose
@@ -557,9 +553,9 @@ def stepS with Sampler = dup ; coinSndS ; moveBy
 
 def walkN with Recursive =
     n -> (n 0 ; equals) [idS] [(stepS ((n ; _ 1 ; -) ; walkN) ; thenS)] ... ; cond
-#   walkN : Int =Recursive> Samp(Int, Int) — a KERNEL built by
-#   recursion, and the recursion is over the number of steps, not over
-#   the randomness
+#   walkN : Int =Recursive> Samp(Int, Int), a KERNEL built by recursion,
+#   where the recursion is over the number of steps rather than over the
+#   randomness
 
 "" ; print
 "== a 10-step random walk, 200 draws (seed 20260915) ==" ; print
@@ -584,15 +580,15 @@ countHead ([toStr] ((10 ; walkN) ; sReport) ; tallyD) ; printFrame
 # of "a Markov category is not cartesian": the same diagram, two
 # answers, and which answer you get is the functor.
 #
-# DISCARD IS NATURAL.  Every kernel has total mass 1 — `f ; discard =
-# discard` — which is Fritz's causality/semicartesian axiom.  There is
-# no `•` object to state it at, so it is stated at the mass, which is
-# the same claim read through `report`.  `condition` is what breaks it,
-# and the mass says so: a category with `condition` is AFFINE (mass ≤
-# 1), not Markov, and Bayes' rule is exactly the renormalizing that
-# puts the mass back.
+# DISCARD IS NATURAL.  Every kernel has total mass 1, `f ; discard =
+# discard`, which is Fritz's causality or semicartesian axiom.  There is
+# no `•` object to state it at, so it is stated at the mass, which is the
+# same claim read through `report`.  `condition` is what breaks it, and
+# the mass says so: a category with `condition` is AFFINE, with mass ≤ 1,
+# rather than Markov, and Bayes' rule is the renormalizing that puts the
+# mass back.
 
-## `says` comes from the frame library too — a Bool, spelled
+## `says` comes from the frame library too: a Bool, spelled
 def weightsOf = (w -> w ; unWeighted ; [(b -> b ; unBox ; (y p -> p))] ... ; map)
 def massOf   = (c -> c ; eReport ; weightsOf ; sumF)
 def sameDist = (u v -> (u ; eReport ; unWeighted) (v ; eReport ; unWeighted) ; eq? ; verdict)
@@ -624,18 +620,18 @@ montyPostE  ; massOf ; print              # 0.5     — 1/6 + 1/3
 sensorPostE ; massOf ; print              # 0.3125  — 7/32 + 3/32
 
 # ---------------------------------------------------------------------
-# 11. EXPECTATION IS A HOMOMORPHISM — but not of THIS category
+# 11. EXPECTATION IS A HOMOMORPHISM, but not of THIS category
 # ---------------------------------------------------------------------
 # `transformation Expect : Enum ⇒ <anything>` cannot be declared, and
 # the reason is not a gap in the checker: E[g(X)] ≠ g(E[X]), so
 # expectation does not preserve composition and is not a functor of the
 # Markov category at all.  §12 prints the counterexample.
 #
-# What expectation IS a homomorphism of is the CONVEX structure — the
-# fair-mixture operation — and that is an algebraic theory over one
+# What expectation IS a homomorphism of is the CONVEX structure, the
+# fair-mixture operation, and that is an algebraic theory over one
 # carrier, so it is declared here and machine-checked.  `mix` is the
-# midpoint ½x + ½y; the laws are the barycentric ones (idempotence,
-# commutativity, mediality).
+# midpoint ½x + ½y, and the laws are the barycentric ones: idempotence,
+# commutativity and mediality.
 
 theory Convex(m) =
     mix     : m m ⇒ m
@@ -684,7 +680,7 @@ transformation Expect in Mixtures ⇒ Means = meanW
 "== expectation, as a homomorphism of the convex structure ==" ; print
 (twoPts onePt ; mixW ; Expect) ; print         # 3.0  — ½·2 + ½·4
 (twoPts ; Expect) (onePt ; Expect) ; meanMix ; print
-                                               # 3.0  — the same, the other way
+                                               # 3.0, the same, the other way
                                                #   round the square
 
 # ---------------------------------------------------------------------
@@ -712,22 +708,22 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 # `transformation Draw : Sampler ⇒ Enum` HAS NO COMPONENT, and the
 # reason is mathematical rather than mechanical: a component is a word
 # `Samp(a, b) ⇒ Kern(a, b)` that is generic in `a` and `b`, so it can
-# never APPLY the sampler — and a sample is not a function of the
-# distribution anyway.  Writing the obvious wrong one (the point mass
-# at the draw taken from a fixed seed) type-checks and is then refused
-# at the samples, because a fresh seed per factor is not the same
-# kernel as one seed threaded through the composite:
+# never APPLY the sampler, and a sample is not a function of the
+# distribution anyway.  Writing the obvious wrong one, the point mass at
+# the draw taken from a fixed seed, type-checks and is then refused at the
+# samples, because a fresh seed per factor is not the same kernel as one
+# seed threaded through the composite:
 #
 #     transformation Draw : Sampler ⇒ Enum = asDirac, asDiracD
 #     error: transformation Draw: the square for slot 'compose' does not
 #     commute at the theory's samples — a transformation between models
 #     is a homomorphism, slot by slot.
 #
-# `transformation Support : Enum ⇒ Nondet` is the one that OUGHT to
-# work — forgetting the weights really is a homomorphism, it is the
-# support functor from the distribution monad to the nonempty powerset
-# — and it is refused for a reason worth writing down.  Every square
-# but one is fine; the `under` square is not:
+# `transformation Support : Enum ⇒ Nondet` is the one that OUGHT to work.
+# Forgetting the weights really is a homomorphism, the support functor
+# from the distribution monad to the nonempty powerset, and it is refused
+# for a reason worth writing down.  Every square but one is fine, and the
+# `under` square is not:
 #
 #     error: transformation Support: the square for slot 'under' does not
 #     commute at the theory's samples — … The two carriers were compared
@@ -735,64 +731,61 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 #     input FITS this slot's result — an exit at `k(Int, Int)` does not
 #     reach the hom-object at another pair of stacks.
 #
-# (That message named the wrong thing until 2026-09-15: it said the
-# theory declares NO exit, and this theory declares two.  A refusal
-# that misreports its own cause sends the reader to the wrong repair,
-# so it now says `no exit whose input FITS`.)
+# The refusal says `no exit whose input FITS` rather than "declares no
+# exit", because this theory declares two, and a refusal that misreports
+# its own cause sends the reader to the wrong repair.
 #
-# A second exit at the wider stack cannot help either, and this is the
-# sharp end of it: the square THAT exit would itself need is fed by the
-# theory's first entry — `sample : • ⇒ k(Int, Int)`, the doctrine's —
-# whose object is one Int wire and not two, so the exit's own square
-# does not even typecheck.  The carriers are therefore compared
-# directly, and they are closures.
+# A second exit at the wider stack cannot help either.  The square THAT
+# exit would itself need is fed by the theory's first entry, the
+# doctrine's `sample : • ⇒ k(Int, Int)`, whose object is one Int wire and
+# not two, so the exit's own square does not typecheck.  The carriers are
+# therefore compared directly, and they are closures.
 #
-# The general statement, which is the pragmatics item this file buys:
-# a component must be generic in the hom-object's arguments, so it can
-# never RUN the carrier; a square between two function-carrier models is
-# therefore decidable only when the normalizer proves it, which needs
-# the component to pass the witness through untouched.
-# `examples/transformations.braid`'s `Forget : Names ⇒ Funcs` is exactly
-# that case (drop a `Str` field).  A component that TRANSFORMS the
-# witness — which is what forgetting a weight is — is out of reach at
-# the wider stack.
+# The general statement is the item this file buys.  A component must be
+# generic in the hom-object's arguments, so it can never RUN the carrier,
+# and a square between two function-carrier models is therefore decidable
+# only when the normalizer proves it, which needs the component to pass
+# the witness through untouched.
+# `examples/transformations.braid`'s `Forget : Names ⇒ Funcs` is that
+# case, dropping a `Str` field.  A component that TRANSFORMS the witness,
+# which is what forgetting a weight does, is out of reach at the wider
+# stack.
 
 # ---------------------------------------------------------------------
-# 13. What is NOT built, plainly
+# 13. What is NOT built
 # ---------------------------------------------------------------------
 # CONTINUOUS DISTRIBUTIONS.  Everything here is finitely supported.
-# `Enum` enumerates and `Nondet` lists; a Gaussian has no list.  The
-# carrier would be a density against a base measure, which is the
-# `Density` model this file does not ship — and not because it is
-# tedious: scoring a density needs the OUTCOME as an input, so its
-# `flip` would be `k(Float Bool, Bool)` and not `k(Float, Bool)`.
-# A slot has ONE type for every model, so a scoring semantics is a model
-# of a DIFFERENT theory, and saying that is more use than shipping a
-# third carrier that repeats `Sampler`'s threading with `Weight` in
-# place of `Rng`.
+# `Enum` enumerates and `Nondet` lists, and a Gaussian has no list.  The
+# carrier would be a density against a base measure, which is a `Density`
+# model this file does not have, and the reason is not tedium.  Scoring a
+# density needs the OUTCOME as an input, so its `flip` would be
+# `k(Float Bool, Bool)` rather than `k(Float, Bool)`.  A slot has ONE type
+# for every model, so a scoring semantics is a model of a DIFFERENT
+# theory, and saying that is more use than a third carrier repeating
+# `Sampler`'s threading with `Weight` in place of `Rng`.
 #
 # INFERENCE.  There is exact enumeration and there is forward sampling.
 # There is no importance sampling, no MCMC, no variable elimination.
-# `condition` is rejection at weight 0/1 and `renorm` is Bayes' rule on
-# the frame; anything cleverer is an algorithm, and this file is about
+# `condition` is rejection at weight 0 or 1 and `renorm` is Bayes' rule on
+# the frame.  Anything cleverer is an algorithm, and this file is about
 # what the CATEGORY is.
 #
 # DISINTEGRATION.  Cho & Jacobs' Bayesian inversion (READING) takes a
 # kernel `k(a, b)` and a distribution on `a` and returns a kernel
-# `k(b, a)` — the posterior as an arrow.  In `Enum` it is writable:
+# `k(b, a)`, the posterior as an arrow.  In `Enum` it is writable:
 # enumerate the joint, group by the `b` coordinate, renormalize inside
 # each group, and rebuild a kernel by lookup.  What stops it being a
-# screenful is the lookup: `k(b, a)` must answer for EVERY `b`, and a
+# screenful is the lookup.  `k(b, a)` must answer for EVERY `b`, and a
 # table keyed by an arbitrary outcome type needs an ordering or a hash,
-# which the language does not have (`eq?` is structural, `lt?` is Int).
+# which the language does not have: `eq?` is structural and `lt?` is Int.
 # §7 and §8 are disintegration at one point, done with `condition` and
-# `renorm` instead — which is the operation, without the arrow.
+# `renorm` instead, which is the operation without the arrow.
 #
 # NO CHOICE SLOT.  A row program that branches into two different
 # KERNELS cannot be written inside a `with` scope: transporting a sum
 # needs ArrowChoice' `left`, and neither the Doctrine nor `Prob` has
 # one.  `hostFrom` and `biasOf2` sidestep it the way
-# `examples/frame.braid`'s `keep` does — the deciding is deterministic
-# and rides the wire, and the only randomness is a generator composed
+# `examples/frame.braid`'s `keep` does: the deciding is deterministic and
+# rides the wire, and the only randomness is a generator composed
 # unconditionally.  `coinSndE` flips even when the coin will be ignored,
 # which is why §7's tally has to SUM the two branches that agree.

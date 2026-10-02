@@ -47,29 +47,27 @@ data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
 
 # The step function is `=Recursive>`: every circuit below is written
 # under `with Recursive`, and a written arrow means its manifest
-# (MANUAL §14). The slots say so
-# too — a slot declares the MOST a model may do, and the pure model
-# below passes under a `=Recursive>` slot by absorption.
+# (MANUAL §14). The slots say so too: a slot declares the MOST a model
+# may do, and the pure model below passes under a `=Recursive>` slot by
+# absorption.
 #
-# What the slots DO NOT say, since 2026-09-12: nothing about the
-# PROGRAM handed to `embed`. Composition joins grades now, so `arrC`
-# (which ties a knot) no longer demands that its argument
-# recurse; `Fn⟨a ⇒ b⟩` is what the embedding takes, and `Arr` wraps the
-# same pure arrow. Both spellings were `=Recursive>` while composition
-# unified grades, and both were wrong.
+# What the slots DO NOT say is anything about the PROGRAM handed to
+# `embed`. Composition joins grades, so `arrC`, which ties a knot, does
+# not demand that its argument recurse. `Fn⟨a ⇒ b⟩` is what the embedding
+# takes, and `Arr` wraps the same pure arrow.
 
 # `Fn` itself cannot fill `k`: it is built in, it takes an ARROW rather
 # than two wires, and a constructor parameter must name a declared data
-# type. One line of wrapping buys it — and gives the theory a second,
+# type. One line of wrapping buys it, and gives the theory a second,
 # deliberately boring model to be audited against.
 data Arr(a..., b...) = Fn⟨a ⇒ b⟩
 
 # ---- the theory ------------------------------------------------------
-# `in Doctrine` is the whole of it (2026-09-13). `Doctrine` is the
-# prelude's theory of arrows — `compose`, `embed`, and the five
-# category laws — and a theory that says `in Doctrine` DECLARES
-# that its slots of those names are the doctrine's. The elaborator
-# checks the claim against the written signatures and then knows,
+# `in Doctrine` is the whole of it. `Doctrine` is the prelude's theory of
+# arrows, with `compose`, `embed` and the five category laws, and a theory
+# that says `in Doctrine` DECLARES that its slots of those names are the
+# doctrine's. The elaborator checks the claim against the written
+# signatures and then has, without reading a shape,
 # without reading a shape or guessing, that `with Circuits` transports.
 #
 # Before this the three slots were DETECTED by matching arrow shapes,
@@ -204,10 +202,10 @@ def twice2Out in Circuits = twice2 ; observe
 twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 
 # OUTSIDE the scope, two of them side by side are two circuits side by
-# side: `• =Circuits Recursive> Circuit(Int, Int) Circuit(Int, Int)`.  That is
-# well-typed and honestly not composition in Circuits — the display fold
-# wants exactly ONE carrier, so it does not fire and you can see the
-# two.  Composition is written under the marker.
+# side: `• =Circuits Recursive> Circuit(Int, Int) Circuit(Int, Int)`.  That
+# is well-typed and visibly not composition in Circuits.  The display fold
+# folds ONE carrier, so it does not fire and both are visible.
+# Composition is written under the marker.
 def pair    = easy easy
 def pairOut in Circuits = pair ; compose ; observe
 pairOut ; print             # 40 — the same composite, spelled by hand
@@ -236,11 +234,12 @@ def polyOut in Circuits = poly ; observe
 polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 
 # ---- a carrier built BY HAND: `in Circuits` -------------------------
-# `sumFrom` is the whole reason the Arrow exists — a stateful circuit
-# that is not `embed` of anything.  Before 5c½ a def like `0 ; sumFrom`
-# was STRANDED: it produces a `Circuit(Int, Int)` at the base, but the
-# elaborator would not treat it as a word of the category, because doing
-# so would mean reading an INFERRED type to decide what a word is.
+# `sumFrom` is the reason the Arrow exists: a stateful circuit that is not
+# `embed` of anything.  Without a written header, a def like `0 ; sumFrom`
+# would be STRANDED.  It produces a `Circuit(Int, Int)` at the base, and
+# the elaborator will not treat it as a word of the category on that
+# evidence, because doing so would mean reading an INFERRED type to decide
+# what a word is.
 #
 # `in Circuits` is the written declaration that closes it.  It applies
 # nothing — no embedding, no composition, no transport — it says "this
@@ -252,13 +251,12 @@ polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 def sum0 in Circuits = 0 ; sumFrom
 #   sum0 : • =Recursive> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
 #
-# That is the honest reading and it is worth the sentence.  A receipt is
-# PROVENANCE: `=Circuits>` says the code went through the functor.  `sum0`
-# did not — it is a circuit no base program denotes, which is the whole
-# reason Arrows exist — so claiming the label would claim membership in
-# the functor's IMAGE, which is a strictly stronger thing.  `in` mints
-# nothing, because `in` applies nothing; only a `with` mints, and a
-# `with` mints exactly when it CHANGED the code (2026-09-18).
+# A receipt is PROVENANCE: `=Circuits>` says the code went through the
+# functor.  `sum0` did not.  It is a circuit no base program denotes,
+# which is the reason Arrows exist, so claiming the label would claim
+# membership in the functor's IMAGE, which is strictly stronger.  `in`
+# mints nothing, because `in` applies nothing.  Only a `with` mints, and a
+# `with` mints when it CHANGED the code.
 # Membership is carried by the carrier in the type and the entry in the
 # word table.
 #
@@ -285,12 +283,11 @@ def useObs in Circuits = byUse  ; observe
 handObs ; print             # 30 — 3 ⇒ 3 ⇒ 9, then 4 ⇒ 7 ⇒ 21
 useObs  ; print             # 30 — the same circuit, said two ways
 
-# `sameCode` cannot DECIDE it, and the reason is the same one the laws
-# hit below: composing circuits applies a program that arrived as a
-# wire, and `ev` of a value that is not a literal quotation is outside
-# the structural fragment.  So coherence is observed, not proved — the
-# honest state of the art for an Arrow, and exactly why `observe` is a
-# slot of the theory.
+# `sameCode` cannot DECIDE it, for the reason the laws hit below:
+# composing circuits applies a program that arrived as a wire, and `ev` of
+# a value that is not a literal quotation is outside the structural
+# fragment.  Coherence is therefore observed rather than proved, which is
+# why `observe` is a slot of the theory.
 
 # ---- the corollary: a SEALED category ---------------------------------
 # Exits are the only way out, so a theory that declares none is sealed:
@@ -316,64 +313,56 @@ def guarded2 with Sealed = guarded ; add1
 #   guarded2 : Int =Sealed> Int — and the only consumer of a Sealed
 #   word, inside the category's vocabulary, is another Sealed word.
 #
-# `Vault` takes the doctrine's `compose` and `embed`, which is the
-# whole interface since 2026-09-16 — so `def wide with Sealed = dup ; *`
-# transports too, at no extra cost to the model.  The level table has
-# two rows now: compose alone composes carriers by hand, and + embed
-# transports ANY stage.
+# `Vault` takes the doctrine's `compose` and `embed`, which is the whole
+# interface, so `def wide with Sealed = dup ; *` transports too, at no
+# extra cost to the model.  The level table has two rows: compose alone
+# composes carriers by hand, and compose with embed transports ANY stage.
 #
-# It declares no `observe` and no `sample`, so NO doctrine law
-# runs for `Sealed`: an inherited law runs when the model can state it,
-# and a sealed category admits no observation.  That is the honest
-# reading of sealed, and it is worth seeing beside `Circuits`, where all
-# seven run.
+# It declares no `observe` and no `sample`, so NO doctrine law runs for
+# `Sealed`.  An inherited law runs when the model can state it, and a
+# sealed category admits no observation.  That is the reading of sealed,
+# and it is worth seeing beside `Circuits`, where all five run.
 
-# The honest caveat: the CARRIER's own unroller is an ordinary base word
-# and Braid has no export lists, so `unCapsule` still opens it from
-# outside.  A model seals the CATEGORY — nothing written in it leaves it
-# by any route the model offers — and sealing the TYPE is a separate,
-# unshipped question.
+# The caveat: the CARRIER's own unroller is an ordinary base word and
+# Braid has no export lists, so `unCapsule` still opens it from outside.
+# A model seals the CATEGORY, so nothing written in it leaves it by any
+# route the model offers, and sealing the TYPE is a separate question the
+# language does not answer.
 guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 
 # ---- what the laws can and cannot decide ------------------------------
-# The five category axioms — leftId, rightId, assoc, embedFunctor,
-# embedWide — are the PRELUDE's, inherited by `in Doctrine` and run for
-# `Circuits` and for `Funcs`.  This file used to write five of them out;
-# the doctrine writes them once.
+# The five category axioms, leftId, rightId, assoc, embedFunctor and
+# embedWide, are the PRELUDE's, inherited by `in Doctrine` and run for
+# `Circuits` and for `Funcs`.  The doctrine writes them once.
 #
-# They run through `observe` at sample points, and that is now the ONLY
-# way they run.  Until 2026-09-16 `Funcs` could also be asked to PROVE
-# six of its seven axioms: `Arr(a, b)` unrolled to `Fn⟨a ⇒ b⟩` at one
-# wire on each side, so the normalizer could give the `ev` inside
-# `thenA` an arity and `[lhs] [rhs] ; sameCode` answered `true`.  Over
-# STACKS it cannot: `Arr(ρ, σ)` unrolls to `Fn⟨ρ ⇒ σ⟩` with ρ open, and
-# `ev` of an open wire has no closed arity — the same wall `Len` has
-# always stood at in `examples/transformations.braid`.  That is the
-# price of flat products, paid here and reported rather than hidden:
-# what a one-wire hom-object bought was a decidable `ev`, and what it
-# cost was a pairing, a `data Pair` per file and a routing pass.
+# They run through `observe` at sample points, and that is the ONLY way
+# they run.  A one-wire hom-object would make some of them provable:
+# `Arr(a, b)` would unroll to `Fn⟨a ⇒ b⟩` at one wire on each side, so the
+# normalizer could give the `ev` inside `thenA` an arity.  Over STACKS it
+# cannot: `Arr(ρ, σ)` unrolls to `Fn⟨ρ ⇒ σ⟩` with ρ open, and `ev` of an
+# open wire has no closed arity, which is the wall `Len` stands at in
+# `examples/transformations.braid`.  That is the price of flat products:
+# what a one-wire hom-object buys is a decidable `ev`, and what it costs
+# is a pairing, a `data Pair` per file and a routing pass.
 #
-# `Circuits` proved none of them before and proves none now, for a
-# reason that was always structural rather than incidental: `compC`
+# `Circuits` proves none of them, for a structural reason.  `compC`
 # applies the self wire of a `fix`, whose arrow is `Fn⟨Σ =Recursive> Θ⟩`
-# with Σ an open stack variable — there is no arity to give THAT either.
+# with Σ an open stack variable, so there is no arity to give THAT either.
 # Equality modulo a model's defining equations is structural induction
 # over an initial algebra, a different procedure from normalizing in a
-# free category (design-macros.md, "honest gaps").  So for codata the
-# laws stay finite tests of an infinite object, which is what `observe`
-# was asked for in the first place.
+# free category (design-macros.md, "honest gaps").  For codata the laws
+# stay finite tests of an infinite object, which is what `observe` was
+# asked for in the first place.
 
-# The laws ran before any of this printed — five of them, twice, for
-# two models with nothing in common but the doctrine.  `embedWide` is
-# the one worth a second look: it is the old `firstFst`/`firstEmbed`/
-# `firstCompose` said once, in the base's own `...`.  `embed [f] ;
-# embed [g] = embed [f ; g]` at a stage that is one wire in and TWO
-# out, and at one that whiskers — `(_ 1 ; +) _`, a stage on the deepest
-# wire with one riding above.  There is no strength to state a law
-# about, because the whiskering happens in the BASE, inside the
-# quotation, before `embed` ever sees it.
+# The laws ran before any of this printed: five of them, twice, for two
+# models with nothing in common but the doctrine.  `embedWide` is the one
+# worth a second look.  It says `embed [f] ; embed [g] = embed [f ; g]` at
+# a stage that is one wire in and TWO out, and at one that whiskers,
+# `(_ 1 ; +) _`, a stage on the deepest wire with one riding above.  There
+# is no strength to state a law about, because the whiskering happens in
+# the BASE, inside the quotation, before `embed` ever sees it.
 #
-# And stating `compose` still needs `k` at three different pairs of
-# STACKS — `k(ρ, σ)`, `k(σ, τ)`, `k(ρ, τ)` — which a wire parameter
-# could not have said, and which is why `theory Pipeline(a)` (what this
-# file used to hold) was a category with ONE object and this one is not.
+# Stating `compose` needs `k` at three different pairs of STACKS,
+# `k(ρ, σ)`, `k(σ, τ)` and `k(ρ, τ)`, which a wire parameter could not
+# say.  That is why a one-object `theory Pipeline(a)` is a category with
+# ONE object and this one is not.
