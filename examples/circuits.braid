@@ -190,10 +190,10 @@ def easy with Circuits = add1 ; dbl
 # ENTERING is a marker, LEAVING is a model.  `observe` takes the carrier
 # and returns base — an EXIT, read off its declared arrow — so it is
 # refused inside `with Circuits` ("`observe` leaves Circuits") and called
-# under `in Circuits`, where nothing is transported.  That rule is
-# what makes the K-word table exact: every word written under `with` or
-# `in` produces a carrier unless it deliberately exits, so the
-# elaborator never has to ask inference which is which.
+# under `in Circuits`, where nothing is transported.  That rule is what
+# makes the word table exact: every word written under `with` or `in`
+# produces a carrier unless it deliberately exits, so the elaborator
+# never has to ask inference which is which.
 def handOut in Circuits = hand ; observe
 def easyOut in Circuits = easy ; observe
 
@@ -251,8 +251,8 @@ polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 # def is a morphism of the category Circuits presents", and the
 # elaborator CHECKS the claim against the def's arrow: a word of a
 # category builds one carrier out of nothing.  The claim is written, the
-# check is mechanical, and the def joins the K-word table beside the
-# ones `with Circuits` transported.
+# check is mechanical, and the def joins the model's word table beside
+# the ones `with Circuits` transported.
 def sum0 in Circuits = 0 ; sumFrom
 #   sum0 : • =Recursive> Circuit(Int, Int) — UNFOLDED, and no `Circuits` on it.
 #
@@ -264,7 +264,7 @@ def sum0 in Circuits = 0 ; sumFrom
 # nothing, because `in` applies nothing; only a `with` mints, and a
 # `with` mints exactly when it CHANGED the code (2026-09-18).
 # Membership is carried by the carrier in the type and the entry in the
-# K-word table.
+# word table.
 #
 # Under the marker it composes like any other word of the category, and
 # THAT composite went through the functor, so it folds:

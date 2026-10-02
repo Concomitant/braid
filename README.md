@@ -78,6 +78,8 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 
 ## Where to read
 
+- `GLOSSARY.md`: the vocabulary the reference uses, from stage and wire
+  to carrier, grade and receipt.
 - `MANUAL.md`: the language reference, with types checked against the
   implementation.
 - `CONSTRUCTS.md`: the declaration layer, construct by construct.
@@ -96,7 +98,5 @@ that others do), a handler *construct* (a handler is an ordinary word —
 name: `IO`'s carrier is declared abstract and linear, but there is one
 of it, it is ambient, and the elaborator never writes it.
 
-The documentation needs a cleanup pass. It was written stage by stage
-and uses terms it never defines for a reader (`spine`, `stage`,
-`receipt`, `K-word`, `carrier`, and others). Until that pass is done,
-`MANUAL.md` is accurate but not always self-explanatory.
+Prose in the docs follows `WRITING.md`, and `GLOSSARY.md` defines the
+terms the reference uses.

@@ -575,8 +575,8 @@ refuses every other kind with the clause to write instead.
 `renameSlotsT` puts `K`'s slot words in scope — and nothing else: no
 embedding, no composition, no receipt. After inference,
 `checkKWordShape` asks whether the def builds **one carrier out of
-nothing** (`• ⇒ K(a, b)`), which is what a morphism of the category is;
-if it does, the def joins the **K-word table**, so a later `with K`
+nothing** (`• ⇒ K(a, b)`), which is what a morphism of the category is.
+If it does, the def joins `K`'s **word table**, and a later `with K`
 leaves it alone instead of embedding it. A def that neither builds a
 carrier nor uses one of `K`'s words is refused: the clause did nothing.
 Membership is **written**, never read off an inferred type.
@@ -778,7 +778,7 @@ declares nothing* when the theory shares no slot with it.
 ## `with` — the application clause
 
 **What it is.** The clause that **applies** things to a def's body.
-A `with` mints a receipt when it CHANGED the body *(2026-09-18)*.
+A `with` mints a receipt when it changed the body.
 
 **Syntax.** `def NAME [in T] with X₁ X₂ … = body`, left of the `=`,
 never in a spine. A **quotation** takes the same clause, introduced by
@@ -1041,11 +1041,10 @@ test 'wrong' must be a program with type `• ⇒ Bool`, but is • ⇒ Int
 ## receipts
 
 **What it is.** The **label a `with` clause leaves** on the manifest of
-everything it elaborated: provenance about how a word was built, not a
-claim its author made. It says "this scope **changed** this code", not
-"this scope was applied to it" *(2026-09-18)* — the stronger reading,
-and the useful one for auditing, since code a scope left alone has
-nothing to audit.
+everything it elaborated. It is provenance about how a word was built
+rather than a claim its author made, and it says "this scope
+**changed** this code." Code a scope left alone has nothing to audit, so
+it carries no receipt.
 
 **Syntax.** None — you cannot write one. Internally it is a word
 `with@F : ∀ρ. ρ =F> ρ`, a unit endomorphism prepended to the expansion;

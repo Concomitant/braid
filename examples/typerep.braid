@@ -55,7 +55,7 @@ def say = ((t -> t ; showType) | (e -> e)) ; merge
 # question about connected components — and the arities that say which
 # wire an atom eats come from `typeOfCode`, one atom at a time.
 #
-# `cuts : Code ⇒ List(Code)` splits a spine into those components.  Two
+# `components : Code ⇒ List(Code)` splits a spine into those components.  Two
 # halves of a tensor with no wire between them come back separately;
 # what remains between components is the dependency structure, which is
 # to say none.
@@ -70,17 +70,17 @@ def say = ((t -> t ; showType) | (e -> e)) ; merge
 
 ## the walk's state: the next fresh component id, the live stack's ids,
 ## the current stage's outputs and tags, and the stages already done
-data Cut = (Int List(Int) List(Int) List(Int) List(List(Int)))
+data Walk = (Int List(Int) List(Int) List(Int) List(List(Int)))
 
 ## MERGING is one relabelling, which is why every id-carrying field of
 ## the state is rewritten together
 def relab    = (old new l -> l ; [(x -> (x old ; equals) new x ; select)] ... ; map)
 def relabAll = (old new ls -> ls ; [(l -> old new l ; relab)] ... ; map)
-def relabCut =
+def relabWalk =
     old new c ->
-    c ; unCut
+    c ; unWalk
       ; (n s o t d -> n (old new s ; relab) (old new o ; relab) (old new t ; relab) \
-                        (old new d ; relabAll) ; Cut)
+                        (old new d ; relabAll) ; Walk)
 
 ## an ATOM's arity, read off its own type: `typeOfCode` of the one-atom
 ## spine, and the closed width of each side of the arrow
@@ -96,35 +96,35 @@ def atomArity =
 
 def headOr   = (z l -> l ; unList ; (z | (x r -> x)) ; merge)
 def copies   = (m g -> (m ; range) ; [(i -> g)] ... ; map)
-def cutMerge = (c cs g -> cs ; [(acc x -> x g acc ; relabCut)] c ... ; fold)
+def walkMerge = (c cs g -> cs ; [(acc x -> x g acc ; relabWalk)] c ... ; fold)
 def freshIf  = (es n -> (es ; len ; zero) (n 1 ; +) n ; select)
 def groupIf  = (es n -> (es ; len ; zero) n (0 es ; headOr) ; select)
 
 ## one atom: eat k wires off the front, join their components, and push
 ## m copies of the joined id back.  An atom that eats nothing starts a
 ## component of its own.
-def cutAtom =
+def walkAtom =
     c a ->
     a ; atomArity ; unBox ; (k m ->
-      c ; unCut ; (n s o t d ->
+      c ; unWalk ; (n s o t d ->
         (k s ; take) ; (eaten ->
           (eaten n ; freshIf) ; (n2 ->
             (eaten n ; groupIf) ; (g ->
-              ((n2 (k s ; skip) o t d ; Cut) eaten g ; cutMerge)
-                ; unCut
+              ((n2 (k s ; skip) o t d ; Walk) eaten g ; walkMerge)
+                ; unWalk
                 ; (n3 s3 o3 t3 d3 ->
-                    n3 s3 ((m g ; copies) o3 ; append) (g t3 ; cons) d3 ; Cut))))))
+                    n3 s3 ((m g ; copies) o3 ; append) (g t3 ; cons) d3 ; Walk))))))
 
 ## one stage: its atoms left to right, then its outputs go in front of
 ## whatever the stage did not touch
-def cutStage =
+def walkStage =
     c stage ->
-    stage ; [cutAtom] c ... ; fold ; unCut
-      ; (n s o t d -> n ((o ; reverse) s ; append) nil nil ((t ; reverse) d ; cons) ; Cut)
+    stage ; [walkAtom] c ... ; fold ; unWalk
+      ; (n s o t d -> n ((o ; reverse) s ; append) nil nil ((t ; reverse) d ; cons) ; Walk)
 
-def cutWalk =
+def walkSpine =
     code ->
-    code ; [cutStage] (0 nil nil nil nil ; Cut) ... ; fold ; unCut
+    code ; [walkStage] (0 nil nil nil nil ; Walk) ... ; fold ; unWalk
          ; (n s o t d -> d ; reverse)
 
 def elemI     = (x col -> col ; [(seen y -> seen (x y ; equals) ; or)] false ... ; fold)
@@ -137,25 +137,25 @@ def pickStage =
     (ids stage ; zip)
       ; [(p -> p ; unBox ; (i a -> (i g ; equals) (a ; single) nil ; select))] ... ; flatMap
 
-def cutComponent =
+def componentOf =
     g code tags ->
     (code tags ; zip) ; [(e -> e ; unBox ; (st ids -> g st ids ; pickStage))] ... ; map
       ; [(s -> (s ; len ; zero) nil (s ; single) ; select)] ... ; flatMap
 
-def cuts =
+def components =
     code ->
-    code ; cutWalk
-         ; (tags -> (tags ; concat ; distinctI) ; [(g -> g code tags ; cutComponent)] ... ; map)
+    code ; walkSpine
+         ; (tags -> (tags ; concat ; distinctI) ; [(g -> g code tags ; componentOf)] ... ; map)
 
 "" ; print
 "-- the components of a spine --" ; print
 [1 2 3 4 ; + _ _ ; _ *] ; getCode
   ; (c ->
       ("whole: " (c ; unparse) ; cat) ; print
-      (c ; cuts) ; [(k -> "  cut: " (k ; unparse) ; cat)] ... ; map ; printAll)
+      (c ; components) ; [(k -> "  component: " (k ; unparse) ; cat)] ... ; map ; printAll)
 #   whole: 1 2 3 4 >> + _ _ >> _ *
-#     cut: 1 2 >> + >> _
-#     cut: 3 4 >> _ _ >> *
+#     component: 1 2 >> + >> _
+#     component: 3 4 >> _ _ >> *
 #
 # Two components, and nothing in the TEXT said so: the `_`s in stage two
 # and stage three are what carry each half past the other, and the cut

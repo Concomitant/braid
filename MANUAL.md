@@ -1,9 +1,11 @@
 # The Braid Manual
 
 A reference for every language feature. Types shown are the checker's
-actual output (`:t`), not paraphrases. Companion docs:
-`guide-open-arity.md` (width-polymorphic words), `design-*.md` (why
-each feature is the way it is), `examples/` (everything running).
+actual output (`:t`). `GLOSSARY.md` defines the vocabulary used
+throughout: stage, wire, carrier, grade, receipt, spine, and the rest.
+Other companions: `CONSTRUCTS.md` (the declaration layer),
+`guide-open-arity.md` (width-polymorphic words), `design-*.md` (why each
+feature is the way it is), `examples/` (everything running).
 
 ---
 
@@ -210,14 +212,13 @@ a resource declaration drives — `World` is declared by none, so there is
 no `World` and no `unWorld` to write one with, and the name it does have
 is in the compiler's `@` namespace. `print : a0 =IO> •`, unchanged.
 
-**And a `with` that changes anything leaves a receipt.** A scope (§6,
-§12) elaborates the code under it — rewriting it, routing it, renaming
-it — and mints its own name onto the manifest of what it elaborated, so
-the arrow records not only what a word touches but what built it, and
-every caller inherits the label by composition. **A receipt says "this
-scope CHANGED this code", not "this scope was applied to it"**
-*(2026-09-18)* — the stronger reading, and the useful one for auditing,
-since code a scope left alone has nothing to audit:
+**A `with` that changes anything leaves a receipt.** A scope (§6, §12)
+elaborates the code under it, rewriting it, routing it or renaming it,
+and mints its own name onto the manifest of what it elaborated. The
+arrow then records what built a word as well as what the word touches,
+and every caller inherits the label by composition. **A receipt says
+"this scope changed this code."** Code a scope left alone has nothing to
+audit, so it carries no receipt:
 
 ```text
 poly    : Int =Traced> Int          -- elaborated under `with Traced`
@@ -2527,8 +2528,8 @@ asked for would be the inverse of a model whose slot bodies are
 transport sends `f ; g` to `embed [f] embed [g] ; compose`, embedding
 each **stage** opaquely; a reader sends `dup ; fadd` to
 `copy add ; compose`, reading each **atom** into a slot. The two share
-the composition, the exit rule and the K-word table, and differ only in
-what one stage becomes. A stage a reader can transport is `_`… followed
+the composition, the exit rule and the model's word table, and differ
+only in what one stage becomes. A stage a reader can transport is `_`… followed
 by exactly **one** generator — the `_`s are the whiskering and the
 generator is the carrier they ride beneath — so two generators side by
 side is a *tensor*, and only one whiskering is spellable (above), so
@@ -4199,16 +4200,16 @@ prefix scope's, fixed before this declaration was reached.
 
 Three things `examples/typerep.braid` does with it:
 
-- **diagram cuts.** `cuts : Code ⇒ List(Code)` splits a spine into its
-  connected components — atoms as nodes, wires as edges, each atom's
-  arity read off `typeOfCode` of the one-atom spine that calls it. So
-  `1 2 3 4 ; + _ _ ; _ *` comes back as `1 2 ; + ; _` and `3 4 ; _ _ ;
-  *`: two halves with no wire between them, and nothing in the *text*
-  said so. Analysis, not runtime parallelism — what it licenses is the
-  reading that a component whose grade is ∅ is **central** (interchange
-  holds) and may be reordered or run anywhere, while one carrying a
-  label may not, because the label is the claim that its order is
-  observable.
+- **components.** `components : Code ⇒ List(Code)` splits a spine into
+  its connected components, with atoms as nodes and wires as edges. Each
+  atom's arity is read off `typeOfCode` of the one-atom spine that calls
+  it. `1 2 3 4 ; + _ _ ; _ *` comes back as `1 2 ; + ; _` and
+  `3 4 ; _ _ ; *`, two halves with no wire between them, and nothing in
+  the text said so. This is analysis and not runtime parallelism. What it
+  licenses is a reading: a component whose grade is ∅ is **central**
+  (interchange holds), so it may be reordered or run anywhere; one
+  carrying a label may not, because the label is the claim that its order
+  is observable.
 - **the bootstrap seed.** `envOf` is every word in scope with its
   scheme, and for each there are two ways to ask its type: look the word
   up, or hand the checker the one-atom program that calls it. They
