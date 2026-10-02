@@ -3532,6 +3532,12 @@ moduleFailTests =
      "line 3, in def h: Unclosed group (expected ')')")
   , ("def dup2 = 1\ndef dup2 = 2\n1 ; print",
      "in def dup2: Duplicate definition: dup2")
+    -- A REFUSED PATTERN names its line (2026-10-02).  The destructuring
+    -- rewrite runs on a token list before there is a parse tree to
+    -- stamp, so it counts the newline tokens it walks past.
+  , ("data P = Int Str\ndef f =\n    1 \"a\" ; P\n\
+     \    P(x, y, z) -> x ; drop\n1 ; print",
+     "line 4, in def f: `P(\8230)` in a binder names 3 fields, but `P` has 2")
     -- A SLOT BODY and a LAW BODY are user-written, so the generated def
     -- each becomes reports the line it was written on, and the model it
     -- belongs to (2026-10-02).

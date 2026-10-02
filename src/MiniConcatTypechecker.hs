@@ -2076,17 +2076,28 @@ patToks (PSPat c fs) =
 -- Rewrite every destructuring binder in a token stream.  `tbl` is the
 -- data types in scope; with none (a `parse` of a string at runtime) a
 -- pattern is refused by name rather than guessed at.
-expandPatterns :: [(String, PatCon)] -> [Token] -> Either String [Token]
-expandPatterns tbl = go Nothing
+-- ...and the line the scan is on, so a refused pattern names it.  This
+-- pass runs before there is a parse tree to stamp, and the only thing
+-- in the stream that says where it is is the newline token: the line
+-- counter starts at the line the first stage sits on and advances with
+-- every break the scan walks past (2026-10-02).
+expandPatterns :: Int -> [(String, PatCon)] -> [Token]
+               -> Either String [Token]
+expandPatterns start tbl = go start Nothing
   where
-    go _ [] = Right []
-    go prev ts@(t : rest)
+    go _ _ [] = Right []
+    go ln prev ts@(t : rest)
       | binderPos prev
       , Just (slots, hasRest, after) <- scanHead ts
       , any isPatSlot slots = do
-          mapM_ validate slots
-          go prev (rewrite slots hasRest after)
-      | otherwise = (t :) <$> go (Just t) rest
+          mapM_ (validate ln) slots
+          go ln prev (rewrite slots hasRest after)
+      | otherwise = (t :) <$> go (lineAfter ln t) (Just t) rest
+
+    -- the stream's only location: a newline token carries the line the
+    -- stage after it opens on
+    lineAfter _  (TokNewline n) = n
+    lineAfter ln _              = ln
 
     -- exactly where `parseProgramToks` consults `binderPrefix`: the
     -- start of a scope, a new line, the inside edge of a bracket, or
@@ -2116,8 +2127,8 @@ expandPatterns tbl = go Nothing
               ++ replicate (n - j) (TokIdent "_")
           | (j, PSPat c _) <- zip [1 :: Int ..] slots ]
 
-    validate (PSPlain _) = Right ()
-    validate (PSPat c fs) =
+    validate _  (PSPlain _) = Right ()
+    validate ln (PSPat c fs) = first (atSrcLine ln) $
       case lookup c tbl of
         Nothing -> Left $ "`" ++ c ++ "(…)` in a binder: `" ++ c
                        ++ "` is not a `data` type in scope, and a pattern "
@@ -2132,7 +2143,7 @@ expandPatterns tbl = go Nothing
                   ++ show (length fs) ++ " field"
                   ++ (if length fs == 1 then "" else "s") ++ ", but `" ++ c
                   ++ "` has " ++ show (pcFields pc)
-          | otherwise -> mapM_ validate fs
+          | otherwise -> mapM_ (validate ln) fs
 
     -- the rest of the current scope: up to the bracket that closes it
     splitScope = walk (0 :: Int) []
@@ -2239,7 +2250,7 @@ parseProgramFrom :: (Int -> Int) -> [DataDecl] -> String
                  -> Either String (Term, Int)
 parseProgramFrom lineOf datas input = first (remapMark lineOf) $ do
   (start, toks0) <- normalizeToksAt <$> tokenize input
-  toks  <- expandPatterns (patCons datas) toks0
+  toks  <- expandPatterns start (patCons datas) toks0
   (term, rest) <- parseProgramToks start toks
   case rest of
     [] -> Right (remapLines lineOf term, lineOf start)

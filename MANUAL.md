@@ -4274,7 +4274,9 @@ line their head sits on, and a duplicate declaration reports the line of the
 second one. A model's slot bodies and a theory's law bodies are lines in their
 blocks, so a refusal in one names that line and which slot or law it is in,
 `in model Fwd, slot add` where a def reads `in def f`. A transformation's
-components and squares report the line its declaration sits on. A name clash between two imported files names **both** lines,
+components and squares report the line its declaration sits on. A refused
+destructuring pattern names its line too, though the rewrite runs before there
+is a parse tree: it counts the line breaks it walks past. A name clash between two imported files names **both** lines,
 because a clash is two places to open:
 
 ```text
