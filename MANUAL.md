@@ -1204,10 +1204,10 @@ def name in T with M … = body # the two header clauses (below)
 - `## doc` lines immediately before a `def`/`type`/`data` attach to it.
 - Defs may **shadow** prims and prelude words; duplicate defs of the
   same name are an error.
-- **Self-reference is marked**: a definition is **not in scope in its
-  own body** unless its header says so. `def f = … f …` is refused —
+- **Self-reference is marked.** A definition is **not in scope in its own
+  body** unless its header says so, so `def f = … f …` is refused with
   "`f` refers to itself: write `with Recursive` in its header (MANUAL
-  §8)" — and so is the old `recurse` spelling, which is gone.
+  §8)". The `recurse` spelling is gone.
 - **Recursion is a marker**. `with Recursive` in a def's
   header puts the def's **own name** in scope in its own body, and
   nothing else:
@@ -1219,19 +1219,18 @@ def name in T with M … = body # the two header clauses (below)
   ```
 
   It is not a special form. Elaboration rewrites the body to the closed
-  form the language already had — a binder with the knot deepest, every
-  self-call routed through it — and does so **before inference** and
+  form the language already had, a binder with the knot deepest and every
+  self-call routed through it. The rewrite runs **before inference** and
   **innermost** among the header's scopes, so `with Traced Recursive`
-  traces the closed spine. Every elaborated def is therefore still a
-  **closed spine** over its prefix scope, which is what keeps
-  `reflect`, the per-stage schemes and every functor total.
+  traces the closed spine. Every elaborated def is therefore a **closed
+  spine** over its prefix scope, which is what keeps `reflect`, the
+  per-stage schemes and every functor total.
 
-  The rewrite is syntactic: no types are consulted, and a binder
-  parameter named like the def **shadows** it exactly as it shadows any
-  other word. A self-call inside a quotation is a **capture**, and
-  abstraction elimination handles it like any other captured wire —
-  which is what makes guarded corecursion (`examples/stream.braid`)
-  ordinary code.
+  The rewrite is syntactic. No types are consulted, and a binder parameter
+  named like the def **shadows** it as it shadows any other word. A
+  self-call inside a quotation is a **capture**, and abstraction
+  elimination handles it like any other captured wire, which is what makes
+  guarded corecursion (`examples/stream.braid`) ordinary code.
 
   A point-free body needs no binder at all; the name is a word:
 
@@ -1239,58 +1238,56 @@ def name in T with M … = body # the two header clauses (below)
   def until100 with Recursive = lt100? >> (double >> until100 | _) >> merge
   ```
 
-  `Recursive` is the **receipt** of that scope (§3), minted exactly as
-  `with Traced` mints `Traced` — when the scope CHANGED the code, which
-  here means the body named the def and a knot was tied. A body that
-  never names it gets no knot and no label, including
-  one where a binder parameter shadows the def's name. The knot the
-  marker ties carries the label too, and a manifest is a set, so a
-  marked def that also calls `loop` says `Recursive` once.
-- **`fix` is derived**, and is for **open** recursion —
-  a body someone else hands you, a memoizing or logging `self`, a body
-  you built at runtime:
+  `Recursive` is the **receipt** of that scope (§3), minted as `with
+  Traced` mints `Traced`: when the scope changed the code, which here
+  means the body named the def and a knot was tied. A body that never
+  names it gets no knot and no label, including one where a binder
+  parameter shadows the def's name. The knot the marker ties carries the
+  label too, and a manifest is a set, so a marked def that also calls
+  `loop` says `Recursive` once.
+- **`fix` is derived**, and is for **open** recursion: a body someone else
+  hands you, a memoizing or logging `self`, a body you built at runtime:
 
   ```braid
   fix : Fn⟨Fn⟨ρ0 =Recursive> ρ1⟩ ρ0 ⇒ ρ1⟩ =Recursive> Fn⟨ρ0 =Recursive> ρ1⟩
   ```
 
   The body receives the knotted function **deepest**, then its own
-  arguments, so the recursive call is an ordinary quoted call —
-  `… >> self ... >> ev`. Three stages: quote the body, tie the knot,
-  `ev` it. `... ` carries the arguments over the quote (a stage's
-  leftmost atom is its deepest wire, so `[body] ...` pushes the quote
-  *under* them).
+  arguments, so the recursive call is an ordinary quoted call,
+  `… >> self ... >> ev`. Three stages: quote the body, tie the knot, `ev`
+  it. `... ` carries the arguments over the quote, since a stage's
+  leftmost atom is its deepest wire and `[body] ...` therefore pushes the
+  quote *under* them.
 
   ```braid
   def facBody = [(self n -> n >> zero? >> ((z -> 1) | (m -> m (m 1 >> - >> self ... >> ev) >> *)) >> merge)]
   def fac     = facBody ... >> fix ... >> ev
   ```
 
-  Reach for the marker first: it is the same knot with the plumbing
-  written for you. Reach for `loop`/`while`/`until` (§10, §11) before
-  either when the recursion is a tail call — it is one word and needs
-  no knot — and for the **generated structural recursor** (`foldTree`,
-  `foldNat`, the prelude's `fold`) when the recursion is structural,
-  since those descend on a smaller value and terminate by construction
-  — and, being bounded, mint no `Recursive`.
+  Reach for the marker first, since it is the same knot with the plumbing
+  written for you. Reach for `loop`, `while` or `until` (§10, §11) before
+  either when the recursion is a tail call, because each is one word and
+  needs no knot. Reach for the **generated structural recursor**
+  (`foldTree`, `foldNat`, the prelude's `fold`) when the recursion is
+  structural: those descend on a smaller value, terminate by construction,
+  and being bounded mint no `Recursive`.
 - **The knot itself is not a word.** The machinery the marker emits is
-  spelled `#fix`, and `#` opens a comment, so no program and no
-  reflected atom can name it — the same trick that keeps `#dist:K` and
-  `with@F` out of source. It is why `fix` could leave the primitive set
-  (§9, 48 → 47) without the language losing a knot.
+  spelled `#fix`, and `#` opens a comment, so no program and no reflected
+  atom can name it. That is the trick that keeps `#dist:K` and `with@F`
+  out of source, and it is why `fix` could leave the primitive set (§9)
+  without the language losing a knot.
 
-  **There is exactly one door**. `#fix` is unspellable
-  and `with Recursive` is the only thing that opens it, so an
-  unlabelled word ties no knot — but until 2026-09-18 that was not the
-  whole story, because a `data` declaration naming itself to the **left
-  of an arrow** made the typed Z combinator writable and general
-  recursion available with a **pure** manifest. Such a declaration is
-  now refused (§5, §14). With that door shut, provenance and the
-  semantic property coincide: the label is minted where the knot is
-  tied, and there is nowhere else to tie one.
-- **Functors reach inside**: a self-call inside a row
-  component or a quotation reflects (§6, §12), so `with Traced` over a
-  `with Recursive` factorial traces every stage and prints `24`.
+  **There is one door.** `#fix` is unspellable and `with Recursive` is the
+  only thing that opens it, so an unlabelled word ties no knot. A `data`
+  declaration naming itself to the **left of an arrow** would open a
+  second, making the typed Z combinator writable and general recursion
+  available with a **pure** manifest; such a declaration is refused (§5,
+  §14). With that door shut, provenance and the semantic property
+  coincide: the label is minted where the knot is tied, and there is
+  nowhere else to tie one.
+- **Functors reach inside.** A self-call inside a row component or a
+  quotation reflects (§6, §12), so `with Traced` over a `with Recursive`
+  factorial traces every stage and prints `24`.
 - Let-polymorphism: defs generalize over all four variable sorts.
 - The prelude is auto-loaded user code; `:defs` lists it.
 
@@ -1311,23 +1308,22 @@ data Stream(a) = (a Fn⟨• =Recursive> Stream(a)⟩)  # codata: recursion THRO
 ```
 
 **Parameters are kinded**, four ways. A bare name stands for exactly
-**one wire**; `...` stands for a whole **stack**, and may only be the
-last parameter (at most one); `---` stands for a **row** — the tail of
-a sum's alternatives — and is also last (at most one, after the `...`
-if both are there); a name used under `^` in the body is a **width**.
-The last-position rules are what keep every stack and row variable in
-tail position, so no declaration can spell one with anything after it:
+**one wire**. `...` stands for a whole **stack** and may only be the last
+parameter, at most one. `---` stands for a **row**, the tail of a sum's
+alternatives, and is also last, at most one, after the `...` if both are
+there. A name used under `^` in the body is a **width**. The last-position
+rules keep every stack and row variable in tail position, so no
+declaration can spell one with anything after it:
 
 ```braid
-data Pair(a, b) = (a b)        # two wires — inexpressible before kinds
+data Pair(a, b) = (a b)        # two wires
 data Box(...)   = (...)        # a whole stack in one wire
 data Bad(...)   = (... Int)    # rejected: '...' must be last in its stack
 type L = List(Int Str)         # rejected: List's cell takes one wire
 ```
 
-**Named stack parameters**. A parameter written with a
-trailing `...` is a stack **with a name**, and there may be several,
-anywhere in the list:
+**Named stack parameters.** A parameter written with a trailing `...` is
+a stack **with a name**, and there may be several, anywhere in the list:
 
 ```braid
 data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
@@ -1336,16 +1332,16 @@ data Bad(a..., b...)     = a b     # rejected: the stack parameter 'a'
 ```
 
 The body spells each by its name. The one-at-most, must-come-last rule
-above is the **anonymous** `...`'s — it is spelled `...` in the body, and
-one spelling names one thing — while a named stack parameter is held to
+above belongs to the **anonymous** `...`, which is spelled `...` in the
+body and whose one spelling names one thing. A named stack parameter is
+held to
 the same law where it belongs, in the **body**: a stack variable sits in
 tail position or it is a splice, and a splice is unspellable. This is
 what lets a hom-object range over whole stacks (§8).
 
-**Row parameters** say "at least these alternatives,
-maybe more" in a written type — the `σ` that inference has always
-minted, given a spelling. `---` is the last alternative of a row, never
-a bare element:
+**Row parameters** say "at least these alternatives, maybe more" in a
+written type. They give a spelling to the `σ` inference already mints.
+`---` is the last alternative of a row and never a bare element:
 
 ```braid
 data Any2(---)   = (Int | Str | ---)             # Any2 : (Int | Str | σ0) ⇒ Any2((σ0))
@@ -1359,25 +1355,25 @@ data Bad2(a)     = (a | ---)   # rejected: '---' needs a `---` parameter on the 
 type Bad3(---)   = (--- Int)   # rejected: '---' must be the last alternative of its row
 ```
 
-A row argument is written the way a row is written anywhere — as a
-parenthesized list of alternatives — which is why the argument list of
-a rolled `Any2` shows two sets of parens: the outer ones are the
-argument list, the inner ones the row. The `---` itself displays as the
-ordinary `σ` (§5). Roll and unroll are the ascription that forces a
-quotation to a written residual type, and that type is then usable as
-an `evalAs` witness:
+A row argument is written the way a row is written anywhere, as a
+parenthesized list of alternatives, which is why the argument list of a
+rolled `Any2` shows two sets of parens: the outer ones are the argument
+list, the inner ones the row. The `---` itself displays as the ordinary
+`σ` (§5). Roll and unroll are the ascription that forces a quotation to a
+written residual type, and that type is then usable as an `evalAs`
+witness:
 
 ```braid
 [(s -> s >> (toStr | ---))] >> Peeler >> unPeeler
     • ⇒ Fn⟨(Int | σ0) ⇒ (Str | σ0)⟩
 ```
 
-Widths are declared **by use**, not by annotation: the two roles are
-syntactically disjoint (a wire stands where a type stands, a width only
-after `^`), so position decides the kind and one parameter cannot be
-both. Width parameters are **`type`-only** for now — a `data` type
-would need its argument list to carry widths — and every `^n` in a body
-must name a parameter:
+Widths are declared **by use** rather than by annotation. The two roles
+are syntactically disjoint, a wire standing where a type stands and a
+width only after `^`, so position decides the kind and one parameter
+cannot be both. Width parameters are **`type`-only** for now, since a
+`data` type would need its argument list to carry widths, and every `^n`
+in a body must name a parameter:
 
 ```braid
 type Bad(n) = (Int^n n)        # rejected: parameter 'n' is used both as a
@@ -1394,41 +1390,40 @@ Width aliases display-fold like any other: with `Sq` in scope,
 `:t [dupN >> addN]` prints `• ⇒ Sq(n0)`.
 
 Because `List`'s parameter sits *before* the recursive slot in
-`(• | a List(a))`, it is forced to be a wire — which is why a list cell
-is one wire and `Box` is how a pair-list is spelled:
+`(• | a List(a))`, it is forced to be a wire. That is why a list cell is
+one wire and why `Box` is how a pair-list is spelled:
 `pack2 : (a b)ⁿ ⇒ List(Box(a b))`.
 
-A `data Name(...)` declaration generates:
-- `Name` — the constructor (roll): body stack ⇒ `Name(…)`;
-- `unName` — the unroll: `Name(…)` ⇒ body sum;
-- `foldName` — the structural eliminator, one quoted case per
-  alternative, recursive slots pre-folded (e.g. `foldList :
-  Fn⟨• ⇒ b⟩ Fn⟨b ρ ⇒ b⟩ List(ρ) ⇒ b`).
+A `data Name(...)` declaration generates three words:
 
-Roll/unroll are free at runtime. Type parameters must occur in the
-body. A declaration's right-hand side is parsed as a stack,
-so both literal exponents (`type T3 = (Int^3 | Str)`) and exponent
-*variables* (`type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩`) belong there.
+| word | what it is |
+|---|---|
+| `Name` | the constructor, or roll: body stack ⇒ `Name(…)` |
+| `unName` | the unroll: `Name(…)` ⇒ body sum |
+| `foldName` | the structural eliminator, one quoted case per alternative, recursive slots pre-folded (`foldList : Fn⟨• ⇒ b⟩ Fn⟨b ρ ⇒ b⟩ List(ρ) ⇒ b`) |
 
-**`model Name in Doctrine = <stack>`** declares a threaded wire — a `data`
-declaration, nominal for the same reason `data` is, **and a model of
-the Doctrine**. It is a `model` head because that is what it always
-was: since 2026-09-17 the declaration writes a carrier `R@k`, a theory
+Roll and unroll are free at runtime. Type parameters must occur in the
+body. A declaration's right-hand side is parsed as a stack, so both
+literal exponents (`type T3 = (Int^3 | Str)`) and exponent *variables*
+(`type Mat(n, m) = Fn⟨Int^n ⇒ Int^m⟩`) belong there.
+
+**`model Name in Doctrine = <stack>`** declares a threaded wire. It is a
+`data` declaration, nominal for the same reason `data` is, **and a model
+of the Doctrine**. The declaration writes a carrier `R@k`, a theory
 `R@t in Doctrine` and `model R in R@t(R@k)`, and everything downstream
-reads it as one (`:doc R` prints all three).
+reads it as one; `:doc R` prints all three.
 
 The **body is a STACK**, with no `=` in it, and that is what tells this
-head from every other `model` head — a body of `p = q` lines is a
-table, a body with no `=` is a carrier. Same content-directed rule the
-object map uses; no new punctuation, no position to remember.
+head from every other `model` head: a body of `p = q` lines is a table, a
+body with no `=` is a carrier. It is the same content-directed rule the
+object map uses, with no new punctuation and no position to remember.
 
-`in Doctrine` here is the one place `in` names a **sub-presentation**.
-The generated model interprets `compose` and `embed` and *not*
-`observe`/`sample`, because a generated `observe` would have to run a
-resource program, which needs a seed, and seeds live at install sites.
-So a plain `model M in T` is total over `T`'s slots and this one is
-not — the only such head in the language, and it says so here rather
-than leaving a reader to find out.
+`in Doctrine` here is the one place `in` names a **sub-presentation**. The
+generated model interprets `compose` and `embed` and not `observe` or
+`sample`, because a generated `observe` would have to run a resource
+program, which needs a seed, and seeds live at install sites. A plain
+`model M in T` is total over `T`'s slots and this one is not. It is the
+only such head in the language.
 
 ```braid
 model Log     in Doctrine = Str
@@ -1436,18 +1431,18 @@ model Counter in Doctrine = Int
 model GameState in Doctrine = Int Int
 ```
 
-- **Nominal.** `Int Int` is never silently a GameState — `def notState
-  = swap : a0 a1 ⇒ a1 a0`, unfolded. Structural folding would rename
-  every def that happened to thread two Ints; a resource's meaning is
-  exactly the part its shape does not carry, so it declares a distinct
+- **Nominal.** `Int Int` is never silently a GameState, so
+  `def notState = swap` is `a0 a1 ⇒ a1 a0`, unfolded. Structural folding
+  would rename every def that happened to thread two Ints. A resource's
+  meaning is the part its shape does not carry, so it declares a distinct
   type instead.
 - **One wire**, its contents boxed, whatever the declared stack's
   width. That is what makes `=Log Counter>` an ordered run of wires
   (§3) rather than a guess about widths.
-- **Roll and unroll, no fold.** `Log : Str ⇒ Log` and `unLog : Log ⇒
-  Str` are generated as for any `data`; `foldLog` is *not* — you unroll
-  a resource, you do not eliminate it by points (`foldLog` reports
-  *Unknown primitive*). Roll/unroll are free at runtime.
+- **Roll and unroll, no fold.** `Log : Str ⇒ Log` and `unLog : Log ⇒ Str`
+  are generated as for any `data`. `foldLog` is not: you unroll a resource
+  rather than eliminating it by points, and `foldLog` reports *Unknown
+  primitive*. Roll and unroll are free at runtime.
 - **Rides deepest.** Resource wires sit at the bottom of the stack, in
   the order a `with` names them, which is what puts every offset a known
   distance from the deepest wire (§6). Operations are ordinary defs
@@ -1462,10 +1457,9 @@ Threading a resource by hand is `_` and `...` like anything else; `with`
 (§6) writes that padding. See `examples/resources.braid` and
 `design-effects.md`.
 
-*Amendment (2026-09-17): **a resource is a model of the Doctrine**, and
-the declaration generates it.* Beside `R`/`unR` it writes three more
-declarations, in the compiler's `@` namespace and therefore unwritable
-in source:
+**A resource is a model of the Doctrine, and the declaration generates
+it.** Beside `R` and `unR` it writes three more declarations, in the
+compiler's `@` namespace and therefore unwritable in source:
 
 ```braid
 data  R@k(a..., b...) = Fn⟨R a ⇒ R b⟩
@@ -1475,12 +1469,11 @@ theory R@t(k(..., ...)) in Doctrine =
 model R in R@t(R@k) = compose = R@then, embed = R@arr
 ```
 
-`:doc R` prints all three — sugar you cannot read is a feature, not a
-desugaring — and `:defs` hides them, as it hides every other `@` name.
-The carrier is Power–Robinson's **state construction**, `K_R(Σ, Θ) =
-C(R ⊗ Σ, R ⊗ Θ)`, and it is **representable**: the hom-object is an
-object of the base, so fibre composition *is* base composition of
-representatives. That is what makes `with R` **transport in fused
+`:doc R` prints all three, so the sugar is readable, and `:defs` hides
+them as it hides every other `@` name. The carrier is Power-Robinson's
+**state construction**, `K_R(Σ, Θ) = C(R ⊗ Σ, R ⊗ Θ)`, and it is
+**representable**: the hom-object is an object of the base, so fibre
+composition *is* base composition of representatives. That is what makes `with R` **transport in fused
 form** — `embed [s] ; compose` normalises to `_ s ...`, which is
 exactly what the routing pass already wrote, so nothing elaborates
 differently and `examples/metered.braid` still burns seven units.
@@ -1488,43 +1481,42 @@ differently and `examples/metered.braid` still burns seven units.
 The theory declares `compose` and `embed` **only**, and that is forced
 rather than lazy. `observe : k(Int, Int) ⇒ Int` would have to *run* a
 resource program, which needs a **seed**, and seeds live at the install
-site with no declared defaults — a generated `observe` would be
-`mempty`-conjuring by another name. The happy consequence is that no
-inherited law runs: every Doctrine law names `observe` or `sample`, so
-the `inherited` filter keeps none. The category laws hold by
+site with no declared defaults. A generated `observe` would be
+`mempty`-conjuring by another name. One consequence is that no inherited
+law runs: every Doctrine law names `observe` or `sample`, so the
+`inherited` filter keeps none. The category laws hold by
 construction (`embed` is padding, `compose` is `;`).
 
-Two things follow. `in R` is still refused — a representable fibre's
-carrier is *cancelled*, so no def ever holds one; write `with R`. And
-the model takes the resource's own name, so a `functor` or a `model` of
-that name is now a duplicate declaration rather than a shadow.
+Two things follow. `in R` is refused, because a representable fibre's
+carrier is *cancelled* and no def ever holds one; write `with R`. And the
+model takes the resource's own name, so a `functor` or a `model` of that
+name is a duplicate declaration rather than a shadow.
 
-Routing itself no longer needs the header at all — see §6.
+Routing itself needs no header. See §6.
 
-**`Dict`, the dictionary's own wire**. A declaration is
-an **act on the dictionary**, and the dictionary is a resource like any
-other: a label whose carrier is looked up from its declaration, exactly
-as `Log`'s is `Log ⊗ –` and `IO`'s is `World ⊗ –`. Every declaration
-word says so in its own arrow — `defW : Code Str =Dict> •` — which is
-the phase distinction the keyword-initial surface marks, written down
-as a grade.
+**`Dict`, the dictionary's own wire.** A declaration is an **act on the
+dictionary**, and the dictionary is a resource like any other: a label
+whose carrier is looked up from its declaration, as `Log`'s is `Log ⊗ –`
+and `IO`'s is `World ⊗ –`. Every declaration word says so in its own
+arrow, `defW : Code Str =Dict> •`, which writes down as a grade the phase
+distinction the keyword-initial surface marks.
 
 What it holds is the module's **declarations so far**: the defs with
 their headers and source, the type lines, the theory/model/functor/
 transformation blocks, the imports, the tables, the keyword table, and
 the program lines the declarations did not take. It is not the finished
-module — a module holds an environment, a scheme and a term, none of
-which has a Braid rep, and handing one to a program would be a
-reflection of the checker rather than a declaration layer. `Dict` is the
-**write** handle; the **read** side already exists and is the reflection
-words (`declOf`, `typeOfWord`, `envOf`, §12), which read the four tables
-the checker holds at the point the word runs.
+module. A module holds an environment, a scheme and a term, none of which
+has a Braid rep, and handing one to a program would be a reflection of the
+checker rather than a declaration layer. `Dict` is the **write** handle.
+The **read** side already exists as the reflection words (`declOf`,
+`typeOfWord`, `envOf`, §12), which read the four tables the checker holds
+at the point the word runs.
 
 **A program cannot discharge it, structurally.** A handler is `seed ;
 … ; unwrap`, and both ends come from the `data` machinery a
-`model R in Doctrine` line drives. `Dict` is declared by no such
-line — it is not declared at all — so there is no `Dict` to seed one with and no `unDict` to open
-one with, and the name may not be taken:
+`model R in Doctrine` line drives. No such line declares `Dict`, and
+nothing else does either, so there is no `Dict` to seed one with and no
+`unDict` to open one with. The name may not be taken:
 
 ```text
 `Dict` is the dictionary's own wire and may not be declared: `Dict` is
@@ -1534,34 +1526,35 @@ one with, and the name may not be taken:
   from discharging it.  Rename it.  MANUAL § 8.
 ```
 
-That is `World`'s argument, made once for both: the wire whose carrier
+That is `World`'s argument, made once for both. The wire whose carrier
 lives in the compiler's `@` namespace is discharged by the **host**, and
-here the host is the loader — it holds the dictionary, hands it to each
+here the host is the loader: it holds the dictionary, hands it to each
 declaration word in turn, and turns what comes back into a module.
 `:doc Dict` prints all of this, including the two words it deliberately
 has not got.
 
-**`theory` / `model`** — named slots, models, and laws that run.
+**`theory` and `model`** declare named slots, models, and laws that run.
 Both are **block** declarations: a header line ending in `=`, then
 indented lines, the same shape as `def name =` with an indented body. A
-theory's entries are `slot : Σ ⇒ Θ` and `law name = <program>`; a
-model's are `slot = <program>`, and a model has the **inline** form too
-— `model Ints in Ring(Int) = add = +, mul = *` — exactly as `def` has
-both. `;` NEVER separates two of them: it composes, so the separator is
-a comma on one line and a newline in a block, and the `;` inside `mul =
-dup ; *` is the body's own composition (balanced brackets make that
-exact). Writing one is refused by name:
+theory's entries are `slot : Σ ⇒ Θ` and `law name = <program>`. A model's
+are `slot = <program>`, and a model has the **inline** form too,
+`model Ints in Ring(Int) = add = +, mul = *`, as `def` has both. `;` NEVER
+separates two of them, because it composes. The separator is a comma on
+one line and a newline in a block, and the `;` inside `mul = dup ; *` is
+the body's own composition, which balanced brackets make unambiguous.
+Writing a `;` between bindings is refused by name:
 
 ```text
 `;` composes; separate bindings with `,` or a newline
 ```
 
-One rule for models, transformations and theories alike. Theory parameters are kinded: a bare
-name is one wire, `...` a stack, and `k(..., ...)` a type **constructor**
-whose arguments are kinded one by one (below).
+One rule covers models, transformations and theories alike. Theory
+parameters are kinded: a bare name is one wire, `...` a stack, and
+`k(..., ...)` a type **constructor** whose arguments are kinded one by one
+(below).
 
-**THE MODEL HEAD IS ONE GRAMMAR**, and every kind of
-model is a setting of it:
+**THE MODEL HEAD IS ONE GRAMMAR**, and every kind of model is a setting of
+it:
 
 ```text
 model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ] = BINDINGS
@@ -1572,9 +1565,9 @@ theory an argument model must model, and makes this head a **family**
 (`model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)`, applied by `with
 Fwd(Floats)`). `( ARGS )` are the theory's arguments. `( A ↦ B via c )`
 is the **object map** (below). The two parenthesized clauses after the
-theory are told apart by **content and not by position** — a group
-containing `↦` is the object map, and there is nothing to disambiguate
-because a type expression never contains `↦`.
+theory are told apart by **content rather than position**: a group
+containing `↦` is the object map, and a type expression never contains
+`↦`, so there is nothing to disambiguate.
 
 | the head | the model it declares |
 |---|---|
@@ -1585,10 +1578,11 @@ because a type expression never contains `↦`.
 | `model Mod in Base(Int ↦ Mod7 via reduce)` | ...the same, with a **written** object map |
 
 They are one record (`Instance`) and one parser (`parseModelHead`).
-Combinations that mean nothing are refused by name — an object map on a
-model of a theory is *an object map is a `Base` model's clause*, because
-such a model already maps objects; a model parameter on a model of
-`Base` is refused because `Base` has no theory for an argument to model.
+Combinations that mean nothing are refused by name. An object map on a
+model of a theory reports *an object map is a `Base` model's clause*,
+because such a model already maps objects. A model parameter on a model of
+`Base` is refused because `Base` has no theory for an argument to
+model.
 
 ```braid
 theory Monoid(a) =
@@ -1612,19 +1606,19 @@ def joined with StrCat = [op] unit ... ; foldExp     # Strⁿ⁰ =StrCat> Str
 ```
 
 **These are not typeclasses.** Nothing is inferred and nothing is
-dispatched: `with IntSum` (§6) selects a model **by name**, and the
-selection is a *renaming at elaboration* — each slot resolves to a
-generated def, so resolution costs nothing per call, once per scope.
-The trade is deliberate (`design-effects.md`): you give up inferring
-*which* model, and get annotation-freeness, coherence in a
+dispatched. `with IntSum` (§6) selects a model **by name**, and the
+selection is a *renaming at elaboration*: each slot resolves to a
+generated def, so resolution costs nothing per call and happens once per
+scope. The trade is deliberate (`design-effects.md`). You give up
+inferring *which* model, and get annotation-freeness, coherence in a
 structural type system, and no need for higher kinds.
 
-**Slot-local variables** (2026-09-09). A slot may name type variables
-the theory does not declare, and each slot is **generalized over its
-own**: they are quantified per slot, not shared between slots, and the
-model's body must be at least as general as the result. Any
-lowercase name that is neither a theory parameter nor a type in scope
-is such a variable, and a `...` in a slot of a theory with no stack
+**Slot-local variables.** A slot may name type variables the theory does
+not declare, and each slot is **generalized over its own**. They are
+quantified per slot rather than shared between slots, and the model's body
+must be at least as general as the result. Any lowercase name that is
+neither a theory parameter nor a type in scope is such a variable, and a
+`...` in a slot of a theory with no stack
 parameter is a slot-local *stack*. So `box : b ⇒ a` in `theory
 Wrap(a)` declares `∀b. b ⇒ a`, and a model filling it with
 `_ 1 ; + ; toStr` is refused:
@@ -1636,20 +1630,18 @@ requires it to be Int — the expected type promises the code works for
 every choice of 'b', so it must stay parametric in it)
 ```
 
-Nothing in the checker changed for this: `declaredSlots` already
-generalized a slot's arrow and `checkInstance` already compared bodies
-to it by **subsumption**, so the variables only had to survive the
-parser.
+`declaredSlots` generalizes a slot's arrow and `checkInstance` compares
+bodies to it by **subsumption**, so slot-local variables need nothing but
+to survive the parser.
 
-**Constructor parameters** (2026-09-09; kinded per argument
-2026-09-16). A theory parameter may be a type constructor, written with
-its arity visible as one mark per argument — `_` for a wire, `...` for a
-whole stack, so `theory Arrow(k(..., ...))` and `theory Prob(k(..., ...),
-d(_))`. The kind must be visible because the two bare readings are
-already taken (a name is a wire, `...` is a stack), and a kind that is
-invisible is a kind that is guessed. Slots then apply it, and a
-lowercase name standing in a `...` position **is a stack variable** —
-the kind is declared once, at the head, and read off here:
+**Constructor parameters.** A theory parameter may be a type constructor,
+written with its arity visible as one mark per argument: `_` for a wire,
+`...` for a whole stack, so `theory Arrow(k(..., ...))` and
+`theory Prob(k(..., ...), d(_))`. The kind has to be visible because the
+two bare readings are already taken, a name being a wire and `...` a
+stack, and an invisible kind is a guessed kind. Slots then apply it, and a
+lowercase name standing in a `...` position **is a stack variable**: the
+kind is declared once, at the head, and read off here:
 
 ```braid
 data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
@@ -1664,12 +1656,11 @@ model Circuits in Arrow(Circuit) =
     …
 ```
 
-The model head names a **declared data type**, not a type
+The model head names a **declared data type** rather than a type
 expression, and that name is substituted for `k` before any slot is
-forward-declared or checked. So `k` is not a higher-kinded type
-variable and inference never meets one — this is the ML-functor move,
-and `Ty` still has no constructor variable. The slots come out as
-ordinary types:
+forward-declared or checked. `k` is therefore not a higher-kinded type
+variable, and inference never meets one. This is the ML-functor move, and
+`Ty` has no constructor variable. The slots come out as ordinary types:
 
 ```text
 braid> with Circuits
@@ -1685,17 +1676,15 @@ thenP : Arr(ρ0, ρ1) Arr(ρ1, ρ2) ⇒ Arr(ρ0, ρ2)
 ```
 
 The slots carry `=Recursive>` because the `Circuit` model builds every
-circuit under `with Recursive`; the function model does not, and a pure body under
-a `=Recursive>` slot passes by absorption — which is why `Funcs`'s `thenP`
-comes back bare. A slot declares the *most* a model may do, as ever.
-What `arrP` does **not** ask for is a recursive *argument*: composition
-joins (§3), so a knot-built embedding takes an ordinary
-`Fn⟨a ⇒ b⟩`. It read `Fn⟨a =Recursive> b⟩` until 2026-09-12, and that was the
-grade system unifying where it should join (§14).
+circuit under `with Recursive`. The function model does not, and a pure
+body under a `=Recursive>` slot passes by absorption, which is why
+`Funcs`'s `thenP` comes back bare. A slot declares the *most* a model may
+do. What `arrP` does **not** ask for is a recursive *argument*: composition
+joins (§3), so a knot-built embedding takes an ordinary `Fn⟨a ⇒ b⟩`.
 
-A slot is reached **through its scope, or not at all**: the compiler's
-own spelling for the generated def is `Circuits@arrP`, and writing an
-`@` yourself is an elaboration error (§12).
+A slot is reached **through its scope, or not at all**. The compiler's own
+spelling for the generated def is `Circuits@arrP`, and writing an `@`
+yourself is an elaboration error (§12).
 
 
 Five things are refused, each naming what is wrong:
@@ -1722,12 +1711,12 @@ model Bad in Arrow(T)            # theory Arrow(k(..., ...)), data T(a, b)
   (a stack) where that says `...`
 ```
 
-`Fn` cannot fill a constructor parameter: it is built in and takes an
-arrow rather than wires, and the refusal says so and suggests the
-one-line wrapper (`data Arr(a, b) = Fn⟨a ⇒ b⟩`) that makes plain
-functions a model. `examples/circuits.braid` declares the Arrow
-interface once and audits both models — circuits and functions —
-against the doctrine's five runnable laws.
+`Fn` cannot fill a constructor parameter. It is built in and takes an
+arrow rather than wires, and the refusal says so and suggests the one-line
+wrapper (`data Arr(a, b) = Fn⟨a ⇒ b⟩`) that makes plain functions a model.
+`examples/circuits.braid` declares the Arrow interface once and audits
+both models, circuits and functions, against the doctrine's five runnable
+laws.
 
 **A model is audited, three ways**, each with its own message:
 
@@ -1748,13 +1737,13 @@ law 'leftUnit' fails for model BadUnit in a model must be an
 audited model of its theory
 ```
 
-`theory` and `model` are file declarations, not REPL lines (the
-REPL says so). See `examples/theories.braid`, §14 for the limits, and
+`theory` and `model` are file declarations rather than REPL lines, and
+the REPL says so. See `examples/theories.braid`, §14 for the limits, and
 `design-effects.md` for the position.
 
-**A model parameterized by a model**. A model head takes
-an optional **parameter list**, and a model that has one is not a model
-at all — it is a **family**:
+**A model parameterized by a model.** A model head takes an optional
+**parameter list**, and a model that has one is a **family** rather than a
+model:
 
 ```braid
 data Dual(a) = a a
@@ -1765,21 +1754,20 @@ model Fwd(Smooth(a, g)) in Smooth(Dual(a), a) =
     …
 ```
 
-Read it as a **functor Mod(Smooth) → Mod(Smooth)**: a map from models of
-a theory to models of a theory, which is what an ML higher-order functor
+Read it as a **functor Mod(Smooth) → Mod(Smooth)**, a map from models of
+a theory to models of a theory. That is what an ML higher-order functor
 is, what Kiselyov calls an interpreter transformer, and what the ring
-construction R ↦ R[ε]/ε² is. `examples/autodiff.braid` is the case
-worth having: `Fwd` is forward-mode differentiation, so applying it
-twice differentiates twice.
+construction R ↦ R[ε]/ε² is. In `examples/autodiff.braid`, `Fwd` is
+forward-mode differentiation, so applying it twice differentiates twice.
 
 **`with Fwd(Floats)` applies it**, and that is the one spelling. The
-application is also the **name** of the model it mints — an ordinary
+application is also the **name** of the model it mints, an ordinary
 model, with ordinary slot defs, whose laws run at module start like any
-other's. That is why the spelling is an application and not a scope
+other's. That is why the spelling is an application rather than a scope
 stack (`with Floats Fwd`): a `transformation` names a model, a receipt
 prints one, and only the applied form is a name that can be written in
-both places. `Fwd(Floats)` is minted once per module however many
-headers ask for it, and
+both places. `Fwd(Floats)` is minted once per module however many headers
+ask for it, and
 
 ```braid
 def polyDD with Fwd(Fwd(Floats)) = poly
@@ -1789,37 +1777,36 @@ def polyDD with Fwd(Fwd(Floats)) = poly
 iterates: a family may be applied to a member of itself.
 
 **The receipt is the whole application, as one label.** `with Fwd(Floats)`
-mints `Fwd(Floats)` and not `Fwd` and `Floats`: a receipt says *which
-model read the template*, one model did, and `Floats` never saw it. A
+mints `Fwd(Floats)` rather than `Fwd` and `Floats`. A receipt says *which
+model read the template*; one model did, and `Floats` never saw it. A
 grade is a set of labels, and this contributes one.
 
-**The carrier is substitution, never a type-level function.** The
-parameter clause `Smooth(a, _)` **binds a name to each of the
-argument model's own theory arguments**, and the head writes its own in
-terms of them. At `Fwd(Floats)`, `Floats : Smooth(Float, Float)` gives
+**The carrier is substitution rather than a type-level function.** The
+parameter clause `Smooth(a, _)` **binds a name to each of the argument
+model's own theory arguments**, and the head writes its own in terms of
+them. At `Fwd(Floats)`, `Floats : Smooth(Float, Float)` gives
 `a := Float` and the head reads `Smooth(Dual(Float), Float)`; at
 `Fwd(Fwd(Floats))` it gives `a := Dual(Float)` and reads
 `Smooth(Dual(Dual(Float)), Dual(Float))`. Nothing is applied at the type
 level; a name is replaced.
 
 **A family's slot bodies are templates over the PARAMETER's theory.**
-Inside a body every theory name is the argument model's — including the
-name of the slot being defined, which is *not* in scope in its own
-body. That is why the head needs no name for the parameter and does not
-have one: a body reaches the parameter's slots by the theory's names,
-and `_` fills a binder the head does not use. So `add = …
-add …` is unambiguous with no rule to learn, and `lit = (c -> (c ; lit)
-(0.0 ; lit) ; Dual)` reads exactly as it looks: R's `lit` twice. (The
-zero tangent is `0.0 ; lit` rather than a new `zero` slot because the
-theory already names its zero and `law addUnit` already pins it — one
-spelling per thing.)
+Inside a body every theory name is the argument model's, including the
+name of the slot being defined, which is *not* in scope in its own body.
+That is why the head needs no name for the parameter and does not have one:
+a body reaches the parameter's slots by the theory's names, and `_` fills a
+binder the head does not use. `add = … add …` is therefore unambiguous
+with no rule to learn, and `lit = (c -> (c ; lit) (0.0 ; lit) ; Dual)`
+reads as it looks, R's `lit` twice. The zero tangent is `0.0 ; lit` rather
+than a new `zero` slot, because the theory already names its zero and
+`law addUnit` already fixes it: one spelling per thing.
 
 **Laws are checked at each instantiation, not once for the family.**
 Checking them generically would need equality modulo the parameter
 theory's laws, and there is no such thing here. So every member runs the
 theory's laws on **its own evidence**, and a false family is refused at
-its **first instantiation**, naming the member — which names the family
-and the argument at once:
+its **first instantiation**, naming the member, which names the family and
+the argument at once:
 
 ```text
 law 'mulAssoc' fails for model Fwd(Floats): a model must be an audited
@@ -1829,38 +1816,37 @@ INSTANTIATION, on that member's own evidence, and this is the first
 one that named it)
 ```
 
-**One parameter, for now.** Two would give one slot name two meanings
-inside a body, since a body is written in the parameter's vocabulary;
-the head says so rather than guessing. (This is also why the parameter
-has no name: with one parameter there is nothing to disambiguate.)
+**One parameter.** Two would give one slot name two meanings inside a
+body, since a body is written in the parameter's vocabulary, and the head
+says so rather than guessing. It is also why the parameter has no name:
+with one parameter there is nothing to disambiguate.
 
 **`:defs` lists a family** with the spelling that applies it, and
 `:import` counts it apart from the models (`5 models, 1 parameterized
-model`): a family is not a model and not a def.
+model`), because a family is neither a model nor a def.
 
-**The head is a sequence of optional clauses.** Today:
+**The head is a sequence of optional clauses** around one required one:
 
 ```text
-model NAME [ ( Theory(binders) ) ] in THEORY [ ( args ) ]
+model NAME [ ( Theory(binders) ) ] in THEORY [ ( args ) ] [ ( A ↦ B via c [, r] ) ]
 ```
 
-and a third clause is coming — an **object map**, `model FwdAD in Base(Float
-↦ Dual)`, a functor given on generators with a substitution on types.
-The general form the two collapse into: *a model is a presentation
+All of them are settings of one general form: *a model is a presentation
 interpreted in a category, given by an object map and an image for each
-generator.* Today's `Base` models are the identity-object-map case with
-an explicit generator table; doctrine models are the identity on base
-types with `embed` total; a parameterized model is a type-level
-**substitution** with generator images written over the parameter's
-words. See `design-macros.md` (2026-09-15).
+generator.* A `Base` model is the identity-object-map case with an explicit
+generator table. A doctrine model is the identity on base types with
+`embed` total. A parameterized model is a type-level **substitution** with
+generator images written over the parameter's words. An object-mapped
+model, `model Mod in Base(Int ↦ Mod7 via reduce)`, writes the substitution
+down. See `design-macros.md`.
 
-### `in T`: a template — a def written over a theory
+### `in T`: a template, a def written over a theory
 
-A def whose header is **`in T`** for a theory `T` is a *template*: it
-is a morphism of `T`, its body waits for a model, and it is not a
-def at all until one arrives. A def whose `with` header names an
-**model** supplies one — every template it calls is expanded there,
-renamed by that model, and **re-inferred there**:
+A def whose header is **`in T`** for a theory `T` is a *template*. It is a
+morphism of `T`, its body waits for a model, and it is not a def until one
+arrives. A def whose `with` header names a **model** supplies one: every
+template it calls is expanded there, renamed by that model, and
+**re-inferred there**:
 
 ```braid
 def fold1 in Monoid = [op] unit ... ; foldExp  # a template over Monoid
@@ -1870,8 +1856,8 @@ def joined with StrCat = fold1                   # and again, elsewhere
 ```
 
 Because each instantiation is inferred on its own, each gets its own
-**principal type** — there is no rank-1 wall, and nothing is passed at
-run time:
+**principal type**. There is no rank-1 wall, and nothing is passed at run
+time:
 
 ```text
 braid> :t total
@@ -1888,28 +1874,27 @@ braid> :t fold1
 fold1 : Strⁿ⁰ =StrCat> Str
 ```
 
-The `in Monoid` on `fold1` mints nothing — it applied nothing. The
-label on each instantiation is the `with IntSum` / `with StrCat` that
-read the template.
+The `in Monoid` on `fold1` mints nothing, because it applied nothing. The
+label on each instantiation is the `with IntSum` or `with StrCat` that read
+the template.
 
-This is ML's functor application performed by the mechanism that
-already existed: `with Inst` is a renaming, and a template is a body
-that waits for one. There is no new syntax, no parameter list, and no
-`@`.
+This is ML's functor application performed by the mechanism that already
+existed: `with Inst` is a renaming, and a template is a body that waits for
+one. There is no new syntax, no parameter list and no `@`.
 
-**The rules, each with its message.** A template is *recorded*, not
-defined: it never enters the environment or the runtime scope, because
-it has no body that runs before a model says what its slots mean.
-So calling one outside every model scope of its theory is an
-elaboration error that names the **theory**, not a missing word:
+**The rules, each with its message.** A template is *recorded* rather than
+defined. It never enters the environment or the runtime scope, because it
+has no body that runs before a model says what its slots mean. Calling one
+outside every model scope of its theory is an elaboration error that names
+the **theory** rather than a missing word:
 
 ```text
 fold1 needs a model of Monoid in scope (`with <model>` before
 calling it)
 ```
 
-A model of the *wrong* theory in scope gives the same message —
-scope selection is by theory, and nothing is searched for. Templates
+A model of the *wrong* theory in scope gives the same message, because
+scope selection is by theory and nothing is searched for. Templates
 may call templates (`examples/build.braid`), and the instantiating
 scope instantiates the whole chain. Nested scopes resolve
 **innermost-first**, which is what renaming already did. Four more
@@ -1939,25 +1924,25 @@ def loopy in Monoid = dup ; op ; loopy
   cannot recurse
 ```
 
-The last of those is reported where the template is *instantiated*, not
-where it is written: a template's body is stored unexpanded, so the
-no-self-reference rule above meets it only when a `with <model>`
-scope inlines it.
+The last of those is reported where the template is *instantiated* rather
+than where it is written. A template's body is stored unexpanded, so the
+no-self-reference rule above meets it only when a `with <model>` scope
+inlines it.
 
-The other clause survives, so `def f in Monoid with Log = …` is a
-template that also threads a resource; the resource is routed where the
-template *lands*, not where it was written.
+The other clause survives, so `def f in Monoid with Log = …` is a template
+that also threads a resource. The resource is routed where the template
+*lands*, not where it was written.
 
-**`in` also decides instantiate against transport**.
-When `with M` names a model of a **Doctrine** theory (below), there are
-two things it could mean and the `in` clause says which:
+**`in` also decides instantiate against transport.** When `with M` names a
+model of a **Doctrine** theory (below), there are two things it could mean,
+and the `in` clause says which:
 
 | the def | `with M` does | because |
 |---|---|---|
 | `def f in T with M = …`, T = M's theory | **instantiates**: M's words replace the slot names and the spine stays BASE composition | the body is already a morphism of `B[T]`, and a morphism of `B[T]` composes like the base |
 | `def f with M = …`, no `in` | **transports**: every stage becomes `embed` of itself and every `;` becomes `compose` | the body is a base program, and M is the functor that carries it in |
 
-Never both — transporting a template would embed the expansion's own
+Never both: transporting a template would embed the expansion's own
 `embed` and `compose`. That is why a template over a Doctrine theory is
 writable at all:
 
@@ -1974,16 +1959,17 @@ def a with Enum = half ; flip ; dup      # a0 =Enum Recursive> Bool Bool
 def b in Enum   = flip ; dup             # • =Recursive> Kern(Float, Bool) Kern(Float, Bool)
 ```
 
-`a` is the Markov copy — one flip, copied, so HH and TT at ½ each. `b`
-is two kernel *values* side by side, which is not a kernel at all. `in`
-is what tells them apart.
+`a` is the Markov copy: one flip, copied, so HH and TT at ½ each. `b` is
+two kernel *values* side by side, which is not a kernel at all. `in` is
+what tells them apart.
 
 **`in` with a `with` of the same model is the mixed case**, and it is
 allowed: `def mixed in Funcs with Funcs = sample ; (x -> x 2 ; *)`
 puts `Funcs`' own words inline *and* transports the base stages around
 them.
 
-**`in Recursive` is refused.** `Recursive` is applied, not lived in:
+**`in Recursive` is refused.** `Recursive` is applied rather than lived
+in:
 
 ```text
 `Recursive` is applied, not lived in: write `with Recursive`; the
@@ -1991,76 +1977,74 @@ open-recursion body is `fix` by hand (MANUAL §8)
 ```
 
 `with Recursive` is `in B[f]` plus the knot model, where `B[f]` is the
-base extended by the def's own name — a one-slot theory per def whose
-slot type is inferred. `in Recursive` would be the *open*-recursion
-half of that: a body written over the slot, with no knot tied. Writing
-it by hand is `fix`, which is what the marker rewrites to anyway.
+base extended by the def's own name: a one-slot theory per def whose slot
+type is inferred. `in Recursive` would be the *open*-recursion half of
+that, a body written over the slot with no knot tied. Writing it by hand is
+`fix`, which is what the marker rewrites to anyway.
 
 **A template is over a theory, never over a resource name.** A resource
-scope is *routing* — the offsets come from the header's arity — so a
-body waiting for a resource would be waiting for an arity rather than
-for a name; and the operations a generic handler needs (a seed, an
-unroller) are per-carrier words, which is exactly what a theory names.
-`examples/resources.braid` writes the generic handler that way, and it
-is two lines per resource.
+scope is *routing*, and the offsets come from the header's arity, so a body
+waiting for a resource would be waiting for an arity rather than a name.
+The operations a generic handler needs, a seed and an unroller, are
+per-carrier words, which is what a theory names.
+`examples/resources.braid` writes the generic handler that way, in two
+lines per resource.
 
-**Not "functors".** Templates are model-parameterized *defs*;
-`functor` (below) is the macro keyword, and for Haskell readers neither
-is `Functor`/`fmap`.
+**Not "functors".** Templates are model-parameterized *defs*. `functor`
+(below) is the macro keyword, and for Haskell readers neither one is
+`Functor` or `fmap`.
 
-**`functor Name = <graph morphism>`** names a
-**functor**, and takes a **graph morphism**: a program whose type is
-`• ⇒ Fn⟨Stage ⇒ Code⟩` at pure grade — one image per generator. A
-functor out of a FREE category *is* a graph morphism, so one image per
-generator determines the whole functor by the universal property; that
-is why the declaration needs nothing but this, and why it is functorial
-rather than merely claimed to be.
+**`functor Name = <graph morphism>`** names a **functor** and takes a
+**graph morphism**: a program whose type is `• ⇒ Fn⟨Stage ⇒ Code⟩` at pure
+grade, one image per generator. A functor out of a FREE category *is* a
+graph morphism, so one image per generator determines the whole functor by
+the universal property. That is why the declaration needs nothing else, and
+why it is functorial rather than merely claimed to be.
 
 ```braid
 functor Traced = [(s -> (s ; pack) (s ; markStage) ; append)]
 functor Ticked = tick ... ; interpose
 ```
 
-`with Traced` then extends the morphism along the scope's whole spine
-at elaboration and splices the result back. The **extension is also a
-word** of the functor's own name — `Traced : Code ⇒ Code` — so the same
-functor is a value: `[Traced]` is a quote and `lift2 [Traced]` applies
-it at run time. There is no `macro` keyword and nothing to register.
+`with Traced` then extends the morphism along the scope's whole spine at
+elaboration and splices the result back. The **extension is also a word**
+of the functor's own name, `Traced : Code ⇒ Code`, so the same functor is a
+value: `[Traced]` is a quote and `lift2 [Traced]` applies it at run time.
+There is no `macro` keyword and nothing to register.
 
-The morphism is checked at the first `with` (declarations are hoisted,
-so that is where the prefix scope is what it will be at run time), and
-once at its declaration whether or not anything applies it: *must be a
-GRAPH MORPHISM* — with the arrow it actually has, named; *must be pure*
-(it runs while the module is being checked, so it cannot do IO — the
-`IO` label IS the phase distinction; other labels on it are harmless);
-*must be defined before the functor line* (a functor is runnable before
-its first use: the one place source order is semantic); and a looping
-functor exhausts a step budget rather than hanging the compiler.
+The morphism is checked at the first `with`, where the prefix scope is what
+it will be at run time because declarations are hoisted, and once at its
+declaration whether or not anything applies it. It **must be a GRAPH
+MORPHISM**, and the refusal names the arrow it has instead. It **must be
+pure**, because it runs while the module is being checked and so cannot do
+IO; the `IO` label IS the phase distinction, and other labels on it are
+harmless. It **must be defined before the functor line**, since a functor
+has to be runnable before its first use, which is the one place source
+order is semantic. A looping functor exhausts a step budget rather than
+hanging the compiler.
 
-**A `Code ⇒ Code` word may not head a `with`**, and is
-refused by name. Such a word is an endomap of the *object of
-morphisms*: it has no object map, no generator images and no laws, and
-nothing about it makes it commute with `;`. It has two homes, and the
-refusal names both — `lift2 [w]` applies it at RUNTIME, checked per
-program against the program's own type with the original as the
-fallback; and a top-level declaration program (`[code] "name" ; defW`,
-§12) DECLARES what it generates, for code that is generated rather than
-rewritten. **Nothing is lost**: between them those two cover every use
-the whole-spine scope had.
+**A `Code ⇒ Code` word may not head a `with`**, and is refused by name.
+Such a word is an endomap of the *object of morphisms*: it has no object
+map, no generator images and no laws, and nothing about it makes it commute
+with `;`. It has two homes, and the refusal names both. `lift2 [w]` applies
+it at RUNTIME, checked per program against the program's own type with the
+original as the fallback. A top-level declaration program
+(`[code] "name" ; defW`, §12) DECLARES what it generates, for code that is
+generated rather than rewritten. Between them those cover every use the
+whole-spine scope had.
 
-Not Haskell's `Functor`: nothing is dispatched on a type; this is a
+Not Haskell's `Functor`: nothing is dispatched on a type, and this is a
 functor out of the free category of programs, selected by name. §12 has
-what a functor may and may not do; `examples/traced.braid` and
-`metered.braid` are the two idioms, and `examples/optimizer.braid`
-states the functor laws as theories.
+what a functor may and may not do. `examples/traced.braid` and
+`metered.braid` are the two idioms, and `examples/optimizer.braid` states
+the functor laws as theories.
 
-**`model Name in Base = p = q, r = s`** is a **partial
-model of the ambient presentation**. `Base` is the reserved theory
-whose generators are *every word in scope*, each with its own scheme as
-the slot's declared type; a binding gives a generator an image, and
-every generator it does not name maps to itself. It is the same
-declaration in a block, one binding per indented line, exactly as every
-other model body has both forms:
+**`model Name in Base = p = q, r = s`** is a **partial model of the ambient
+presentation**. `Base` is the reserved theory whose generators are *every
+word in scope*, each with its own scheme as the slot's declared type. A
+binding gives a generator an image, and every generator it does not name
+maps to itself. The block form takes one binding per indented line, as
+every other model body has both forms:
 
 ```braid
 model Opt in Base = dupInt = dup, twice = double
@@ -2070,19 +2054,18 @@ model Opt in Base
     twice  = double
 ```
 
-`with Opt` is then the renaming every `with Inst` performs — it descends
-into quotations (so a knot body is rewritten where it lives), into a
-row's tracks, into a residual row's written tracks, and into groups —
-and mints `=Opt>` on everything it renamed, like any other scope. The
-declaration also produces a **word** `Opt : Code ⇒ Code` (the table,
-handed to the `rewrite` engine), so `lift2 [Opt]` applies the same
-reinterpretation at run time with the program as its own fallback
-(§12).
+`with Opt` is then the renaming every `with Inst` performs. It descends
+into quotations, so a knot body is rewritten where it lives, and into a
+row's tracks, a residual row's written tracks, and groups. It mints
+`=Opt>` on everything it renamed, like any other scope. The declaration
+also produces a **word** `Opt : Code ⇒ Code`, the table handed to the
+`rewrite` engine, so `lift2 [Opt]` applies the same reinterpretation at run
+time with the program as its own fallback (§12).
 
-There is no separate machinery and no separate keyword: a rewriting of
-the base *is* a model, a by-generators functor whose action on a
-generator is a rename and whose action on everything else is
-congruence. The keyword `rules` is gone:
+There is no separate machinery and no separate keyword. A rewriting of the
+base *is* a model, a by-generators functor whose action on a generator is a
+rename and whose action on everything else is congruence. The keyword
+`rules` is gone:
 
 ```text
 `rules` is gone: a rule set is a PARTIAL MODEL of the ambient
@@ -2090,27 +2073,26 @@ presentation, so it is written `model Name in Base = p = q, …` (or
 one `p = q` per indented line).  MANUAL §8.
 ```
 
-**Optimizer or dialect.** A model of `Base` whose images are
-*provably equal* to the generators (`sameCode`, §12) is an
-**optimizer**; one whose images merely satisfy the theory's laws is a
-**reinterpretation** — a dialect. Both are models of `Base`, and the
-distinction is semantic, not syntactic: `examples/optimizer.braid`
-draws the line explicitly, two of its four bindings on each side.
+**Optimizer or dialect.** A model of `Base` whose images are *provably
+equal* to the generators (`sameCode`, §12) is an **optimizer**. One whose
+images merely satisfy the theory's laws is a **reinterpretation**, a
+dialect. Both are models of `Base`, and the distinction is semantic rather
+than syntactic. `examples/optimizer.braid` draws the line explicitly, with
+two of its four bindings on each side.
 
-`Base` itself may not be declared — its generators are not something a
-user writes down (*`Base` is the ambient presentation and may not be
+`Base` itself may not be declared, because its generators are not something
+a user writes down (*`Base` is the ambient presentation and may not be
 declared*).
 
-**Why a declaration and not a type.** A word `replace : Fn⟨a ⇒ b⟩
-Fn⟨a ⇒ b⟩ Code ⇒ Code` types — but its shared variables are
-**unification**, "p and q have a common model", and that is
-symmetric, while "q may stand wherever p stands" is not. The property
-that *is* sufficient is `scheme(q) ≥ scheme(p)`, a rank-2 statement no
-rank-1 `Fn` can hold. The routine that states it already exists, with
-three other consumers (`checkInstance`, `runAs`, `interpose`):
-`subsumes`. So a binding is checked **once**, where it is written, and
-is free at every use — which is exactly what `checkInstance` has always
-done to a slot:
+**Why a declaration rather than a type.** A word
+`replace : Fn⟨a ⇒ b⟩ Fn⟨a ⇒ b⟩ Code ⇒ Code` types, but its shared variables
+are **unification**, "p and q have a common model", and that is symmetric
+where "q may stand wherever p stands" is not. The sufficient property is
+`scheme(q) ≥ scheme(p)`, a rank-2 statement no rank-1 `Fn` can hold. The
+routine that states it already exists, with three other consumers
+(`checkInstance`, `runAs`, `interpose`): `subsumes`. A binding is therefore
+checked **once**, where it is written, and is free at every use, which is
+what `checkInstance` does to a slot:
 
 > *Unification blesses a call; subsumption blesses a rule.*
 
@@ -2125,45 +2107,43 @@ generator's type, or a program that typed before the reinterpretation
 would not type after it.
 ```
 
-The parametricity case is the one worth staring at. With `two : a ⇒ Int
-Int`, `two = dup` would *run* perfectly well wherever it fired — and it
-narrows `a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else, so it is
-refused: *two is used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0*.
+The parametricity case is the one to study. With `two : a ⇒ Int Int`,
+`two = dup` would *run* perfectly well wherever it fired, and it narrows
+`a ⇒ Int Int` to `Int ⇒ Int Int` everywhere else, so it is refused: *two is
+used at a0 ⇒ Int Int but dup is a0 ⇒ a0 a0*.
 
-**Grades ride along** for free, because `subsumes` compares them by ⊆
-and `∅` is the bottom of the semilattice: a **pure** image under an
-**io** generator passes (the reinterpretation can only remove effects),
-and an io image under a pure generator is refused — *Cannot unify
-effects: IO vs pure (the expected type fixes the grade; this code must
-stay pure)*.
+**Grades ride along** for free, because `subsumes` compares them by ⊆ and
+`∅` is the bottom of the semilattice. A **pure** image under an **io**
+generator passes, since the reinterpretation can only remove effects. An io
+image under a pure generator is refused: *Cannot unify effects: IO vs pure
+(the expected type fixes the grade; this code must stay pure)*.
 
 **What may not be a binding's side.** A theory **slot** (*a slot is not
 a word outside `with`*), a name containing `@` (*the compiler's spelling
 of a slot*), a **theory** name, a **template** (it has no type until an
-model supplies one, and a binding is checked once), or a word not yet
-defined. Models and functors share one namespace — every name
-a `with` header may carry — so `model Opt in Base` beside `functor Opt
-= …` is a *Duplicate model declaration*.
+model supplies one, and a binding is checked once), or a word not yet defined. Models and functors share one namespace, every
+name a `with` header may carry, so `model Opt in Base` beside
+`functor Opt = …` is a *Duplicate model declaration*.
 
-**v1 bindings are single words on both sides.** Multi-atom patterns —
-`dup ; * = square` — are **not shipped**: they need a matcher over
-spines and a story about what a pattern variable is, and no example has
-asked for one yet. The engine itself is exposed as the unchecked prim
-`rewrite : List(Sym) List(Sym) Code ⇒ Code`, the same way `interposeRaw`
-is the unchecked half of `interpose`; nothing blesses a table you build
-by hand, which is exactly why `lift2`'s fallback exists.
+**A binding is a single word on both sides.** Multi-atom patterns such as
+`dup ; * = square` are not present: they need a matcher over spines and a
+story about what a pattern variable is, and no example has asked for one.
+The engine itself is exposed as the unchecked prim
+`rewrite : List(Sym) List(Sym) Code ⇒ Code`, the way `interposeRaw` is the
+unchecked half of `interpose`. Nothing blesses a table you build by hand,
+which is why `lift2`'s fallback exists.
 
 `examples/optimizer.braid` is the worked example: four interchangeable
-words, a model of `Base`, the two bindings `sameCode` can prove and
-the two it honestly cannot, the receipt on the arrow, the laws as
-theories, and image membership.
+words, a model of `Base`, the two bindings `sameCode` can prove and the two
+it cannot, the receipt on the arrow, the laws as theories, and image
+membership.
 
-### A model with an OBJECT MAP — `model Mod in Base(Int ↦ Mod7 via reduce)`
+### A model with an OBJECT MAP: `model Mod in Base(Int ↦ Mod7 via reduce)`
 
-A model is **a presentation interpreted in a category, given by an
-object map and an image for each generator**, and everything above
-carried the *identity* object map: `with Opt` renames words and the
-wires keep their types. The head's third clause writes the other half.
+A model is **a presentation interpreted in a category, given by an object
+map and an image for each generator**. Everything above carried the
+*identity* object map, so `with Opt` renames words and the wires keep their
+types. The head's third clause writes the other half.
 
 ```braid
 data Mod7 = Int
@@ -2175,33 +2155,31 @@ model Mod in Base(Int ↦ Mod7 via reduce) =
     - = subM
 ```
 
-**The map.** `Int ↦ Mod7` is the **substitution** `Int := Mod7`,
-applied structurally — under `List`, under a data type's arguments,
-through an `Fn` arrow, along a stack. It is a substitution and *not* a
-type-level function, which is the whole reason it is principal:
-substitution commutes with unification, so a transported program has a
-principal type for the same reason the original did. `↦` is the glyph,
-and it is deliberately not `⇒`: `⇒` is the arrow of every **written
-type**, and an object map is not a type but a function on objects.
+**The map.** `Int ↦ Mod7` is the **substitution** `Int := Mod7`, applied
+structurally: under `List`, under a data type's arguments, through an `Fn`
+arrow, along a stack. A substitution is principal where a type-level
+function would not be, because substitution commutes with unification, so a
+transported program has a principal type for the same reason the original
+did. `↦` is the glyph rather than `⇒`, because `⇒` is the arrow of every
+**written type** and an object map is a function on objects.
 
-The source `A` is a **nominal** name — a base type, or a `data`/`type`
-name of arity zero. A parameterized source would make the map a
-type-level function (what is `List(a) ↦ …` at an unknown `a`?), and it
-is refused.
+The source `A` is a **nominal** name: a base type, or a `data`/`type` name
+of arity zero. A parameterized source would make the map a type-level
+function, since there is no answer to what `List(a) ↦ …` means at an
+unknown `a`, and it is refused.
 
 **`via c` is the image of the LITERAL FAMILY.** Every literal of the
 mapped type is a generator; there are infinitely many of them and none
 of them is a word, so a table cannot name them and the head does. Under
-`with Mod`, `3` elaborates to `3 ; reduce`. This is not a detail: in
-`examples/modular.braid` §7 a floor-halving map sends `3` to `1` and
-the transported polynomial computes something the untransported one
-never did, which is exactly what a functor on the whole presentation
-means.
+`with Mod`, `3` elaborates to `3 ; reduce`. In `examples/modular.braid` §7
+a floor-halving map sends `3` to `1`, and the transported polynomial
+computes something the untransported one never did, which is what a functor
+on the whole presentation means.
 
-When `A` is **nominal** there are no literals of it at all, and `c` is
-then the map on *values* — what the conjugation below coerces with. It
-is still required, and still checked at `A ⇒ B`: an object map with no
-way from `A` to `B` is not one.
+When `A` is **nominal** there are no literals of it at all, and `c` is then
+the map on *values*, which is what the conjugation below coerces with. It is
+still required and still checked at `A ⇒ B`: an object map with no way from
+`A` to `B` is not one.
 
 **The table.** Each image is checked by subsumption at the generator's
 scheme **with the substitution applied** — `+ : Int Int ⇒ Int` is
@@ -2209,15 +2187,15 @@ checked at `Mod7 Mod7 ⇒ Mod7` — by the same `subsumes` that blesses
 every other binding, so an image may only generalize. Any word may
 appear, because `Base`'s generators are every word in scope.
 
-Images here are **programs**, not single words, and the reason is the
-same one that makes them single words above: a model of `Base` with the
-identity map also declares a `Code ⇒ Code` word, and `Code` carries
-names. An object-mapped model declares **no such word** — its action on
-a literal is not a rename and its action on a def is an unfolding, and a
-rewrite table holds neither — so its images are ordinary programs,
-inlined at each use and re-inferred where they land (each use gets its
-own principal type, exactly as a template's expansion does). An image
-applies nothing: `with` and `in` inside one are refused.
+Images here are **programs** rather than single words, for the reason that
+makes them single words above. A model of `Base` with the identity map also
+declares a `Code ⇒ Code` word, and `Code` carries names. An object-mapped
+model declares **no such word**, because its action on a literal is not a
+rename and its action on a def is an unfolding, and a rewrite table holds
+neither. Its images are therefore ordinary programs, inlined at each use and
+re-inferred where they land, so each use gets its own principal type as a
+template's expansion does. An image applies nothing: `with` and `in` inside
+one are refused.
 
 **The refusal is TYPE-DIRECTED.** At `with M`, each atom gets one of
 five answers:
@@ -2226,14 +2204,14 @@ five answers:
 |---|---|
 | a generator the table names | its image, inlined |
 | a **literal** of `A` | `lit ; c` |
-| a word whose scheme **never mentions `A`** | **unchanged** — the functor is the identity off `A`, and wiring (`dup`, `swap`, `drop`, `_`) is always in this row |
+| a word whose scheme **never mentions `A`** | **unchanged**: the functor is the identity off `A`, and wiring (`dup`, `swap`, `drop`, `_`) is always in this row |
 | a word that mentions `A` and **has a body** | **UNFOLDED**: `F(def) = F(body)`, transitively |
 | a word that mentions `A` with neither | conjugated (below), or **refused by name** |
 
-The third row is what makes `with M` twice the identity the second
-time — after one pass there is no `A` left in any type, so nothing
-mentions the mapped object — and what makes `with M` then `with N`
-(for `N` mapping `B ↦ C`) compose.
+The third row is what makes `with M` twice the identity the second time,
+since after one pass there is no `A` left in any type and nothing mentions
+the mapped object. It is also what makes `with M` then `with N` compose, for
+`N` mapping `B ↦ C`.
 
 The fifth is the refusal, where the scope is written:
 
@@ -2245,44 +2223,42 @@ send it to.  Add `div = …` to `model Mod`, declare a retraction
 conjugation, or do not call it here.
 ```
 
-`div` and `lt?` are *right* to be refused at Z/7 — it is neither
-ordered nor of characteristic zero — but the checker does not know
-that. It knows that a functor with no value on a generator is not a
-functor, which is the same refusal for a better reason.
+`div` and `lt?` are *right* to be refused at Z/7, which is neither ordered
+nor of characteristic zero, but the checker does not reason about that. It
+checks that a functor has a value on every generator, which is the same
+refusal for a better reason.
 
-**Transitive unfolding.** A def called under the scope is transported
-too, and so is everything *it* calls. Each is minted once per def per
-model as a generated word `M@def` — a cache, not an inlining: one word,
-one type, however many times it is called. `:defs` does not list it
-(`@` is the compiler's character and you cannot name it); `:doc M@poly`
-shows it. `fix` transports as **structure** — a functor of the doctrine
-preserves the fixpoint, and the walk enters quotations — so a def
-written under `with Recursive` comes along with no case of its own.
+**Transitive unfolding.** A def called under the scope is transported too,
+and so is everything *it* calls. Each is minted once per def per model as a
+generated word `M@def`, which is a cache rather than an inlining: one word
+and one type, however many times it is called. `:defs` does not list it,
+since `@` is the compiler's character and you cannot name it, and
+`:doc M@poly` shows it. `fix` transports as **structure**, because a functor
+of the doctrine preserves the fixpoint and the walk enters quotations, so a
+def written under `with Recursive` comes along with no case of its own.
 
 **Retraction and conjugation.** `via c, r` declares a retraction
 `r : B ⇒ A` with `c ; r = id_A`. Where one is given, every generator the
 table does not name is **derived by conjugation**: one `r` per `A` input
-wire, one `c` per `A` output wire, read off the generator's own arrow
-(an open arrow has no wires to count, and says so). Table entries
-override. A retraction makes the **empty table total**, so this is a
-complete model:
+wire, one `c` per `A` output wire, read off the generator's own arrow. An
+open arrow has no wires to count, and says so. Table entries override. A
+retraction makes the **empty table total**, so this is a complete model:
 
 ```braid
 model Milli in Base(Meters ↦ Mm via toMm, toM) =
 ```
 
-`Meters : Int ⇒ Meters` becomes `Meters ; toMm`, `unMeters : Meters ⇒
-Int` becomes `toM ; unMeters`, and a def written over metres runs over
-millimetres. Note what conjugation is *not*: `r ; c` is only an
-idempotent unless `c` is an iso, so a conjugated word sees `B` only
-through `c`'s image.
+`Meters : Int ⇒ Meters` becomes `Meters ; toMm`, `unMeters : Meters ⇒ Int`
+becomes `toM ; unMeters`, and a def written over metres runs over
+millimetres. Conjugation has a limit: `r ; c` is only an idempotent unless
+`c` is an iso, so a conjugated word reaches `B` only through `c`'s image.
 
 **Two laws, and who decides them.** A declaration like this states laws
 `Base` has no samples to run: the retraction (`c ; r = id_A`) and, for
 an image given to a word that **has** a body, `image = F(body)`.
-`sameCode` (§12) decides both where it reaches — a proof in the free
-category, for every input — and where it does not, the binding stands
-and the model is recorded as a **DIALECT**. `:doc M` says which:
+`sameCode` (§12) decides both where it reaches, as a proof in the free
+category for every input. Where it does not reach, the binding stands and
+the model is recorded as a **DIALECT**. `:doc M` says which:
 
 ```text
 ## model Mod in Base(Int ↦ Mod7 via reduce) — + = addM, * = mulM, - = subM.
@@ -2290,32 +2266,31 @@ and the model is recorded as a **DIALECT**. `:doc M` says which:
    its own.  An object-mapped model declares no `Code ⇒ Code` word …
 ```
 
-That is the optimizer/dialect line of the previous section, drawn by
-the same procedure. Refusing instead would rule out every image whose
-truth is arithmetic, which is all of them.
+That is the optimizer-or-dialect line of the previous section, drawn by the
+same procedure. Refusing instead would rule out every image whose truth is
+arithmetic, which is all of them.
 
 **The receipt** is one label per model, `=Mod>`, as for a family's
-application — on the def whose header named the model. The unfoldings
-are its internals and carry none: a receipt is minted by a scope, and
-nobody wrote one around `M@poly`.
+application, on the def whose header named the model. The unfoldings are its
+internals and carry none: a receipt is minted by a scope, and nobody wrote
+one around `M@poly`.
 
 **Map-out only is refused.** There is no `model M in Base(A ↦ B)`
 without `via`, because the literals of `A` would have no image and the
 map would be a claim about types with nothing behind it on values.
 
 `examples/modular.braid` is the worked example: Z/7 by canonical
-representatives, one polynomial run over two rings, `div` and `lt?`
-refused by name, `transformation Reduce in Ints ⇒ Mods` audited square
-by square, floor-halving as the contrast (a perfectly good object map
-whose `transformation` is refused at the `add` square), and a nominal
-source with a retraction and an empty table.
+representatives, one polynomial run over two rings, `div` and `lt?` refused
+by name, `transformation Reduce in Ints ⇒ Mods` audited square by square,
+floor-halving as the contrast (a legitimate object map whose
+`transformation` is refused at the `add` square), and a nominal source with
+a retraction and an empty table.
 
-**An object map is a `Base` model's clause.** A model of a theory
-already maps objects — by instantiating the theory's parameters at its
-own arguments — and a second map at a mapped type would be a functor
-into a category whose objects nobody has named. Refused for now, with
-the clause to write instead; whether it means anything is the one
-question this stage leaves open (`design-macros.md`, 2026-09-17).
+**An object map is a `Base` model's clause.** A model of a theory already
+maps objects, by instantiating the theory's parameters at its own arguments,
+and a second map at a mapped type would be a functor into a category whose
+objects nobody has named. It is refused, with the clause to write instead.
+Whether it means anything is open (`design-macros.md`).
 
 **A model whose theory joins the DOCTRINE transports.** The prelude declares
 one theory every module sees:
@@ -2347,57 +2322,50 @@ def easy    with Circuits = add1 ; dbl     # Int =Circuits Recursive> Int
 def easyOut in Circuits = easy ; observe
 ```
 
-`easy` elaborates to `[add1] ; embed ; _ [dbl] ; _ embed ; compose` —
-which you may write by hand under `in Circuits`, and the two print
-the same thing.
+`easy` elaborates to `[add1] ; embed ; _ [dbl] ; _ embed ; compose`. You
+may write that by hand under `in Circuits`, and the two print the same
+thing.
 
 **`in D` in a theory head is `in` doing its one job**: declaring
-membership, applying nothing, minting nothing. The elaborator *checks
-the claim* — each slot whose name is one of `D`'s must be `D`'s arrow,
-with `D`'s constructor parameters instantiated consistently across the
-whole theory — and then it knows, without reading a shape, that `with
-Circuits` transports. Deviations that are refused, each naming the
-fix: a slot of a doctrine name at another signature; two slots reading
-one parameter two ways; a hom-object that is not the theory's own
-parameter (a model must be able to choose the carrier); an `in` that
-takes none of the named theory's operations (it declared nothing);
-extension of a theory that itself extends one (extension is one level
-deep).
+membership, applying nothing, minting nothing. The elaborator *checks the
+claim*: each slot whose name is one of `D`'s must be `D`'s arrow, with
+`D`'s constructor parameters instantiated consistently across the whole
+theory. It then knows, without reading a shape, that `with Circuits`
+transports. Five deviations are refused, each naming the fix: a slot of a
+doctrine name at another signature; two slots reading one parameter two
+ways; a hom-object that is not the theory's own parameter, since a model
+must be able to choose the carrier; an `in` that takes none of the named
+theory's operations, which declares nothing; and extension of a theory that
+itself extends one, extension being one level deep.
 
-**The grade is the extending theory's.** `Doctrine`'s slots are
-written pure; `Arrow`'s are `=Recursive>` because circuits are built
-under `with Recursive`. Only the *stacks* are checked against the doctrine — a grade
-says what a model may do, and the doctrine does not bound it.
+**The grade is the extending theory's.** `Doctrine`'s slots are written
+pure, and `Arrow`'s are `=Recursive>` because circuits are built under
+`with Recursive`. Only the *stacks* are checked against the doctrine. A
+grade says what a model may do, and the doctrine does not bound it.
 
-**There is no pairing, and no strength**. Until that date
-the Doctrine had a second constructor parameter `p(_, _)` and a slot
-`first : k(a, b) ⇒ k(p(a, c), p(b, c))`, and three of its laws were about
-that slot. Both existed for one reason: a hom-object that named one
-WIRE per side could not hold a wide stage, so the stage had to be
-*packed*. Products in Braid are flat — the stack is the product — and
-the hom-object was the one place they nested. Over stacks a stage of
-any width embeds as **itself**, so the packing, the parameter that named
-it, the `data Pair` every model file declared to BE it, and the routing
-pass that wrote it out are all gone together. `embedWide` is the law
-that replaces the three: `embed [f] ; embed [g] = embed [f ; g]` at a
-stage that is one wire in and two out, and at one that **whiskers** —
-`(_ 1 ; +) _`, a stage on the deepest wire with one riding above. The
-whiskering happens in the BASE, inside the quotation, before `embed`
-sees it, so there is nothing left for a strength law to say.
+**There is no pairing, and no strength.** The hom-object ranges over
+stacks, so a stage of any width embeds as **itself** and nothing has to be
+*packed*. Products in Braid are flat, the stack being the product, and a
+hom-object over one WIRE per side would be the one place they nested.
+`embedWide` is the law that covers the widths: `embed [f] ; embed [g] =
+embed [f ; g]` at a stage that is one wire in and two out, and at one that
+**whiskers**, `(_ 1 ; +) _`, a stage on the deepest wire with one riding
+above. The whiskering happens in the BASE, inside the quotation, before
+`embed` receives it, so there is nothing left for a strength law to say.
 
 **The two levels are what the theory declared.**
 
 | declared | it licenses |
 |---|---|
-| `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
-| `+ ` **base spellings** | `with M` transports a base program built from the atoms the theory named, **atom by atom**, and refuses any other by name. `embed` on a **subcategory** — below. |
+| `compose` | `in M ; f g ; compose`: carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
+| `+ ` **base spellings** | `with M` transports a base program built from the atoms the theory named, **atom by atom**, and refuses any other by name. This is `embed` on a **subcategory**, below. |
 | `+ embed` | `with M` transports **any** stage, at the width it is written. |
 
-Slots that are not the doctrine's are classified exactly as 5c read
-them: a slot taking the carrier and returning base is an **exit**
-(refused inside `with M`, called under `in M`), one taking `•` to a
-single carrier is an **entry** (already a stage of the category, left
-alone). Identity is `embed [pass]` and needs no slot.
+Slots that are not the doctrine's are classified two ways. A slot taking
+the carrier and returning base is an **exit**, refused inside `with M` and
+called under `in M`. One taking `•` to a single carrier is an **entry**,
+already a stage of the category and left alone. Identity is `embed [pass]`
+and needs no slot.
 
 **A compose-only theory, in practice: linear maps**
 (`examples/linear.braid`). The upper row of that table is not a
@@ -2419,8 +2387,8 @@ theory GLA(k(..., ...)) in Doctrine =
 **Declaring no `embed` IS the guarantee.** `embed` takes *any* base
 function, so a theory that declares it makes `embed [fsin]` a linear
 map. Without it, a def under `in Dense` can name only GLA's slots, and
-those slots ARE the generators of the PROP of matrices — a comonoid, a
-monoid, the symmetry, the scalars (Bonchi–Sobociński–Zanasi; READING).
+those slots ARE the generators of the PROP of matrices: a comonoid, a
+monoid, the symmetry, the scalars (Bonchi-Sobocinski-Zanasi; READING).
 Everything nameable is linear **by scope**, and the runtime scan
 `examples/transpose.braid` calls `linear?` has nothing left to ask. The
 price is the one the table names: composition is a word, `f g ;
@@ -2433,12 +2401,12 @@ vocabulary.
 
 **Only one whiskering is writable, and it is a real limit.** A stack
 parameter may sit only in tail position, so `under : k(a, b) ⇒ k(c a,
-c b)` declares and `over : k(a, b) ⇒ k(a c, b c)` is refused — *The
+c b)` declares and `over : k(a, b) ⇒ k(a c, b c)` is refused with *The
 stack parameter 'a' must be the last thing in its stack*. The
 consequence is that the monoidal product `m ⊗ n` is **not
 constructible from a theory's own slots**: a generator can be given
 wires riding below it and never wires riding above. Where the base is
-reachable this costs nothing — `prob.braid` builds `flip ⊗ flip` as
+reachable this costs nothing: `prob.braid` builds `flip ⊗ flip` as
 `embed [swap] ; under flip ; embed [swap] ; under flip`, the symmetry
 coming from the base at whatever width the stage needs. A theory with
 no `embed` cannot reach for it: `GLA` declares the symmetry as a
@@ -2451,30 +2419,30 @@ the four-wire equation itself, which needs `copy ⊗ copy`.
 **The dual, not the `Code`, is what transposition needs.** `tr :
 k(a, b) ⇒ k(b, a)` cannot be computed from a function: probing at basis
 vectors is an anamorphism and erasure forbids it. It cannot be computed
-from the `Code` either — `evalAs` is the only way back from `Code` to
-`Fn` and it wants a **witness** at the flipped arrow, which is the
-thing being built. So the carrier holds the transpose beside the map (a
-map *with a chosen adjoint*, Elliott's representation), and `tr` is a
-projection. The `Code` stays for a different job: it is the **diagram**,
-and `sameCodeC` *decides* equations on it — `tr ; tr = id`,
-contravariance, and the comonoid/monoid exchange `Δᵀ = ∇` are proved
-rather than sampled, while the bialgebra corollaries, which relate two
-*different* diagrams, are sampled through `app`.
+from the `Code` either, because `evalAs` is the only way back from `Code`
+to `Fn` and it wants a **witness** at the flipped arrow, which is the thing
+being built. The carrier therefore holds the transpose beside the map, a map
+*with a chosen adjoint* in Elliott's representation, and `tr` is a
+projection. The `Code` stays for a different job. It is the **diagram**, and
+`sameCodeC` *decides* equations on it: `tr ; tr = id`, contravariance, and
+the comonoid-monoid exchange `Δᵀ = ∇` are proved rather than sampled, while
+the bialgebra corollaries, which relate two *different* diagrams, are
+sampled through `app`.
 
-**`embed` ON A SUBCATEGORY — a slot may declare its base spelling**
-. `embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` asserts a functor from
-the **whole** base, and for linear maps that assertion is false. What is
-true is a **wide subcategory** `B_lin ⊆ B` and a functor `B_lin → K`, so
-`embed` is **partial — and the partiality is the guarantee**. A wide
-subcategory is determined by a set of generators closed under
-composition, and the base is *presented*, so "is this program in the
-subcategory" reduces to "is every atom in the generator set" — a
-syntactic scan, decidable. `examples/transpose.braid` runs that scan at
-run time and answers with a Bool; a theory that spells its generators
-runs it at **elaboration** and answers with a refusal.
+**`embed` ON A SUBCATEGORY: a slot may declare its base spelling.**
+`embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)` asserts a functor from the **whole** base,
+and for linear maps that assertion is false. What is true is a **wide
+subcategory** `B_lin ⊆ B` and a functor `B_lin → K`, so `embed` is
+**partial, and the partiality is the guarantee**. A wide subcategory is
+determined by a set of generators closed under composition, and the base is
+*presented*, so "is this program in the subcategory" reduces to "is every
+atom in the generator set", a syntactic scan and decidable.
+`examples/transpose.braid` runs that scan at run time and answers with a
+Bool. A theory that spells its generators runs it at **elaboration** and
+answers with a refusal.
 
-The spelling goes after the signature, one word, split on ` = ` (with
-spaces — `=` with none is part of a labelled arrow):
+The spelling goes after the signature, one word, split on ` = ` with
+spaces, since `=` with none is part of a labelled arrow:
 
 ```braid
 theory GLA(k(..., ...)) in Doctrine =
@@ -2490,9 +2458,9 @@ def f with Dense = dup ; fadd        # Float =Dense> Float
 theory in the base (`copy ↦ dup`); the table is injective on generators
 (checked at the `theory` line), so it has a partial inverse
 `read : B ⇀ B[T]`, undefined off the table, and transport is `read` then
-the model. No new machinery: one table used as a **parser** composed
-with another used as an interpreter, and the universal property does the
-rest — a functor out of a free category *is* a graph morphism.
+the model. There is no new machinery: one table used as a **parser**
+composed with another used as an interpreter, and the universal property
+does the rest, a functor out of a free category being a graph morphism.
 
 **The table belongs to the THEORY, not to a model.** Which base programs
 are linear is a property of the *presentation*; two models of one theory
@@ -2507,21 +2475,21 @@ transport sends `f ; g` to `embed [f] embed [g] ; compose`, embedding
 each **stage** opaquely; a reader sends `dup ; fadd` to
 `copy add ; compose`, reading each **atom** into a slot. The two share
 the composition, the exit rule and the model's word table, and differ
-only in what one stage becomes. A stage a reader can transport is `_`… followed
-by exactly **one** generator — the `_`s are the whiskering and the
-generator is the carrier they ride beneath — so two generators side by
-side is a *tensor*, and only one whiskering is spellable (above), so
-there is nothing to send it to.
+only in what one stage becomes. A stage a reader can transport is `_`…
+followed by exactly **one** generator, the `_`s being the whiskering and the
+generator the carrier they ride beneath. Two generators side by side is a
+*tensor*, and only one whiskering is spellable (above), so there is nothing
+to send it to.
 
 **The affine trap, and where it is pinned.** If a Float literal were a
 generator, `x ; 1.0 ; fadd` would be admitted and that map is **affine**,
 not linear. It is refused, and not by a special case: a base spelling is
 accepted only on a slot that *builds* a carrier out of nothing or
 *whiskers* one, and a scalar (`scale : Float ⇒ k(Float, Float)`) is
-neither — it takes a base wire, so it is one generator per *value* and
-no one word spells it. So no literal ever enters the table, and a
-literal in a transported scope meets the ordinary *no image* refusal
-with a message that names the trap.
+neither: it takes a base wire, so it is one generator per *value* and no
+one word spells it. No literal ever enters the table, and a literal in a
+transported scope meets the ordinary *no image* refusal with a message that
+names the trap.
 
 **Sound, and deliberately incomplete.** A reader accepts only programs
 built from the theory's generators, every one of which is in the
@@ -2542,25 +2510,24 @@ BACKWARDS*, and *slot 'copy' declares a base spelling, and this theory
 also declares `embed` … Declare one or the other*.
 
 
-**The laws are the doctrine's, and they run.** A model is audited
-against every inherited law it can *state* — every slot the law names
-is one its theory declared. `Arrow` above takes all four slots, so all
-five laws run, for `Circuits` and for `Funcs`, and again for
-`Reified` in `examples/reified.braid`. A theory that takes `compose`
-and `embed` and no evidence — `Vault`, the sealed category — runs
-none, which is the honest reading of *sealed*: nothing can be observed
-leaving it, the audit included. They are sampled laws (`observe` at
-`sample` points); what `sameCode` can and cannot decide about them is
-in §12 and in `examples/circuits.braid`'s closing comment.
+**The laws are the doctrine's, and they run.** A model is audited against
+every inherited law it can *state*, meaning every slot the law names is one
+its theory declared. `Arrow` above takes all four slots, so all five laws
+run, for `Circuits` and for `Funcs`, and again for `Reified` in
+`examples/reified.braid`. A theory that takes `compose` and `embed` and no
+evidence runs none; `Vault`, the sealed category, is that case, and it is
+the reading of *sealed* that nothing can be observed leaving it, the audit
+included. These are sampled laws, `observe` at `sample` points. What
+`sameCode` can and cannot decide about them is in §12 and in
+`examples/circuits.braid`'s closing comment.
 
-This is not Braid inventing a doctrine. It is the **base's own**
-structure — a Freyd category, Hughes' `arr`/`>>>` (Atkey,
-*What is a categorical model of arrows?*; READING) — written down as
-an ordinary theory, so that "a target must have the structure the
-source has" is *declared and checked* rather than assumed. That is
-what a functor is.
+The doctrine is the **base's own** structure, a Freyd category and Hughes'
+`arr` and `>>>` (Atkey, *What is a categorical model of arrows?*; READING),
+written down as an ordinary theory. "A target must have the structure the
+source has" is therefore *declared and checked* rather than assumed, which
+is what a functor is.
 
-**There is no routing discipline**. A hom-object
+**There is no routing discipline.** A hom-object
 `k(ρ, σ)` names a whole **stack** on each side, so a transported spine
 is one carrier wire whose two objects are the base stacks themselves.
 Every stage becomes `embed [stage]`, whatever it covers, and every `;`
@@ -2572,20 +2539,16 @@ def sq with Circuits = dup ; *             # Int =Circuits Recursive> Int
 #              >> _ [*] >> _ Circuits@embed >> Circuits@compose
 ```
 
-Nothing reads an arity, nothing packs, nothing whiskers. The base
-already makes every stage cover the stack it is handed — that is what
-`_` and `...` are for (§4) — so the base's own widths ride through the
-functor untouched, and a stage that does not cover its stack gets the
-base's own refusal rather than a second one from the elaborator. A
-stage with no input wire is ordinary too: `k(•, Int)` is a hom-object
-between stacks, and `•` is a stack.
-
-Until this date the paragraph above described `embed [unP … ; stage ;
-P …]` whiskered by `first` once per wire riding above — sixty-nine
-lines of elaborator, all of it there because the carrier was one wire.
+Nothing reads an arity, nothing packs, nothing whiskers. The base already
+makes every stage cover the stack it is handed, which is what `_` and `...`
+are for (§4), so the base's own widths ride through the functor untouched,
+and a stage that does not cover its stack gets the base's own refusal rather
+than a second one from the elaborator. A stage with no input wire is
+ordinary too: `k(•, Int)` is a hom-object between stacks, and `•` is a
+stack.
 
 **A model may still declare a strength, and one does.** A base stage
-whiskers in the base, but a **generator** does not: an entry slot like
+whiskers in the base, and a **generator** does not. An entry slot like
 `examples/prob.braid`'s `flip : • ⇒ k(Float, Bool)` is a carrier at a
 fixed width, and nothing in the base can widen a carrier. A Markov
 category is exactly a theory with such generators, so `Prob` declares
@@ -2598,62 +2561,58 @@ under : k(a, b) =Recursive> k(c a, c b)
 One wire `c` rides **under** the kernel's domain. There is no pairing
 in that signature and nothing to unpack: over stacks the strength is
 whiskering, and whiskering is concatenation. `c` is a wire rather than a
-stack because a stack variable can only sit in tail position — `c a` is
-spellable and `a c` is a splice — which is the rule every declaration in
-the language obeys (§5). `under` is not a doctrine slot, so it is
-available under `in M` and ignored by transport, exactly like any other
-slot the doctrine does not name.
+stack because a stack variable can only sit in tail position, so `c a` is
+spellable and `a c` is a splice, which is the rule every declaration in the
+language obeys (§5). `under` is not a doctrine slot, so it is available
+under `in M` and ignored by transport, like any other slot the doctrine does
+not name.
 
-**`in M`: a morphism built by hand**. `with M`
-transports a base program into the category; some morphisms of the
-category are not the transport of any base program — a stateful circuit
-is the whole reason Arrows exist — and before this they were stranded,
-because treating a def as a word of `M` on the evidence of its inferred
-type is the sharpest edge in the language. `in M` is the written
-declaration instead:
+**`in M`: a morphism built by hand.** `with M` transports a base program
+into the category. Some morphisms of the category are not the transport of
+any base program, a stateful circuit being the reason Arrows exist, and
+treating a def as a word of `M` on the evidence of its inferred type would
+be guessing. `in M` is the written declaration instead:
 
 ```braid
 def sum0 in Circuits = 0 ; sumFrom      # • =Recursive> Circuit(Int, Int)
 def running with Circuits = sum0 ; dbl     # Int =Circuits Recursive> Int
 ```
 
-`in M` opens M's **vocabulary** — its slot words are in scope — and
-applies nothing. What the def *is* then follows from its arrow: one
-that builds **one carrier out of nothing**, `• ⇒ Circuit(a, b)`, is a
-morphism of the category and joins M's word table, so `with M` leaves it
-alone and composes it exactly like a transported one; one that does not
-is an ordinary base word written in M's words — an observation, a
-runner, a composite that exits. The *written header* is what makes the
-question askable at all: a def with no header that happens to produce a
-carrier is still not a word of M, so no inferred type is ever scanned
-for membership. A header that does neither — no carrier, and none of
-M's words used — is refused, because it did nothing.
+`in M` opens M's **vocabulary**, putting its slot words in scope, and
+applies nothing. What the def *is* then follows from its arrow. One that
+builds **one carrier out of nothing**, `• ⇒ Circuit(a, b)`, is a morphism of
+the category and joins M's word table, so `with M` leaves it alone and
+composes it like a transported one. One that does not is an ordinary base
+word written in M's words: an observation, a runner, a composite that exits.
+The *written header* is what makes the question askable at all. A def with
+no header that happens to produce a carrier is still not a word of M, so no
+inferred type is ever scanned for membership. A header that does neither, no
+carrier and none of M's words used, is refused, because it did nothing.
 
-`in M` **mints nothing**, so a hand-built word prints as the carrier
-it is, *unfolded*. That is the honest reading and it is the difference
-the receipt exists to record: `=Circuits>` says *this code went through
-the functor*, and `sum0` did not — claiming the label would claim
-membership in the functor's **image**, which is strictly stronger.
-Membership is carried by the carrier in the type and the entry in the
-word table; the composite `running`, which *was* transported, carries
-the label and folds.
+`in M` **mints nothing**, so a hand-built word prints as the carrier it is,
+*unfolded*. That is the difference the receipt exists to record.
+`=Circuits>` says *this code went through the functor*, and `sum0` did not;
+claiming the label would claim membership in the functor's **image**, which
+is strictly stronger. Membership is carried by the carrier in the type and
+the entry in the word table. The composite `running`, which *was*
+transported, carries the label and folds.
 
 **A transporting model declares a word of its own name** as well, so
 `[Circuits]` is an ordinary quote and `lift2 [Circuits]` applies the
 functor at run time. (It will always fall back: transport changes the
 program's type, and `lift2`'s witness is the program itself.) The word
-seeds with an identity carrier where the scope does not, which `leftId`
-is the law for. It embeds one stage at a time at one wire — all a
+seeds with an identity carrier where the scope does not, which `leftId` is
+the law for. It embeds one stage at a time at one wire, which is all a
 `Code ⇒ Code` word can promise without the widths the scope reads.
 
 **Sealed categories, for free.** A theory that declares no exit cannot
 be left: every stage is embedded and the only word that touches the
 accumulated carrier is the composition, which returns one. Code written
-in such a category can be consumed only by more code in it —
-abstract-type sealing falling out of the exit rule rather than being a
-feature. The honest limit: the carrier's own generated unroller is an
-ordinary base word and Braid has no export lists, so a model seals the
-*category*, not the *type*. `examples/circuits.braid` has both halves.
+in such a category can be consumed only by more code in it, so abstract-type
+sealing falls out of the exit rule rather than being a feature. The limit is
+that the carrier's own generated unroller is an ordinary base word and Braid
+has no export lists, so a model seals the *category* and not the *type*.
+`examples/circuits.braid` has both halves.
 
 Errors, at the `theory` line, the `model` line or the `with`: *slot
 `compose` is … but Doctrine declares it …*; *`in Doctrine` declares
@@ -2665,15 +2624,12 @@ it builds a carrier rather than being a program `embed` could embed*.
 A stage that does not cover the stack it is handed is refused by
 inference, in the base's own words, because that is what it is.
 
-**`transformation Len in ListMonoid ⇒ IntSum = len`** *(2026-09-13,
-shipped; spelled `morphism` until 2026-09-14, and `:` in place of `in`
-until 2026-09-16 — a transformation's head says which hom-set of
-Mod(T) it is a member of, which is membership, and `:` types a slot and
-nothing else)*.
-Two models of **one** theory, and a base word between their carriers.
-Its components are a **list**, so `,` separates them: `transformation
-Value in Fwd(Floats) ⇒ Floats = value, zeroTangent`, one word per
-theory parameter in order.
+**`transformation Len in ListMonoid ⇒ IntSum = len`** takes two models of
+**one** theory and a base word between their carriers. The head uses `in`
+because it says which hom-set of Mod(T) the transformation is a member of,
+which is membership, and `:` types a slot and nothing else. Its components
+are a **list**, so `,` separates them: `transformation Value in Fwd(Floats)
+⇒ Floats = value, zeroTangent`, one word per theory parameter in order.
 The claim is that the word is a **homomorphism**: for every slot
 `s : Σ ⇒ Θ`, the square
 
@@ -2689,93 +2645,84 @@ for composites paste from the squares for generators. The arrow is `⇒`
 because that is the arrow of every written type in Braid; `->` is only
 its ASCII synonym there.
 
-**Why `transformation`**. Two models of one theory are
-two functors out of the presented category, and a map between them with
-one component per object and a commuting square per generator is a
-**natural transformation** between those functors — the generated
-squares are naturality squares. `morphism` was correct only as "a
-morphism in the category of models", which is underspecified. "Natural"
-is implied: there is no other kind here, and the checker enforces it.
-For an algebraic theory the same thing is a homomorphism of models; for
-a theory over the `Doctrine` it is also an internal functor. The old
-keyword is refused with a pointer to the new one, as `instance` and
-`mode` are.
+**Why `transformation`.** Two models of one theory are two functors out of
+the presented category, and a map between them with one component per
+object and a commuting square per generator is a **natural transformation**
+between those functors; the generated squares are naturality squares.
+"Natural" is implied, because there is no other kind here and the checker
+enforces it. For an algebraic theory the same thing is a homomorphism of
+models, and for a theory over the `Doctrine` it is also an internal functor.
+The `morphism` keyword is refused with a pointer to this one, as `instance`
+and `mode` are.
 
 The declaration generates the squares and **decides** them, one of two
 ways:
 
-- **Proved** by `sameCode`, for every input and every interpretation of
-  the words — which reaches as far as the normalizer does. A square
-  that only passes the witness through is proved outright: `embed` and
-  `sample` in `Forget`, in `examples/transformations.braid`. One that
-  *applies* the witness is not, because a hom-object over stacks pins
-  its `Fn⟨ρ ⇒ σ⟩` to a whole stack per side and `ev` of an open wire has
-  no closed arity — which is where `compose` and `observe` go to the
-  samples, and it is the same wall `Len` stands at. Before 2026-09-16
-  the hom-object named one wire per side and all five proved; that is
-  what flat products cost, said out loud.
-- **Sampled**, at the theory's own evidence, when it is not: `sample`
-  supplies the inputs, an exit observes a result that is a carrier (a
-  carrier cannot be compared), `eq?` decides, and the check runs at
-  module start beside the model laws. `Len` above is this case — `len`
-  is a fold, and a fold applies its handler.
+- **Proved** by `sameCode`, for every input and every interpretation of the
+  words, which reaches as far as the normalizer does. A square that only
+  passes the witness through is proved outright, as `embed` and `sample` are
+  in `Forget` (`examples/transformations.braid`). One that *applies* the
+  witness is not, because a hom-object over stacks pins its `Fn⟨ρ ⇒ σ⟩` to a
+  whole stack per side and `ev` of an open wire has no closed arity. That is
+  where `compose` and `observe` go to the samples, and it is the same wall
+  `Len` stands at.
+- **Sampled**, at the theory's own evidence, when it is not proved. `sample`
+  supplies the inputs, an exit observes a result that is a carrier, since a
+  carrier cannot be compared, `eq?` decides, and the check runs at module
+  start beside the model laws. `Len` above is this case: `len` is a fold, and
+  a fold applies its handler.
 
-A square that neither proves nor samples is **refused**, naming the
-slot and the reason: *the square for slot 'op' does not decide —
-`sameCode` cannot prove it (ev of an open wire), and it cannot be
-sampled: the theory declares no `sample : • ⇒ a` to supply its inputs
-with. Add a `sample` slot to theory Mag, or state the square as a law of
-the theory.* A square that runs and comes out false names the slot too:
-*the square for slot 'unit' does not commute at the theory's samples*.
+A square that neither proves nor samples is **refused**, naming the slot and
+the reason: *the square for slot 'op' does not decide — `sameCode` cannot
+prove it (ev of an open wire), and it cannot be sampled: the theory declares
+no `sample : • ⇒ a` to supply its inputs with. Add a `sample` slot to theory
+Mag, or state the square as a law of the theory.* A square that runs and
+comes out false names the slot too: *the square for slot 'unit' does not
+commute at the theory's samples*.
 
-**`false` and a refusal are two answers, and both go to the evidence**
-. `sameCode` answering **false** means *different as
-programs of the free category*, which is a real answer about the free
-category and **not** an answer about the model: the model's words
-satisfy the theory's laws, and the normalizer has none of them.
-`Transpose`'s five sampled squares are exactly that case — the two sides
-are equal only up to the arithmetic of `fadd` and `fmul`, which are
-uninterpreted here. So a square the normalizer decided false is sampled,
-like a square it refused; a square it decided **false with no evidence
-behind it** is refused as WRONG, naming the slot: *the square for slot
-'pick' is FALSE — `sameCode` decides the two sides are different
-programs of the free category, and there is no evidence that could say
-otherwise*.
+**`false` and a refusal are two answers, and both go to the evidence.**
+`sameCode` answering **false** means *different as programs of the free
+category*, which is a real answer about the free category and not an answer
+about the model: the model's words satisfy the theory's laws, and the
+normalizer has none of them. `Transpose`'s five sampled squares are that
+case, with the two sides equal only up to the arithmetic of `fadd` and
+`fmul`, which are uninterpreted here. A square the normalizer decided false
+is therefore sampled, like a square it refused. A square it decided **false
+with no evidence behind it** is refused as WRONG, naming the slot: *the
+square for slot 'pick' is FALSE — `sameCode` decides the two sides are
+different programs of the free category, and there is no evidence that could
+say otherwise*.
 
-**The exit is applied whatever the parameter's kind**.
-A sampled square compares two results, and when the result is the
-carrier it compares them **through the theory's exit** — the slot
-taking one carrier and handing back base. Until this date that was done
-only for a hom-object parameter; a **wire** parameter was compared
-directly, on the reasoning that `eq?` reaches an ordinary type. It
-does — but an ordinary type may HOLD a quotation
-(`data Rev = Float Fn⟨Float ⇒ Grad⟩`), and `eq?` on a quotation is
-syntactic, so two extensionally equal continuations built by different
-code answer `false` and a square that commutes is reported as not
-commuting. `examples/autodiff.braid`'s `transformation Transpose in Fwd ⇒ Rev`
-is the declaration that was refused that way and is declared now. Two
-consequences, both worth knowing before declaring one:
+**The exit is applied whatever the parameter's kind.** A sampled square
+compares two results, and when the result is the carrier it compares them
+**through the theory's exit**, the slot taking one carrier and handing back
+base. Comparing a **wire** parameter directly would rest on `eq?` reaching an
+ordinary type. It does, but an ordinary type may HOLD a quotation
+(`data Rev = Float Fn⟨Float ⇒ Grad⟩`), and `eq?` on a quotation is syntactic,
+so two extensionally equal continuations built by different code answer
+`false` and a square that commutes is reported as not commuting.
+`examples/autodiff.braid`'s `transformation Transpose in Fwd ⇒ Rev` is the
+declaration that needs the exit. Two consequences follow, both worth knowing
+before declaring one:
 
-- **A theory with no exit still compares carriers directly** — there is
-  nothing else to compare them with — and a failure says so: *the two
-  carriers were compared with `eq?` directly, since the theory declares
-  no exit: if the carrier holds a function, `eq?` is syntactic —
-  declare an exit `observe` in the theory*.
-- **A sampled square establishes its claim AT THE EXIT.** `Transpose`'s
-  exit is the value, so what its five sampled squares check is that
-  forward and reverse agree on the value; the gradient is read by a
-  word outside the theory (the exit problem, below).
+- **A theory with no exit still compares carriers directly**, there being
+  nothing else to compare them with, and a failure says so: *the two carriers
+  were compared with `eq?` directly, since the theory declares no exit: if
+  the carrier holds a function, `eq?` is syntactic — declare an exit
+  `observe` in the theory*.
+- **A sampled square establishes its claim AT THE EXIT.** `Transpose`'s exit
+  is the value, so its five sampled squares check that forward and reverse
+  agree on the value. The gradient is read by a word outside the theory (the
+  exit problem, below).
 
-**A square the normalizer PROVED is not sampled again**.
-The sampled law is generated before the verdict is in, so a proved
-square used to run one too — harmlessly, until the exit change gave a
-strength slot (whose output is the hom-object at a *wider* pair of
-stacks, which no exit fits) a law that weighed two carriers. Proof
-outranks evidence.
+**A square the normalizer PROVED is not sampled again.** The sampled law is
+generated before the verdict is in. Proof outranks evidence, which matters
+for a strength slot: its output is the hom-object at a *wider* pair of
+stacks, and no exit fits that, so a law weighing two carriers would have
+nothing to weigh them with.
 
-**`:transformations`** lists every transformation in scope — own and
-imported —
-with the verdict on each square, read off the module rather than
+**`:transformations`** lists every transformation in scope, own and
+imported, with the verdict on each square, read off the module rather than
 decided again:
 
 ```text
@@ -2786,11 +2733,11 @@ Transpose : Fwd ⇒ Rev
   lit      proved
 ```
 
-`proved` is `sameCode`, for every input; `sampled (n points; why)` is
-the theory's evidence at the n inputs `sample` supplied, and `why` is
-what the normalizer said instead of *true* — either `differ in the free
-category` (it decided **false**, and the model's laws are what the free
-category lacks) or its refusal in a few words (`ev of an open wire`,
+`proved` is `sameCode`, for every input. `sampled (n points; why)` is the
+theory's evidence at the n inputs `sample` supplied, and `why` is what the
+normalizer said instead of *true*: either `differ in the free category`,
+meaning it decided **false** and the model's laws are what the free category
+lacks, or its refusal in a few words (`ev of an open wire`,
 ``` `pack` has no closed arity ```, `case split under eta`, `nested past
 3 levels`). A square with no inputs and nothing to say reads just
 `sampled`. `:doc <name>` puts the same verdicts on one line under the
@@ -2799,19 +2746,18 @@ component's type.
 The component is an ordinary **word** under the transformation's own
 name,
 forward-declared at the type the two model heads wrote
-(`List(Int) ⇒ Int`), so a def may use it wherever it sits — and then
-typed like any def, which may be more general (`Len : List(a) ⇒ Int`,
-since `len` counts anything). `with Len` (reading a
-template through one model and landing in another) is **not** shipped:
-it wants a second elaboration of the template, and nothing has asked
-for it yet.
+(`List(Int) ⇒ Int`), so a def may use it wherever it sits. It is then typed
+like any def, which may be more general (`Len : List(a) ⇒ Int`, since `len`
+counts anything). `with Len`, reading a template through one model and
+landing in another, is not present: it wants a second elaboration of the
+template, and nothing has asked for it.
 
-**An exit whose result varies by model is a theory parameter**
-. An exit is a slot (`observe : a ⇒ Float`), so it has ONE
-type for every model — and a gradient does not: forward mode hands back
-a tangent `Float`, reverse mode a whole `Grad`. The answer is not a slot
-whose type varies with the model, which is not what a slot is; it is
-that the exit's **result type** is a parameter the model instantiates:
+**An exit whose result varies by model is a theory parameter.** An exit is a
+slot (`observe : a ⇒ Float`), so it has ONE type for every model, and a
+gradient does not: forward mode hands back a tangent `Float` and reverse mode
+a whole `Grad`. A slot whose type varies with the model is not a slot. The
+answer is that the exit's **result type** is a parameter the model
+instantiates:
 
 ```braid
 theory Smooth(a, g) =
@@ -2824,13 +2770,13 @@ model Fwd in Smooth(Dual, Float)
 model Rev in Smooth(Rev, Grad)
 ```
 
-A wire parameter used only in an exit's output types reaches nothing
-else: it is instantiated per model and that is all.
+A wire parameter used only in an exit's output types reaches nothing else:
+it is instantiated per model, and that is all.
 
-**One component per parameter**. A component of
-`transformation T in M ⇒ N` is a word on **one** of the theory's
-parameters, and `gradient : a ⇒ g` has its two ends at *different* ones
-— so a square like that cannot be drawn with a single component. A
+**One component per parameter.** A component of
+`transformation T in M ⇒ N` is a word on **one** of the theory's parameters,
+and `gradient : a ⇒ g` has its two ends at *different* ones, so a square
+like that cannot be drawn with a single component. A
 natural transformation between models of a theory with n parameters is
 n components, written in the theory's order:
 
