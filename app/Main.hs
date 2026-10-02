@@ -548,7 +548,10 @@ handleLine st line =
              \`:import` that, so the CSV resolves against the file"
     Right _           -> report "one definition per line, please"
   where
-    report err = putStrLn ("error: " ++ err) >> pure st
+    -- A LOCATED refusal is resolved here, as it is on the `:t` path: a
+    -- typed line is one line, so the location says nothing and is
+    -- dropped, and a multi-line entry keeps `line N` (2026-10-02).
+    report err = putStrLn ("error: " ++ locFor [] line err) >> pure st
 
     -- `model R in Doctrine = rhs`: the wire, AND the model its
     -- declaration generates.  Checked as a one-line module so a session
