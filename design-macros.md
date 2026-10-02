@@ -5375,3 +5375,60 @@ questions. The primitive count is of words **source can name**, and
 the whole of its guard. The generator count is of what the free
 category needs. MANUAL §9 and the README now say which count they are
 giving.
+
+## Amendment (2026-10-02): qualified import landed as the renaming it was always going to be
+
+The 2026-09-09 note left qualified import as a continuation and said
+why: the renaming functor already exists, so namespacing has to be model
+renaming at file scope and never a second implementation. That is what
+shipped. `import "f.braid" as F` is the inclusion composed with one
+table, in the shape `renameWordsT` takes, and every name the file
+provides is rewritten where the file writes it.
+
+**The separator is `/`, not `.`.** The note wrote `G.f`, which the lexer
+cannot give: `.` is the SYMBOL prefix, so `.dup` is a symbol and
+`F.name` reads as `F` followed by the symbol `.name`. Of what is left,
+`:` types a slot and heads a REPL command, and `@` is the compiler's own
+namespace, refused wherever source is walked. `/` is already an
+identifier character, so `F/says` lexed as one identifier before this
+change and lexes as one after and the lexer did not move; it is written
+nowhere else in the language, because division is `div` and `fdiv`; and
+it reads as a path into a module, spelled with the character the
+import's own path uses.
+
+**The receipt carries the qualified name**, `=F/Ints>`. A receipt is a
+label a scope minted, so the question is which scope. Two prefixes on
+one file are two scopes presenting two models of the same shape, and a
+manifest that said `=Ints>` for both could not say which one an arrow
+went through. It also falls out rather than being arranged: the model is
+named `F/Ints`, and `with` mints the name it finds.
+
+**A slot name is not qualified**, because it is the theory's rather than
+the module's. `with F/Loud = emit` renames `emit` to `F/Loud@emit`,
+which is the same renaming functor doing its own job one level down.
+
+**A derived name stays inside the scope.** `un` of `F/Pair` is
+`F/unPair`, never `unF/Pair`, and the same rule gives `F/mergeShape`,
+`F/foldShape`, `F/loadTrades` and `F/headerTrades`. One function states
+it and every generated name goes through it, which is the whole of what
+a prefix costs the rest of the compiler: nothing downstream asks whether
+a name has a prefix.
+
+**One deviation from the note.** The renaming is applied to the
+declaration TEXT an import includes, not to parsed `Term`s. The pipeline
+is textual — the loader assembles source and the checker parses the
+composite — and a prefix has to reach type references inside a `data`
+body and inside a theory's slot signatures, which are text wherever the
+renaming runs. So the scan is over the text, a word at a time, by the
+LEXER's own `isIdentChar`: "what a word is" has one definition, shared
+between the lexer and the renaming, which is the part of "never a second
+implementation" that was load-bearing. `renameWordsT` is the same table's
+action on a `Term` and is untouched.
+
+**Two renamings of one file are two copies** with disjoint names, and
+both are included; one prefix on one file is one inclusion, so a diamond
+is still a diamond. A qualified import may sit beside an unqualified one.
+
+**The second continuation stands.** Importing through a functor
+(`import "rules.braid" with Traced`) is still a functor applied to a
+whole presentation, and still not in.

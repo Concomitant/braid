@@ -31,7 +31,7 @@ the current stack is rejected with a message naming the stack.
 
 ## 2. Lexical structure
 
-*Last changed 2026-09-20.*
+*Last changed 2026-10-02.*
 
 | syntax | meaning |
 |---|---|
@@ -58,11 +58,14 @@ the current stack is rejected with a message naming the stack.
 | `=Log>` , `=IO Log Counter>` | display only: an arrow threading resource wires, manifest included (§3, §8) |
 | `=Traced>` | a scope's receipt: minted by `with Traced`, or by `with IntSum`, or by any other `with`, and never written (§3, §12) |
 | `=Circuits>` | a transporting model's receipt: the same, with a CARRIER the display folds (§3, §8) |
-| `import "f.braid"` | include another file's declarations (§8) |
+| `import "f.braid"` , `import "f.braid" as F` | include another file's declarations, bare or under a prefix (§8) |
 | `table T = "f.csv"` | a CSV's header declares a type: the row type, its header word and its loader (§8) |
 
 Identifiers are any run of characters not in the punctuation set, so
-`odd?`, `f'`, `+` and `*` are all ordinary names. Blank lines collapse.
+`odd?`, `f'`, `+` and `*` are all ordinary names. `/` is in no other
+construct, which is what makes it the **qualified-name** separator: a
+name an `as` import placed in a scope is written `F/says`, and it lexes
+as one identifier like any other (§8). Blank lines collapse.
 
 **A newline is a strict `>>`.** Two things absorb one:
 
@@ -1177,7 +1180,7 @@ design: the row form on the right is always available.
 
 ## 8. Definitions, types, modules
 
-*Last changed 2026-09-21.*
+*Last changed 2026-10-02.*
 
 Every head reads the same way. A def is
 `def NAME [in T] [with M …] = body`. A theory extending another is
@@ -2994,7 +2997,7 @@ and a written `def` may not.
 `examples/dictionary.braid` runs all of this. `:defs` in a session lists the
 words it declared, and `typeOfWord` answers about them like any other.
 
-### Modules: `import "path.braid"`
+### Modules: `import "path.braid"`, and `as F`
 
 One file's declarations in another file's scope, written as a
 declaration line and resolved before anything is checked:
@@ -3002,6 +3005,7 @@ declaration line and resolved before anything is checked:
 ```braid
 import "geometry.braid"
 import "lib/shapes.braid"      # relative to THIS file's directory
+import "frame.braid" as F      # every name it provides, as F/name
 ```
 
 What travels is **declarations**: defs, `type` and `data`, `theory`,
@@ -3014,9 +3018,9 @@ its own.
 The rules are all one rule. An import is the **inclusion** of one module's
 presentation into another, so objects are added and never merged:
 
-- **A clash is an error**, naming both files: *in `b.braid`: `poly` is
-  already defined in `a.braid`*. There is no namespacing and no `as` in
-  this version; two files that both want the name have to settle it.
+- **A clash is an error**, naming both lines: *`poly` is already
+  defined in `a.braid:12`*. Two files that both want one name settle it
+  by renaming, or one of them is imported `as` a prefix.
 - **A file is included once**, however many routes reach it. A diamond
   (`a` imports `b` and `c`, both of which import `util`) is not a
   duplicate-definition error.
@@ -3035,14 +3039,52 @@ composite is checked as a single module, which is also why a `theory`
 declared in one file and its `model` in another work. See
 `examples/imports.braid`.
 
+**`as F` qualifies the import.** A **qualified name** is `F/name`: the
+prefix names the scope the file's declarations were placed in, and `/` is
+the separator because it appears in no other construct, so `F/says` lexes
+as one identifier (§2). A qualified import is the inclusion composed with
+the **renaming** `with M` already applies to a model's slot names, so
+nothing downstream asks whether a name has a prefix.
+
+Everything a file provides is qualified: defs, `type` and `data` with
+their constructors, un-constructors and field words, `theory`, `model`,
+`functor`, `transformation`, `table` with its row type and its two words,
+and the keywords a `keyword` line bound. A destructuring pattern writes
+the qualified constructor, `F/Pair(x, y)`. A **derived** name stays
+inside the scope: `un` of `F/Pair` is `F/unPair`, never `unF/Pair`.
+
+A **slot name is not** qualified, because a slot name is the theory's
+rather than the module's: `with F/Loud` is what says which model `emit`
+means, and `F/Loud@emit` is what the elaborator renames it to.
+
+A `with` of a qualified model mints a qualified **receipt**, `=F/Ints>`.
+A receipt is a label a scope minted, two prefixes are two scopes, and the
+manifest says which one. A resource's carrier is qualified with it, so
+`with F/Log` threads an `F/Log` wire and `F/unLog` opens it; routing is
+inferred from the carrier and needs no header either way.
+
+Two prefixes of one file are two renamings, so they are two copies with
+disjoint names and both are included; a file imported once under one
+prefix is included once, which is what keeps a diamond a diamond. A
+qualified import may sit beside an unqualified one. An unqualified use of
+a name that is only in scope qualified names the fix:
+
+```text
+Unknown primitive: says.  `says` is `F/says` here: it was imported as F
+```
+
+A prefix is capitalized, because it names a scope the way a theory or a
+model does. `examples/prob.braid` imports the frame library this way, and
+keeps a `says` of its own.
+
 Reading the file is the **loader's** IO, at the same boundary that reads the
 program you ran. Elaboration sees only parsed declarations and stays pure. A
 module checked without a file context, such as a REPL line or an embedded
 source string, has nothing to resolve an import against and says so.
 
-In a session, `:import "path.braid"` does the same thing, and is the only way
-a session gets a `theory`, a `model` or a `functor`, since it cannot declare
-one:
+In a session, `:import "path.braid"` does the same thing, `as F` and all,
+and is the only way a session gets a `theory`, a `model` or a `functor`,
+since it cannot declare one:
 
 ```text
 braid> :import "examples/traced.braid"
@@ -4250,7 +4292,7 @@ by the witness rule above (§9, `design-indices.md`).
 
 ## 14. Sharp edges (things the checker will teach you)
 
-*Last changed 2026-09-21.*
+*Last changed 2026-10-02.*
 
 **Every refusal says where, and most say which rule.** A refusal from a file
 reads `path:line`, plus `, in def X` when it is inside one. A main program
@@ -4288,10 +4330,12 @@ because a clash is two places to open:
 test/imports/clash.braid:2: `double` is already defined in test/imports/util.braid:7
 ```
 
-**Seven shapes also carry a one-line hint** naming the rule and the fix. Each
-fires only on something the checker can read in the source, and says "usually"
-where it is a guess. Each is marked ✦ in the catalogue below, and a ✦ in the
-list of edges after it points back at one of the same seven.
+**Eight shapes also carry a one-line hint** naming the rule and the fix.
+Seven fire on something the checker can read in the source, and say
+"usually" where it is a guess; the eighth reads the scope instead, and
+names the prefix a qualified import put a name behind. Each is marked ✦ in
+the catalogue below, and a ✦ in the list of edges after it points back at
+one of the same eight.
 
 This section is a **catalogue**, kept as reference, so entries are corrected in
 place rather than dated one by one.
@@ -4383,7 +4427,9 @@ place rather than dated one by one.
   one of the two and the compiler will not guess (§5).
 - **`Unknown primitive: n`** — a name nothing in scope defines, named
   at the stage that writes it. A def is in scope from its own line
-  down, so a call above its definition is this message.
+  down, so a call above its definition is this message. ✦ If the name is
+  in scope **qualified**, the hint says so and names the prefix: *`says`
+  is `F/says` here: it was imported as F* (§8).
 - **``` `X` refers to itself: write `with Recursive` in its header ```**
   — recursion is a **marker**. The same message with *(`recurse` named the
   definition being written)* is the word `recurse` used outside any
@@ -4863,6 +4909,13 @@ place rather than dated one by one.
   *the compiler's spelling of a table's insides: a `table` generates
   `loadTrades` and `headerTrades`, and those are the only words it puts
   in scope*.
+- **An `import` refuses five things**, each naming the fix. The path must
+  be a quoted string and the line must end there, or carry one `as`
+  clause (*Malformed import …*); the file must be there (*import: no such
+  file …*, naming both places looked); a cycle names the path that closes
+  it; and a clash names both lines. An `as` prefix is one capitalized
+  word, because it names a scope: *`lower` is not capitalized: a prefix
+  names a SCOPE, like a theory or a model* (§8).
 - A resource is **nominal**: structural shapes never fold into one.
   `model GameState in Doctrine = Int Int` leaves `swap : a0 a1 ⇒ a1 a0` exactly
   as it was, and only a genuine rolled `GameState` wire ever displays

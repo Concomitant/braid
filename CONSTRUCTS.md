@@ -45,6 +45,8 @@ terms.
 | `functor F = <graph morphism>` | a functor out of the free category of programs, given by ONE IMAGE PER GENERATOR (`• ⇒ Fn⟨Stage ⇒ Code⟩`) — plus its extension as a word `F : Code ⇒ Code`, so `[F]` and `lift2 [F]` are the same functor as a value | nothing | nothing | `checkFunctorWord`, once at the declaration and again at the first `with F` (a graph morphism, pure, defined by then) | `traced`, `metered`, `optimizer` |
 | `model R in Doctrine = Ty` | a wire the elaborator threads — **and a model of the Doctrine**, which is why it is a `model` head: the carrier `data R@k(a..., b...) = Fn⟨R a ⇒ R b⟩`, the theory `R@t` (`compose` and `embed` only), and `model R in R@t(R@k)`. The body is a STACK, which is what tells this head from a table | nothing | nothing | the `data` machinery, `transportOf` (the model's shape), and the routing pass (`elabScope`), which is that model's fused evaluator | `resources`, `metered`, `payroll`, `lifting`, `prob`, `autodiff` |
 | `table N(cols) = "f.csv"` | a data type, a loader and a header word, read from a CSV **at check time** | nothing | nothing | `parseTableLine`, `tableBlock` (the file, the header, the column types) | `frame` |
+| `import "f.braid"` | another file's declarations, in this file's scope: the **inclusion** of one presentation into another, so objects are added and a clash names both lines | nothing | nothing | `loadWith` (the path, the cycle, the clash), then the composite is one module | `imports`, `prob` |
+| `import "f.braid" as F` | the same inclusion composed with a **renaming**: every name the file provides is `F/name`, derived names included (`F/unPair`), slot names excluded (they are the theory's) | nothing | a `with` of a qualified model mints a qualified receipt, `=F/Ints>` | `qualifyTable` (the names the file provides), `qualifySource` (the renaming) | `prob`, `test/imports/qualified` |
 | `def f = body` | a word | nothing | nothing | inference | all |
 | `def f in T = body` (T a theory) | a **template**: a morphism of `T`, waiting for a model | nothing | nothing | recorded, not defined; `expandTemplates` checks it at the call | `theories`, `build`, `autodiff`, `prob`, `resources`, `transformations` |
 | `def f in K = body` (K a model with a carrier) | a **hand-built morphism** of the category `K` presents | nothing | nothing | `inTarget` (the name's kind), `checkKWordShape` (the arrow) | `circuits`, `reified`, `frame`, `prob`, `lifting`, `transformations` |
@@ -963,7 +965,7 @@ morphism.
 | `model` | `modelW` | `Str Str =Dict> •` | the bindings, and the head — **including a resource**, `model Log in Doctrine = Str`, whose body is a stack |
 | `transformation` | `transformationW` | `Str Str =Dict> •` | the components, and the head |
 | `functor` | `functorW` | `Str Str =Dict> •` | the graph morphism, and the name |
-| `import` | `importW` | `Str =Dict IO> •` | `import "u.braid"` ≡ `"u.braid" importW` |
+| `import` | `importW` | `Str =Dict IO> •` | `import "u.braid"` ≡ `"u.braid" importW`; the head carries an `as F` clause when there is one |
 | `table` | `tableW` | `Str Str =Dict IO> •` | the path, and the head |
 | `keyword` | `keywordW` | `Str Str =Dict> •` | `keyword test = testW` ≡ `"testW" "test" keywordW` |
 | *(none, until bound)* | `testW` | `Code Str =Dict> •` | a registered check, run at module start |

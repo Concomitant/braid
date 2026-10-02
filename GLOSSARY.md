@@ -113,6 +113,14 @@ membership in it.
 beside any other arrow without contributing a label, and is what a
 written `Fn⟨Σ ⇒ Θ⟩` demands of the quotation that fills it.
 
+**qualified name** (§2, §8). `F/says`: a name an `as` import placed in the
+scope `F`. The separator is `/`, which appears in no other construct, so a
+qualified name lexes as one identifier. A qualified import is the
+inclusion composed with the renaming `with M` applies to slot names, so
+nothing downstream asks whether a name has a prefix. A **derived** name
+stays inside the scope: `un` of `F/Pair` is `F/unPair`. A slot name is
+never qualified, because it is the theory's rather than the module's.
+
 **receipt** (§3, §12). The label a `with` scope mints on the manifest of
 everything it elaborated. A receipt says this scope **changed** this
 code, so a scope that found nothing to rewrite mints nothing: a model

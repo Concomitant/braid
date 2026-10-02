@@ -12,6 +12,11 @@
 # program; a library's demo is its own business.  Nothing here needed
 # machinery of its own, because an import is textual: the composite is
 # checked as one module.
+#
+# `import "f.braid" as F` puts every name the file provides in the `F`
+# scope instead, so a library's private helper cannot land on yours
+# (MANUAL 8).  `examples/prob.braid` imports the frame library that way;
+# `test/imports/qualified.braid` is one file doing both.
 
 import "traced.braid"
 
