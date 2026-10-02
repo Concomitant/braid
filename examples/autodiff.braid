@@ -2,8 +2,8 @@
 #
 # The thesis (Elliott, *The simple essence of automatic
 # differentiation*; READING): differentiation is a FUNCTOR into pairs
-# of a value and a LINEAR MAP — D(f)(x) = (f x, f'(x)·—) — and it is a
-# functor because the chain rule says exactly that composition goes to
+# of a value and a LINEAR MAP, `D(f)(x) = (f x, f'(x)·-)`, and it is a
+# functor because the chain rule says that composition goes to
 # composition.  A model of a theory in Braid IS a functor out of the
 # free category on the theory's generators.  So: write the arithmetic
 # as a THEORY, write differentiation as a MODEL of it, and the chain
@@ -19,7 +19,7 @@
 # TWICE and §6 prints second derivatives.  Forward and reverse are
 # not two algorithms here; they are two REPRESENTATIONS of one linear
 # map, and `transformation Transpose : Fwd ⇒ Rev` is the sentence that
-# says so — §8 declares it, and records which of its squares the
+# says so.  §8 declares it, and records which of its squares the
 # normalizer proves and which the theory's samples decide.  A fourth
 # model in §9 threads the adjoint through a resource.
 #
@@ -34,36 +34,35 @@
 # `sample` is the evidence a parametric law runs on (a law cannot
 # invent a value of `a`).  `observe` is an EXIT: a slot that takes the
 # carrier and hands back base, so a law can compare results.  Every law
-# below is stated at `observe`, because two carriers cannot be compared
-# — `Rev`'s carrier holds a closure.
+# below is stated at `observe`, because two carriers cannot be compared:
+# `Rev`'s carrier holds a closure.
 #
 # `gradient` is the OTHER exit, and the reason the theory has two
 # parameters.  An exit's result is what the model hands back, and for a
 # gradient that is not one type: `Fwd` hands back a tangent `Float`,
 # `Rev` a whole `Grad`.  A slot has ONE type for every model, so the
-# result type is a THEORY PARAMETER the model instantiates — `gradient
-# : a ⇒ g`, with `Smooth(Float, Float)`, `Smooth(Dual(a), a)` and
-# `Smooth(Rev, Grad)`.  That is the general rule: an exit whose result
-# varies by model is a theory parameter (§8 shows what it buys —
-# `Transpose`'s gradient half becomes a square like any other).
+# result type is a THEORY PARAMETER the model instantiates:
+# `gradient : a ⇒ g`, with `Smooth(Float, Float)`, `Smooth(Dual(a), a)`
+# and `Smooth(Rev, Grad)`.  That is the general rule, an exit whose
+# result varies by model is a theory parameter, and §8 shows what it
+# buys: `Transpose`'s gradient half becomes a square like any other.
 #
 # THERE IS NO `cos` GENERATOR, AND THE THEORY IS STILL CLOSED UNDER
-# DIFFERENTIATION (2026-09-16).  A theory a family like `Fwd` can be
-# built over must be able to WRITE each generator's derivative in its
-# own vocabulary: d(exp x) is `exp`, and d(sin x) is the cosine.  The
-# cosine is not a second generator — it is this theory's own sine, a
-# quarter turn along:
+# DIFFERENTIATION.  A theory a family like `Fwd` can be built over must
+# be able to WRITE each generator's derivative in its own vocabulary:
+# d(exp x) is `exp`, and d(sin x) is the cosine.  The cosine is not a
+# second generator; it is this theory's own sine, a quarter turn along:
 #
 #     cos x = sin(x + π/2)
 #
 # which is `cosOf` below, an ordinary TEMPLATE over `Smooth`.  A
-# generator is a thing a model must be asked to supply; a definable
-# word is not one, and `cos` was definable all along.  So `Smooth` has
-# nine slots and every model has one binding fewer to get wrong.
+# generator is a thing a model must be asked to supply, and a definable
+# word is not one.  `Smooth` therefore has nine slots and every model
+# has one binding fewer to get wrong.
 #
-# `Smooth` is NOT declared `in Doctrine`.  The doctrine's carrier is
-# a hom-object `k(a, b)` — a category of arrows — and this is an
-# algebraic theory over ONE carrier: a ring.  Elliott's functor is
+# `Smooth` is NOT declared `in Doctrine`.  The doctrine's carrier is a
+# hom-object `k(a, b)`, a category of arrows, and this is an algebraic
+# theory over ONE carrier: a ring.  Elliott's functor is
 # between categories; a model of an algebraic theory is the same
 # statement one level down, on the free category its generators
 # present.

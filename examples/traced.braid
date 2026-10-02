@@ -75,7 +75,7 @@ quoted ; getCode ; unparse ; print      # with@Ticked >> dup >> "tick" pass …
 #   def peek = [dup ... ; print ...] ; getCode
 #   def peeked = peek ... ; interpose
 #   functor Peeked = peeked
-#   def bad = use Peeked ; dup ; +
+#   def bad with Peeked = dup ; +
 # interpose: `dup pass >> print pass` is a0 ρ0 =IO> a0 ρ0, which reads a
 # wire; a stage inserted at every cut must be ρ ⇒ ρ, or E ρ ⇒ E ρ for
 # resource wires E routed beneath the whole scope

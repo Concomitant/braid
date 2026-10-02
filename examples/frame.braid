@@ -1,39 +1,39 @@
 # A DATA FRAME, as a model of the Doctrine.
 #
 # The thesis: you should never write a loop over rows.  You write a
-# program on ONE ROW — a stack of scalars, ordinary Braid — and a MODEL
+# program on ONE ROW, a stack of scalars in ordinary Braid, and a MODEL
 # lifts it to the whole frame.  `List` appears nowhere in the row
 # programs below.  What does the lifting is `with Frame`, and `Frame` is
 # a model of the same `Doctrine` that `examples/circuits.braid` models:
 # hom-object a FUNCTION BETWEEN COLUMNS, `embed` = `map`, `compose` =
 # composition.  A row program of any width transports, because the
-# hom-object's two arguments are whole STACKS — "the other columns ride
-# past" is what the base's own `...` already means, and since
-# 2026-09-16 there is no strength slot saying it again.
+# hom-object's two arguments are whole STACKS.  "The other columns ride
+# past" is what the base's own `...` already means, so there is no
+# strength slot saying it again.
 #
 # So the functor laws of `map` are not something this file promises.
 # They are the doctrine's seven arrow laws, and the audit runs them
 # before anything below prints.
 #
-# WHAT IS A FRAME, exactly.  A frame is a map from an INDEX to a row —
+# WHAT IS A FRAME, exactly.  A frame is a map from an INDEX to a row,
 # `Fn⟨I ⇒ row⟩` together with its key set.  This file represents it as
 # `List(row)` with an IMPLICIT POSITIONAL INDEX: row i is the i-th
 # element, the key set is `0 … n−1`, and `Fin(n) ⇒ row` stored
-# tabulated and flat is exactly what a list is here (MANUAL §5, §13).
-# The reading matters even though it is implicit, because it is what
-# says WHY the model is a functor: `map` preserves the index pointwise,
-# so a transported row program cannot move a row, cannot drop one, and
-# cannot see its neighbours.  Every operation that does any of those —
-# `keep`, `groupBy`, `sortBy`, `join`, the aggregations — is written
-# ONCE, at frame level, outside the scope.  A functor cannot drop rows;
-# that is the whole division of labour in this file.
+# tabulated and flat is what a list is here (MANUAL §5, §13).  The
+# reading matters even though it is implicit, because it says WHY the
+# model is a functor: `map` preserves the index pointwise, so a
+# transported row program cannot move a row, cannot drop one, and cannot
+# see its neighbours.  Every operation that does any of those, which is
+# `keep`, `groupBy`, `sortBy`, `join` and the aggregations, is written
+# ONCE, at frame level, outside the scope.  A functor cannot drop rows,
+# and that is the division of labour in this file.
 #
 # COLUMN NAMES ARE WORDS.  `data Trades = (sym: Str, px: Float, qty:
-# Int)` generates `sym`, `px` and `qty` as ordinary definitions
-# (2026-09-14, MANUAL §5).  Nothing in the type system knows a column
-# is called `px` — the header is runtime data, carried as a `List(Str)`
-# to the printer — and that is deliberate: a column name is a word, so
-# it composes, quotes and reflects like every other word.
+# Int)` generates `sym`, `px` and `qty` as ordinary definitions (MANUAL
+# §5).  Nothing in the type system records that a column is called `px`:
+# the header is runtime data, carried as a `List(Str)` to the printer.
+# That is deliberate, because a column name is a word, so it composes,
+# quotes and reflects like every other word.
 
 # ---------------------------------------------------------------------
 # 1. The carrier and the model
@@ -47,12 +47,12 @@
 # reason.
 
 ## `Col(ρ, σ)` is a function from the ρ-columns to the σ-columns, and
-## ρ and σ are STACKS (2026-09-16): a row program takes a whole row and
-## leaves a whole row.  The ROW STORE inside is a `List(Box(ρ))` — one
-## list of boxed rows — and NOT a stack of lists, which is the honest
-## reason this type is written the way it is: a stack of lists is the
-## non-injective column store (three columns of ten and ten columns of
-## three are the same stack of Ints) and it must not enter the type.
+## ρ and σ are STACKS: a row program takes a whole row and leaves a
+## whole row.  The ROW STORE inside is a `List(Box(ρ))`, one list of
+## boxed rows, and NOT a stack of lists, which is why this type is
+## written the way it is: a stack of lists is the non-injective column
+## store (three columns of ten and ten columns of three are the same
+## stack of Ints) and it must not enter the type.
 ## The box is a representation choice; `Col`'s arguments are the bare
 ## stacks, which is what the doctrine's `k(..., ...)` asks for.
 data Col(a..., b...) = Fn⟨List(Box(a)) =Recursive> List(Box(b))⟩

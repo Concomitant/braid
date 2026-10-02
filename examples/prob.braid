@@ -3,40 +3,40 @@
 # The thesis (Fritz, *A synthetic approach to Markov kernels,
 # conditional independence and theorems on sufficient statistics*;
 # READING): a Markov category is a monoidal category in which every
-# object carries a comonoid — every wire can be COPIED and DISCARDED —
-# and in which copying is NOT NATURAL.  That last clause is the whole
-# of probability.  Copy after a coin flip gives two EQUAL bits; two coin
-# flips give two INDEPENDENT bits; and a category where those two
+# object carries a comonoid, so every wire can be COPIED and DISCARDED,
+# and in which copying is NOT NATURAL.  That last clause is the whole of
+# probability.  Copy after a coin flip gives two EQUAL bits, two coin
+# flips give two INDEPENDENT bits, and a category where those two
 # programs agree is a category with no randomness in it.
 #
-# Braid's base is cartesian.  `dup` there IS natural — `examples/laws.braid`
-# has the normalizer PROVE `dup ; f f = f ; dup` for an arbitrary word,
-# which is exactly the statement that the base has no randomness.  A
-# model of the Doctrine whose hom-object is a STOCHASTIC MAP is a Markov
-# category, and `with Enum` is the functor from the deterministic world
-# into it.  The distinction is then drawn STRUCTURALLY, not by a
-# convention about what `flip` means:
+# Braid's base is cartesian, so `dup` there IS natural.
+# `examples/laws.braid` has the normalizer PROVE `dup ; f f = f ; dup`
+# for an arbitrary word, which is the statement that the base has no
+# randomness.  A model of the Doctrine whose hom-object is a STOCHASTIC
+# MAP is a Markov category, and `with Enum` is the functor from the
+# deterministic world into it.  The distinction is then drawn
+# STRUCTURALLY rather than by a convention about what `flip` means:
 #
-#     def twoEqual = use Enum ; half ; flip ; dup        # ONE flip, copied
-#     def twoIndep = use Enum ; twoBiases ; bothFlip     # TWO flips
+#     def twoEqualE with Enum = half ; flip ; dup        # ONE flip, copied
+#     def twoIndepE with Enum = twoBiases ; bothFlipE    # TWO flips
 #
 # and §6 prints the two distributions, which differ.  Nothing in the
 # file declares that they should.  `dup` is transported by the functor
-# and the functor is the model; the disagreement is what the model IS.
+# and the functor is the model, so the disagreement is what the model IS.
 #
-# THREE MODELS of one theory: `Enum` enumerates exactly (the finite
-# distribution monad's Kleisli category), `Sampler` threads a random
-# number RESOURCE and draws (a small LCG in Braid, so every number
-# below is reproducible), `Nondet` keeps only the SUPPORT — the
+# THREE MODELS of one theory.  `Enum` enumerates exactly, as the finite
+# distribution monad's Kleisli category.  `Sampler` threads a random
+# number RESOURCE and draws, with a small LCG in Braid, so every number
+# below is reproducible.  `Nondet` keeps only the SUPPORT: the
 # possibilistic Markov category, where a weight is a bit.  The
 # Doctrine's five category laws run for all three before anything prints.
 #
 # There is no `Code`, no `functor` and no `getCode` anywhere below.
 # Binders and destructuring throughout.
 #
-# The DataFrame library is this file's client: `import` below brings
+# The DataFrame library is this file's client.  `import` below brings
 # `groupBy`, `sumF`, `keep` and `printFrame` in, and every distribution
-# printed is a frame — outcome, weight — with the weights summed per
+# printed is a frame of outcome and weight, with the weights summed per
 # outcome by `groupBy`.  A posterior is a frame operation.
 
 import "frame.braid"

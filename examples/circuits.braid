@@ -1,4 +1,4 @@
-# Processes as data — and the Arrow interface, said once.
+# Processes as data, and the Arrow interface said once.
 #
 # `examples/arrows.braid` shows that Control.Arrow's INTERFACE is just
 # Braid's syntax: `arr f` is any pure program, `f >>> g` is `f ; g`,
@@ -11,42 +11,38 @@
 # Only IO is irreducible, and it is a GRADE on the arrow (`=IO>`) rather
 # than an arrow of its own (design-effects.md).
 #
-# What is genuinely left over is arrows that are PROCESSES: Yampa's
-# signal functions, Hughes' stream transducers, circuits. Those really
-# are a different category — and in Braid they are an ordinary
-# recursive data type whose composition is an ordinary word.
+# What is left over is arrows that are PROCESSES: Yampa's signal
+# functions, Hughes' stream transducers, circuits. Those are a different
+# category, and in Braid they are an ordinary recursive data type whose
+# composition is an ordinary word.
 #
-# ---- what changed (2026-09-09) --------------------------------------
-# This file used to end "nothing abstracts over the category; there is
-# no `Arrow` class here, because Braid has no higher kinds to write one
-# with." The second half was wrong, and the theory below is the
-# correction. A theory parameter may now be a type CONSTRUCTOR —
-# `theory Arrow(k(_, _))`, the arity written as underscores because a
-# bare name already means a wire and `...` already means a stack. `k`
-# is not a type and never reaches inference: it lives in the slot
+# ---- the theory abstracts over the category -------------------------
+# A theory parameter may be a type CONSTRUCTOR:
+# `theory Arrow(k(..., ...))`, with the arity written as marks because a
+# bare name already means a wire and `...` already means a stack.  `k`
+# is not a type and never reaches inference.  It lives in the slot
 # signatures, and the model head names a declared data type that is
-# substituted for it before any slot is checked. That is the ML-functor
-# move, not higher kinds — `Ty` still has no constructor variable, and
-# nothing is inferred or dispatched. Slots also carry their OWN
-# variables now (`a b c` below), each generalized per slot.
+# substituted for it before any slot is checked.  That is the ML-functor
+# move rather than higher kinds: `Ty` has no constructor variable, and
+# nothing is inferred or dispatched.  Slots carry their OWN variables
+# (`a b c` below), each generalized per slot.
 
-# ---- what changed (2026-09-16) --------------------------------------
-# The hom-object ranges over STACKS.  `data Circuit(a..., b...)` — a
-# parameter written with a trailing `...` is a whole stack — so a
-# circuit is a process on a whole SIDE of a diagram, not on one wire.
-# Three things went with the one-wire reading: the doctrine's pairing
-# parameter `p`, the `data Pair` this file declared to be it, and the
-# strength `first`.  A wide stage now embeds as itself.
+# ---- the hom-object ranges over STACKS ------------------------------
+# `data Circuit(a..., b...)` writes each parameter with a trailing `...`,
+# which makes it a whole stack, so a circuit is a process on a whole SIDE
+# of a diagram rather than on one wire.  A wide stage embeds as itself,
+# so the doctrine needs no pairing parameter, no `data Pair` to be it,
+# and no strength `first`.
 #
-# The step function's two stacks ride in a `Box` — the prelude's
-# anonymous product, `data Box(...) = (...)`.  That is a REPRESENTATION
-# choice and it stays inside the carrier: `Circuit(a, b)`'s arguments
-# are the stacks themselves, and `arrC`'s declared slot is
-# `Fn⟨a ⇒ b⟩ ⇒ k(a, b)` with no box in sight.  A codata carrier needs
-# the box because its step leaves the successor BESIDE the output, and
-# a passenger beside an OPEN stack is unwritable: `...` covers the top,
-# so nothing can be pushed above it (guide-open-arity.md, Rule 2).
-# `Frame`'s column store boxes its rows for the same reason.
+# The step function's two stacks ride in a `Box`, the prelude's anonymous
+# product `data Box(...) = (...)`.  That is a REPRESENTATION choice and
+# it stays inside the carrier: `Circuit(a, b)`'s arguments are the stacks
+# themselves, and `arrC`'s declared slot is `Fn⟨a ⇒ b⟩ ⇒ k(a, b)` with no
+# box in sight.  A codata carrier needs the box because its step leaves
+# the successor BESIDE the output, and a passenger beside an OPEN stack
+# is unwritable: `...` covers the top, so nothing can be pushed above it
+# (guide-open-arity.md, Rule 2).  `Frame`'s column store boxes its rows
+# for the same reason.
 data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
 
 # The step function is `=Recursive>`: every circuit below is written

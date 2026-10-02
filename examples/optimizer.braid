@@ -1,21 +1,20 @@
 # An optimizer you can audit.
 #
 # A rewrite is only safe if the word it puts IN is at least as general
-# as the word it takes OUT.  That property — `scheme(q) ≥ scheme(p)` —
-# is rank-2, so no `Fn` type can hold it and no call site can check it.
-# It is checked ONCE, where the binding is written, by the routine that
+# as the word it takes OUT.  That property, `scheme(q) ≥ scheme(p)`, is
+# rank-2, so no `Fn` type can hold it and no call site can check it.  It
+# is checked ONCE, where the binding is written, by the routine that
 # checks any model against its theory: `subsumes`.
 #
 #     unification blesses a call; subsumption blesses a rule.
 #
-# So an optimizer IS AN MODEL.  `Base` is the ambient presentation —
-# every word in scope, each with its own scheme as the slot's declared
-# type — and `model Opt : Base = …` is a PARTIAL model of it: the
-# generators it names get new images, and every generator it does not
-# name maps to itself.  It declares a word `Opt : Code ⇒ Code` for
-# runtime use, and `with Opt` renames and mints `=Opt>` on everything it
-# rewrote — which is what makes an optimizer auditable rather than
-# merely convenient.
+# So an optimizer IS A MODEL.  `Base` is the ambient presentation, every
+# word in scope with its own scheme as the slot's declared type, and
+# `model Opt in Base = …` is a PARTIAL model of it: the generators it
+# names get new images, and every generator it does not name maps to
+# itself.  It declares a word `Opt : Code ⇒ Code` for runtime use, and
+# `with Opt` renames and mints `=Opt>` on everything it rewrote, which is
+# what makes an optimizer auditable rather than merely convenient.
 
 # ---------------------------------------------------------------------
 # 1. Four words, pairwise interchangeable in four different ways.

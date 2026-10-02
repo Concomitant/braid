@@ -1,32 +1,31 @@
 # AN OBJECT MAP: a model that changes the TYPES, not just the words.
 #
-# A model is one construct — a presentation interpreted in a category,
-# given by an OBJECT MAP and an image for each generator — and until
-# now every model in Braid carried the identity object map and wrote
-# only the images.  `model Opt in Base = dupInt = dup` renames
-# generators; the wires keep their types.  This file writes the other
-# half.
+# A model is one construct: a presentation interpreted in a category,
+# given by an OBJECT MAP and an image for each generator.  Most models
+# carry the identity object map and write only the images, so
+# `model Opt in Base = dupInt = dup` renames generators and the wires
+# keep their types.  This file writes the other half.
 #
 #     model Mod in Base(Int ↦ Mod7 via reduce) = + = …, * = …
 #
 # `Int ↦ Mod7` is the map on OBJECTS: the substitution `Int := Mod7`,
-# applied structurally — under `List`, under a data type's arguments,
-# through an `Fn` arrow, along a stack.  It is a substitution and not a
-# type-level function, which is why it is principal: substitution
+# applied structurally under `List`, under a data type's arguments,
+# through an `Fn` arrow, and along a stack.  A substitution is principal
+# where a type-level function would not be, because substitution
 # commutes with unification, so a transported program has a principal
 # type for the same reason the original did.
 #
-# `via reduce` is the image of the LITERAL FAMILY.  Every literal of
-# the mapped type is a generator — there are infinitely many of them
-# and none of them is a word — so a table cannot name them and the head
-# does: under `with Mod`, `3` becomes `3 ; reduce`.
+# `via reduce` is the image of the LITERAL FAMILY.  Every literal of the
+# mapped type is a generator, there are infinitely many of them, and
+# none of them is a word, so a table cannot name them and the head does:
+# under `with Mod`, `3` becomes `3 ; reduce`.
 #
 # Everything else is the table, and the table may name ANY WORD, because
-# `Base`'s generators are every word in scope.  What makes this a stage
-# rather than a bigger table is the third rule: a word that MENTIONS the
-# mapped type and has no image is UNFOLDED — F(def) = F(body) —
-# transitively, and cached.  A word whose type never mentions `Int` is
-# left exactly as it was, because the functor is the identity off `Int`.
+# `Base`'s generators are every word in scope.  The third rule is what
+# makes this more than a bigger table: a word that MENTIONS the mapped
+# type and has no image is UNFOLDED, `F(def) = F(body)`, transitively
+# and cached.  A word whose type never mentions `Int` is left as it was,
+# because the functor is the identity off `Int`.
 
 # ---------------------------------------------------------------------
 # 1. The carrier, and the map on values
