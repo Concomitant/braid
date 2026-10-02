@@ -1,33 +1,34 @@
 # The constructs of Braid
 
-*A reference, not a history. Every claim here is checked against the
-shipped checker and the example that exercises it; the examples named
-run clean (`cabal run braid -- examples/<f>.braid`) and the test suite
-runs all of them.*
+*Last changed 2026-09-21.*
 
-Braid's **declaration layer** is small on purpose. Beside the type
-layer (`type`, `data`) there are **five declarations** — `theory`,
-`model`, `transformation`, `functor`, `table` — **one definition form**
-(`def`), and **two header clauses** that say what a definition is and
-what is applied to it (`in`, `with`). Everything else — templates,
-hand-built morphisms, families, receipts, resources, the Doctrine — is
-one of those read a particular way, and this document says which. One
-of the five is **sugar over the others**: a `table` writes a `data`
-declaration, and shows you what it wrote (`:doc`).
+A reference for the declaration layer. Every claim is checked against
+the checker and against the example that exercises it, and the test
+suite runs every example named here.
 
-A **resource** is not a sixth declaration and has not been one since
-2026-09-18: `model R in Doctrine = Ty` is a model like any other, told
-from the rest by its body being a STACK rather than a table of
-bindings, and `:doc R` prints the carrier, the theory and the model it
-wrote.
+Braid's **declaration layer** is small on purpose. Beside the type layer
+(`type`, `data`) there are **five declarations**, `theory`, `model`,
+`transformation`, `functor` and `table`; **one definition form**, `def`;
+and **two header clauses** that say what a definition is and what is
+applied to it, `in` and `with`. Templates, hand-built morphisms,
+families, receipts, resources and the Doctrine are each one of those read
+a particular way, and this document says which. One of the five is
+**sugar over the others**: a `table` writes a `data` declaration, and
+shows you what it wrote (`:doc`).
 
-Since 2026-09-17 there is a layer **beneath** all of them, and it
-changes nothing you write: each keyword names a **declaration word**,
-and a keyword line is parsed into a call of it (`def f = body` is
-`[body] "f" defW`). The surface is unchanged and the table of words is
-open. See "Beneath the keywords", below.
+A **resource** is not a sixth declaration. `model R in Doctrine = Ty` is
+a model like any other, told from the rest by its body being a STACK
+rather than a table of bindings, and `:doc R` prints the carrier, the
+theory and the model it wrote.
 
-Cross-references are to `MANUAL.md`.
+There is a layer **beneath** all of them, and it changes nothing you
+write: each keyword names a **declaration word**, and a keyword line is
+parsed into a call of it (`def f = body` is `[body] "f" defW`). The
+surface is unchanged and the table of words is open. See "Beneath the
+keywords", below.
+
+Cross-references are to `MANUAL.md`, and `GLOSSARY.md` defines the
+terms.
 
 ---
 
@@ -56,8 +57,8 @@ Cross-references are to `MANUAL.md`.
 ## `theory`
 
 **What it is.** A **presentation**: a set of generators with
-signatures, plus equations (laws). It names a category — the free
-category on those generators, modulo the laws — without naming any
+signatures, plus equations (laws). It names a category, the free
+category on those generators modulo the laws, without naming any
 particular one.
 
 **Syntax.**
@@ -69,24 +70,24 @@ theory NAME [ ( params ) ] [ in DOCTRINE ] =
     law name = <program>    # an equation, one per line
 ```
 
-The optional **base spelling** *(2026-09-21)* names the atom of the
-ambient presentation that IS this generator. The set of them determines
-a **wide subcategory** of the base, and that is the subcategory `embed`
-is defined on — see the Doctrine, below. It is split on ` = ` with
-spaces, since `=` without them is part of a labelled arrow (`=IO>`).
+The optional **base spelling** names the atom of the ambient
+presentation that IS this generator. The set of them determines a **wide
+subcategory** of the base, and that is the subcategory `embed` is defined
+on (see the Doctrine, below). The line is split on ` = ` with spaces,
+since `=` without them is part of a labelled arrow (`=IO>`).
 
 Parameters are **kinded by how they are written**: a bare name is one
 wire (`Monoid(a)`), `...` a stack, and a type **constructor** carries its
-kind **one mark per argument** — `_` where that argument is one wire,
+kind **one mark per argument**: `_` where that argument is one wire,
 `...` where it is a whole stack. So a hom-object over stacks is
 `k(..., ...)` and a parameterized exit over one wire is `d(_)`. A slot
 may name variables the theory does not declare; each is local to its
-slot and generalized there — and in a constructor's stack position they
-are stack variables, which is why `compose : k(a, b) k(b, c) ⇒ k(a, c)`
+slot and generalized there. In a constructor's stack position they are
+stack variables, which is why `compose : k(a, b) k(b, c) ⇒ k(a, c)`
 composes whole sides of a diagram.
 
-`in DOCTRINE` (§8) says this theory **extends** another — at most one,
-because a presentation extends by inclusion and two inclusions want a
+`in DOCTRINE` (§8) says this theory **extends** another, and at most
+one: a presentation extends by inclusion, and two inclusions want a
 pushout nobody has asked for.
 
 **What the checker does.** `parseTheory` reads the head (kinds,
@@ -106,7 +107,7 @@ from the base is one generator per *value*), the table must be
 (there must be something to embed into), and it must not also declare
 `embed` (which already claims the whole base).
 
-**What `with` does to it.** Nothing — `with T` is refused (below). A
+**What `with` does to it.** Nothing; `with T` is refused (below). A
 theory is applied by being *modelled*.
 
 **Examples.** `theories.braid` (`Monoid`, the introduction);
@@ -162,8 +163,8 @@ theory T: a base spelling says which base atoms `embed` is defined on,
 
 A **model** interprets a theory: a functor out of the category the
 theory presents, given by an **object map** and an image for each
-generator. Six kinds, one declaration form, and §"the same thing said
-six ways" below says why they are one thing.
+generator. Six kinds share one declaration form, and "the same thing
+said six ways" below says why they are one thing.
 
 **The head, in full.** One grammar, three optional clauses:
 
@@ -173,8 +174,8 @@ model NAME [ ( PARAM ) ] in THEORY [ ( ARGS ) ] [ ( A ↦ B via c [, r] ) ] = BI
 
 `( PARAM )` makes this a **family**; `( ARGS )` are the theory's
 arguments; `( A ↦ B via c )` is the **object map**. The two groups after
-the theory are told apart by CONTENT — a group containing `↦` is the
-object map — so there is nothing to disambiguate and no position to
+the theory are told apart by CONTENT: a group containing `↦` is the
+object map. There is nothing to disambiguate and no position to
 remember. One parser (`parseModelHead`), one record (`Instance`).
 
 ### Plain model — `model M in T(args)`
@@ -209,16 +210,16 @@ bare `data` name.
    to this model's own words.
 3. `declaredSlots` + `checkInstance` compare each slot's **inferred**
    arrow against the theory's **declared** arrow instantiated at this
-   model's arguments — by subsumption, so a more general body is fine.
+   model's arguments, by subsumption, so a more general body is fine.
 4. `transportOf` reads this model's *shape* off the theory's declared
-   arrows (composition, embedding, exits) — never off a slot's name.
+   arrows (composition, embedding, exits), never off a slot's name.
 5. The theory's **laws run**, as ordinary programs, at module start,
    before `main`.
 
 **What `with` does to it.** `with M` **renames**: every occurrence of a
 slot name in the body becomes `M@slot`. If the theory is `in Doctrine`
 and supplies composition and embedding, `with M` additionally
-**transports** — unless the def is declared `in T` for M's theory, in
+**transports**, unless the def is declared `in T` for M's theory, in
 which case it only instantiates (see `with`, below).
 
 **Examples.** `theories.braid` (`IntSum`, `IntProd`, `StrCat`);
@@ -233,7 +234,7 @@ which case it only instantiates (see `with`, below).
 **Refusals.**
 
 ```text
-`:` types a slot and nothing else since 2026-09-16: a model's head says
+`:` types a slot and nothing else: a model's head says
   which theory it interprets, which is MEMBERSHIP — write
   `model M in <Theory>(…)`
 model M: no binding for 's' (declared by theory T)
@@ -255,11 +256,10 @@ Duplicate model declaration: M (a functor and a model share one
 
 ### Model of `Base` — `model Opt in Base = p = q, …`
 
-**What it is.** A **partial** model of the *ambient* presentation —
-the presentation whose generators are every word in scope, each with
-its own scheme as the slot's declared type. It is a rewriting: an image
-for the generators it names, and the identity on every generator it
-does not.
+**What it is.** A **partial** model of the *ambient* presentation, whose
+generators are every word in scope, each carrying its own scheme as the
+slot's declared type. It is a rewriting: an image for the generators it
+names, and the identity on every generator it does not.
 
 **Syntax.** `model Opt in Base = p = q, r = s`, or one `p = q` per
 indented line. `Base` is reserved and cannot be declared.
@@ -268,9 +268,9 @@ indented line. `Base` is reserved and cannot be declared.
 **once**, over the finished environment (so a binding may name a word
 declared anywhere in the module): the image must have the generator's
 own scheme, at the generator's own use. The declaration also generates
-a **word** `Opt : Code ⇒ Code` — the table handed to the `rewrite`
-engine — so `[Opt]` is an ordinary quotation and `lift2 [Opt]` applies
-the same reinterpretation at run time.
+a **word** `Opt : Code ⇒ Code`, the table handed to the `rewrite`
+engine, so `[Opt]` is an ordinary quotation and `lift2 [Opt]` applies the
+same reinterpretation at run time.
 
 **What `with` does to it.** `with Opt` renames the generators to their
 images, through quotations, rows and `fix` bodies, and mints `=Opt>`.
@@ -298,27 +298,27 @@ model Bad in Base: two bindings give `p` an image, and a model sends
 
 **What it is.** The same model with the *other half* written. A model
 is a presentation interpreted in a category, given by an object map and
-an image for each generator; every kind above carries the identity
-object map, and this one writes a real one — the **substitution**
-`A := B`, applied structurally (under `List`, a data type's arguments,
-an `Fn` arrow, a stack). It is a substitution and not a type-level
-function, which is why it is principal.
+an image for each generator. Every kind above carries the identity object
+map; this one writes a real one, the **substitution** `A := B` applied
+structurally (under `List`, a data type's arguments, an `Fn` arrow, a
+stack). A substitution is principal where a type-level function would
+not be.
 
 **Syntax.** `model M in Base(A ↦ B via c)` or `… via c, r`, then the
 table. `↦` is the glyph and it is not `⇒`: `⇒` is the arrow of every
 written TYPE, and an object map is a function on objects. `A` is a
-nominal name — a base type or a `data`/`type` name of arity zero.
+nominal name, a base type or a `data`/`type` name of arity zero.
 `via c` is the image of the LITERAL FAMILY (`c : A ⇒ B`); `, r` is a
-retraction (`r : B ⇒ A`). Images here are **programs**, not single
-words, because this model declares no `Code ⇒ Code` table for them to
-be names in.
+retraction (`r : B ⇒ A`). Images here are **programs** rather than single
+words, because this model declares no `Code ⇒ Code` table for them to be
+names in.
 
 **What the checker does.** Each image is blessed once by `subsumes` at
 the generator's own arrow **with the substitution applied** (`+ : Int
 Int ⇒ Int` is checked at `Mod7 Mod7 ⇒ Mod7`); `via` and the retraction
 are checked at `A ⇒ B` and `B ⇒ A`. `:doc M` carries a verdict on each
-law the declaration states — the retraction (`c ; r = id_A`) and
-`image = F(body)` for an image given to a word that has a body —
+law the declaration states, the retraction (`c ; r = id_A`) and
+`image = F(body)` for an image given to a word that has a body. Each is
 decided by `sameCode` where it reaches and recorded as a **dialect**
 where it does not.
 
@@ -366,12 +366,12 @@ model M in Base: `g` cannot be derived by conjugation: its arrow is
 doctrine's composition and embedding: it presents a **category**, and
 `with` of it is the functor from the base into that category.
 
-**Syntax.** No syntax of its own — it is an ordinary `model`. What
-makes it transport is the **shape** of its theory, read by
-`transportOf`: a hom-object `k(..., ...)`, a slot at `k(a, b) k(b, c) ⇒
-k(a, c)`, a slot at `Fn⟨a ⇒ b⟩ ⇒ k(a, b)`, and exits (`k(Int, Int) ⇒
-Int` and kin) — `a`, `b`, `c` being **stacks**, so the carrier is a
-process on a whole side of a diagram. Its data type declares a stack
+**Syntax.** None of its own; it is an ordinary `model`. What makes it
+transport is the **shape** of its theory, read by `transportOf`: a
+hom-object `k(..., ...)`, a slot at `k(a, b) k(b, c) ⇒ k(a, c)`, a slot
+at `Fn⟨a ⇒ b⟩ ⇒ k(a, b)`, and exits (`k(Int, Int) ⇒ Int` and kin). `a`,
+`b` and `c` are **stacks**, so the carrier is a process on a whole side
+of a diagram. Its data type declares a stack
 parameter per side: `data Circuit(a..., b...) = …`.
 
 **What the checker does.** Everything a plain model gets, plus:
@@ -380,17 +380,17 @@ slots; a generated word of the model's own name is checked to be
 `Code ⇒ Code` and pure (`checkCodeWord`), so that `[Circuits]` and
 `lift2 [Circuits]` are values.
 
-**What `with` does to it.** `with M` **transports**: every stage
-becomes `embed` of that stage as a quotation and every `;` becomes
-`compose` — or, when the theory spells its generators instead of
-declaring `embed`, every **atom** becomes the slot it was read into and
-every `;` becomes `compose` (a `_` in the stage is the whiskering, and
-a stage with two generators in it is a tensor and is refused). No arity is read and nothing is packed or whiskered — a
-stage of any width embeds as **itself**, and is weighed at exactly the
-width it was written, so a stage that does not cover the stack it is
-handed fails with the base's own message (`Cannot unify stacks: • vs
-Int`). Exits are **refused inside** the scope and called under `in M`.
-At most one such model per clause.
+**What `with` does to it.** `with M` **transports**. Every stage becomes
+`embed` of that stage as a quotation and every `;` becomes `compose`.
+When the theory spells its generators instead of declaring `embed`, every
+**atom** becomes the slot it was read into and every `;` becomes
+`compose`; a `_` in the stage is the whiskering, and a stage with two
+generators in it is a tensor and is refused. No arity is read and nothing
+is packed or whiskered. A stage of any width embeds as **itself** and is
+weighed at the width it was written, so a stage that does not cover the
+stack it is handed fails with the base's own message (`Cannot unify
+stacks: • vs Int`). Exits are **refused inside** the scope and called
+under `in M`. At most one such model per clause.
 
 ```text
 def sq with Circuits = dup ; *
@@ -399,11 +399,11 @@ def sq with Circuits = dup ; *
 
 **Examples.** `circuits.braid` (`Circuits` over stateful stream
 transducers, `Funcs` over plain functions, `Sealed` with no exit);
-`linear.braid` (`Dense`, linear maps — a model of a theory that takes
+`linear.braid` (`Dense`, linear maps: a model of a theory that takes
 `compose` and **not** `embed`, so `with Dense` is refused and every
 morphism is built by hand out of the presentation's generators);
-`frame.braid` (`Frame`, a data frame as a category — no loop is ever
-written); `prob.braid` (`Enum`, `Sampler`, `Nondet`);
+`frame.braid` (`Frame`, a data frame as a category, with no loop written
+anywhere); `prob.braid` (`Enum`, `Sampler`, `Nondet`);
 `reified.braid` (`Reified`, a program paired with its own `Code`);
 `lifting.braid` (`Notes`); `transformations.braid` (`Names`, `Funcs`).
 
@@ -420,13 +420,10 @@ written); `prob.braid` (`Enum`, `Sampler`, `Nondet`);
 `with M`: the scope is empty, and a transported scope must build a K
 ```
 
-### Resource — `model R in Doctrine = Ty` *(2026-09-18)*
+### Resource — `model R in Doctrine = Ty`
 
-**What it is.** A threaded wire, and a **model of the Doctrine** — the
-state construction at that carrier. Spelled `resource R = Ty` until
-2026-09-18, when the keyword went: the declaration has generated a
-model since 2026-09-17 and everything downstream read it as one, so a
-second spelling was all the keyword was.
+**What it is.** A threaded wire, and a **model of the Doctrine**: the
+state construction at that carrier.
 
 **How the head is told apart.** By its **body**: a STACK, with no `=`
 in it. A body of `p = q` lines is a table; a body with no `=` is a
@@ -446,19 +443,20 @@ model R in R@t(R@k) =
 ```
 
 **The one partial `model` head.** `in Doctrine` here names a
-**sub-presentation** — `compose` and `embed`, not `observe`/`sample` —
-because a generated `observe` would have to run a resource program,
-which needs a seed, and seeds live at install sites. Every other
-`model` head is total over its theory's slots; this one is not, and
-that is the price of generating it.
+**sub-presentation**: `compose` and `embed`, without `observe` or
+`sample`. A generated `observe` would have to run a resource program,
+which needs a seed, and seeds live at install sites. Every other `model`
+head is total over its theory's slots, and this one is not; that is the
+price of generating it.
 
 `resources`, `metered`, `payroll`, `lifting`, `prob`, `autodiff`.
 
 ### Family — `model F(T(binders)) in T′(args)`
 
-**What it is.** Not a model: a **functor Mod(T) → Mod(T′)**. ML's
-higher-order functor, Kiselyov's interpreter transformer, and the ring
-construction R ↦ R[ε]/ε² are the same thing in three vocabularies.
+**What it is.** A **functor Mod(T) → Mod(T′)**, which is not a model.
+ML's higher-order functor, Kiselyov's interpreter transformer, and the
+ring construction R ↦ R[ε]/ε² are the same thing in three
+vocabularies.
 
 **Syntax.**
 
@@ -477,7 +475,7 @@ parameter.
 
 **What the checker does.** `familyInstances` mints each member the
 module asks for, **deepest first**, reading the applications off the
-source — def headers, def bodies, main, model bindings and the two
+source: def headers, def bodies, main, model bindings and the two
 model names a transformation declares. The carrier is read by
 **substitution**: the binders take the argument model's own theory
 arguments and the head is read off. A member is an ordinary `Instance`
@@ -493,9 +491,9 @@ the member; the receipt is the **whole application as one label**
 (`=Fwd(Floats)>`, `=Fwd(Fwd(Floats))>`), because one model read the
 template and `Floats` never saw it.
 
-**Examples.** `autodiff.braid` — `Fwd`, applied at `Fwd(Floats)` and
-at `Fwd(Fwd(Floats))`, which is the second derivative of the *same*
-three templates.
+**Examples.** `autodiff.braid`, where `Fwd` is applied at
+`Fwd(Floats)` and at `Fwd(Fwd(Floats))`, the second derivative of the
+*same* three templates.
 
 **Refusals.**
 
@@ -532,7 +530,7 @@ body that runs. `expandTemplates` inlines it at each call site, inside
 the innermost enclosing scope whose model is a model of `T`, and wraps
 the inlined body in an **instantiating** scope. Every instantiation is
 then **re-inferred where it lands**, so each gets its own principal
-type — no rank-1 wall, no dictionary.
+type. There is no rank-1 wall and no dictionary.
 
 **What `with` does to it.** A model of `T` in the `with` clause
 instantiates it. Under a Doctrine model, instantiating is **all** it
@@ -540,7 +538,7 @@ does: the spine stays base composition, because a morphism of `B[T]`
 composes like the base (§8).
 
 **Examples.** `theories.braid` (`fold1 in Monoid`, read by three
-models); `build.braid` (`banner`, `stamped`, `plan` over `Config` — a
+models); `build.braid` (`banner`, `stamped`, `plan` over `Config`, a
 template calling templates); `autodiff.braid` (`poly`, `wave`, `fxy`,
 `cosOf` over `Smooth`, read by five models); `prob.braid` (`bothFlip`,
 `coinSnd`, `flipSnd` over `Prob`, instantiated per model);
@@ -564,15 +562,15 @@ template loopy calls itself: a template is expanded at the call, so it
 ## `def … in K` — a hand-built morphism
 
 **What it is.** A **word of the category `K` presents**, written in
-`K`'s vocabulary and entered without transport: a morphism the functor
-may not have in its image at all.
+`K`'s vocabulary and entered without transport. The functor may not have
+it in its image at all.
 
 **Syntax.** `def NAME in K = body`, where `K` is a model whose theory
 has a hom-object.
 
 **What the checker does.** `inTarget` resolves the name **by kind** and
 refuses every other kind with the clause to write instead.
-`renameSlotsT` puts `K`'s slot words in scope — and nothing else: no
+`renameSlotsT` puts `K`'s slot words in scope and nothing else: no
 embedding, no composition, no receipt. After inference,
 `checkKWordShape` asks whether the def builds **one carrier out of
 nothing** (`• ⇒ K(a, b)`), which is what a morphism of the category is.
@@ -581,19 +579,19 @@ leaves it alone instead of embedding it. A def that neither builds a
 carrier nor uses one of `K`'s words is refused: the clause did nothing.
 Membership is **written**, never read off an inferred type.
 
-Since 2026-09-16, an **instantiated template** is classified the same
-way: `def f in T with K = …` is a morphism of `T` read by `K`, so if it
-builds one carrier it is one of `K`'s words too.
+An **instantiated template** is classified the same way:
+`def f in T with K = …` is a morphism of `T` read by `K`, so if it builds
+one carrier it is one of `K`'s words too.
 
-**What `with` does to it.** Nothing — `in` applies nothing. A later
-`with K` treats it as a carrier, not as a stage.
+**What `with` does to it.** Nothing, because `in` applies nothing. A
+later `with K` treats it as a carrier rather than as a stage.
 
 **Examples.** `circuits.braid` (`hand`, `sum0`, `scale3`, `byHand`, and
 the `…Out` observations that call an exit); `prob.braid` (`bothFlipE`,
 `coinSndE`, `flipSndE`, `idS`, `thenS`, …); `reified.braid` (`sq5`,
 `w5`); `frame.braid` (`column`, `sqOut`, `polyOut`, `wiringOut`);
 `lifting.braid` (`report in Notes`); `transformations.braid`
-(`namedSq in Names`); `linear.braid` (`dbl`, `two`, `row11`, `col11` —
+(`namedSq in Names`); `linear.braid` (`dbl`, `two`, `row11`, `col11`,
 where `in Dense` is the **only** way in, the theory declaring no
 `embed`).
 
@@ -622,8 +620,8 @@ where `in Dense` is the **only** way in, the theory declaring no
 ## `transformation`
 
 **What it is.** A **natural transformation** between two models of one
-theory — the models are functors out of the presented category, and
-this is a map between them.
+theory. The models are functors out of the presented category, and this
+is a map between them.
 
 **Syntax.**
 
@@ -638,8 +636,8 @@ written type in Braid; `=` gives the body, and `,` lists its
 **components** — one word per theory parameter, in the theory's order.
 
 **What the checker does.** `transformationDefs` contributes the
-component as a word, both sides of every slot's square, and — where the
-theory's evidence allows it — a sampled law per square. For each slot
+component as a word, both sides of every slot's square, and, where the
+theory's evidence allows it, a sampled law per square. For each slot
 `s : Σ ⇒ Θ` it builds
 
 ```text
@@ -656,31 +654,30 @@ on the module**, so `:transformations` reads them rather than deciding
 again.
 
 **The evidence is every entry, and every combination of them.** A
-theory's evidence is each slot at `• ⇒ a` for a parameter `a` — every
-one it declares, not the first — and a slot with several inputs is run
-at the **cross product**, capped at 64 points per square (`sampleCap`)
-and reported as `n of N points` when the cap bites. Reading only the
-first entry made the audit a fact about the order the theory's slots
-were written in rather than about the models: with `zero` written above
-`sample`, floor-halving passed as a ring homomorphism at (0, 0).
+theory's evidence is every slot it declares at `• ⇒ a` for a parameter
+`a`, and a slot with several inputs is run at the **cross product**,
+capped at 64 points per square (`sampleCap`) and reported as
+`n of N points` when the cap bites. Reading only the first entry would
+make the audit a fact about the order the theory's slots were written in
+rather than about the models: with `zero` written above `sample`,
+floor-halving passes as a ring homomorphism at (0, 0).
 
 **What `with` does to it.** Nothing: a transformation contributes a
 word, and the word is called like any other.
 
 **Examples.** `transformations.braid` (`Len : ListMonoid ⇒ IntSum`,
-sampled; `Forget : Names ⇒ Funcs`, four squares — `embed` and `sample`
-**proved**, `compose` and `observe` **sampled**, because over stacks the
-witness is `Fn⟨ρ ⇒ σ⟩` with ρ open and `ev` of an open wire has no
-closed arity);
-`autodiff.braid` (`Value : Fwd(Floats) ⇒ Floats` — "AD computes the
-right value", all nine proved; `Transpose : Fwd(Floats) ⇒ Rev` —
-"forward and reverse are the same linear map", six sampled);
-`prob.braid` (`Expect : Mixtures ⇒ Means`).
+sampled; `Forget : Names ⇒ Funcs`, four squares, with `embed` and
+`sample` **proved** and `compose` and `observe` **sampled**, because over
+stacks the witness is `Fn⟨ρ ⇒ σ⟩` with ρ open and `ev` of an open wire
+has no closed arity); `autodiff.braid` (`Value : Fwd(Floats) ⇒ Floats`,
+"AD computes the right value", all nine proved; and
+`Transpose : Fwd(Floats) ⇒ Rev`, "forward and reverse are the same linear
+map", six sampled); `prob.braid` (`Expect : Mixtures ⇒ Means`).
 
 **Refusals.**
 
 ```text
-`:` types a slot and nothing else since 2026-09-16: a transformation's
+`:` types a slot and nothing else: a transformation's
   head says which hom-set of Mod(T) it is a member of — write
   `transformation Name in ModelA ⇒ ModelB = word`
 Malformed transformation declaration (want `transformation Name in
@@ -702,31 +699,31 @@ transformation N: the square for slot 's' is FALSE — `sameCode` decides
 
 ## the Doctrine
 
-**What it is.** The **built-in theory of the base's own structure** — a
-category whose hom-objects range over **stacks**, and the embedding of
-the base into it; Hughes' `arr` and `>>>` without his `first`, because
-a stage of any width now embeds as itself. It is not declared by anyone
-and cannot be: it names the shape a theory must have for its models to
+**What it is.** The **built-in theory of the base's own structure**: a
+category whose hom-objects range over **stacks**, plus the embedding of
+the base into it. It is Hughes' `arr` and `>>>` without his `first`,
+because a stage of any width embeds as itself. Nobody declares it and
+nobody can; it names the shape a theory must have for its models to
 transport.
 
 **Syntax.** `theory T(k(..., ...)[, …]) in Doctrine = …`. The Doctrine
-is `theory Doctrine(k(..., ...))` with four slots — the two structural
-ones, `compose : k(a, b) k(b, c) ⇒ k(a, c)` and `embed : Fn⟨a ⇒ b⟩ ⇒
-k(a, b)`, plus the evidence a law needs, `observe : k(Int, Int) ⇒ Int`
-and `sample : • ⇒ k(Int, Int)` — and five laws stated over them
-(identity twice, associativity, functoriality of `embed`, and
+is `theory Doctrine(k(..., ...))` with four slots and five laws. The two
+structural slots are `compose : k(a, b) k(b, c) ⇒ k(a, c)` and
+`embed : Fn⟨a ⇒ b⟩ ⇒ k(a, b)`; the other two are the evidence a law
+needs, `observe : k(Int, Int) ⇒ Int` and `sample : • ⇒ k(Int, Int)`. The
+laws are identity twice, associativity, functoriality of `embed`, and
 `embedWide`, which states `embed [f] ; embed [g] = embed [f ; g]` at a
 stage that is one wire in and two out and at one that whiskers,
-`(_ 1 ; +) _`). `k` is the hom-object, and `a`, `b`, `c` are stacks:
-there is no pairing parameter and no strength, because the base's own
-`...` does the whiskering **inside the quotation**, before `embed` sees
-it. A theory declares as many of the four as it wants, and there are
+`(_ 1 ; +) _`. `k` is the hom-object, and `a`, `b`, `c` are stacks.
+There is no pairing parameter and no strength, because the base's own
+`...` does the whiskering **inside the quotation**, before `embed`
+receives it. A theory may declare any number of the four, and there are
 two levels:
 
 | declared | it licenses |
 |---|---|
 | `compose` | `in M ; f g ; compose` — carriers built by hand compose. `with M` is refused: *theory `Half` takes Doctrine's `compose` and not its `embed` (`Fn⟨ρ ⇒ σ⟩ ⇒ k(ρ, σ)`) … `in Half` and compose by hand.* |
-| `+` **base spellings** *(2026-09-21)* | `embed` on a **wide subcategory**: `with M` transports a base program **atom by atom** when every atom is one of the words the theory named, and refuses any other by name (*`fmul` has no image under GLA*). The table is the theory's, not a model's; it is a model read backwards. Sound and deliberately incomplete. |
+| `+` **base spellings** | `embed` on a **wide subcategory**: `with M` transports a base program **atom by atom** when every atom is one of the words the theory named, and refuses any other by name (*`fmul` has no image under GLA*). The table is the theory's, not a model's; it is a model read backwards. Sound and deliberately incomplete. |
 | `+ embed` | `with M` transports **any** stage, at the width it is written. |
 
 **What the checker does.** `checkExtends` verifies the claim once per
@@ -735,21 +732,21 @@ declares that the Doctrine also declares must be the Doctrine's slot at
 the Doctrine's shape (`matchArrow`, a one-way match whose pattern
 variables are the Doctrine's slot-local stacks and its constructor
 parameter), with `k` instantiated **consistently across every slot**.
-The grade is not compared — what a model may *do* is the theory's
+The grade is not compared, because what a model may *do* is the theory's
 business, which is why `Arrow`'s slots may be `=Recursive>`. A theory
 that takes the composition and not the embedding is audited for
-associativity and for nothing else: exactly what it claimed, since
-every other law names `embed`. The Doctrine's **laws are inherited**,
+associativity and for nothing else, which is what it claimed: every other
+law names `embed`. The Doctrine's **laws are inherited**,
 and a model runs an inherited law when it can *state* it — when it
 declares every slot the law names.
 
 A theory may declare a **strength of its own**, and one does:
 `prob.braid`'s `Prob` has `under : k(a, b) =Recursive> k(c a, c b)`, a
 wire `c` riding under the kernel's domain, with no pairing anywhere. It
-needs one because a Markov category's **generators** — `flip`,
-`uniform`, `condition` — are carriers at a fixed width, and nothing in
-the base can widen a carrier. `under` is not a Doctrine slot, so it is
-an ordinary slot of that theory: in scope under `in M`, ignored by
+needs one because a Markov category's **generators** (`flip`,
+`uniform`, `condition`) are carriers at a fixed width, and nothing in the
+base can widen a carrier. `under` is not a Doctrine slot, so it is an
+ordinary slot of that theory: in scope under `in M`, ignored by
 transport.
 
 **What `with` does to it.** Nothing directly; it is `transportOf`
@@ -783,14 +780,15 @@ A `with` mints a receipt when it changed the body.
 **Syntax.** `def NAME [in T] with X₁ X₂ … = body`, left of the `=`,
 never in a spine. A **quotation** takes the same clause, introduced by
 the same `=`: `[with Fuel = dup ; *]`. In the **REPL** a bare `with X`
-line opens an ambient scope over the rest of the session — the one
-place it stands alone, because a session has no `def` to hang it on.
+line opens an ambient scope over the rest of the session. That is the
+one place it stands alone, because a session has no `def` to hang it
+on.
 
 The kinds of name it may carry, applied in a fixed order. **The order
-is ACTIONS, not keywords** *(restated 2026-09-18)*: templates **expand**
-(a phase earlier), then **renames**, then **routes**, then
-**composes**, then **rewrites**, left to right — so a rewrite always
-sees finished wiring. Which action a name takes is read off its
+is ACTIONS, not keywords**: templates **expand** (a phase earlier), then
+**renames**, then **routes**, then **composes**, then **rewrites**, left
+to right, so a rewrite always receives finished wiring. Which action a name
+takes is read off its
 DECLARATION, never off a keyword: a carrier declared `model R in
 Doctrine` routes, a model whose theory has slots renames, a model of
 `Base` rewrites by its table, a model whose theory has a hom-object
@@ -804,7 +802,7 @@ changed nothing here.
 | an **applied family** `F(M)` | the member is minted and reads the body | `=F(M)>` (one label) | `def polyD with Fwd(Floats) = poly` (`autodiff.braid`) |
 | a model of **`Base`** | its generators are renamed to their images, through quotes and rows | `=X>` | `def poly with Opt = …` (`optimizer.braid`) |
 | a **resource** | **transport into the model `model R in Doctrine` generates, in fused form**: the wire is routed deepest and every stage is padded, which is what `embed [s] ; compose` normalises to at a representable fibre. The header is **optional** — routing is inferred | `=R>`, on the claim's own stage rather than a new one | `def score with Log Counter = …` (`resources.braid`) |
-| a **functor** | the routed, renamed body is reified as `Code` and its graph morphism is EXTENDED along it (`stagewise`), and what comes back is spliced. A `Code ⇒ Code` word may not head a `with` *(2026-09-18)* — `lift2 [w]` applies one at runtime, and the declaration substrate declares what one generates | `=F>`, plus the morphism's own labels | `def poly with Fuel Metered = …` (`metered.braid`) |
+| a **functor** | the routed, renamed body is reified as `Code` and its graph morphism is EXTENDED along it (`stagewise`), and what comes back is spliced. A `Code ⇒ Code` word may not head a `with` — `lift2 [w]` applies one at runtime, and the declaration substrate declares what one generates | `=F>`, plus the morphism's own labels | `def poly with Fuel Metered = …` (`metered.braid`) |
 | **`Recursive`** | the def's own name goes into scope in its own body and the knot is tied (innermost, before every other scope) | `=Recursive>` | `def fac with Recursive = …` (`recursion.braid`) |
 | a **model with a carrier**, no `in` | **transport**: stage ↦ `embed`, `;` ↦ `compose` | `=X>` | `def easy with Circuits = add1 ; dbl` (`circuits.braid`) |
 | a **model with a carrier**, with `in T` for its theory | **instantiate only**: slot names resolve, the spine stays base composition | `=X>` | `def bothFlipE in Prob with Enum = bothFlip` (`prob.braid`) |
@@ -812,23 +810,23 @@ changed nothing here.
 **What the checker does.** `elabHeaders` runs **between parse and
 inference** and writes the clause out: a syntactic Term rewrite with
 the environment available for arities and resource signatures. The node
-never reaches inference. `with` **asserts** a resource claim — the
+never reaches inference. `with` **asserts** a resource claim: the
 incoming wires must really be those resources, even when the body never
 touches one.
 
 **Routing needs no clause.** A def is routed for a resource when the
 scheme of an atom in its body, **alone in its stage**, carries that
-resource as its deepest wire on both sides — read from the prefix
-scope, which is fixed before the def is touched, so invariant five is
-untouched. Callers are routed the same way, transitively, until the
+resource as its deepest wire on both sides. That scheme is read from the
+prefix scope, which is fixed before the def is touched, so invariant five
+is untouched. Callers are routed the same way, transitively, until the
 wire meets an **install site** (a written seed) or a **handler** (a
-discharge). `with R` stays legal, is exactly what inference does
-(routing is idempotent), and is the **override**: it names the scope
-where inference only proposes one. Two things are never auto-routed — a
-body that names the carrier's constructor or un-constructor (`Log` /
-`unLog`) is handling the wire itself, and a stage that writes its own
-`_` and `...` around the resource word is threading by hand and says
-so. `:t!` prints why a def was routed.
+discharge). `with R` stays legal and is what inference does, routing
+being idempotent, and it is the **override**: it names the scope where
+inference only proposes one. Two things are never auto-routed. A body
+that names the carrier's constructor or un-constructor (`Log` / `unLog`)
+is handling the wire itself, and a stage that writes its own `_` and
+`...` around the resource word is threading by hand and says so. `:t!`
+prints why a def was routed.
 
 **Refusals.**
 
@@ -862,10 +860,10 @@ a quotation's `with` clause is followed by `=` and then the quoted body:
 the category the named thing presents, written in that thing's
 vocabulary. It applies nothing, writes no wire and mints no label.
 
-**Syntax.** `def NAME in X … = body` — at most once, before `with`,
-left of the `=`. There are exactly **two** kinds of `X`: a **theory**
-(the def is a template) and a **model with a carrier** (the def is a
-hand-built word of that category). Every other kind is refused by name.
+**Syntax.** `def NAME in X … = body`, at most once, before `with`, left
+of the `=`. There are exactly **two** kinds of `X`: a **theory** (the def
+is a template) and a **model with a carrier** (the def is a hand-built
+word of that category). Every other kind is refused by name.
 
 `in` also decides, for a `with` clause naming a Doctrine model, whether
 that model **instantiates** or **transports**:
@@ -886,7 +884,7 @@ def a with Enum = half ; flip ; dup   # a0 =Enum Recursive> Bool Bool
 def b in Enum   = flip ; dup          # • =Recursive> Kern(Float, Bool) Kern(Float, Bool)
 ```
 
-`a` is the Markov copy — one flip, copied, so HH and TT at ½ each
+`a` is the Markov copy: one flip, copied, so HH and TT at ½ each
 (`prob.braid` §6 prints it). `b` is two kernel *values* side by side,
 which is not a kernel at all. Nothing but `in` tells them apart.
 
@@ -915,10 +913,9 @@ promised against the arrow that came out.
 **What it is.** A **CSV read at check time**, turned into a `data`
 declaration, a loader and a header word.
 
-**Syntax.** `table Trades = "trades.csv"` — columns and types sniffed
-from the file — or `table Sector(ticker: Str, sector: Str, weight:
-Float) = "sectors.csv"`, which declares them. Unchanged by the
-2026-09-16 rename: a table names a file, and that is a definition.
+**Syntax.** `table Trades = "trades.csv"` sniffs the columns and their
+types from the file. `table Sector(ticker: Str, sector: Str, weight:
+Float) = "sectors.csv"` declares them instead.
 
 **What the checker does.** `parseTableLine` reads the head;
 `tableBlock` resolves the path **against the importing file's
@@ -945,17 +942,17 @@ table: a table can only be declared when the module is loaded from a
 
 ---
 
-## Beneath the keywords — the declaration words *(2026-09-17)*
+## Beneath the keywords — the declaration words
 
-**What they are.** Eleven ordinary words — ten of them one per keyword,
-and one with no keyword until a module binds it — each acting on the
-**dictionary**: `Dict`, a resource the loader threads. A keyword
-line is parsed, whole, into a **call** of its word, and the pipeline
-runs the calls in file order against the dictionary. This is stage 0's
-"direction 3" (`design-macros.md`, 2026-08-29) built: a fixed,
-name-first surface over an **open table** of declaration words carrying
-a `=Dict>` manifest. The keyword-initial surface is kept deliberately —
-it marks *an act on the dictionary* against *a morphism*.
+**What they are.** Eleven ordinary words, ten of them one per keyword
+and one with no keyword until a module binds it, each acting on the
+**dictionary**: `Dict`, a resource the loader threads. A keyword line is
+parsed, whole, into a **call** of its word, and the pipeline runs the
+calls in file order against the dictionary. The surface is name-first and
+fixed over an **open table** of declaration words carrying a `=Dict>`
+manifest (`design-macros.md`, "direction 3"). Keeping the keyword first
+is deliberate: it marks an act on the dictionary apart from a
+morphism.
 
 | keyword | its word | arrow | the call a line becomes |
 |---|---|---|---|
@@ -963,7 +960,7 @@ it marks *an act on the dictionary* against *a morphism*.
 | `type` | `typeW` | `TypeRep Str =Dict> •` | `type P = Int Int` ≡ `⌜Int Int⌝ "P" typeW` |
 | `data` | `dataW` | `TypeRep Str =Dict> •` | `data Box = Int` ≡ `⌜Int⌝ "Box" dataW` |
 | `theory` | `theoryW` | `Str Str =Dict> •` | the block, and the head |
-| `model` | `modelW` | `Str Str =Dict> •` | the bindings, and the head — **including a resource**, `model Log in Doctrine = Str`, whose body is a stack *(2026-09-18)* |
+| `model` | `modelW` | `Str Str =Dict> •` | the bindings, and the head — **including a resource**, `model Log in Doctrine = Str`, whose body is a stack |
 | `transformation` | `transformationW` | `Str Str =Dict> •` | the components, and the head |
 | `functor` | `functorW` | `Str Str =Dict> •` | the graph morphism, and the name |
 | `import` | `importW` | `Str =Dict IO> •` | `import "u.braid"` ≡ `"u.braid" importW` |
@@ -972,32 +969,33 @@ it marks *an act on the dictionary* against *a morphism*.
 | *(none, until bound)* | `testW` | `Code Str =Dict> •` | a registered check, run at module start |
 
 **The two that read the world say so.** `importW` and `tableW` are
-`=Dict IO>`; the other nine are `=Dict>`. That is the one place IO
-happens before anything is checked — the loader resolves a path and
-reads a file — and the grade is the manifest of exactly that.
+`=Dict IO>`, and the other nine are `=Dict>`. That is the one place IO
+happens before anything is checked: the loader resolves a path and reads
+a file. The grade is the manifest of that and nothing else.
 
 **What an argument may be.** Three shapes, and the list is closed:
-**`Code`** (an already-parsed program), **`Str`** (a name, a header, a
-path — text the word reads, never parses) and **`TypeRep`** (an
+**`Code`** (an already-parsed program), **`Str`** (a name, a header or a
+path, text the word reads and never parses) and **`TypeRep`** (an
 already-parsed type). All three are **post-parse**. A word that wanted a
 fourth would be asking for a reader macro, and parsing words are ruled
-out permanently: they break uniform reading and the
-hygiene-by-representation story.
+out permanently, because they break uniform reading and
+hygiene-by-representation.
 
 **How a line is parsed into them.** Every declaration line is `KEYWORD
-<head> = <body>`, split at its own first `=`, the body running to the
-end of the line or into the indented block beneath it. The head is the
-`Str`; the body is read at the word's declared shape; the arguments are
-pushed in that order and the word is called postfix. A keyword whose
-line has no `=` (`import`) takes the head alone.
+<head> = <body>`, split at its own first `=`, with the body running to
+the end of the line or into the indented block beneath it. The head is
+the `Str`, the body is read at the word's declared shape, the arguments
+are pushed in that order, and the word is called postfix. A keyword whose
+line has no `=`, such as `import`, takes the head alone.
 
 **Callable from a program.** A top-level group is a **declaration line**
-when its **grade** says so — when what it does carries `Dict`. Not when
-it happens to name `defW`: a loop that declares three words names it
-inside a def, and the grade is the only thing that knows. Such a group
-is inferred at `• =Dict> •`, run at check time above main and below the
-module's own defs (the ordering rule — the dictionary a compile-time
-word sees is the dictionary so far), and lifted out of main.
+when its **grade** says so, which is when what it does carries `Dict`.
+Naming `defW` is not enough: a loop that declares three words names it
+inside a def, and the grade is the only thing that distinguishes them.
+Such a group is inferred at `• =Dict> •`, run at check time above main
+and below the module's own defs, and lifted out of main. The ordering is
+the ordering rule: the dictionary a compile-time word reads is the
+dictionary so far.
 
 **The table is open.** `keyword <name> = <a declaration word>` binds a
 keyword to a word, and from that line on `<name> x = …` is a
@@ -1008,10 +1006,10 @@ line, run with the module's own declaration program in file order.
 `testW` is the kernel's one word with no keyword of its own: it
 registers a **check**, run at module start beside the laws.
 
-**Examples.** `dictionary.braid` — the arrows printed off the words
-themselves, one declaration written both ways, three words declared in a
-loop and then used, `keyword test = testW` with two checks, and a
-declaration word written in Braid bound to a keyword of its own.
+**Examples.** `dictionary.braid`, which prints the arrows off the words
+themselves, writes one declaration both ways, declares three words in a
+loop and then uses them, binds `keyword test = testW` with two checks,
+and binds a declaration word written in Braid to a keyword of its own.
 
 **Refusals.**
 
@@ -1046,7 +1044,7 @@ rather than a claim its author made, and it says "this scope
 **changed** this code." Code a scope left alone has nothing to audit, so
 it carries no receipt.
 
-**Syntax.** None — you cannot write one. Internally it is a word
+**Syntax.** None; you cannot write one. Internally it is a word
 `with@F : ∀ρ. ρ =F> ρ`, a unit endomorphism prepended to the expansion;
 it costs nothing at run time, whiskers at any width, and is visible in
 reflected code:
@@ -1059,24 +1057,23 @@ with@Ticked >> dup >> "tick" pass >> print pass >> + >> "tick" pass >> print pas
 
 **What the checker does.** `receiptScheme` gives it its type;
 `elabHeaders` mints it for every `with` **whose action left the code
-different from the code it was given** — one structural comparison of
-the `Term`, before and after that scope, per scope per def. That is
-**image membership**, the law the functor notes already state for an
-idempotent F (`F(p) = p` ⟺ p is in F's image). So an identity graph
-morphism, a model whose slot names do not occur, and a `with Recursive`
-on a body that never names the def all mint nothing — and `with
-Recursive` on such a body ties no knot either, which is the same fact
-said in the code. A **resource** scope always mints, by the same rule:
-it emits a CLAIM about the incoming wires (`unLog ; Log`), and that is
-a change. The same walk refuses `@` in source, which is what makes a
-label evidence. The one scope exempted by a rule of its own is a
-model's own component — the `with I` wrapping a slot body resolves
-names, it does not apply the model to itself, and it must be exempted
-rather than left to image membership because a body naming a SIBLING
-slot really is changed by the rename. `in` mints nothing, ever: a
-hand-built morphism is by definition not in the functor's image, and
-`=K>` on it would over-claim in exactly the gap between "went through
-F" and "is in the image of F".
+different from the code it was given**: one structural comparison of the
+`Term`, before and after that scope, per scope per def. That is **image
+membership**, the law the functor notes already state for an idempotent F
+(`F(p) = p` ⟺ p is in F's image). An identity graph morphism, a model
+whose slot names do not occur, and a `with Recursive` on a body that
+never names the def therefore mint nothing. Such a body ties no knot
+either, which is the same fact said in the code. A **resource** scope
+always mints, by the same rule: it emits a CLAIM about the incoming wires
+(`unLog ; Log`), and that is a change. The same walk refuses `@` in
+source, which is what makes a label evidence. One scope is exempted by a
+rule of its own, a model's own component: the `with I` wrapping a slot
+body resolves names rather than applying the model to itself, and it has
+to be exempted rather than left to image membership, because a body
+naming a SIBLING slot really is changed by the rename. `in` mints
+nothing, ever. A hand-built morphism is by definition not in the
+functor's image, and `=K>` on it would over-claim in the gap between
+"went through F" and "is in the image of F".
 
 **Examples.** Every labelled arrow. `traced.braid` prints one inside
 reflected code and uses it as an `evalAs` witness; `theories.braid`
@@ -1094,37 +1091,36 @@ with@Ticked is the receipt of `with Ticked`, not a word: a label is
 
 ---
 
-## the reflection words — **not** declarations *(2026-09-16)*
+## the reflection words — **not** declarations
 
 **What they are.** Five **prims**: `typeOfWord : Str ⇒ (TypeRep |
 Str)`, `typeOfCode : Code ⇒ (TypeRep | Str)`, `declOf : Str ⇒ (Decl |
 Str)`, `showType : TypeRep ⇒ Str` and `envOf : • ⇒ List(Box(Str
 TypeRep))`. They belong on this page only to say where they sit: they
-**declare nothing, apply nothing and mint nothing**. They are words, and the only
-reason they are in the kernel rather than derived is the kernel's own
-criterion — they touch the implementation, reading the four tables the
-checker holds (the environment, the `data` declarations (resources
-included), the
-`type` aliases and the theories) exactly as `print` touches the world.
+**declare nothing, apply nothing and mint nothing**. They are words, and
+they are in the kernel rather than derived for the kernel's own reason:
+they touch the implementation. They read the four tables the checker
+holds, the environment, the `data` declarations (resources included), the
+`type` aliases and the theories, as `print` touches the world.
 
 **What they answer with.** `data TypeRep` and `data Decl`, declared in
 the prelude beside `data Atom`, for the same reason: a prim's scheme
 has to point at something. `TypeRep` mirrors `Ty`/`SType`/`EffRow`/
-`Arrow` in nine alternatives — the last two being a repeated closed
+`Arrow` in nine alternatives. The last two are a repeated closed
 **segment** with its width (`Aⁿ`) and **`Fin`** at a width, whose widths
-are a `WidthRep` and not a type; `Decl` is a `data` (name, parameters,
-body, **field names**), a `type` (name, parameters, body) or a `theory`
-(name, parameters, slots, law names). A resource reflects as the
+are a `WidthRep` rather than a type. `Decl` is a `data` (name,
+parameters, body, **field names**), a `type` (name, parameters, body) or a
+`theory` (name, parameters, slots, law names). A resource reflects as the
 `data` it is; a `table` reflects as the `data` declaration it wrote.
 
 **Why this is not a new declaration layer.** Every construct on this
-page is a *claim* the checker audits. These three are the opposite
-direction: they hand a program what the checker already decided. So
-there is nothing to check, nothing to mint, and no clause to write —
-and a functor's graph morphism may call them, as may a
-declaration-time program, which is what makes an **elaboration-time
-derivation** an ordinary Braid word rather than a construct of its own
-(`cellsFor`, the prelude; `examples/frame.braid`).
+page is a *claim* the checker audits. These five run the other
+direction: they hand a program what the checker already decided. There is
+nothing to check, nothing to mint, and no clause to write. A functor's
+graph morphism may call them, and so may a declaration-time program,
+which is what makes an **elaboration-time derivation** an ordinary Braid
+word rather than a construct of its own (`cellsFor`, the prelude;
+`examples/frame.braid`).
 
 **What is not reflected, and why.**
 
@@ -1133,31 +1129,30 @@ derivation** an ordinary Braid word rather than a construct of its own
 | `model`, `transformation`, `functor`, a resource's routing (and the model it generates) | nothing has asked; each needs a rep of its own and none of them is a function of the *declaration* alone |
 | a template (`def f in T`) | it has no type until a model reads it, so `typeOfWord` has nothing to answer |
 
-**The width tier has its own sort** *(2026-09-16)*. `Aⁿ` is a stack
-SEGMENT repeated n times, so its rep stands in a `StackRep` beside the
-open end rather than being a wire, and the width beside it is a
-`WidthRep` — `lit k`, or `var n k` for `n+k`. A width is a second sort
-and keeping it one is the whole point: a CONCRETE width reflects
-expanded, because the checker itself expands it (`Int³` *is* three
-wires), and a VARIABLE width is never flattened, or `a0ⁿ⁰` and `a0ᵐ⁰`
-would be one type. `typeOfWord "pack"` answers now, and so do `zipN`,
+**The width tier has its own sort**. `Aⁿ` is a stack SEGMENT repeated n
+times, so its rep stands in a `StackRep` beside the open end rather than
+being a wire, and the width beside it is a `WidthRep`: `lit k`, or
+`var n k` for `n+k`. A width is a second sort, and keeping it one is what
+stops two types from becoming equal. A CONCRETE width reflects expanded,
+because the checker itself expands it (`Int³` *is* three wires), and a
+VARIABLE width is never flattened, or `a0ⁿ⁰` and `a0ᵐ⁰` would be one
+type. `typeOfWord "pack"` answers now, and so do `zipN`,
 `mapN`, `checkedAt` and `indicesN`.
 
 **Refusals.** None of their own: `typeOfWord`, `typeOfCode` and
 `declOf` are total, and put the checker's own message on the **miss
-track** — "there is no such word" is an answer, not a failure.
+track**: "there is no such word" is an answer rather than a failure.
 `showType` is the one that can fail, and only on a rep nobody built.
 
-**Where a derivation goes** *(answered 2026-09-18)*. All five may be
+**Where a derivation goes.** All five may be
 called from a **declaration-time program**, so
 `(.Row ; cellsOfSym) "rowCells" ; defW` declares the printer a
 declaration implies (`examples/typerep.braid` §4). That is the
-declaration form whose body is computed, and it is what this page used
-to say was missing: no scope runs, so nothing mints, and `rowCells` is
-`Row ⇒ List(Str)` — an ordinary word that fits an ordinary `Fn`. A
-functor's graph morphism may call them too, and *that* is for code
-being rewritten rather than generated; the receipt it mints is correct
-there, because a scope really did run.
+declaration form whose body is computed. No scope runs, so nothing mints,
+and `rowCells` is `Row ⇒ List(Str)`, an ordinary word that fits an
+ordinary `Fn`. A functor's graph morphism may call them too, and that is
+for code being rewritten rather than generated; the receipt it mints is
+correct there, because a scope really did run.
 
 ---
 
@@ -1180,45 +1175,41 @@ The six kinds are six **settings** of it, told apart by their
 | a plain model (`model IntSum in Monoid(Int)`) | the theory's parameters, instantiated at this model's arguments | one program per slot, total over the theory's generators |
 | a Doctrine model (`model Circuits in Arrow(Circuit)`) | the identity on base types, with `embed` **total** — every base program has an image | the theory's slots, and `;` goes to `compose` |
 | a family (`model Fwd(Smooth(a, _)) in Smooth(Dual(a), a)`) | a type-level **substitution**, `a ↦ Dual(a)`, driven by the parameter | written over the **parameter's** words, not the base's |
-| an object-mapped model (`model Mod in Base(Int ↦ Mod7 via reduce)`) *(2026-09-17)* | a type-level **substitution**, `A ↦ B`, written down; `via c` on the literal family | a table over any word in scope, **partial** — a word that does not mention `A` maps to itself, one that does is unfolded, conjugated, or refused |
-| a **resource** (`model Log in Doctrine = Str`) *(2026-09-18)* | the identity on base types | the **state construction** at that carrier: `compose` and `embed` only, which is a SUB-presentation of the Doctrine and is the one place a `model` head is not total over its theory's slots |
+| an object-mapped model (`model Mod in Base(Int ↦ Mod7 via reduce)`) | a type-level **substitution**, `A ↦ B`, written down; `via c` on the literal family | a table over any word in scope, **partial** — a word that does not mention `A` maps to itself, one that does is unfolded, conjugated, or refused |
+| a **resource** (`model Log in Doctrine = Str`) | the identity on base types | the **state construction** at that carrier: `compose` and `embed` only, which is a SUB-presentation of the Doctrine and is the one place a `model` head is not total over its theory's slots |
 
-The last row is the fold of 2026-09-18, and it was a change of spelling
-and nothing else: since 2026-09-17 a resource declaration *generated* a
-Doctrine model whose carrier is `Fn⟨E ρ ⇒ E σ⟩`, and everything
-downstream already treated it as one. What tells its head from a table
-is its **body**: a stack, with no `=` in it — the same content-directed
-rule the object map uses.
+A resource declaration generates a Doctrine model whose carrier is
+`Fn⟨E ρ ⇒ E σ⟩`. What tells its head from a table is its **body**: a
+stack, with no `=` in it, the same content-directed rule the object map
+uses.
 
-The object-mapped row is the one that was missing, and writing it cost
-no move: `inObjMap` was already a field of the head's record, the arguments and
-the object map ride beside each other in the same grammar, and nothing
-that existed had to move. What it *added* is the machinery a written
-object map needs and a renaming does not — an image for the literal
-family, and transitive unfolding, because `F(def) = F(body)` is not a
-table lookup.
+The object-mapped row needs machinery a renaming does not: an image for
+the literal family, and transitive unfolding, because `F(def) = F(body)`
+is not a table lookup. The head's record already carried `inObjMap`, and
+the arguments and the object map ride beside each other in the same
+grammar.
 
 **What is NOT folded in, and will not be.** `functor F = <graph
-morphism>` stays its own declaration *(decided 2026-09-18)*. A model is
-a structure-preserving functor out of a **presented** category; a
-functor declaration gives a graph morphism on the free category of
-programs, which has no relations to preserve and no object map to
-write. Folding it into `model … in Base` was considered and rejected:
-the two are not the same thing said two ways, and saying so would cost
-the word "model" its meaning. What DID change is that a functor is now
-checked to be one (`design-macros.md`, 2026-09-18).
+morphism>` stays its own declaration. A model is a structure-preserving
+functor out of a **presented** category. A functor declaration gives a
+graph morphism on the free category of programs, which has no relations to
+preserve and no object map to write. Folding it into `model … in Base`
+was considered and rejected: the two are different things, and saying
+otherwise would cost the word "model" its meaning. A functor is checked
+to be one (`design-macros.md`).
 
 ## What is NOT a construct, and why
 
-| retired | when | what it is now |
-|---|---|---|
-| `instance` | 2026-09-13 | `model` — it fills a theory's slots, and "instance" is a typeclass word for a thing that is not a typeclass |
-| `mode` | 2026-09-13 | nothing: a model whose theory has a hom-object transports when it is **applied**, so the model IS the declaration. Write `with M` where `mode` was entered, and `in M` to build one of its morphisms by hand |
-| `rules` | 2026-09-13 | `model Name in Base = p = q, …` — a rule set is a **partial model of the ambient presentation**, which is a model |
-| `morphism` | 2026-09-14 | `transformation` — a map between two models of a theory is a **natural transformation** between the functors they are |
-| `over` | 2026-09-16 | the `in` clause. It was a preposition doing a verb's job, it lived in the body where a scope is not a stage, and losing a block body silently lost the whole scope |
-| `use` | 2026-09-16 | the `with` clause. It named nothing about what was applied to what, it took "the rest of the enclosing scope" as its body, and a header clause has no body to lose |
-| `resource` | 2026-09-18 | `model R in Doctrine = Ty` — a **model of the Doctrine**, which is what its declaration has generated since 2026-09-17. The keyword was a second spelling for a thing the language has one spelling for |
+| retired | what it is now |
+|---|---|
+| `instance` | `model` — it fills a theory's slots, and "instance" is a typeclass word for a thing that is not a typeclass |
+| `mode` | nothing: a model whose theory has a hom-object transports when it is **applied**, so the model IS the declaration. Write `with M` where `mode` was entered, and `in M` to build one of its morphisms by hand |
+| `rules` | `model Name in Base = p = q, …` — a rule set is a **partial model of the ambient presentation**, which is a model |
+| `morphism` | `transformation` — a map between two models of a theory is a **natural transformation** between the functors they are |
+| `K-word` | a **morphism of the model**, and the table of them is the model's **word table** |
+| `over` | the `in` clause. It was a preposition doing a verb's job, it lived in the body where a scope is not a stage, and losing a block body silently lost the whole scope |
+| `use` | the `with` clause. It named nothing about what was applied to what, it took "the rest of the enclosing scope" as its body, and a header clause has no body to lose |
+| `resource` | `model R in Doctrine = Ty` — a **model of the Doctrine**, which is what its declaration generates. The keyword was a second spelling for a thing the language has one spelling for |
 
 Each is refused **by name**, with the replacement spelled out, rather
 than failing as an unknown word.

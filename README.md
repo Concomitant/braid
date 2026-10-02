@@ -21,7 +21,7 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   and laws; a model interprets it; a transformation is checked
   slot by slot, proved where a normalizer can and sampled otherwise.
 - One model head, with optional clauses: a model may take a model
-  parameter (a family), and it may carry an **object map** —
+  parameter (a family), and it may carry an **object map**.
   `model Mod in Base(Int ↦ Mod7 via reduce)` reinterprets a program at
   another type, mapping literals through `via`, unfolding the defs it
   meets, and refusing by name any word it has no image for
@@ -29,17 +29,17 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
 - Models of the Doctrine transport whole programs into another
   category: circuits, data frames, probability as a Markov category.
   The Doctrine's hom-object ranges over whole STACKS, so a stage of any
-  width transports as itself — products stay flat. A theory may also
+  width transports as itself and products stay flat. A theory may also
   spell each of its generators in the base, and then the embedding is
   defined on the **wide subcategory** those atoms generate: transport
   reads each atom into a slot, and refuses by name any atom that is not
-  one (`examples/linear.braid` presents linear maps that way, so a
-  transported program is linear by construction and a literal — which
-  would make it affine — has nothing to be read as).
-- A **resource** is a threaded wire, and it is a model of the Doctrine —
+  one. `examples/linear.braid` presents linear maps that way, so a
+  transported program is linear by construction, and a literal has
+  nothing to be read as because it would make the program affine.
+- A **resource** is a threaded wire, and it is a model of the Doctrine,
   so it is written as one: `model Log in Doctrine = Str`, told from
   every other `model` head by its body being a stack. `with R` is
-  transport into it; the routing is inferred, so a word that calls a
+  transport into it. The routing is inferred, so a word that calls a
   resource word carries the label with no header at all.
 - `Code` as data, with reflection (`getCode`, `typeOfCode`, `declOf`)
   and user-written functors: `functor F = <graph morphism>` takes one
@@ -50,11 +50,10 @@ def notional with Frame = dup ; px qty ; _ toFloat ; fmul
   `[body] "f" defW`, and `defW : Code Str =Dict> •` says in its arrow
   what it does. The table is open, and a program may declare too
   (`examples/dictionary.braid`).
-- 64 primitives; everything else is in the prelude, in Braid. (The
-  count is of words source can name, so it **excludes** `#fix`, the
-  knot `with Recursive` emits — `#` opens a comment. The kernel holds
-  one more morphism than this number reports, and it is always that
-  one.)
+- 64 primitives; everything else is in the prelude, in Braid. The count
+  is of words source can name, so it **excludes** `#fix`, the knot
+  `with Recursive` emits (`#` opens a comment). The kernel holds one
+  more morphism than this number reports, and it is always that one.
 
 ## Install and run
 
@@ -93,9 +92,9 @@ One Haskell module for the checker, interpreter, and REPL, a 1317-case test suit
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove
-that others do), a handler *construct* (a handler is an ordinary word —
-`examples/resources.braid` writes one), and a `World` wire you can
-name: `IO`'s carrier is declared abstract and linear, but there is one
+that others do), a handler *construct* (a handler is an ordinary word,
+and `examples/resources.braid` writes one), and a `World` wire you can
+name. `IO`'s carrier is declared abstract and linear, but there is one
 of it, it is ambient, and the elaborator never writes it.
 
 Prose in the docs follows `WRITING.md`, and `GLOSSARY.md` defines the
