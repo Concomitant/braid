@@ -1,6 +1,6 @@
-# Interactive IO. readLine takes one line from stdin; EOF rides the
-# miss track like any other IO failure — so this example works at a
-# terminal AND degrades gracefully in CI, where stdin is closed.
+# Interactive IO. readLine takes one line from stdin, and EOF rides the
+# miss track like any other IO failure, so this example works at a
+# terminal and degrades gracefully where stdin is closed.
 
 "What is your name?" >> print
 readLine

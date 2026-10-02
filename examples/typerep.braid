@@ -1,9 +1,9 @@
-# TYPES ARE DATA — and so are declarations.
+# TYPES ARE DATA, and so are declarations.
 #
 # `examples/code.braid` reflects a PROGRAM: `reflect` turns a quotation
 # into its spine and the list library becomes the metaprogramming
-# library.  This file reflects the other half — the program's TYPE, and
-# the DECLARATION it was written against.
+# library.  This file reflects the other half: the program's TYPE, and the
+# DECLARATION it was written against.
 #
 #     typeOfWord : Str     ⇒ (TypeRep | Str)     a word's principal scheme
 #     typeOfCode : Code    ⇒ (TypeRep | Str)     a Code value's, inferred here
@@ -13,7 +13,7 @@
 #
 # Nothing here computes anything new.  Every one of these words answers
 # with a fact the checker already holds, so they are pure, they cost
-# nothing, and a `functor` may call them — which is what makes an
+# nothing, and a `functor` may call them, which is what makes an
 # ELABORATION-TIME derivation an ordinary Braid word rather than a
 # construct of its own (§5 below).
 #
@@ -21,8 +21,8 @@
 # answer (`normalizeArrow`: variables become a0, ρ0, σ0, ε0 in order of
 # first appearance), so two schemes are the same scheme exactly when
 # their reps are `eq?`.  A rep you assembled by hand carries no such
-# guarantee — `eq?` on an unnormalized rep compares variable NAMES,
-# which is a different question.  MANUAL §12.
+# guarantee: `eq?` on an unnormalized rep compares variable NAMES, which
+# is a different question.  MANUAL §12.
 
 def say = ((t -> t ; showType) | (e -> e)) ; merge
 

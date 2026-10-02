@@ -1,8 +1,8 @@
 # Naming wires, concatenatively. `x y ->` is a postfix binder: it names
-# the top wires and the REST of the scope is the body. No wrapping
-# parens needed — the binder is a pipeline stage. It compiles to pure
-# dup/swap/drop wiring (a named abstraction IS a string diagram); try
-# `[x -> x x >> *] >> reflect >> unparse` to see the wiring.
+# the top wires and the REST of the scope is the body. It needs no
+# wrapping parens, because the binder is a pipeline stage. It compiles to
+# pure dup/swap/drop wiring, since a named abstraction IS a string
+# diagram; `[x -> x x >> *] >> reflect >> unparse` shows the wiring.
 
 # bare def body
 def square = x -> x x >> *

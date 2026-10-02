@@ -4,20 +4,18 @@
 # Braid is cartesian CLOSED (`curry`/`ev`) and has coproducts, so it is
 # DISTRIBUTIVE for free: `P × –` is a left adjoint, left adjoints
 # preserve colimits, and `dist2`'s prelude body is that proof written
-# out — capture `P` into one handler per track, then `case2`. Nothing
-# below is an axiom; `:doc dist2` has the derivation.
+# out, capturing `P` into one handler per track and then `case2`. Nothing
+# below is an axiom, and `:doc dist2` has the derivation.
 #
-# Stage 5a¾ made this load-bearing: abstraction elimination reifies a
-# binder parameter used inside a ROW by distributing the parameter block
-# over the row's tracks with exactly this word (MANUAL §6).
+# The word carries weight elsewhere too: abstraction elimination reifies
+# a binder parameter used inside a ROW by distributing the parameter
+# block over the row's tracks with this word (MANUAL §6).
 #
-# STATUS, 2026-09-13: DECIDED. Every law below was a check at sample
-# points until the normalizer learned to enter quotations and rows
-# (§12.9). It is now a proof: `sameCode` normalizes both sides to a case
-# tree over the free distributive category — following a known injection
-# is β, and splitting an unknown one is extensivity — so `true` here
-# means the law holds at EVERY input and under every reading of the
-# slots, not that it held at the three numbers we tried.
+# Every law below is DECIDED rather than sampled. `sameCode` normalizes
+# both sides to a case tree over the free distributive category, where
+# following a known injection is β and splitting an unknown one is
+# extensivity (§12.9). `true` here means the law holds at EVERY input and
+# under every reading of the slots, not that it held at three numbers.
 
 # The router each model supplies for `pick`: a sum wire whose injection
 # nobody knows, which is what makes the laws below theorems about an

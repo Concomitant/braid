@@ -1,8 +1,8 @@
 # caseN: the flat coproduct eliminators. A right-nested sum (A | (B | C))
-# is a decision tree written in the type; [hA] [hB] [hC] ... >> case3
-# folds the whole spine in one shot — one quoted handler per track, all
+# is a decision tree written in the type, and [hA] [hB] [hC] ... >> case3
+# folds the whole spine in one shot: one quoted handler per track, all
 # landing on a common result. It is to sums what foldList is to lists,
-# and it is an ordinary prelude word (the old case(…) syntax is gone).
+# and it is an ordinary prelude word, not syntax.
 #
 # Deferred routers build the nest: each one answers its track and passes
 # the rest down, so the leftover sum grows to the right.

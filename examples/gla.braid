@@ -1,16 +1,16 @@
-# Graphical linear algebra, level 1. A vector is a BUNDLE — n bare
-# wires, typed Intⁿ — and the generators are width-polymorphic: one
-# word, every dimension. No boxes: the stack is the vector.
+# Graphical linear algebra, level 1. A vector is a BUNDLE of n bare
+# wires, typed Intⁿ, and the generators are width-polymorphic: one word,
+# every dimension. No boxes: the stack is the vector.
 #   dupN : aⁿ ⇒ aⁿ aⁿ            copy (Δ)
 #   addN : Intⁿ Intⁿ ⇒ Intⁿ     pointwise add (∇)
 #   zipN : aⁿ bⁿ ⇒ Box(a b)ⁿ   pair two bundles, one wire each
 #   sumN : Intⁿ ⇒ Int           fold a bundle
 # A matrix is just a value Fn⟨Intⁿ ⇒ Intᵐ⟩.
 #
-# That is the VECTOR half of graphical linear algebra.  The MORPHISM
-# half — the PROP presented as a `theory`, with copy/add/zero/discard
-# as slots, no `embed`, and transposition as a law-checked exchange of
-# the comonoid and the monoid — is `examples/linear.braid` (2026-09-21).
+# That is the VECTOR half of graphical linear algebra.  The MORPHISM half
+# is `examples/linear.braid`: the PROP presented as a `theory`, with
+# copy, add, zero and discard as slots, no `embed`, and transposition as
+# a law-checked exchange of the comonoid and the monoid.
 
 1 2 3 >> dupN >> addN >> sumN >> print      # Δ then ∇ = x+x pointwise → 12
 

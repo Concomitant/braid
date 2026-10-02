@@ -1,13 +1,13 @@
 # A tracer that lifts at every cut.
 #
-# The tempting tracer reads the wire — `dup ... ; print ...` — and that
+# The tempting tracer reads the wire, `dup ... ; print ...`, and that
 # stage is `a ρ =IO> a ρ`: it needs a wire, so it fails at an empty cut
-# and, on a binder body, prints the parameter block (the deepest wire
-# for the body's duration).  The stage that can go anywhere touches NO
-# wire: `"after dup" pass ; print pass` is `ρ =IO> ρ`.  Its content
-# comes from the functor, which has the stage in hand.  That is what
-# `interpose` checks: the inserted stage must be a unit endomorphism,
-# `ρ ⇒ ρ`, whiskered by whatever the cut carries.
+# and, on a binder body, prints the parameter block, which is the deepest
+# wire for the body's duration.  The stage that can go anywhere touches NO
+# wire: `"after dup" pass ; print pass` is `ρ =IO> ρ`.  Its content comes
+# from the functor, which has the stage in hand.  That is what `interpose`
+# checks: the inserted stage must be a unit endomorphism, `ρ ⇒ ρ`,
+# whiskered by whatever the cut carries.
 
 def orNil = ((c -> c) | drop ; nil) ; merge
 

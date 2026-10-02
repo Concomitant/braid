@@ -1,12 +1,12 @@
-# Diagram cuts. Braid is not token-concatenative — everything-exact
-# means an arbitrary text substring is not a program. What replaces it
-# is better: reflected code is in SPINE NORMAL FORM (Code = a list of
-# stages = the diagram's horizontal slices), and at that granularity
-# the concatenative property is a theorem you can run:
+# Diagram cuts. Braid is not token-concatenative, because everything-exact
+# means an arbitrary text substring is not a program. What replaces it is
+# spine granularity: reflected code is in SPINE NORMAL FORM, where Code is
+# a list of stages and a stage is one of the diagram's horizontal slices.
+# At that granularity the concatenative property is a theorem you can run:
 #
 #   HORIZONTAL: every stage-boundary cut of a well-typed program
 #   yields two runnable pieces, and run(prefix) ; run(suffix) = run(whole).
-#   VERTICAL:   atom slices WITHIN a stage are sub-tensors — runnable.
+#   VERTICAL:   atom slices WITHIN a stage are sub-tensors, and runnable.
 #   BOXING:     a Code slice becomes an Fn value without running
 #               (deferred through a closure; the dynamic check rides
 #               the railway at ev time).

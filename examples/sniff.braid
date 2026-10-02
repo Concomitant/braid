@@ -1,5 +1,5 @@
-# The ingestion story, now real: CSV cells are strings; a parse router
-# refines them; sequence commutes the column — typed data or evidence.
+# The ingestion story. CSV cells are strings, a parse router refines them,
+# and sequence commutes the column into typed data or evidence.
 
 ("1" "2" "3" >> pack) >> [asInt?] ... >> map >> sequence >> print   # alt1(list(1, 2, 3))
 ("1" "x" "3" >> pack) >> [asInt?] ... >> map >> sequence >> print   # alt2(x)

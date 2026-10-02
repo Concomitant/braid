@@ -1,6 +1,6 @@
-# The two ladders — vertical programs built from ONE polymorphic word
-# each (no numbered families). Newlines are the spine; `;` appears only
-# inside arms; `>>` not at all.
+# The two ladders: vertical programs built from ONE polymorphic word
+# each, with no numbered families. Newlines are the spine, `;` appears
+# only inside arms, and `>>` not at all.
 #
 #   settle  = assocL ; (merge |)  :  (ρ0 | (ρ0 | ρ1)) ⇒ (ρ0 | ρ1)
 #   settleR = assocR ; (| merge)  :  ((ρ0 | ρ1) | ρ1) ⇒ (ρ0 | ρ1)
@@ -9,9 +9,9 @@
 # level routes the working track, answers the hit, and settle folds the
 # agreeing answer into the pile. One bar per level, forever.
 #
-# settleR is its mirror, the VALIDATION ladder: (working | errors) —
-# each check must pass to keep working; failures settle behind you.
-# Both are prelude words (with `splice`, their routing cousin).
+# settleR is its mirror, the VALIDATION ladder, (working | errors): each
+# check must pass to keep working, and failures settle behind you. Both
+# are prelude words, beside `splice`, their routing cousin.
 
 def classify =
     negative?

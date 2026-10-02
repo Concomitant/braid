@@ -1,13 +1,13 @@
 # The registrar's office, wired.
 #
-# A student's scores travel as a bare bundle — three wires, no box.
-# Weighting is a dot product against the syllabus; the letter is a
-# decision ladder; fairness is a law you can run. Everything is exact:
-# every wire is visible, every join is chosen.
+# A student's scores travel as a bare bundle of three wires, with no box.
+# Weighting is a dot product against the syllabus, the letter is a
+# decision ladder, and fairness is a law you can run. Everything is exact:
+# every wire is visible and every join is chosen.
 
 # ---- the workhorse -----------------------------------------------------
-# dot : Intⁿ Intⁿ ⇒ Int — dimension-checked: a 3-weight syllabus
-# cannot meet a 4-score transcript.
+# dot : Intⁿ Intⁿ ⇒ Int, dimension-checked: a 3-weight syllabus cannot
+# meet a 4-score transcript.
 def dot = zipN ; [(acc p -> p ; unBox ; (a b -> (a b ; *) acc ; +))] 0 ... ; foldExp
 
 # ---- the syllabus ------------------------------------------------------

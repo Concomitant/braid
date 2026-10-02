@@ -1,5 +1,5 @@
-# User-declared binary trees. unTree is a router — elimination IS
-# control flow — and folds are ordinary recursion.
+# User-declared binary trees. unTree is a router, so elimination IS
+# control flow, and folds are ordinary recursion.
 
 type Tree(a) = (a | Tree(a) Tree(a))
 

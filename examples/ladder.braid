@@ -1,12 +1,13 @@
-# Guard ladders as ordinary words — no parser support, no sugar.
+# Guard ladders as ordinary words, with no parser support and no sugar.
 #
-# The headline form: one lane per line, `...` accumulates, `decide`
-# folds. A lane is a bare Bool condition beside its answer; the final
-# lane is the default (no condition). The trailing `...` is the
-# ordinary explicit-remainder marker — each lane line pushes UNDER the
-# growing product, so lanes stack reversed and decide's overwrite fold
-# (deepest first) makes the FIRST-written true lane win. All conditions
-# are probed (a product — pure, so harmless); answers are plain values.
+# The headline form: one lane per line, `...` accumulates, `decide` folds.
+# A lane is a bare Bool condition beside its answer, and the final lane is
+# the default, with no condition. The trailing `...` is the ordinary
+# explicit-remainder marker, so each lane line pushes UNDER the growing
+# product. Lanes therefore stack reversed, and decide's overwrite fold,
+# deepest first, makes the FIRST-written true lane win. All conditions are
+# probed, which is harmless because the product is pure, and answers are
+# plain values.
 def sign =
     x ->
     (x >> negative) "neg"  ...

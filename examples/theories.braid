@@ -1,15 +1,15 @@
 # Theories: named slots, models, and laws you actually run.
 #
-# Not typeclasses. Nothing is inferred and nothing is dispatched: an
-# model is chosen BY NAME with `with`, and the choice is a renaming at
-# elaboration — resolution once per scope, never a dictionary per call.
-# That is the trade design-effects.md records: you give up inferring
-# WHICH model, and get back annotation-freeness, coherence in a
-# structural type system, and no need for higher kinds.
+# Not typeclasses. Nothing is inferred and nothing is dispatched: a model
+# is chosen BY NAME with `with`, and the choice is a renaming at
+# elaboration, resolved once per scope rather than by a dictionary per
+# call. That is the trade design-effects.md records: you give up inferring
+# WHICH model, and get back annotation-freeness, coherence in a structural
+# type system, and no need for higher kinds.
 #
-# What makes a model more than a promise is that the theory's laws
-# are ordinary Braid programs, and they RUN — at module start, before
-# main. A model that fails them is not a model.
+# What makes a model more than a promise is that the theory's laws are
+# ordinary Braid programs, and they RUN at module start, before main. A
+# model that fails them is not a model.
 
 theory Monoid(a) =
     unit   : • ⇒ a

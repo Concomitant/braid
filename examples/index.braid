@@ -1,11 +1,11 @@
 # Indices: Fin(n), and a small dataframe made of them.
 #
 # A bundle Aⁿ IS the function space Fin(n) → A, stored tabulated and
-# laid flat on the stack. This file adds the other half: the index
-# itself. Every Fin is WITNESSED — its bound comes from a live bundle
-# or from a literal's own offset — so `at` never needs a runtime check
-# and the bound is erased like every other width (a Fin is an Int at
-# runtime; `finInt` and `weaken` are identities).
+# laid flat on the stack. This file adds the other half, the index
+# itself. Every Fin is WITNESSED, with its bound coming from a live
+# bundle or from a literal's own offset, so `at` never needs a runtime
+# check and the bound is erased like every other width. A Fin is an Int
+# at runtime, and `finInt` and `weaken` are identities.
 
 # ---- the frame ---------------------------------------------------------
 # Equal-height columns ARE shared n: the checker correlates the widths,

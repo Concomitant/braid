@@ -1,18 +1,17 @@
-# `into` — the OPEN coproduct eliminator, and `---`, the written row
-# tail (stage 5a⅞, 2026-09-12).
+# `into`, the OPEN coproduct eliminator, and `---`, the written row tail.
 #
 # A sum has TWO tails and they are different things. `...` continues a
 # track's WIRES (a stack variable, ρ); `---` continues a row's
 # ALTERNATIVES (a row variable, σ). One glyph per kind, in every
-# position — declaration heads, written types, terms.
+# position: declaration heads, written types, terms.
 #
 #   into : Fn⟨ρ0 ⇒ (σ0)⟩ (ρ0 | σ0) ⇒ (σ0)
 #
-# It is the copairing [h, id]: handle the FIRST alternative by mapping
-# it INTO the remaining row, and shift every other tag down one. Over a
-# residual that is the only copairing anyone can write — a handler for a
-# track you cannot name does not exist — so `into` is a prim, while the
-# closed eliminators (`case2`, `merge`, `otherwise`) stay derived.
+# It is the copairing [h, id]: handle the FIRST alternative by mapping it
+# INTO the remaining row, and shift every other tag down one. Over a
+# residual that is the only copairing anyone can write, because a handler
+# for a track you cannot name does not exist, so `into` is a prim where
+# the closed eliminators (`case2`, `merge`, `otherwise`) stay derived.
 #
 # NOTE `>=>` is `[q, alt2]`, a CLOSED copairing: not a model of this.
 

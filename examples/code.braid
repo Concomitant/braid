@@ -1,8 +1,8 @@
-# Code is data: reflect turns a quotation into its spine — a list of
-# stages of atoms — so the list library IS the metaprogramming
-# library. evalAs runs code against a WITNESS whose type it must meet;
-# the witness is never applied, it is the expectation. Failures ride the
-# miss track carrying the untouched segment.
+# Code is data: reflect turns a quotation into its spine, a list of
+# stages of atoms, so the list library IS the metaprogramming library.
+# evalAs runs code against a WITNESS whose type it must meet. The witness
+# is never applied; it is the expectation. Failures ride the miss track
+# carrying the untouched segment.
 
 [dup >> * >> 1 ... >> +] >> reflect
     ((c -> [dup >> *] (2 c >> take) (6) >> evalAs >> print) | print) >> forget   # alt1(36): a 2-stage section, run

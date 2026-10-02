@@ -1,5 +1,5 @@
-# Braid is already an Arrow. Control.Arrow's interface is not a library
-# here — it is the syntax:
+# Braid is already an Arrow. Control.Arrow's interface is the syntax
+# rather than a library:
 #
 #   arr f      = any pure program        f >>> g   = f ; g
 #   first f    = f _                     second f  = _ f
@@ -8,7 +8,7 @@
 #   f +++ g    = (f | g)                 f ||| g   = (f | g) ; merge
 #   app        = ev
 #
-# The laws run below — with sq = square, db = double, on the pair 3 7.
+# The laws run below, with sq = square and db = double, on the pair 3 7.
 
 def sq = dup ; *
 def db = 2 _ ; *

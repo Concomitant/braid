@@ -1,11 +1,11 @@
 # One file's declarations, in another file's scope.
 #
 # An import is the INCLUSION of one presentation into another: objects
-# are added, never merged.  A clash is an error naming both files —
+# are added, never merged.  A clash is an error naming both files, so
 # importing `metered.braid` here as well would say
 #   in examples/metered.braid: `poly` is already defined in
 #   examples/traced.braid
-# — and a file included twice by two different routes is included once.
+# and a file included twice by two different routes is included once.
 #
 # What travels is DECLARATIONS: defs, types, resources, theories,
 # models, functors.  What does not is the imported file's main

@@ -1,26 +1,26 @@
-# A NATURAL TRANSFORMATION BETWEEN MODELS — the declaration that was
-# missing.
+# A NATURAL TRANSFORMATION BETWEEN MODELS.
 #
 # A theory has models, and two models of one theory are two functors out
-# of the presented category; a map between them is a NATURAL
+# of the presented category, so a map between them is a NATURAL
 # TRANSFORMATION.  `transformation Len : ListMonoid ⇒ IntSum = len` says
-# that `len` is a homomorphism: for every slot `s : Σ ⇒ Θ` of the
-# theory, the square
+# that `len` is a homomorphism: for every slot `s : Σ ⇒ Θ` of the theory,
+# the square
 #
 #     ListMonoid@s ; Len(Θ)  =  Len(Σ) ; IntSum@s
 #
-# commutes, where the component at a stack is the component ON EACH
-# WIRE that is the theory's parameter — monoidal, so at `a a` it is
+# commutes, where the component at a stack is the component ON EACH WIRE
+# that is the theory's parameter.  It is monoidal, so at `a a` it is
 # `len len`.  Because the base is the FREE category on the theory's
 # generators, one square per generator is complete: a morphism of
-# presentations is determined on generators, so there is nothing else
-# to check.
+# presentations is determined on generators, so there is nothing else to
+# check.
 #
-# The elaborator generates the squares and DECIDES them: `sameCode`
-# where the normalizer reaches, and where it does not, the theory's own
-# evidence — `sample : • ⇒ a` supplies the inputs, an exit observes a
-# carrier, `eq?` compares.  A square that neither proves nor samples is
-# refused, naming the slot and asking for a `sample` slot.
+# The elaborator generates the squares and DECIDES them.  `sameCode`
+# decides where the normalizer reaches, and where it does not, the
+# theory's own evidence does: `sample : • ⇒ a` supplies the inputs, an
+# exit observes a carrier, and `eq?` compares.  A square that neither
+# proves nor samples is refused, naming the slot and asking for a
+# `sample` slot.
 
 theory Monoid(a) =
     unit   : • ⇒ a

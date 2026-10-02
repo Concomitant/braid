@@ -2,12 +2,11 @@
 # a TEMPLATE.
 #
 # A def whose header is `in THEORY` is a template: it is a morphism of
-# the theory, and its body waits for a model.  A def whose `with`
-# names a MODEL supplies one — the
-# template's body is expanded there, renamed by that model, and
-# re-inferred there.  So every instantiation gets its own principal type
-# and nothing is dispatched at run time.  ML's functor application,
-# spelled as scope.
+# the theory, and its body waits for a model.  A def whose `with` names
+# a MODEL supplies one, and the template's body is expanded there,
+# renamed by that model, and re-inferred there.  Every instantiation
+# therefore gets its own principal type and nothing is dispatched at run
+# time.  It is ML's functor application, spelled as scope.
 
 theory Config(v) =
     name    : • ⇒ Str

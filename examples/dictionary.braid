@@ -1,15 +1,15 @@
 # BENEATH THE KEYWORDS: the declaration words.
 #
-# Braid's declaration layer is a fixed, name-first surface — `def name =
-# body` and kin — over an OPEN TABLE of DECLARATION WORDS, each carrying
-# a `=Dict>` manifest.  The keyword is kept deliberately: it marks "an
-# act on the dictionary" as against "a morphism", which is the phase
-# distinction, visible.  What this file shows is the other side of that
-# surface — the words themselves, called by a program.
+# Braid's declaration layer is a fixed, name-first surface (`def name =
+# body` and kin) over an OPEN TABLE of DECLARATION WORDS, each carrying a
+# `=Dict>` manifest.  The keyword is kept deliberately: it marks an act
+# on the dictionary apart from a morphism, which is the phase distinction
+# made visible.  What this file shows is the other side of that surface,
+# the words themselves, called by a program.
 #
 # There are no parsing words and there never will be.  A keyword's word
-# receives ALREADY-PARSED arguments — Code, Str, a TypeRep — so a file
-# can be read without being run, and hygiene stays a property of the
+# receives ALREADY-PARSED arguments, a Code, a Str or a TypeRep, so a
+# file can be read without being run, and hygiene stays a property of the
 # representation rather than a discipline.
 
 # ---------------------------------------------------------------------

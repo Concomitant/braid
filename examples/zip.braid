@@ -1,6 +1,6 @@
-# zip pairs two lists. A list cell holds ONE wire, so the pair is a
-# Box — a whole stack carried as a single wire — and the fold unboxes
-# it to see both halves: List(a) List(b) ⇒ List(Box(a b)).
+# zip pairs two lists. A list cell holds ONE wire, so the pair is a Box,
+# a whole stack carried as a single wire, and the fold unboxes it to see
+# both halves: List(a) List(b) ⇒ List(Box(a b)).
 
 (1 2 3 >> pack) (10 20 30 >> pack) >> zip
     [0] [(acc bx -> bx >> unBox >> (a b -> a b >> * >> acc ... >> +))] ...

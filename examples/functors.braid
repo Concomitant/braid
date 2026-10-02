@@ -1,7 +1,7 @@
-# Functors are quote transformers. No typeclasses: a functor IS its
-# action on morphisms — an ordinary def Fn⟨a⇒b⟩ ⇒ Fn⟨F(a)⇒F(b)⟩,
-# written by conjugation (wrap the hole in context). Composing
-# functors is just ; — and a monad is three such values.
+# Functors are quote transformers. There are no typeclasses: a functor IS
+# its action on morphisms, an ordinary def Fn⟨a⇒b⟩ ⇒ Fn⟨F(a)⇒F(b)⟩,
+# written by conjugation, which wraps the hole in context. Composing
+# functors is `;`, and a monad is three such values.
 
 def fmapList = (q -> [q ... ; map])
 def compFn   = (p q -> [p ... ; ev ; q ... ; ev])

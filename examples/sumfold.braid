@@ -1,6 +1,6 @@
 # Folding a sum type: a row of handlers, one per alternative, then a
-# collapse. This is the copair [h1, h2, h3] — the fundamental sum
-# eliminator, and the dual of folding a list.
+# collapse. This is the copair [h1, h2, h3], the fundamental sum
+# eliminator and the dual of folding a list.
 
 data Shape = (Int | Int Int | Int Int Int)     # radius | w h | a b c
 def circle = alt1 >> Shape

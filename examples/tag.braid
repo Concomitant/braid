@@ -7,13 +7,13 @@
 #   -> x y     names AFTER the arrow are LABELS: identity at runtime, so
 #              the wires flow straight on and the names are there too.
 #
-# In a drawn diagram you write a label beside a wire without breaking
-# it; the second form is that. It is sugar, not machinery:
+# In a drawn diagram you write a label beside a wire without breaking it,
+# and the second form is that. It is sugar rather than machinery:
 #
 #   -> x _ y   ≡   x _ y ... -> x _ y ...
 #
-# Slots use the ordinary stage vocabulary — a name takes one wire, `_`
-# skips one — exactly as atoms do in `print print _`.
+# Slots use the ordinary stage vocabulary, where a name takes one wire and
+# `_` skips one, as atoms do in `print print _`.
 
 # ---- the two binders, same answer ---------------------------------------
 def consumed =

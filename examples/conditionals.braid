@@ -1,5 +1,5 @@
-# "Do something on one track, keep the other" — vertical rows with
-# identity defaults. Leading | keeps track 1; trailing | keeps track 2.
+# "Do something on one track, keep the other": vertical rows with
+# identity defaults. Leading | keeps track 1, trailing | keeps track 2.
 
 def relu =                 # negative → 0, else keep
     negative?

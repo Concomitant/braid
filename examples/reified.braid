@@ -1,19 +1,19 @@
 # A category whose carrier is the program AND its Code.
 #
 # `examples/circuits.braid` says the rule once: a theory declared
-# `in Doctrine` that takes the doctrine's `compose`, `embed` and
-# `first` presents a category, and `with` of one of its models
-# transports base programs into it.  This file is a second model of
-# that rule with nothing in common with circuits except the doctrine —
-# its carrier is a PAIR of the program and the Code the elaborator
-# handed it, so a transported word can be RUN and READ.  The doctrine's
-# seven laws run for this model too, which is the point of having the
-# doctrine at all: one audit, two carriers that share nothing.
+# `in Doctrine` that takes the doctrine's `compose` and `embed` presents
+# a category, and `with` of one of its models transports base programs
+# into it.  This file is a second model of that rule with nothing in
+# common with circuits except the doctrine.  Its carrier is a PAIR of
+# the program and the Code the elaborator handed it, so a transported
+# word can be RUN and READ.  The doctrine's five laws run for this model
+# too, which is what having the doctrine buys: one audit, two carriers
+# that share nothing.
 #
-# The point to take away, and the reason the file is short: `getCode`
-# and `evalAs` are THIS MODEL's embedding and exit.  `Code` is not a
-# special floor that metaprogramming happens on; it is one more carrier
-# a theory can name, reached and left through slots like any other.
+# The reason the file is short: `getCode` and `evalAs` are THIS MODEL's
+# embedding and exit.  `Code` is not a special floor that
+# metaprogramming happens on.  It is one more carrier a theory can name,
+# reached and left through slots like any other.
 
 data Coded(a..., b...) = Fn⟨a ⇒ b⟩ Code
 

@@ -1,7 +1,7 @@
 # Factor-style conditionals from the verdict tier: a Bool selects a
-# quotation and ev runs it on the rest of the stack. This only
-# works because Bool's tracks are empty — selection commutes with the
-# data, so the branches see wires the test never touched.
+# quotation and ev runs it on the rest of the stack. This works because
+# Bool's tracks are empty, so selection commutes with the data and the
+# branches receive wires the test never touched.
 
 3 4 >> (1 >> odd) [+] [*] ... >> cond >> print     # 7   (odd: then-branch)
 3 4 >> (2 >> odd) [+] [*] ... >> cond >> print     # 12  (even: else-branch)

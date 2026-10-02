@@ -12,8 +12,8 @@
 # strength slot saying it again.
 #
 # So the functor laws of `map` are not something this file promises.
-# They are the doctrine's seven arrow laws, and the audit runs them
-# before anything below prints.
+# They are the doctrine's five laws, and the audit runs them before
+# anything below prints.
 #
 # WHAT IS A FRAME, exactly.  A frame is a map from an INDEX to a row,
 # `Fn⟨I ⇒ row⟩` together with its key set.  This file represents it as

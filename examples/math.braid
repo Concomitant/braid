@@ -1,6 +1,6 @@
-# Factorial, Fibonacci, exponentiation — recursive and iterative.
-# Newlines are strict >>, so each step gets its own line. Every one is
-# the same shape: a router picks base-vs-step, then one router row
+# Factorial, Fibonacci and exponentiation, recursive and iterative.
+# Newlines are strict >>, so each step gets its own line. Every one is the
+# same shape: a router picks base against step, then one router row
 # (base | step) >> merge, and postfix binders name the wires.
 
 # --- recursive (`with Recursive`: the header puts the definition's own
