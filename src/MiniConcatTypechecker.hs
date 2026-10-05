@@ -1153,9 +1153,10 @@ showEff e
 -- `arrowGlyph` prints `⇒` for a row with a tail and no labels, and a
 -- grade argument prints `•` for the same row.
 showGrade :: EffRow -> String
-showGrade e
-  | S.null (eLabels e) = "•"
-  | otherwise          = unwords (S.toList (eLabels e))
+showGrade (Eff ls mv)
+  | S.null ls, Just v <- mv = show v
+  | S.null ls               = "•"
+  | otherwise               = unwords (S.toList ls ++ maybe [] ((: []) . show) mv)
 
 -- A grade argument, as a one-wire stack: the shape `TData` carries it
 -- in.  Every non-stack kind rides this way (`paramStack (PRow …)` is
@@ -3526,6 +3527,7 @@ dataFoldArtifact d
               svs0     = [ sv | PStack sv <- dParams d ]
               rvs0     = [ rv | PRow   rv <- dParams d ]
               nvs0     = [ nv | PWidth nv <- dParams d ]
+              evs0     = [ ev | PEff   ev <- dParams d ]
               payloads = map stackElems alts
               flagsOf  = map (== selfTy)
               specs    = [ if null pl then Nothing else Just (flagsOf pl)
@@ -3550,7 +3552,10 @@ dataFoldArtifact d
               resSV    = SV (fresh "ρ" [ n | PStack (SV n) <- dParams d ])
               resStack | oneWire   = SCons resTy SEnd
                        | otherwise = STail resSV
-              eps      = EV "ε"
+              -- the fold's own row variable, named apart from the
+              -- declaration's grade parameters for the same reason the
+              -- result variable is named apart from its wires
+              eps      = EV (fresh "ε" [ n | PEff (EV n) <- dParams d ])
               arrE i o = Arrow i o (Eff S.empty (Just eps))
               sigma (alt, pl)
                 | null pl   = alt
@@ -3566,7 +3571,7 @@ dataFoldArtifact d
                               (SCons selfTy SEnd) sigmas
               sc = Forall (tvs0 ++ [ resTV | oneWire ])
                           (svs0 ++ [ resSV | not oneWire ])
-                          rvs0 nvs0 [eps] []
+                          rvs0 nvs0 (evs0 ++ [eps]) []
                           (arrE inStack resStack)
               doc = "definition by points: one quoted case per constructor of "
                       ++ dName d ++ ", recursive slots pre-folded"
@@ -4552,11 +4557,12 @@ parseTypeLine aliases datas line =
                 Left $ "Type " ++ name ++ ": parameter '" ++ nm
                     ++ "' is used both as a wire and as a width (^"
                     ++ nm ++ ")"
-            | EV nm `elem` bodyEVs, TV nm `elem` bodyTVs =
-                Left $ "Type " ++ name ++ ": parameter '" ++ nm
-                    ++ "' is used both as a wire and as a grade (=" ++ nm
-                    ++ ">)"
             | NV nm `elem` bodyNVs = Right (PWidth (NV nm))
+            -- A GRADE WINS over the wire reading, because a grade
+            -- argument parses as a stack until the kind is known: the
+            -- first read sees a wire exactly where the second will see
+            -- a grade.  The genuine clash is checked below, against the
+            -- SECOND read.
             | EV nm `elem` bodyEVs = Right (PEff (EV nm))
             | otherwise            = Right q
           reclass q = Right q
@@ -4570,6 +4576,15 @@ parseTypeLine aliases datas line =
                 then parseTyBody aliases ((name, params) : dataSigs)
                                  params rhs
                 else Right body
+      -- …and a parameter read as a grade must be a grade EVERYWHERE
+      case [ pName q | q <- params, isEffParam q
+                     , let (ts, ss, _, ns, _) = varsOfTy body
+                     , TV (pName q) `elem` ts || SV (pName q) `elem` ss
+                       || NV (pName q) `elem` ns ] of
+        (nm : _) -> Left $ "Type " ++ name ++ ": parameter '" ++ nm
+                        ++ "' is used both as a grade (=" ++ nm
+                        ++ ">) and as a wire, a stack or a width"
+        []       -> Right ()
       let occurs (PWire tv)  = tv `elem` bodyTVs
           occurs (PStack sv) = sv `elem` bodySVs
           occurs (PWidth nv) = nv `elem` bodyNVs
@@ -4785,6 +4800,11 @@ parseTyElem aliases dataSigs params toks = case toks of
         Left $ "Type parameter " ++ name
              ++ " is a row (`---`): write it as the last alternative of a "
              ++ "sum — (A | ---)"
+    | Just (PEff _) <- lookupParam name params ->
+        Left $ "Type parameter " ++ name
+             ++ " is a grade: write it on an arrow (=" ++ name
+             ++ ">) or in a hom-object's grade position (k(" ++ name
+             ++ ", a, b))"
     | Just (PCon _ ks) <- lookupParam name params ->
         Left $ "Type parameter " ++ name ++ " is a type constructor of "
              ++ "arity " ++ show (length ks) ++ ": it is not a wire, write it "

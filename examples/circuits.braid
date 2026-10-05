@@ -28,7 +28,8 @@
 # (`a b c` below), each generalized per slot.
 
 # ---- the hom-object ranges over STACKS ------------------------------
-# `data Circuit(a..., b...)` writes each parameter with a trailing `...`,
+# `data Circuit(ε, a..., b...)` writes each stack parameter with a trailing
+# `...`,
 # which makes it a whole stack, so a circuit is a process on a whole SIDE
 # of a diagram rather than on one wire.  A wide stage embeds as itself,
 # so the doctrine needs no pairing parameter, no `data Pair` to be it,
@@ -36,20 +37,29 @@
 #
 # The step function's two stacks ride in a `Box`, the prelude's anonymous
 # product `data Box(...) = (...)`.  That is a REPRESENTATION choice and
-# it stays inside the carrier: `Circuit(a, b)`'s arguments are the stacks
+# it stays inside the carrier: `Circuit(ε, a, b)`'s stack arguments are the
+# stacks
 # themselves, and `arrC`'s declared slot is `Fn⟨a ⇒ b⟩ ⇒ k(a, b)` with no
 # box in sight.  A codata carrier needs the box because its step leaves
 # the successor BESIDE the output, and a passenger beside an OPEN stack
 # is unwritable: `...` covers the top, so nothing can be pushed above it
 # (guide-open-arity.md, Rule 2).  `Frame`'s column store boxes its rows
 # for the same reason.
-data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
+data Circuit(ε, a..., b...) = Fn⟨Box(a) =ε Recursive> Box(b) Circuit(ε, a, b)⟩
 
-# The step function is `=Recursive>`: every circuit below is written
-# under `with Recursive`, and a written arrow means its manifest
-# (MANUAL §14). The slots say so too: a slot declares the MOST a model
-# may do, and the pure model below passes under a `=Recursive>` slot by
-# absorption.
+# ---- the carrier is GRADED ------------------------------------------
+# The step function runs at `=ε Recursive>`: `Recursive`, because every
+# circuit below is written under `with Recursive` and a written arrow
+# means its manifest (MANUAL §14), and `ε`, because what the embedded
+# stage does is the stage's business and not the theory's.
+#
+# `ε` is a **grade parameter**, the sixth kind a declaration may take. It
+# is declared by use, like a width: a parameter the body grades is a
+# grade. The grade then rides in the carrier's own type, so `Circuit(•,
+# Int, Int)` is a pure circuit and `Circuit(IO, Int, Int)` is one that
+# prints, under ONE theory and one model. Before this the theory chose a
+# grade for all its programs, and a circuit that printed could not be
+# embedded at all.
 #
 # What the slots DO NOT say is anything about the PROGRAM handed to
 # `embed`. Composition joins grades, so `arrC`, which ties a knot, does
@@ -60,7 +70,7 @@ data Circuit(a..., b...) = Fn⟨Box(a) =Recursive> Box(b) Circuit(a, b)⟩
 # than two wires, and a constructor parameter must name a declared data
 # type. One line of wrapping buys it, and gives the theory a second,
 # deliberately boring model to be audited against.
-data Arr(a..., b...) = Fn⟨a ⇒ b⟩
+data Arr(ε, a..., b...) = Fn⟨a =ε> b⟩
 
 # ---- the theory ------------------------------------------------------
 # `in Doctrine` is the whole of it. `Doctrine` is the prelude's theory of
@@ -84,11 +94,11 @@ data Arr(a..., b...) = Fn⟨a ⇒ b⟩
 # only OBSERVED; the doctrine asks for the observation, which is what
 # keeps its laws finite tests of an infinite object.
 # A theory that declares neither gets no laws; see `Vault` below.
-theory Arrow(k(..., ...)) in Doctrine =
-    embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
-    compose : k(a, b) k(b, c) =Recursive> k(a, c)
-    observe : k(Int, Int) =Recursive> Int
-    sample  : • =Recursive> k(Int, Int)
+theory Arrow(k(ε, ..., ...)) in Doctrine =
+    embed   : Fn⟨a =ε> b⟩ =Recursive> k(ε, a, b)
+    compose : k(ε, a, b) k(ε', b, c) =Recursive> k(ε ε', a, c)
+    observe : k(ε, Int, Int) =ε Recursive> Int
+    sample  : • =Recursive> k(•, Int, Int)
 
 # ---- model one: circuits ---------------------------------------------
 # A circuit consumes an input and returns an output AND ITS SUCCESSOR.
@@ -97,7 +107,7 @@ theory Arrow(k(..., ...)) in Doctrine =
 # width the user sees, which boxes and unboxes around it.
 def stepB = (c x -> c ; unCircuit ; _ x ; ev)
 def stepC = _ Box ; stepB ; swap ; _ unBox
-#   stepC : Circuit(ρ, σ) ρ =Recursive> Circuit(ρ, σ) σ
+#   stepC : Circuit(ε0, ρ0, ρ1) ρ0 =Recursive> Circuit(ε0, ρ0, ρ1) ρ1
 
 # `arr` and `>>>`.  No `first`: a wide stage is an ordinary stage now,
 # and the identity is `embed [pass]`, which needs no slot and never
@@ -167,9 +177,10 @@ drop
 # category that sends every stage to the embedding of that stage and
 # every `;` to the composition.  It is a LABEL WITH A CARRIER: it mints
 # the receipt `Circuits` exactly as any functor scope does, and the
-# carrier is the hom-object `Circuit(a, b)`.  The display folds the two
-# together: a transported word is `• ⇒ Circuit(Int, Int)` carrying
-# `Circuits` at the base, and prints `Int =Circuits Recursive> Int`.  Objects
+# carrier is the hom-object `Circuit(ε, a, b)`.  The display folds all
+# three together: a transported word is `• ⇒ Circuit(•, Int, Int)`
+# carrying `Circuits` at the base, and prints `Int =Circuits Recursive>
+# Int` — the receipt and the carrier's own grade in one manifest.  Objects
 # are shared with the base category; composition is the model's own.
 
 def add1 = _ 1 ; +
@@ -202,7 +213,7 @@ def twice2Out in Circuits = twice2 ; observe
 twice2Out ; print           # 40 — 3 ⇒ 8 ⇒ 18, 4 ⇒ 10 ⇒ 22
 
 # OUTSIDE the scope, two of them side by side are two circuits side by
-# side: `• =Circuits Recursive> Circuit(Int, Int) Circuit(Int, Int)`.  That
+# side: `• =Circuits Recursive> Circuit(ε2, Int, Int) Circuit(ε5, Int, Int)`.  That
 # is well-typed and visibly not composition in Circuits.  The display fold
 # folds ONE carrier, so it does not fire and both are visible.
 # Composition is written under the marker.
@@ -233,10 +244,34 @@ def poly with Circuits = dup ; _ dup ; _ _ add1 ; _ * ; +
 def polyOut in Circuits = poly ; observe
 polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 
+# ---- an EFFECTFUL stage transports, and the grade surfaces -----------
+# `print` is the one irreducible label, and a circuit that prints is an
+# ordinary circuit: the grade rides in the carrier, `compose` joins the
+# two parts' grades, and the exit hands the join back on its own arrow.
+#
+# `compose : k(ε, a, b) k(ε', b, c) ⇒ k(ε ε', a, c)` is where the join is
+# written.  Juxtaposition means "at least these", and it is LOWERED: the
+# parser stores one fresh variable for `ε ε'` and records `ε ⊆ ε''` and
+# `ε' ⊆ ε''`, which are the constraints `;` already emits.  So no type
+# ever holds a union, and `IO` below is the least solution rather than
+# anything anybody wrote.
+def noisy with Circuits = dup ; * ; dup ; print ...
+#   noisy : Int =Circuits IO Recursive> Int
+def mixed with Circuits = sq ; noisy
+#   mixed : Int =Circuits IO Recursive> Int — ε'' solved to IO
+def noisyOut in Circuits = mixed ; observe
+noisyOut ; print            # 81, 256, then 337 — the squares, announced
+
+# `observe : k(ε, Int, Int) =ε Recursive> Int` takes the grade back OUT of
+# the carrier and puts it on its own arrow, so `noisyOut` is
+# `• =Circuits IO Recursive> Int`.  Construction is inert and execution
+# is at the exit; the grade in the carrier is what carries the fact
+# across the two.
+
 # ---- a carrier built BY HAND: `in Circuits` -------------------------
 # `sumFrom` is the reason the Arrow exists: a stateful circuit that is not
 # `embed` of anything.  Without a written header, a def like `0 ; sumFrom`
-# would be STRANDED.  It produces a `Circuit(Int, Int)` at the base, and
+# would be STRANDED.  It produces a `Circuit(ε, Int, Int)` at the base, and
 # the elaborator will not treat it as a word of the category on that
 # evidence, because doing so would mean reading an INFERRED type to decide
 # what a word is.
@@ -249,7 +284,10 @@ polyOut ; print             # 39 — (3 + 3·4) + (4 + 4·5)
 # check is mechanical, and the def joins the model's word table beside
 # the ones `with Circuits` transported.
 def sum0 in Circuits = 0 ; sumFrom
-#   sum0 : • =Recursive> Circuit(Int, Int), UNFOLDED and with no `Circuits` on it.
+#   sum0 : • =Recursive> Circuit(ε0, Int, Int), UNFOLDED and with no
+#   `Circuits` on it.  The grade stays a variable because the step
+#   function does nothing an embedded stage could add to, and a grade is
+#   an UPPER bound: a pure circuit is a circuit at every grade.
 #
 # A receipt is PROVENANCE: `=Circuits>` says the code went through the
 # functor.  `sum0` did not.  It is a circuit no base program denotes,
@@ -275,7 +313,7 @@ def scale3 in Circuits = 3 ; scale
 
 def byHand in Circuits = sum0 scale3 ; compose
 def byUse with Circuits = sum0 ; scale3
-#   byHand : • =Recursive> Circuit(Int, Int)   no label: nothing was applied
+#   byHand : • =Recursive> Circuit(ε0, Int, Int)   no label: nothing was applied
 #   byUse  : Int =Circuits Recursive> Int      transported, so it folds
 
 def handObs in Circuits = byHand ; observe
@@ -337,7 +375,7 @@ guarded2 ; unCapsule ; _ 5 ; ev ; print    # 13 — ((5+1)·2)+1
 #
 # They run through `observe` at sample points, and that is the ONLY way
 # they run.  A one-wire hom-object would make some of them provable:
-# `Arr(a, b)` would unroll to `Fn⟨a ⇒ b⟩` at one wire on each side, so the
+# `Arr(ε, a, b)` would unroll to `Fn⟨a =ε> b⟩` at one wire on each side, so the
 # normalizer could give the `ev` inside `thenA` an arity.  Over STACKS it
 # cannot: `Arr(ρ, σ)` unrolls to `Fn⟨ρ ⇒ σ⟩` with ρ open, and `ev` of an
 # open wire has no closed arity, which is the wall `Len` stands at in
