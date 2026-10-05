@@ -9886,6 +9886,30 @@ transportOf datas theories inst = do
                       (representableAt datas (inName inst) carrier)
                       reader)
 
+-- A TRANSPORTED SCOPE WHOSE CARRIER FIXES ITS GRADE (2026-10-05).  The
+-- generic effect refusal names the wrong fix here: it says "write
+-- `=IO>` on that arrow", and there is no arrow in the def to write it
+-- on.  `with M` is a functor into `M`'s category, `embed` takes a
+-- program at whatever grade the hom-object declares, and when the
+-- hom-object declares no grade parameter that grade is a CONSTANT the
+-- theory chose for all its programs.  The fix is the theory's.
+closedGradeHint :: [DataDecl] -> [Transport] -> String -> String
+closedGradeHint datas tps msg
+  | "Cannot unify effects" `isInfixOf` msg
+  , (tp : _) <- [ t | t <- tps, ungradedCarrier (tpCarrier t) ] =
+      msg ++ "\n  `with " ++ tpName tp ++ "` transports into " ++ tpTheory tp
+          ++ ", whose hom-object `" ++ tpCarrier tp ++ "` declares no grade: "
+          ++ "the carrier's inner arrow is written once, for every program "
+          ++ "the theory embeds.  Grade the hom-object — `theory "
+          ++ tpTheory tp ++ "(k(ε, ..., ...))` with `" ++ doctrineEmbed
+          ++ " : Fn⟨a =ε> b⟩ ⇒ k(ε, a, b)` and `data " ++ tpCarrier tp
+          ++ "(ε, a..., b...)` — or keep the effect outside the scope."
+  | otherwise = msg
+  where
+    ungradedCarrier c = case [ d | d <- datas, dName d == c ] of
+      (d : _) -> not (any isEffParam (dParams d))
+      []      -> False
+
 -- WHEN A MODEL'S FIBRE IS REPRESENTABLE AT A RESOURCE WIRE (stage 7b).
 --
 -- `K_E(\931, \920) = C(E \8855 \931, E \8855 \920)` is Power & Robinson's state
@@ -11260,6 +11284,12 @@ checkModuleRaw base src = do
               self = case break (== '@') name of
                 (i, '@' : _) | Just sc <- lookup i instScopes -> i : sc
                 _                                             -> []
+              -- the models THIS def is transported into, for the refusal
+              -- a closed carrier grade earns
+              transporting = case termH of
+                With Transporting ns _ ->
+                  [ m | m <- trans, tpName m `elem` ns, isJust (tpCompose m) ]
+                _ -> []
           -- `in` MINTS NOTHING, ever.  A receipt is provenance — "this
           -- code went through the functor" — and a hand-built morphism
           -- is by definition not the functor's image; it may be a
@@ -11298,7 +11328,8 @@ checkModuleRaw base src = do
           gens <- objGenDefs ectx term
           (envG, runG, docsG, gentries) <- objGenEntries env1 run docs gens
           let accG = reverse gentries ++ acc
-          (arr, dsubs) <- inferTermSubAt bodyStart envG term
+          (arr, dsubs) <- first (closedGradeHint datas transporting)
+                                (inferTermSubAt bodyStart envG term)
           -- `in M` classifies BY SHAPE.  A def that builds one carrier
           -- out of nothing is a morphism of M and joins the K-word
           -- table; one that does not is a base word written in M's

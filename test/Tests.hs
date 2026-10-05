@@ -3460,6 +3460,19 @@ moduleFailTests =
     -- a grade variable must be declared, like a width
   , (gradedMod ++ "data Bad(a...) = Fn⟨a =ε> a⟩\n1 ; print",
      "is not a parameter of this declaration")
+    -- ...and a CLOSED carrier grade names the theory's fix, because
+    -- there is no arrow in the def to write a label on
+  , ("data Cap(a..., b...) = Fn⟨a ⇒ b⟩\n\
+     \theory Vault(k(..., ...)) in Doctrine =\n\
+     \    embed   : Fn⟨a ⇒ b⟩ ⇒ k(a, b)\n\
+     \    compose : k(a, b) k(b, c) ⇒ k(a, c)\n\
+     \def runCap  = unCap ... ; ev\n\
+     \def capThen = (f g -> [f ... ; runCap ; g ... ; runCap] ; Cap)\n\
+     \model Sealed in Vault(Cap) =\n\
+     \    embed   = Cap\n\
+     \    compose = capThen\n\
+     \def bad with Sealed = dup ; * ; print ; 1\n1 ; print",
+     "whose hom-object `Cap` declares no grade")
     -- GLA (2026-09-21): `with` a compose-only model is refused, and the
     -- refusal names the clause that works instead.
   , (glaSrc ++ "def bad with Dense = dup ; fadd\nbad ; app ... ; _ 1.0 ; ev ; print",

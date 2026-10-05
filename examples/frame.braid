@@ -46,7 +46,7 @@
 # `examples/circuits.braid` carries the same label for the same kind of
 # reason.
 
-## `Col(ρ, σ)` is a function from the ρ-columns to the σ-columns, and
+## `Col(ε, ρ, σ)` is a function from the ρ-columns to the σ-columns, and
 ## ρ and σ are STACKS: a row program takes a whole row and leaves a
 ## whole row.  The ROW STORE inside is a `List(Box(ρ))`, one list of
 ## boxed rows, and NOT a stack of lists, which is why this type is
@@ -55,7 +55,7 @@
 ## stack of Ints) and it must not enter the type.
 ## The box is a representation choice; `Col`'s arguments are the bare
 ## stacks, which is what the doctrine's `k(..., ...)` asks for.
-data Col(a..., b...) = Fn⟨List(Box(a)) =Recursive> List(Box(b))⟩
+data Col(ε, a..., b...) = Fn⟨List(Box(a)) =ε Recursive> List(Box(b))⟩
 
 ## run a column function on a boxed frame, the carrier's own spelling
 def runColB = (c rows -> c ; unCol ; _ rows ; ev)
@@ -80,11 +80,11 @@ def ccompose = (f g -> [(rows -> f rows ; runColB ; (mid -> g mid ; runColB))] ;
 def sample3   = 1 (2 (3 nil ; cons) ; cons) ; cons
 def cobserve  = (c -> (c sample3 ; runCol) ; sum)
 
-theory Columns(k(..., ...)) in Doctrine =
-    embed   : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
-    compose : k(a, b) k(b, c) =Recursive> k(a, c)
-    observe : k(Int, Int) =Recursive> Int
-    sample  : • =Recursive> k(Int, Int)
+theory Columns(k(ε, ..., ...)) in Doctrine =
+    embed   : Fn⟨a =ε> b⟩ =Recursive> k(ε, a, b)
+    compose : k(ε, a, b) k(ε', b, c) =Recursive> k(ε ε', a, c)
+    observe : k(ε, Int, Int) =ε Recursive> Int
+    sample  : • =Recursive> k(•, Int, Int)
 
 model Frame in Columns(Col) =
     embed   = cembed
@@ -102,7 +102,7 @@ model Frame in Columns(Col) =
 # 2. Transport, checked on Ints before a single trade is loaded
 # ---------------------------------------------------------------------
 # Every stage embeds on its own, at the width it is written: `embed
-# [dup]` is `Col(Int, Int Int)`.  `sq` is the two-wire case that used
+# [dup]` is `Col(•, Int, Int Int)`.  `sq` is the two-wire case that used
 # to need a packing and a strength, and now needs neither.
 
 def sq with Frame = dup ; *
@@ -118,6 +118,21 @@ def wiringOut in Frame = wiring ; observe
 sqOut     ; print       # 14 — [1, 4, 9]      summed
 polyOut   ; print       # 26 — [3, 8, 15]     summed: x + x·(x+1)
 wiringOut ; print       # 9  — [2, 3, 4]      summed: dup, +1, swap, drop
+
+# A GRADED HOM-OBJECT, and an audited column.  `Col`'s inner arrow runs
+# at `=ε Recursive>`, so what an embedded row program does is the
+# program's business: `embed` of a pure stage gives `Col(•, ρ, σ)` and
+# `embed` of one that prints gives `Col(IO, ρ, σ)`.  `compose : k(ε, a, b)
+# k(ε', b, c) ⇒ k(ε ε', a, c)` joins the two, and `observe` hands the
+# join back on its own arrow.  One theory, one model, both grades.
+def audited with Frame = dup ; * ; dup ; print ...
+#   audited : Int =Frame IO Recursive> Int
+def checked with Frame = sq ; audited
+#   checked : Int =Frame IO Recursive> Int — `IO` is the join, solved
+def auditedOut in Frame = checked ; observe
+#   auditedOut : • =Frame IO Recursive> Int
+auditedOut ; print      # 81, 16, 1, then 98 — every row announced,
+                        #   deepest row last, which is the order `map` walks
 
 # ---------------------------------------------------------------------
 # 3. Frame-level words: everything a functor may NOT do
@@ -429,10 +444,11 @@ def sectorCells = (r -> (r ; ticker) (r ; sector) (r ; weight ; toStr) ; pack)
 # `0 … n−1`.  The `Fn⟨I ⇒ row⟩` reading with an explicit key set would
 # make `join` a map union rather than a nested scan, and would let two
 # frames share an index without being the same length.  It needs a key
-# type in the carrier, `Col(i, a, b)`, and that is a three-parameter
-# hom-object, which the Doctrine's `k(_, _)` does not admit.
+# type in the carrier, `Col(ε, i, a, b)`, and that is a hom-object over
+# THREE objects, which the Doctrine's `k(ρ, σ)` does not admit.  (The
+# grade argument is admitted, and only because it is a grade: see §2.)
 #
-# NO COLUMN STORE.  `Col(a, b)` is a function between columns and the
+# NO COLUMN STORE.  `Col(ε, a, b)` is a function between columns and the
 # frame is stored as rows.  The column-store representation, the frame as a
 # STACK of columns rather than a list of rows, would be a second model of
 # the same theory, and then

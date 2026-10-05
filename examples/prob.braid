@@ -84,16 +84,16 @@ import "frame.braid" as F
 # range and `Enum`'s `compose` walks a list, and a slot declares the
 # MOST a model may do.
 
-theory Prob(k(..., ...), d(...)) in Doctrine =
-    compose   : k(a, b) k(b, c) =Recursive> k(a, c)
-    embed     : Fn⟨a ⇒ b⟩ =Recursive> k(a, b)
-    under     : k(a, b) =Recursive> k(c a, c b)
-    observe   : k(Int, Int) =Recursive> Int
-    sample    : • =Recursive> k(Int, Int)
-    flip      : • =Recursive> k(Float, Bool)
-    uniform   : • =Recursive> k(Int, Int)
-    condition : • =Recursive> k(Bool a, a)
-    report    : k(Int, b) =Recursive> d(b)
+theory Prob(k(ε, ..., ...), d(...)) in Doctrine =
+    compose   : k(ε, a, b) k(ε', b, c) =Recursive> k(ε ε', a, c)
+    embed     : Fn⟨a =ε> b⟩ =Recursive> k(ε, a, b)
+    under     : k(ε, a, b) =Recursive> k(ε, c a, c b)
+    observe   : k(ε, Int, Int) =ε Recursive> Int
+    sample    : • =Recursive> k(•, Int, Int)
+    flip      : • =Recursive> k(•, Float, Bool)
+    uniform   : • =Recursive> k(•, Int, Int)
+    condition : • =Recursive> k(•, Bool a, a)
+    report    : k(ε, Int, b) =ε Recursive> d(b)
 
 # ---------------------------------------------------------------------
 # 2. Model one: `Enum`, exact enumeration
@@ -109,7 +109,7 @@ theory Prob(k(..., ...), d(...)) in Doctrine =
 ## argument is the bare stack; the box is how the list stores it, the
 ## way `examples/frame.braid`'s column store boxes a row.
 data Weighted(b...) = List(Box(Box(b) Float))
-data Kern(a..., b...)  = Fn⟨a =Recursive> Weighted(b)⟩
+data Kern(ε, a..., b...)  = Fn⟨a =ε Recursive> Weighted(b)⟩
 
 ## run a kernel at a point, down to the bare list of (outcome, weight)
 def atK   = unKern ... ; ev ; unWeighted
@@ -188,7 +188,7 @@ model Enum in Prob(Kern, Weighted) =
 
 model Rng in Doctrine = Int
 data Draws(b...)      = List(Box(b))
-data Samp(a..., b...) = Fn⟨Rng a =Recursive> Rng b⟩
+data Samp(ε, a..., b...) = Fn⟨Rng a =ε Recursive> Rng b⟩
 
 ## A 48-bit linear congruential generator, the whole source of
 ## randomness in this file, four atoms wide.  An Int in Braid is exact
@@ -266,7 +266,7 @@ model Sampler in Prob(Samp, Draws) =
 # MUCH rather than WHETHER.
 
 data Reach(b...)      = List(Box(b))
-data Poss(a..., b...) = Fn⟨a =Recursive> Reach(b)⟩
+data Poss(ε, a..., b...) = Fn⟨a =ε Recursive> Reach(b)⟩
 
 def atP      = unPoss ... ; ev ; unReach
 def nEmbed   = (f -> [f ... ; ev ; Box ; single ; Reach] ; Poss)
@@ -336,7 +336,7 @@ def bothFlip in Prob =
     _ (flip ; under) ; compose
 def bothFlipE in Prob with Enum    = bothFlip
 def bothFlipS in Prob with Sampler = bothFlip
-#   bothFlipE : • ⇒ Kern(Float Float, Bool Bool), a word of the category,
+#   bothFlipE : • ⇒ Kern(•, Float Float, Bool Bool), a word of the category,
 #   built out of the theory's own slots, and it composes inside a
 #   `with Enum` scope like any transported stage.
 
@@ -389,6 +389,24 @@ distHead ([showBits] (twoEqualE ; eReport) ; tallyW) ; F/printFrame
 #   TT | 0.5
 
 "" ; print
+# A GRADED KERNEL.  `Kern`'s inner arrow runs at `=ε Recursive>`, so a
+# kernel does whatever the stage embedded in it does, and the grade says
+# which: `embed` of a pure stage gives `Kern(•, a, b)` and `embed` of one
+# that prints gives `Kern(IO, a, b)`.  `compose : k(ε, a, b) k(ε', b, c)
+# ⇒ k(ε ε', a, c)` joins them, and `report : k(ε, Int, b) =ε Recursive>
+# d(b)` hands the join back on its own arrow: the construction of a
+# kernel is inert and its APPLICATION is where the IO happens, so a grade
+# on the construction arrow alone would say nothing.  Nothing about the
+# probability changes.
+def twoEqualTraced with Enum = half ; dup ; print ... ; flip ; dup
+#   twoEqualTraced : Int =Enum IO Recursive> Bool Bool
+"== the same flip, with the bias traced ==" ; print
+distHead ([showBits] (twoEqualTraced ; eReport) ; tallyW) ; F/printFrame
+#   0.5           printed once, when the kernel is APPLIED
+#   HH | 0.5      the same distribution: the grade is not the measure
+#   TT | 0.5
+
+"" ; print
 "== two flips — `with Enum = twoBiases ; bothFlipE` ==" ; print
 distHead ([showBits] (twoIndepE ; eReport) ; tallyW) ; F/printFrame
 #   HH | 0.25     HT | 0.25     TH | 0.25     TT | 0.25
@@ -427,7 +445,7 @@ countHead ([showBits] (twoIndepS ; sReport) ; tallyD) ; F/printFrame
 def coinSnd in Prob = (([half] ; embed) flip ; compose) ; under
 def coinSndE in Prob with Enum    = coinSnd
 def coinSndS in Prob with Sampler = coinSnd
-#   coinSndE : • ⇒ Kern(c Int, c Bool), flipping a fair coin ON TOP of
+#   coinSndE : • ⇒ Kern(•, c Int, c Bool), flipping a fair coin ON TOP of
 #   whatever is riding below
 
 def three    = (n -> 3)
@@ -553,7 +571,7 @@ def stepS with Sampler = dup ; coinSndS ; moveBy
 
 def walkN with Recursive =
     n -> (n 0 ; equals) [idS] [(stepS ((n ; _ 1 ; -) ; walkN) ; thenS)] ... ; cond
-#   walkN : Int =Recursive> Samp(Int, Int), a KERNEL built by recursion,
+#   walkN : Int =Recursive Sampler> Samp(ε0, Int, Int), a KERNEL built by recursion,
 #   where the recursion is over the number of steps rather than over the
 #   randomness
 
@@ -707,7 +725,7 @@ uni3sq ; eReport ; eExpect ; print      # 1.6666666666666665  = (0+1+4)/3
 #
 # `transformation Draw : Sampler ⇒ Enum` HAS NO COMPONENT, and the
 # reason is mathematical rather than mechanical: a component is a word
-# `Samp(a, b) ⇒ Kern(a, b)` that is generic in `a` and `b`, so it can
+# `Samp(ε, a, b) ⇒ Kern(ε, a, b)` that is generic in `a` and `b`, so it can
 # never APPLY the sampler, and a sample is not a function of the
 # distribution anyway.  Writing the obvious wrong one, the point mass at
 # the draw taken from a fixed seed, type-checks and is then refused at the
