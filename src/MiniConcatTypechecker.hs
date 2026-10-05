@@ -225,6 +225,20 @@ data Ty
   | TFn Arrow          -- Fn⟨Γ ⇒ Δ⟩: a reified program
   | TSum SumRow        -- (Δ₁ | … | Δₙ [| σ]): sum of stacks, one wire
   | TData String [SType] -- a declared nominal type: Name(arg-stacks)
+  -- A GRADE IN A TYPE ARGUMENT (2026-10-05).  `Circuit(IO, Int, Int)`'s
+  -- first argument is not a wire: it is the grade the carrier's inner
+  -- arrow runs at.  It rides as the ONE WIRE every non-stack argument
+  -- rides as, exactly as a `---` argument rides as the sum whose
+  -- alternatives it names.
+  --
+  -- The second field is the JUXTAPOSITION this grade was LOWERED FROM,
+  -- and it is provenance rather than structure: unification never reads
+  -- it (`unifyTy` compares the first field alone), so a written
+  -- `k(ε ε', a, c)` is one variable to the solver and the union is
+  -- never a term.  What the field is for is `gradeJoins`, which turns
+  -- it back into the `⊆` constraints `infer (Seq …)` already emits for
+  -- `;` — see the comment on `gradeJoins`.
+  | TGrade EffRow [EffRow]
   | TFin Exp           -- Fin(n): an index into a bundle of width n.
                        -- The bound is a TYPE, erased like every other
                        -- width; at runtime a Fin is a bare Int.  Every
@@ -260,6 +274,7 @@ instance Show Ty where
   show (TData n []) = n
   show (TData n as) =
     n ++ "(" ++ intercalate ", " (map show as) ++ ")"   -- args are stacks
+  show (TGrade e _) = showGrade e
   show (TFin e)    = "Fin(" ++ show e ++ ")"
 
 -- Stack types: front (leftmost) wire first, optional tail variable at the end
@@ -414,6 +429,7 @@ instance Substitutable Ty where
   apply s (TFn arr) = TFn (apply s arr)
   apply s (TData n as) = TData n (map (apply s) as)
   apply s (TSum row)  = TSum (apply s row)
+  apply s (TGrade e ps) = TGrade (apply s e) (map (apply s) ps)
   apply s (TFin e)    = TFin (apply s e)
 
 instance Substitutable Exp where
@@ -803,6 +819,7 @@ varsOfTy TSym        = noVars
 varsOfTy (TFn arr)   = varsOfArrow arr
 varsOfTy (TSum row)  = varsOfRow row
 varsOfTy (TData _ as) = foldr (catVars . varsOfStack) noVars as
+varsOfTy (TGrade e ps) = foldr (catVars . varsOfEff) (varsOfEff e) ps
 varsOfTy (TFin e)    = varsOfExp e
 
 varsOfStack :: SType -> Vars
@@ -875,6 +892,10 @@ unifyTy s t1 t2 =
     (TData n1 as1, TData n2 as2)
       | n1 == n2 && length as1 == length as2 ->
           foldM (\acc (x, y) -> unifyStack acc x y) s (zip as1 as2)
+    -- A GRADE ARGUMENT unifies as a ROW, with one tail on each side.
+    -- The lowered juxtaposition is not read here: that is what keeps
+    -- data-argument grades out of ACI1 unification.
+    (TGrade g1 _, TGrade g2 _) -> unifyEff s g1 g2
     -- two indices agree exactly when their bounds do: the same
     -- `k + n = e` solving that correlates bundle widths
     (TFin e1, TFin e2) -> unifyExp s e1 e2
@@ -1127,6 +1148,73 @@ showEff e
   | S.null (eLabels e) = "pure"
   | otherwise          = unwords (S.toList (eLabels e))
 
+-- The row as a TYPE ARGUMENT reads: `•` for no labels, the labels
+-- otherwise.  A tail is invisible, exactly as it is on an arrow —
+-- `arrowGlyph` prints `⇒` for a row with a tail and no labels, and a
+-- grade argument prints `•` for the same row.
+showGrade :: EffRow -> String
+showGrade e
+  | S.null (eLabels e) = "•"
+  | otherwise          = unwords (S.toList (eLabels e))
+
+-- A grade argument, as a one-wire stack: the shape `TData` carries it
+-- in.  Every non-stack kind rides this way (`paramStack (PRow …)` is
+-- the precedent), so nothing downstream of the parser needs a second
+-- argument sort.
+gradeArg :: EffRow -> [EffRow] -> SType
+gradeArg g ps = SCons (TGrade g ps) SEnd
+
+gradeOfArg :: SType -> Maybe EffRow
+gradeOfArg (SCons (TGrade g _) SEnd) = Just g
+gradeOfArg _                         = Nothing
+
+isGradeArg :: SType -> Bool
+isGradeArg = isJust . gradeOfArg
+
+-- A CARRIER'S TWO OBJECT ARGUMENTS, with a leading grade dropped.  A
+-- hom-object is `k(ρ, σ)` or `k(ε, ρ, σ)`; everything that reads a
+-- carrier's two sides — the display fold, the level detection, `in K`'s
+-- shape check — reads them through here, so the grade is in exactly one
+-- place.
+carrierArgs :: [SType] -> Maybe (SType, SType)
+carrierArgs [a, b]                   = Just (a, b)
+carrierArgs [g, a, b] | isGradeArg g = Just (a, b)
+carrierArgs _                        = Nothing
+
+-- The grade a carrier's arguments carry, `∅` when it has none.
+carrierGrade :: [SType] -> EffRow
+carrierGrade (g : _ : _ : _) = fromMaybe effPure (gradeOfArg g)
+carrierGrade _               = effPure
+
+-- THE COMPOSITE a juxtaposition lowers to, named from its parts.  Two
+-- occurrences of the SAME juxtaposition in one signature are the same
+-- composite, which is what `k(ε ε', a, b) k(ε ε', b, c)` means; the name
+-- is canonical so that falls out.  Never rigid: the tag is a prefix and
+-- this starts with ε, exactly as `unifyEff`'s `bridge` does.
+joinEVar :: [EVar] -> EVar
+joinEVar vs = EV ("ε⊔⟨" ++ intercalate "|" (sortOn id (map show vs)) ++ "⟩")
+
+-- THE LOWERED JUXTAPOSITION, read back as constraints.  A written
+-- `k(ε ε', a, c)` stored `k(ε'', a, c)` and remembered the parts; this
+-- turns each part back into `part ⊆ composite`, which is the same
+-- constraint `infer (Seq t u)` emits for a `;`.  Every instantiation of
+-- a scheme re-emits them, so a use site of `compose` gets ε ⊆ ε'' and
+-- ε' ⊆ ε'' into its own pool and the least fixpoint computes the union.
+-- The union is never a term and `unifyEff` never meets two tails.
+gradeJoins :: Arrow -> [Constraint]
+gradeJoins (Arrow i o _) = goS i ++ goS o
+  where
+    goS (SCons t r)   = goT t ++ goS r
+    goS (SExp b _ r)  = goS b ++ goS r
+    goS _             = []
+    goT (TGrade c ps) = [ CSubEff p c | p <- ps ]
+    goT (TFn arr)     = gradeJoins arr
+    goT (TSum row)    = goR row
+    goT (TData _ as)  = concatMap goS as
+    goT _             = []
+    goR (RCons st r)  = goS st ++ goR r
+    goR _             = []
+
 -- The row as the SOLVER sees it — labels and tail.  Used only by the
 -- raw `Show Scheme` instance, where a ⊆ constraint would otherwise be a
 -- relation between two invisible things.
@@ -1373,6 +1461,10 @@ substOnce s (Arrow i o e) = Arrow (goS i) (goS o) (goE' e)
     goT (TFn arr)  = TFn (substOnce s arr)
     goT (TSum row)   = TSum (goR row)
     goT (TData n as) = TData n (map goS as)
+    -- a grade argument and the juxtaposition it was lowered from are
+    -- freshened together, so the scheme's constraints and its arrow
+    -- name the same variables after instantiation
+    goT (TGrade e ps) = TGrade (goE' e) (map goE' ps)
     -- NOT the catch-all: instantiation must freshen the bound, or
     -- every use site of a Fin-typed word would share one global n
     goT (TFin e)     = TFin (goE e)
@@ -1405,8 +1497,14 @@ instantiateC (Forall tvars svars rvars nvars evars subs arr) = do
       eSub = M.fromList (zip evars [ Eff S.empty (Just v) | v <- newEVs ])
       sub  = Subst tSub sSub rSub nSub eSub
   arr' <- openEff (substOnce sub arr)
-  pure (arr', [ CSubEff (substOnceEff sub p) (substOnceEff sub c)
-              | (p, c) <- subs ])
+  -- …and the JOINS a written hom-object lowered to, freshened with the
+  -- arrow.  A use site of `compose : k(ε, a, b) k(ε', b, c) ⇒
+  -- k(ε ε', a, c)` gets ε ⊆ ε'' and ε' ⊆ ε'' into its own pool, which is
+  -- what makes the composite's grade the union without the union ever
+  -- being a term.
+  pure (arr', gradeJoins arr'
+              ++ [ CSubEff (substOnceEff sub p) (substOnceEff sub c)
+                 | (p, c) <- subs ])
 
 -- Every use of a scheme whose grade is CLOSED gets a fresh tail, so
 -- composition can absorb labels into it: `1 >> print` works because the
@@ -1463,8 +1561,9 @@ instantiateClosedC (Forall tvars svars rvars nvars evars subs arr@(Arrow i o _))
   -- non-final atom would let `1 print` typecheck as pure.
   let sub = Subst tSub sSub rSub nSub eSub
   arr' <- openEff (substOnce sub arr)
-  pure (arr', [ CSubEff (substOnceEff sub p) (substOnceEff sub c)
-              | (p, c) <- subs ])
+  pure (arr', gradeJoins arr'
+              ++ [ CSubEff (substOnceEff sub p) (substOnceEff sub c)
+                 | (p, c) <- subs ])
 
 -- Is a scheme AT LEAST AS GENERAL as an expected arrow?
 --
@@ -1987,7 +2086,12 @@ tokenize = go 1
              , all isLabelName labels -> Just (labels, more)
            _ -> Nothing
 
-    isLabelName (c : rest) = isUpper c && all isIdentChar rest
+    -- A label is Uppercase.  A GRADE VARIABLE is spelled `ε` (2026-10-05):
+    -- `=ε>` on a declaration's inner arrow is the grade that declaration
+    -- is polymorphic in.  One lowercase spelling and only that one, so a
+    -- `def`'s `=` followed by bare words and a `>=>` still falls through
+    -- to an identifier.
+    isLabelName (c : rest) = (isUpper c || c == 'ε') && all isIdentChar rest
     isLabelName []         = False
 
     -- string literal body: minimal escapes \" \\ \n
@@ -2876,9 +2980,41 @@ parseDelimited = parseProgramToks
 -- ALTERNATIVES (σ).  Every σ used to be inferred and unwritable; a
 -- `---` parameter is what lets a declaration say "at least these
 -- alternatives, maybe more".
-data TyParam = PWire TVar | PStack SVar | PWidth NVar | PCon String [Bool]
-             | PRow RVar
+-- A sixth kind (2026-10-05): `PEff`, a GRADE.  `data Circuit(ε, a...,
+-- b...) = Fn⟨a =ε> b⟩` says the carrier's inner arrow runs at a grade
+-- the carrier's own type records, and `theory Arrow(k(ε, ..., ...))`
+-- says the hom-object is graded.  Declared BY USE, like `PWidth`: a
+-- parameter that appears in a grade position IS a grade, because the
+-- positions are disjoint from a wire's and from a stack's.
+data TyParam = PWire TVar | PStack SVar | PWidth NVar | PCon String [ArgKind]
+             | PRow RVar | PEff EVar
   deriving (Eq, Show)
+
+-- THE KIND OF ONE ARGUMENT of a constructor parameter, written as a
+-- mark in the theory head: `_` a wire, `...` a stack, `ε` a grade.  The
+-- marks are what let `goArgs` parse each argument at its own kind, and
+-- `ε` is the one that cannot be guessed from the text (`ε ε'` in a
+-- stack position would be two wires).
+data ArgKind = KWire | KStack | KEff
+  deriving (Eq, Show)
+
+-- the mark a kind is written with
+argKindMark :: ArgKind -> String
+argKindMark KWire  = "_"
+argKindMark KStack = "..."
+argKindMark KEff   = "ε"
+
+-- ...and the parameter an argument at that kind parses as
+argKindParam :: ArgKind -> TyParam
+argKindParam KWire  = PWire (TV "_")
+argKindParam KStack = PStack (SV "_")
+argKindParam KEff   = PEff (EV "_")
+
+-- the kind a declared parameter fills
+paramArgKind :: TyParam -> ArgKind
+paramArgKind (PStack _) = KStack
+paramArgKind (PEff _)   = KEff
+paramArgKind _          = KWire
 
 pName :: TyParam -> String
 pName (PWire (TV n))  = n
@@ -2886,6 +3022,7 @@ pName (PStack (SV n)) = n
 pName (PWidth (NV n)) = n
 pName (PCon n _)      = n
 pName (PRow (RV n))   = n
+pName (PEff (EV n))   = n
 
 -- how a parameter's kind reads back in an error message
 pKind :: TyParam -> String
@@ -2894,6 +3031,7 @@ pKind (PStack _)   = "a stack (`...`)"
 pKind (PWidth _)   = "a width"
 pKind (PCon _ ks)  = "a type constructor of arity " ++ show (length ks)
 pKind (PRow _)     = "a row (`---`)"
+pKind (PEff _)     = "a grade"
 
 isStackParam :: TyParam -> Bool
 isStackParam (PStack _) = True
@@ -2910,6 +3048,10 @@ isWireParam _         = False
 isRowParam :: TyParam -> Bool
 isRowParam (PRow _) = True
 isRowParam _        = False
+
+isEffParam :: TyParam -> Bool
+isEffParam (PEff _) = True
+isEffParam _        = False
 
 -- the one `---` parameter of a declaration, if it has one
 rowParamOf :: [TyParam] -> Maybe RVar
@@ -2937,6 +3079,10 @@ paramStack (PCon n _) =
 -- parens are the row, the outer ones the argument list, and the
 -- argument at a `---` position is written exactly as any row is.
 paramStack (PRow rv) = SCons (TSum (RTail rv)) SEnd
+-- A grade argument rides as one wire too, and it is the variable the
+-- declaration named: `data Circuit(ε, a..., b...)` instantiates to
+-- `Circuit(ε, a, b)` with ε the row `⟨|ε⟩`.
+paramStack (PEff ev) = gradeArg (Eff S.empty (Just ev)) []
 
 -- An argument at a use site: a stack for wire/`...` parameters, a
 -- width for `^`-parameters.  TData still carries only stacks (data
@@ -3257,8 +3403,8 @@ dataSig d = (dName d, dParams d)
 dataDeclArtifacts :: DataDecl
                   -> ([(String, Scheme)], [(String, (Int, Bool, Term))])
 dataDeclArtifacts d =
-  ( [ (dName d,          Forall tvs svs rvs nvs [] [] (Arrow bodyStack namedStack effPure))
-    , (derived "un" (dName d), Forall tvs svs rvs nvs [] []
+  ( [ (dName d,          Forall tvs svs rvs nvs evs [] (Arrow bodyStack namedStack effPure))
+    , (derived "un" (dName d), Forall tvs svs rvs nvs evs []
                                  (Arrow namedStack bodyStack effPure)) ]
       ++ mergeSchemes ++ foldSchemes ++ map fst fieldArts
   , [ (dName d,         (rollArity, rollOpen, rollTerm))
@@ -3275,6 +3421,7 @@ dataDeclArtifacts d =
     svs        = [ sv | PStack sv <- ps ]
     rvs        = [ rv | PRow   rv <- ps ]
     nvs        = [ nv | PWidth nv <- ps ]   -- always [] today (see below)
+    evs        = [ ev | PEff   ev <- ps ]
     namedStack = SCons (TData (dName d) (map paramStack ps)) SEnd
     rollOpen   = openTailedS bodyStack
     -- an n-ary uniform collapse for this declaration's arity: the
@@ -3323,7 +3470,7 @@ dataDeclArtifacts d =
 dataFieldArtifacts :: DataDecl
                    -> [((String, Scheme), (String, (Int, Bool, Term)))]
 dataFieldArtifacts d =
-  [ ( (f, Forall tvs svs rvs nvs [] [] (arrPure namedStack (SCons t SEnd)))
+  [ ( (f, Forall tvs svs rvs nvs evs [] (arrPure namedStack (SCons t SEnd)))
     , (f, (1, False, Seq 0 (Prim "merge") (Tensor (keepOnly i)))) )
   | (i, f, t) <- zip3 [0 :: Int ..] (dFields d) elems ]
   where
@@ -3332,6 +3479,7 @@ dataFieldArtifacts d =
     svs        = [ sv | PStack sv <- ps ]
     rvs        = [ rv | PRow   rv <- ps ]
     nvs        = [ nv | PWidth nv <- ps ]
+    evs        = [ ev | PEff   ev <- ps ]
     namedStack = SCons (TData (dName d) (map paramStack ps)) SEnd
     elems      = case dBody d of
                    TSum (RCons st RNil) -> stackElems st
@@ -3686,13 +3834,16 @@ parseTheory aliases dataSigs header hdLine body = do
     -- two readings a declaration's own parameter list has — so a
     -- hom-object over stacks is `k(..., ...)` and a parameterized exit
     -- over one wire is still `d(_)` (2026-09-16).
-    conArity ks (TokEllipsis : TokComma : r)  = conArity (ks ++ [True]) r
-    conArity ks (TokEllipsis : TokRParen : r) = Right (ks ++ [True], r)
-    conArity ks (TokIdent "_" : TokComma : r)  = conArity (ks ++ [False]) r
-    conArity ks (TokIdent "_" : TokRParen : r) = Right (ks ++ [False], r)
+    conArity ks (TokEllipsis : TokComma : r)  = conArity (ks ++ [KStack]) r
+    conArity ks (TokEllipsis : TokRParen : r) = Right (ks ++ [KStack], r)
+    conArity ks (TokIdent "_" : TokComma : r)  = conArity (ks ++ [KWire]) r
+    conArity ks (TokIdent "_" : TokRParen : r) = Right (ks ++ [KWire], r)
+    conArity ks (TokIdent "ε" : TokComma : r)  = conArity (ks ++ [KEff]) r
+    conArity ks (TokIdent "ε" : TokRParen : r) = Right (ks ++ [KEff], r)
     conArity _ _ = Left ("A constructor parameter's kind is written with "
                       ++ "one mark per argument — `_` for a wire, `...` "
-                      ++ "for a stack: k(..., ...), d(_)")
+                      ++ "for a stack, `ε` for a grade: k(..., ...), "
+                      ++ "k(ε, ..., ...), d(_)")
 
     -- `law nm = program` | `slot : Σ ⇒ Θ` | `slot : Σ ⇒ Θ = <base word>`
     --
@@ -3757,6 +3908,13 @@ parseTheory aliases dataSigs header hdLine body = do
           fresh acc (TokIdent n : rest)
             | not (null n), isLower (head n), not (known n)
             , n `notElem` acc = fresh (acc ++ [n]) rest
+          -- a lowercase name inside a labelled arrow (`=ε>`) is a
+          -- grade variable, and the only place a slot may name one
+          -- without also writing it in a hom-object argument
+          fresh acc (TokEffArrow ls : rest) = fresh (foldl add acc ls) rest
+            where add a n | not (null n), isLower (head n), not (known n)
+                          , n `notElem` a = a ++ [n]
+                          | otherwise     = a
           fresh acc (_ : rest) = fresh acc rest
           fresh acc []         = acc
           -- A slot-local name used as an ARGUMENT OF A CONSTRUCTOR
@@ -3771,17 +3929,22 @@ parseTheory aliases dataSigs header hdLine body = do
           -- riding under a STACK `a`, because a stack variable can only
           -- sit in tail position (a splice is unspellable).
           cons  = [ (pName q, ks) | q@(PCon _ ks) <- params ]
-          inCon = nub (scan toks)
+          marks = nub (scan toks)
           scan (TokIdent n : TokLParen : rest)
             | Just ks <- lookup n cons
             , (grps, rest') <- argGroups rest =
-                concat (zipWith stackArgNames (ks ++ repeat False) grps)
+                concat (zipWith kindNames (ks ++ repeat KWire) grps)
                   ++ concatMap scan grps ++ scan rest'
           scan (_ : rest) = scan rest
           scan []         = []
-          stackArgNames isStk grp =
-            [ n | isStk, (TokIdent n : _) <- [reverse grp]
-                , not (null n), isLower (head n) ]
+          kindNames KStack grp =
+            [ (n, KStack) | (TokIdent n : _) <- [reverse grp]
+                          , not (null n), isLower (head n) ]
+          -- a GRADE argument is written as its components, and each
+          -- lowercase one is a variable: `k(ε ε', a, c)` names two
+          kindNames KEff grp =
+            [ (n, KEff) | TokIdent n <- grp, not (null n), isLower (head n) ]
+          kindNames KWire _ = []
           -- the top-level comma-separated groups of an argument list,
           -- and what follows its closing paren
           argGroups = go (0 :: Int) [] []
@@ -3794,14 +3957,21 @@ parseTheory aliases dataSigs header hdLine body = do
                 | t == TokRParen || t == TokRAngle = go (d - 1) (t : grp) acc r
                 | otherwise                        = go d (t : grp) acc r
           names = fresh [] toks
-          wires = [ PWire (TV n) | n <- names, n `notElem` inCon ]
+          effNames = nub ([ n | (n, KEff) <- marks ]
+                          ++ [ n | TokEffArrow ls <- toks, n <- ls
+                                 , not (null n), isLower (head n)
+                                 , not (known n) ])
+          inCon = [ n | (n, KStack) <- marks, n `notElem` effNames ]
+          effs = [ PEff (EV n) | n <- names, n `elem` effNames ]
+          wires = [ PWire (TV n) | n <- names, n `notElem` inCon
+                                 , n `notElem` effNames ]
           stacks = [ PStack (SV n) | n <- names, n `elem` inCon ]
           -- one slot-local stack for the whole slot, named so that no
           -- source identifier can shadow it (`…` lexes as `...`)
           stk = [ PStack (SV "…")
                 | TokEllipsis `elem` toks
                 , not (any isStackParam params) ]
-      pure (wires ++ stacks ++ stk)
+      pure (effs ++ wires ++ stacks ++ stk)
 
 -- `model Name : Theory(args)` + indented `slot = program`
 -- Split a type-argument list on commas that are not nested inside
@@ -4042,15 +4212,17 @@ parseModelHead aliases dataSigs theories header = do
                      ++ show (length ar) ++ ", but " ++ c ++ " takes "
                      ++ show (length ps) ++ " argument(s)"
             else case [ (k, q') | (k, q') <- zip ar ps
-                      , k /= isStackParam q' ] of
+                      , k /= paramArgKind q' ] of
               ((k, _) : _) -> Left $ "model " ++ nm ++ ": " ++ c
                        ++ " cannot fill the constructor parameter '"
                        ++ pName q ++ "' — theory " ++ t ++ " declares it "
                        ++ "at " ++ pName q ++ "("
-                       ++ intercalate ", " [ if b then "..." else "_" | b <- ar ]
+                       ++ intercalate ", " (map argKindMark ar)
                        ++ "), so " ++ c ++ "'s parameters must be declared "
-                       ++ (if k then "`...` (a stack) where that says `...`"
-                                else "bare (a wire) where that says `_`")
+                       ++ (case k of
+                             KStack -> "`...` (a stack) where that says `...`"
+                             KEff   -> "a grade where that says `ε`"
+                             KWire  -> "bare (a wire) where that says `_`")
               [] -> Right (IACon c)
         _ -> Left $ "model " ++ nm ++ ": theory " ++ t ++ " declares '"
                  ++ pName q ++ "' as " ++ pKind q ++ ", so its argument "
@@ -4374,16 +4546,30 @@ parseTypeLine aliases datas line =
       -- KINDS BY USE: every named parameter parses as a wire, and an
       -- occurrence under `^` makes it an exponent variable in the body.
       -- So the body's own free-variable sets settle the kinds.
-      let (bodyTVs, bodySVs, bodyRVs, bodyNVs, _) = varsOfTy body
+      let (bodyTVs, bodySVs, bodyRVs, bodyNVs, bodyEVs) = varsOfTy body
           reclass q@(PWire (TV nm))
             | NV nm `elem` bodyNVs, TV nm `elem` bodyTVs =
                 Left $ "Type " ++ name ++ ": parameter '" ++ nm
                     ++ "' is used both as a wire and as a width (^"
                     ++ nm ++ ")"
+            | EV nm `elem` bodyEVs, TV nm `elem` bodyTVs =
+                Left $ "Type " ++ name ++ ": parameter '" ++ nm
+                    ++ "' is used both as a wire and as a grade (=" ++ nm
+                    ++ ">)"
             | NV nm `elem` bodyNVs = Right (PWidth (NV nm))
+            | EV nm `elem` bodyEVs = Right (PEff (EV nm))
             | otherwise            = Right q
           reclass q = Right q
       params <- mapM reclass params
+      -- KINDS BY USE, read back.  A grade argument (`Circuit(ε, a, b)`)
+      -- parses as a stack until the kind is known, so a declaration with
+      -- a grade parameter is READ TWICE: once to find which parameters
+      -- the body graded, once at those kinds.  The second read is what
+      -- puts a grade, rather than a wire, in the carrier's argument.
+      body <- if any isEffParam params
+                then parseTyBody aliases ((name, params) : dataSigs)
+                                 params rhs
+                else Right body
       let occurs (PWire tv)  = tv `elem` bodyTVs
           occurs (PStack sv) = sv `elem` bodySVs
           occurs (PWidth nv) = nv `elem` bodyNVs
@@ -4391,6 +4577,8 @@ parseTypeLine aliases datas line =
           -- parameter; `paramList` below never builds one
           occurs (PCon _ _)  = True
           occurs (PRow rv)   = rv `elem` bodyRVs
+          occurs (PEff ev)   = ev `elem` fifth (varsOfTy body)
+            where fifth (_, _, _, _, es) = es
       if all occurs params
         then Right ()
         else Left $ "Type alias " ++ name
@@ -4551,15 +4739,14 @@ parseTyElem aliases dataSigs params toks = case toks of
         -- each argument is parsed at its DECLARED kind: `_` takes one
         -- wire, `...` takes a whole stack (2026-09-16 — which is what
         -- lets a hom-object name a side of a diagram)
-        (args, rest') <- goArgs [ if k then PStack (SV "_") else PWire (TV "_")
-                                | k <- ks ] rest
+        (args, rest') <- goArgs (map argKindParam ks) rest
         if length args /= length ks
           then Left $ "Type constructor parameter '" ++ name
                    ++ "' takes " ++ show (length ks) ++ " argument(s), but was "
                    ++ "given " ++ show (length args)
           else do
             sts <- mapM (stackArg name) args
-            case [ a | (False, a) <- zip ks sts
+            case [ a | (KWire, a) <- zip ks sts
                      , closedArity a /= 1 || openTailedS a ] of
               (a : _) -> Left $ "Type constructor parameter '" ++ name
                              ++ "': an argument declared `_` is one wire, "
@@ -4602,7 +4789,7 @@ parseTyElem aliases dataSigs params toks = case toks of
         Left $ "Type parameter " ++ name ++ " is a type constructor of "
              ++ "arity " ++ show (length ks) ++ ": it is not a wire, write it "
              ++ "applied — " ++ name ++ "("
-             ++ intercalate ", " [ if k then "..." else "_" | k <- ks ] ++ ")"
+             ++ intercalate ", " (map argKindMark ks) ++ ")"
     | Just [] <- lookup name dataSigs -> pure (TData name [], rest)
     | Just _ <- lookup name dataSigs ->
         Left $ "Type " ++ name ++ " expects arguments"
@@ -4717,7 +4904,10 @@ parseTyElem aliases dataSigs params toks = case toks of
       (rest2, grade) <- case rest1 of
                  (TokFatArrow : r)  -> Right (r, effPure)
                  (TokArrow : r)     -> Right (r, effPure)
-                 (TokEffArrow ls : r) -> Right (r, Eff (S.fromList ls) Nothing)
+                 -- A NAME IN A GRADE IS A VARIABLE when the declaration
+                 -- declares it, a LABEL otherwise.  That is the one rule,
+                 -- and it is the rule `expLit` already uses for `^n`.
+                 (TokEffArrow ls : r) -> (,) r <$> arrowGrade ls
                  _ -> Left "Expected '⇒' (or '->', '=IO>', '=Recursive>') \
                            \inside a Fn type"
       (outSt, rest3) <- goStack rest2
@@ -4726,6 +4916,57 @@ parseTyElem aliases dataSigs params toks = case toks of
         _ -> Left $ "Expected '"
                  ++ (if close == TokRAngle then "⟩" else ")")
                  ++ "' to close the Fn type"
+    -- an arrow's grade: labels, and at most one grade parameter.  A
+    -- JOIN belongs in a hom-object argument, where there is a type to
+    -- hang the lowered constraints on.
+    arrowGrade ls =
+      let isVar nm = isJust (lookupParam nm params)
+      in case ([ nm | nm <- ls, isVar nm ], [ nm | nm <- ls, not (isVar nm) ]) of
+           (_, (bad : _)) | take 1 bad == "ε" ->
+             Left $ "The grade variable '" ++ bad ++ "' is not a parameter of "
+                 ++ "this declaration — add it to the parameter list"
+           ([],  lbs) -> Right (Eff (S.fromList lbs) Nothing)
+           ([v], lbs) -> Right (Eff (S.fromList lbs) (Just (EV v)))
+           (vs,  _)   -> Left $ "An arrow's grade names at most one grade "
+                             ++ "parameter, and this one names "
+                             ++ intercalate " " vs
+                             ++ " — write a join in the hom-object "
+                             ++ "(`k(ε ε', a, b)`), where it lowers to the "
+                             ++ "`⊆` constraints composition already uses"
+    -- A GRADE ARGUMENT: `•`, a label, a declared grade parameter, or a
+    -- JUXTAPOSITION of them, which reads "at least these".
+    --
+    -- Juxtaposition is LOWERED HERE and never stored: two or more
+    -- components with a variable among them mint ONE composite variable
+    -- and remember the parts.  `gradeJoins` reads the parts back as
+    -- `part ⊆ composite`, which is what `infer (Seq t u)` emits for a
+    -- `;`.  So every grade in every type is one variable, `unifyEff`
+    -- only ever meets rows with one tail, and the union is only ever the
+    -- answer the least fixpoint computes.
+    goGrade ts = do
+      (comps, rest) <- goComps ts
+      (g, ps) <- lowerGrade comps
+      pure (gradeArg g ps, rest)
+    goComps ts = case ts of
+      (TokIdent t : r)
+        | t `elem` terminalSpellings -> more effPure r
+      (TokIdent nm : r)
+        | Just _ <- lookupParam nm params -> more (Eff S.empty (Just (EV nm))) r
+        | otherwise -> more (Eff (S.singleton nm) Nothing) r
+      _ -> Right ([], ts)
+      where
+        more c r = do
+          (cs, rest) <- goComps r
+          pure (c : cs, rest)
+    lowerGrade [] =
+      Left "Expected a grade here: `•`, a label, or a grade parameter"
+    lowerGrade [c] = Right (c, [])
+    lowerGrade cs =
+      let ls = S.unions (map eLabels cs)
+          vs = nub [ v | Eff _ (Just v) <- cs ]
+      in if null vs then Right (Eff ls Nothing, [])
+                    else Right ( Eff ls (Just (joinEVar vs))
+                               , [ Eff S.empty (Just v) | v <- vs ] )
     stackArg _ (AStack st) = Right st
     stackArg n (AWidth e)  =
       Left $ "Type " ++ n ++ ": a width argument (" ++ show e
@@ -4755,6 +4996,9 @@ parseTyElem aliases dataSigs params toks = case toks of
     goArg (Just (PWidth _)) ts = do
       (e, rest) <- expLit ts
       pure (AWidth e, rest)
+    goArg (Just (PEff _)) ts = do
+      (st, rest) <- goGrade ts
+      pure (AStack st, rest)
     goArg _ ts = do
       (st, rest) <- goStack ts
       pure (AStack st, rest)
@@ -4789,6 +5033,10 @@ applyAlias al args
       Right (tm, sm, rm, M.insert nv e nm)
     bind (tm, sm, rm, nm) (PRow rv, AStack (SCons (TSum row) SEnd)) =
       Right (tm, sm, M.insert rv row rm, nm)
+    bind (tm, sm, rm, nm) (PEff _, AStack (SCons (TGrade _ _) SEnd)) =
+      -- aliases are transparent and carry no grade map: a grade
+      -- parameter on an alias has nothing to substitute into
+      Right (tm, sm, rm, nm)
     bind _ (PRow rv, AStack st) =
       Left $ "Type " ++ aName al ++ ": parameter '" ++ show rv
            ++ "' is a row (`---`): its argument is a sum's alternatives, "
@@ -4818,6 +5066,7 @@ substParams tmap m rmap nmap = goT
     goT (TFn (Arrow i o e)) = TFn (Arrow (goS i) (goS o) e)
     goT (TSum r)     = TSum (goR r)
     goT (TData n as) = TData n (map goS as)
+    goT g@(TGrade _ _) = g     -- parameter substitution carries no grades
     goT (TFin e)     = TFin (goE e)
     goR RNil         = RNil
     -- SPLICING a row tail: a row variable only ever sits in tail
@@ -4946,6 +5195,7 @@ showTyA as t =
       TData n [] -> n
       TData n args ->
         n ++ "(" ++ intercalate ", " (map (showStackA as) args) ++ ")"
+      TGrade g _ -> showGrade g
       TFin e    -> "Fin(" ++ show e ++ ")"
 
 showArgA :: Disp -> TyArg -> String
@@ -5011,9 +5261,18 @@ showArrowA :: Disp -> Arrow -> String
 -- as the two wires it is.  Two carriers side by side (`f g` outside the
 -- scope) stay unfolded, which is how you see that `;` there is not
 -- composition in K.
-showArrowA as (Arrow SEnd (SCons (TData c [a, b]) SEnd) e)
-  | any (\(k, cn) -> cn == c && k `S.member` eLabels e) (dispCarriers as)
-  = showStackA as a ++ arrowGlyph e ++ showStackA as b
+-- A GRADED CARRIER folds its grade into the manifest (2026-10-05).  The
+-- receipt says which category the word was built in and the carrier's
+-- grade says what its morphism does, and the manifest is where both are
+-- read: `• ⇒ Circuit(IO, Int, Int)` carrying `Circuits` is
+-- `Int =Circuits IO> Int`.  One arrow, one manifest.
+showArrowA as (Arrow SEnd (SCons (TData c args) SEnd) e)
+  | Just (a, b) <- carrierArgs args
+  , any (\(k, cn) -> cn == c && k `S.member` eLabels e) (dispCarriers as)
+  = let g = carrierGrade args
+    in showStackA as a
+         ++ arrowGlyph e { eLabels = eLabels e `S.union` eLabels g }
+         ++ showStackA as b
 showArrowA as (Arrow s1 s2 e)
   -- a carrier PREFIX shared by both sides is what "threaded through"
   -- means, so that is exactly when the name is earned.  Works on open
@@ -6918,8 +7177,9 @@ inTarget thNames trans slots funcs bases resources n
 -- carrier in the type plus the entry in the K-word table.
 isKWordShape :: Transport -> Arrow -> Bool
 isKWordShape tp (Arrow i o _) = case (i, o) of
-  (SEnd, SCons (TData c [_, _]) SEnd) -> c == tpCarrier tp
-  _                                   -> False
+  (SEnd, SCons (TData c args) SEnd) -> c == tpCarrier tp
+                                         && isJust (carrierArgs args)
+  _                                 -> False
 
 -- ...and when it is neither that nor a use of one of M's words, the
 -- header did nothing at all, which is worth saying.
@@ -7818,8 +8078,10 @@ componentArrows theories insts mo = do
     -- two, always, which refused every theory whose parameter was not a
     -- hom-object (2026-09-15).
     one (PCon _ ar) (IACon ca) (IACon cb) =
-      let vs = [ SCons (TVarTy (TV v)) SEnd
-               | v <- take (length ar) (map (: []) "\945\946\947\948\949\950") ]
+      let vs = [ case k of
+                   KEff -> gradeArg (Eff S.empty (Just (EV ("ε" ++ v)))) []
+                   _    -> SCons (TVarTy (TV v)) SEnd
+               | (k, v) <- zip ar (map (: []) "\945\946\947\948\949\950") ]
       in Right (arrPure (SCons (TData ca vs) SEnd)
                         (SCons (TData cb vs) SEnd))
     one (PWire _) (IAStack sa) (IAStack sb) = Right (arrPure sa sb)
@@ -9373,6 +9635,12 @@ matchStack cons st0@(cm, tm, sm) s1 s2 = case (s1, s2) of
   _ | s1 == s2 -> Just st0
     | otherwise -> Nothing
   where
+    -- drop the given's leading grade argument only when that is what
+    -- makes the arities agree; two graded types match argument for
+    -- argument, grade included
+    ungraded as as' = case as' of
+      (g : rest) | isGradeArg g, length rest == length as -> rest
+      _                                                   -> as'
     args acc as as'
       | length as /= length as' = Nothing
       | otherwise = foldM (\c (a, b) -> matchStack cons c a b) acc
@@ -9381,10 +9649,17 @@ matchStack cons st0@(cm, tm, sm) s1 s2 = case (s1, s2) of
       Just t' | t' /= t -> Nothing
       _                 -> Just (c, M.insert v t tm', sm')
     one st@(c, tm', sm') (TData n as, TData n' as')
+      -- A GRADED HOM-OBJECT still models the doctrine's.  `Doctrine`
+      -- declares `k(ρ, σ)` and a theory may declare `k(ε, ρ, σ)`; the
+      -- grade argument is DROPPED for the match, for the same reason the
+      -- effect on the arrow is not compared — a grade is what a model
+      -- may do, and the doctrine does not bound it.  The doctrine's
+      -- `k(ρ, σ)` is the total category of the graded family.
       | n `elem` cons = case M.lookup n c of
           Just m | m /= n' -> Nothing
-          _                -> args (M.insert n n' c, tm', sm') as as'
-      | n == n'          = args st as as'
+          _                -> args (M.insert n n' c, tm', sm') as
+                                   (ungraded as as')
+      | n == n'          = args st as (ungraded as as')
     one st (TFn (Arrow a b _), TFn (Arrow a' b' _)) = do
       st1 <- matchStack cons st a a'
       matchStack cons st1 b b'
@@ -9483,8 +9758,8 @@ checkBaseSpellings th cm
   where
     here   = "theory " ++ thName th ++ ": "
     kParam = M.lookup doctrineK cm
-    isCar (TData n [_, _]) = Just n == kParam
-    isCar _                = False
+    isCar (TData n args) = Just n == kParam && isJust (carrierArgs args)
+    isCar _              = False
     carriers st = length (filter isCar (fromMaybe [] (closedWires st)))
     builds   (Arrow i o _) = i == SEnd && carriers o == 1
     whiskers (Arrow i o _) = carriers i == 1 && carriers o == 1
@@ -9530,9 +9805,10 @@ transportOf datas theories inst = do
         | otherwise -> Right Nothing
       Just nm -> case [ ar | PCon p ar <- thParams th, p == nm ] of
         (ar : _)
-          | ar /= [True, True] -> Left $ here ++ "theory " ++ thName th
+          | ar /= [KStack, KStack] && ar /= [KEff, KStack, KStack] ->
+              Left $ here ++ "theory " ++ thName th
               ++ "'s constructor parameter `" ++ nm ++ "` is " ++ nm ++ "("
-              ++ intercalate ", " [ if k then "..." else "_" | k <- ar ]
+              ++ intercalate ", " (map argKindMark ar)
               ++ "), and " ++ doctrineName ++ " declares " ++ what
           | otherwise ->
               case [ c | (PCon p _, IACon c) <- zip (thParams th) (inArgs inst)
@@ -9552,8 +9828,8 @@ transportOf datas theories inst = do
       -- name for the hom-object, not the model's argument for it
       let slots   = thSlots th
           has n   = if isJust (lookup n slots) then Just n else Nothing
-          isCar (TData n [_, _]) = Just n == kParam
-          isCar _                = False
+          isCar (TData n args) = Just n == kParam && isJust (carrierArgs args)
+          isCar _              = False
           carriers st = length (filter isCar (fromMaybe [] (closedWires st)))
           spoken  = catMaybes [has doctrineCompose, has doctrineEmbed]
           -- an EXIT consumes a carrier and hands back base; an ENTRY is
@@ -9572,9 +9848,10 @@ transportOf datas theories inst = do
           -- `• ⇒ k(ρ, σ)` READ AS A BASE ARROW is `ρ ⇒ σ`: what the
           -- atom that spells this generator must actually be.
           baseArr n = case lookup n slots of
-            Just (Arrow SEnd (SCons (TData _ [x, y]) SEnd) _)
-              | n `elem` enters -> Just (Arrow x y effPure)
-            _                   -> Nothing
+            Just (Arrow SEnd (SCons (TData _ args) SEnd) _)
+              | n `elem` enters, Just (x, y) <- carrierArgs args
+              -> Just (Arrow x y (carrierGrade args))
+            _ -> Nothing
           reader = [ (w, n, baseArr n) | (n, w) <- thReads th ]
       -- A BASE SPELLING IS FOR A GENERATOR, and a generator either makes
       -- a carrier or whiskers one.  `scale : Float ⇒ k(Float, Float)` is
@@ -13349,6 +13626,12 @@ reprTyV (TSum row)       = do
   (alts, tl) <- reprRowV row
   Right (VSum 4 [encodeListV alts, tl])
 reprTyV (TFin e)         = Right (VSum 8 [reprWidthV e])
+-- a GRADE argument: the labels and the tail, exactly as an arrow's own
+-- row reflects.  The lowered juxtaposition is not reflected; it is a
+-- declaration's constraint, not part of the type's structure.
+reprTyV (TGrade (Eff ls mv) _) =
+  Right (VSum 9 [ encodeListV (map (symOf . ('.' :)) (S.toList ls))
+                , symOf (maybe ".•" (('.' :) . show) mv) ])
 
 reprStackV :: SType -> Either String Value
 reprStackV st = encodeListV <$> go st
@@ -13401,6 +13684,14 @@ tyOfRepV (VSum 2 [VSym s, asV]) = do
   Right (TData (drop 1 s) as)
 tyOfRepV (VSum 3 [a]) = TFn <$> arrowOfRepV a
 tyOfRepV (VSum 8 [w]) = TFin <$> expOfRepV w
+tyOfRepV (VSum 9 [lsV, VSym tl]) = do
+  ls <- decodeListV lsV
+  let lab (VSym n) = Right (drop 1 n)
+      lab v        = Left ("this is not a label: " ++ show v)
+  nms <- mapM lab ls
+  Right (TGrade (Eff (S.fromList nms)
+                     (if tl == ".•" then Nothing
+                                    else Just (EV (drop 1 tl)))) [])
 tyOfRepV (VSum 4 [altsV, VSym tl]) = do
   alts <- decodeListV altsV >>= mapM stackOfRepV
   let end | tl == ".•" = RNil
@@ -13466,6 +13757,7 @@ reprParamV p = VSum 0 [symOf (pName p), VSym kind, VInt arity]
       PStack _ -> (".stack", 0)
       PRow _   -> (".row",   0)
       PWidth _ -> (".width", 0)
+      PEff _   -> (".grade", 0)
       PCon _ k -> (".con",   length k)
 
 -- The three alternatives of `data Decl`, by tag:

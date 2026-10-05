@@ -1576,6 +1576,28 @@ moduleTypeTests =
     -- category, and its type is the same as `byHand`'s: the difference
     -- is the written header, never an inferred type.
   , (modeMod ++ "def hand = [dup ; +] ; Arr\nhand", "• ⇒ Arr(Int, Int)")
+    -- A GRADED CARRIER, and the grade inferred through transport.  The
+    -- pure word prints pure and the effectful one prints `IO`, under ONE
+    -- theory: that is the polymorphism the grade in the carrier did not
+    -- have.  The display folds the carrier's grade into the manifest, so
+    -- the receipt and the grade read as one arrow.
+  , (gradedMod ++ "quiet", "Int =Circuits> Int")
+  , (gradedMod ++ "loud",  "Int =Circuits IO> Int")
+    -- `compose`'s written `k(ε ε', a, c)` solved to IO.  Nothing wrote
+    -- IO: the join is the least solution of ∅ ⊆ ε'' and IO ⊆ ε''.
+  , (gradedMod ++ "def both with Circuits = quiet ; loud\nboth",
+     "Int =Circuits IO> Int")
+    -- and the carrier the fold folded, unfolded
+  , (gradedMod ++ "def both with Circuits = quiet ; loud\ndef h = both ; unCircuit\nh",
+     "• =Circuits> Fn⟨Int =IO> Int⟩")
+    -- `observe : k(ε, Int, Int) =ε> Int` gets the grade back OUT of the
+    -- carrier and onto the arrow
+  , (gradedMod ++ "def runQ in Circuits = quiet ; observe\nrunQ", "• =Circuits> Int")
+  , (gradedMod ++ "def runL in Circuits = loud ; observe\nrunL",
+     "• =Circuits IO> Int")
+    -- a WRITTEN grade is exact, and a pure one admits the pure word
+  , (gradedMod ++ "data Silent = Circuit(•, Int, Int)\n\
+     \def keepQuiet = quiet ; Silent\nkeepQuiet", "• =Circuits> Silent")
     -- LEVEL THREE: with a strength declared, a wider stage transports
     -- by being packed with the pairing the strength names
   , (wideMod ++ "def sq with Wide = dup ; *\nsq", "Int =Wide> Int")
@@ -1681,6 +1703,33 @@ padF = "def nopC = [pass ...] >> getCode\n\
 -- of any width embeds as itself.  The boring model is enough for the
 -- whole mechanism, and unlike `Circuit` it is pure, so the expected
 -- arrows carry nothing but the receipt.
+
+-- THE GRADED DOCTRINE (2026-10-05).  The hom-object takes a GRADE as
+-- well as two stacks, and `compose` says the composite's grade is at
+-- least each part's by writing the parts side by side.  A juxtaposition
+-- is LOWERED at the parser: `k(ε ε\', a, c)` stores one fresh variable
+-- and records `ε \8838 ε\'\'` and `ε\' \8838 ε\'\'`, so the union is never a
+-- term and the least fixpoint computes it.  The carrier is the pure
+-- function one, graded: the point is the grade, not the circuit.
+gradedMod :: String
+gradedMod = unlines
+  [ "data Circuit(\949, a..., b...) = Fn\10216a =\949> b\10217"
+  , "theory Arrow(k(\949, ..., ...)) in Doctrine ="
+  , "    embed   : Fn\10216a =\949> b\10217 \8658 k(\949, a, b)"
+  , "    compose : k(\949, a, b) k(\949\', b, c) \8658 k(\949 \949\', a, c)"
+  , "    observe : k(\949, Int, Int) =\949> Int"
+  , "    sample  : \8226 \8658 k(\8226, Int, Int)"
+  , "def runC  = unCircuit ... ; ev"
+  , "def compC = (f g -> [f ... ; runC ; g ... ; runC] ; Circuit)"
+  , "model Circuits in Arrow(Circuit) ="
+  , "    embed   = Circuit"
+  , "    compose = compC"
+  , "    observe = (f -> f 3 ; runC)"
+  , "    sample  = [dup ; *] ; Circuit"
+  , "def quiet with Circuits = dup ; *"
+  , "def loud  with Circuits = dup ; * ; print ; 1"
+  ]
+
 modeMod :: String
 modeMod = unlines
   [ "data Arr(a..., b...) = Fn⟨a ⇒ b⟩"
@@ -3402,9 +3451,18 @@ glaReadSrc = unlines
 
 moduleFailTests :: [(String, String)]
 moduleFailTests =
+    -- A WRITTEN GRADE IN A CARRIER IS FIXED (2026-10-05): `Silent` is
+    -- `Circuit(•, Int, Int)`, so the effectful word does not roll into
+    -- it.  The refusal is the one a written manifest always gets.
+  [ (gradedMod ++ "data Silent = Circuit(•, Int, Int)\n\
+     \def keepLoud = loud ; Silent\nkeepLoud ; drop",
+     "Cannot unify effects: IO vs pure")
+    -- a grade variable must be declared, like a width
+  , (gradedMod ++ "data Bad(a...) = Fn⟨a =ε> a⟩\n1 ; print",
+     "is not a parameter of this declaration")
     -- GLA (2026-09-21): `with` a compose-only model is refused, and the
     -- refusal names the clause that works instead.
-  [ (glaSrc ++ "def bad with Dense = dup ; fadd\nbad ; app ... ; _ 1.0 ; ev ; print",
+  , (glaSrc ++ "def bad with Dense = dup ; fadd\nbad ; app ... ; _ 1.0 ; ev ; print",
      "theory GLA takes Doctrine's `compose` and not its `embed`")
     -- ...a hom-object ALONE is not a carrier: the CLAIM is what
     -- `transportOf` reads, so without `in Doctrine` there is nothing to
