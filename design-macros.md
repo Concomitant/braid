@@ -5432,3 +5432,135 @@ is still a diamond. A qualified import may sit beside an unqualified one.
 **The second continuation stands.** Importing through a functor
 (`import "rules.braid" with Traced`) is still a functor applied to a
 whole presentation, and still not in.
+
+## Amendment (2026-10-05): the graded Doctrine
+
+The hole was never a missing place for the grade. `examples/circuits.braid`
+has written one since 2026-09-16: `data Circuit(a..., b...) = Fn⟨Box(a)
+=Recursive> Box(b) Circuit(a, b)⟩`, a grade in the carrier, in the type,
+checked. What was missing is **polymorphism in the grade the carrier
+already had**. One theory chose one grade for all its programs, so `def
+quiet with Circuits = dup ; *` printed `=Recursive>` when it recursed
+nothing, and `def loud with Circuits = dup ; * ; print ; 1` did not
+typecheck at all. design-graded-doctrine.md §1 measured both and §2 placed
+the grade in the carrier, which is where it already was.
+
+**Route W was weeks and Route C is not.** The expensive design writes the
+join as a term: `compose : k(ε, a, b) k(ε', b, c) ⇒ k(ε ∪ ε', a, c)` with
+`∪` a node in the type. Unifying that is unification modulo
+associativity, commutativity and idempotence, which is not unitary:
+`ε1 ∪ ε2 = IO` has three incomparable solutions and no most general one,
+so `EffRow` grows a set of tails, `unifyEff` becomes semilattice
+unification with variables, and `solve`'s principality argument does not
+carry. That is the largest change to the type system since grades, and
+design-graded-doctrine.md §3 priced it across six subsystems.
+
+Route C never writes the union. A juxtaposition in a grade position,
+`k(ε ε', a, c)`, is **lowered where it is parsed**: the checker stores one
+fresh variable for the position and records `ε ⊆ ε''` and `ε' ⊆ ε''`
+beside the signature. Every grade in every type is then one variable,
+`unifyEff` only ever meets rows with one tail, and the union is only ever
+the answer the least fixpoint computes. Nothing about the solver changed.
+
+What is new is only that a WRITTEN type can now say "at least these". The
+discipline it lowers to is `infer (Seq t u)`'s own, from stage 5a⁹⁄₁₀: a
+composite's row is a FRESH variable bounded below by each part, never one
+of the parts, stated as `CSubEff part composite` and solved by `fixSubs`.
+Route C applies that to a signature instead of to a `;`. The Horn-clause
+uniqueness argument above `solve` is untouched, because the constraints
+are the same shape.
+
+**The trace, as it happens.** For `def both with Circuits = quiet ; loud`:
+
+```text
+[joins] k(ε16,a,b) k(ε17,b,c) ⇒ k(ε18,a,c)   ⊢  ε16 ⊆ ε18, ε17 ⊆ ε18
+        -- `compose` instantiated; the lowered constraints freshened with it
+        ε16 := ⟨|ε⟩   from quiet          ε17 := ⟨IO|ε10⟩  from loud
+[flow]  IO|ε10 ⊆ ε18  ⟹  ε18 := IO|ε⊔1
+        -- ε16 ⊆ ε18 never fires: ε16 carries no label
+both : • =Circuits> Circuit(IO, Int, Int)    displayed  Int =Circuits IO> Int
+```
+
+The predicted trace and the real one agree. The one surprise is that the
+PARTS travel in the type and are re-emitted at every use of the type, so
+`loud`'s own scheme carries `IO|ε8 ⊆ IO|ε10` and re-emits it wherever
+`loud` is used. Those are satisfied the moment they are emitted and their
+number is the size of the type, not of the program, so they are noise
+rather than cost. The alternative, routing the joins through the scheme's
+`[EffSub]` and `keepSubs`, would have needed the GC to keep a constraint
+whose only link to the arrow is through a `TData` argument; keeping the
+parts in the type made that question go away.
+
+**What the sort cost.** A sixth `TyParam` kind, `PEff`, and `PCon
+String [Bool]` becoming `PCon String [ArgKind]` with `KWire | KStack |
+KEff`. 126 lines name a `TyParam` constructor and 35 name an `ArgKind`;
+of those, two needed more than a line. A generated `foldName` gathered
+its declaration's wire, stack, row and width parameters and not its
+grades, so a graded sum type's recursor left them unquantified; and its
+own row variable was named `ε` outright, which a parameter of that name
+would have captured.
+
+`TData` did **not** become `TData String [TyArg]`, which is the 67-site
+change the measurement budgeted. A grade argument rides as the ONE WIRE
+every non-stack argument already rides as, which is what `paramStack
+(PRow rv) = SCons (TSum (RTail rv)) SEnd` does for a row: `Ty` gains
+`TGrade EffRow [EffRow]` and the argument list stays a list of stacks.
+Substitution, variable collection, unification and display then reach it
+through the walks they already had, and the only sites that needed the
+grade named are the four that read a carrier's two object arguments —
+the display fold, the level detection, `in K`'s shape check, and the base
+spellings' audit — which now read them through one `carrierArgs`.
+
+**The second field of `TGrade` is provenance, not structure.** It holds
+the juxtaposition the grade was lowered from, and `unifyTy` does not read
+it: a written `k(ε ε', a, c)` is one variable to the solver. What reads it
+is `gradeJoins`, at every instantiation, which is how the constraints
+reach each use site freshened with the variables they relate.
+
+**The Doctrine's own text did not change, and should not.** The plan was
+to grade `compose`, `embed` and `observe` in the prelude. That would make
+every model of the Doctrine graded, and `Vault`, `GLA`, `Reflective`,
+`Lifting` and every generated resource model have nothing to grade: a
+category with no effects would pay a `•` argument in every displayed type
+for an option it never uses. So `Doctrine` keeps `k(..., ...)` and
+`checkExtends` drops a leading grade argument when it matches a theory's
+slot against the doctrine's. That is the same reading `matchArrow`
+already had for the arrow's own effect — "a grade is what a MODEL may do,
+and the doctrine does not bound it" — applied to the hom-object's grade
+argument, and it is sound for the reason design-7b.md §2 gives:
+`Doctrine`'s `k(ρ, σ)` is the total category `∫_ε k(ε, ρ, σ)` of the
+graded family.
+
+For the same reason the models were graded **where the grade does work**
+and nowhere else: `Arrow`/`Circuit`/`Arr` in `circuits.braid`,
+`Columns`/`Col` in `frame.braid`, `Prob`/`Kern`/`Samp`/`Poss` in
+`prob.braid`. `Vault`/`Capsule` stays ungraded in the same file as
+`Arrow`, which is the demonstration that the option is optional. The
+**resource generator** stays ungraded too, and it has to: `resCarrierLine`
+writes `data R@k(a..., b...) = Fn⟨R a ⇒ R b⟩` with a PURE inner arrow,
+and that purity is exactly what `representableAt` tests before
+`runTransport` fuses transport into the routing pass. A grade on that
+arrow would stop every resource model fusing, for a parameter no resource
+op needs.
+
+**The three graded functors.** Transport is `with M` over `L ↦ L ∪ {M}`
+on the base's grades: the receipt is minted, and the carrier's grade
+argument is whatever the embedded stage's grade was, so `embed` is the
+component at each `L`. The exit is over the identity: `observe : k(ε, Int,
+Int) =ε> Int` adds no label of its own and carries the carrier's grade out
+unchanged, which is what makes construction inert and execution graded.
+And `compose`'s join slot is the statement that `K'` is graded at all: a
+category whose hom-objects are indexed by a semilattice, with composition
+`K'_L(Σ,Θ) × K'_M(Θ,Ξ) → K'_{L∪M}(Σ,Ξ)`. Written in Braid that is one
+line, and it is the only line in which the grading is visible.
+
+**Two limits found and left.** A written grade on an arrow may name at
+most one grade parameter, because an arrow's `EffRow` has one tail and
+there is no type node to hang a lowered join on; a join belongs in a
+hom-object argument, and the refusal says so. And a model's slot body is
+checked against the declared join only vacuously: at the model check the
+declared grades are skolems carrying no labels, so `ε ⊆ ε''` holds
+whatever the body does with them. The declared type is what use sites
+trust, and a body that loses a grade is caught by the inner arrow's own
+unification rather than by the constraint — which is enough, and is not
+the same as checking the constraint.

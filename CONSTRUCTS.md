@@ -81,8 +81,9 @@ since `=` without them is part of a labelled arrow (`=IO>`).
 Parameters are **kinded by how they are written**: a bare name is one
 wire (`Monoid(a)`), `...` a stack, and a type **constructor** carries its
 kind **one mark per argument**: `_` where that argument is one wire,
-`...` where it is a whole stack. So a hom-object over stacks is
-`k(..., ...)` and a parameterized exit over one wire is `d(_)`. A slot
+`...` where it is a whole stack, `ε` where it is a **grade**. So a
+hom-object over stacks is `k(..., ...)`, a graded one is
+`k(ε, ..., ...)`, and a parameterized exit over one wire is `d(_)`. A slot
 may name variables the theory does not declare; each is local to its
 slot and generalized there. In a constructor's stack position they are
 stack variables, which is why `compose : k(a, b) k(b, c) ⇒ k(a, c)`
@@ -135,7 +136,13 @@ Malformed theory declaration: after the parameters a theory head takes
 `over` is gone since 2026-09-16: a theory extending another is
   MEMBERSHIP — write `theory … in <Theory>` where the `over` is
 A constructor parameter's kind is written with one mark per argument —
-  `_` for a wire, `...` for a stack: k(..., ...), d(_)
+  `_` for a wire, `...` for a stack, `ε` for a grade: k(..., ...),
+  k(ε, ..., ...), d(_)
+The grade variable 'ε' is not a parameter of this declaration — add it
+  to the parameter list
+An arrow's grade names at most one grade parameter, and this one names
+  … — write a join in the hom-object (`k(ε ε', a, b)`), where it lowers
+  to the `⊆` constraints composition already uses
 theory T: slot 's' is <arrow>, but Doctrine declares it <arrow> — a
   theory that extends Doctrine declares Doctrine's operations at
   Doctrine's signatures.
@@ -374,7 +381,8 @@ hom-object `k(..., ...)`, a slot at `k(a, b) k(b, c) ⇒ k(a, c)`, a slot
 at `Fn⟨a ⇒ b⟩ ⇒ k(a, b)`, and exits (`k(Int, Int) ⇒ Int` and kin). `a`,
 `b` and `c` are **stacks**, so the carrier is a process on a whole side
 of a diagram. Its data type declares a stack
-parameter per side: `data Circuit(a..., b...) = …`.
+parameter per side: `data Circuit(ε, a..., b...) = …`, with `ε` the
+**grade** the carrier's inner arrow runs at.
 
 **What the checker does.** Everything a plain model gets, plus:
 `transportOf` records the carrier, composition, embedding and exit
@@ -717,6 +725,18 @@ laws are identity twice, associativity, functoriality of `embed`, and
 `embedWide`, which states `embed [f] ; embed [g] = embed [f ; g]` at a
 stage that is one wire in and two out and at one that whiskers,
 `(_ 1 ; +) _`. `k` is the hom-object, and `a`, `b`, `c` are stacks.
+
+A theory may **grade** its hom-object, `theory T(k(ε, ..., ...)) in
+Doctrine`, and then `embed : Fn⟨a =ε> b⟩ ⇒ k(ε, a, b)` records what the
+embedded program does, `compose : k(ε, a, b) k(ε', b, c) ⇒ k(ε ε', a, c)`
+joins the two, and `observe : k(ε, Int, Int) =ε> Int` hands the join back
+on its own arrow. The grade argument is dropped when the slot is matched
+against the Doctrine's, so a graded category and an ungraded one both
+join: `Doctrine`'s `k(ρ, σ)` is the total category of the graded family.
+Juxtaposition in a grade position means "at least these" and is lowered
+to `⊆` constraints at the parser, so no type ever holds a union. The
+level table below is unchanged.
+
 There is no pairing parameter and no strength, because the base's own
 `...` does the whiskering **inside the quotation**, before `embed`
 receives it. A theory may declare any number of the four, and there are

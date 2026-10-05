@@ -9,10 +9,10 @@ the function space `Fin(n) ⇒ A`, stored tabulated and flat. The width is
 erased at run time.
 
 **carrier** (§3, §8). The type a model supplies for its theory's
-hom-object. `model Circuits in Arrow(Circuit)` makes `Circuit(a, b)` the
-carrier. A resource's carrier is a wire of its own type, and `IO`'s is an
-abstract linear `World`. The carrier is what a label adds to the objects;
-the hom-object is the parameter it fills.
+hom-object. `model Circuits in Arrow(Circuit)` makes `Circuit(ε, a, b)`
+the carrier. A resource's carrier is a wire of its own type, and `IO`'s is
+an abstract linear `World`. The carrier is what a label adds to the
+objects; the hom-object is the parameter it fills.
 
 **closed spine** (§8, §12). A spine with no free name and no recursive
 back-reference left to resolve. Every elaborated def is one, because
@@ -80,10 +80,27 @@ things: a grade is the set, a **label** is one member, a **manifest** is
 the grade as the display writes it, and a **receipt** is a label a scope
 minted.
 
+A grade may also be a type ARGUMENT, at a position a declaration marks
+`ε`, and then it is written as its members: `•` for the empty grade, a
+label, a grade variable, or several of those side by side. Juxtaposition
+means "at least these" — `k(ε ε', a, c)` is the grade of a composite —
+and it is lowered at the parser to the `⊆` constraints composition already
+emits, so no type holds a union (§8).
+
+**graded carrier** (§3, §8). A carrier that takes a grade as an argument,
+so that the morphism's own grade is in its type: `Circuit(•, Int, Int)` is
+a pure circuit and `Circuit(IO, Int, Int)` is one that prints, under one
+theory and one model. The display folds the carrier's grade into the
+manifest beside the receipt, and the theory's exit (`observe : k(ε, Int,
+Int) =ε> Int`) takes it back out onto the arrow that runs the thing. A
+carrier with no grade parameter fixes one grade for every program its
+theory embeds.
+
 **hom-object** (§8). The parameter of a theory declared with
-arrow-shaped arguments, `theory Arrow(k(..., ...))`. A model fills it
-with a carrier. A theory that has one can join the Doctrine and transport
-whole programs.
+arrow-shaped arguments, `theory Arrow(k(..., ...))`, or
+`theory Arrow(k(ε, ..., ...))` for a graded one. A model fills it with a
+carrier. A theory that has one can join the Doctrine and transport whole
+programs.
 
 **`in`** (§6, §8). The header clause of membership. `def f in X = body`
 declares that this def is a morphism of X. It applies nothing, writes no

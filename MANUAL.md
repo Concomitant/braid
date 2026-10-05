@@ -280,15 +280,34 @@ embedding (§8), `with` of that model is the functor that sends every
 stage of a scope to the model's embedding and every `;` to its
 composition. `with Circuits` mints `Circuits` as any functor scope does,
 and nothing on the arrow is new. What the label *adds to the objects* is
-the hom-object `Circuit(a, b)`. At the base a transported word is
-`• ⇒ Circuit(Int, Int)` carrying `Circuits`, and the display folds the
+the hom-object `Circuit(ε, a, b)`. At the base a transported word is
+`• ⇒ Circuit(•, Int, Int)` carrying `Circuits`, and the display folds the
 carrier onto the glyph, which is the same move that folds a threaded
 resource:
 
 ```text
 easy     : Int =Circuits Recursive> Int   -- one carrier, out of `•`, carrying the label
-pair     : • =Circuits Recursive> Circuit(Int, Int) Circuit(Int, Int)
+pair     : • =Circuits Recursive> Circuit(ε2, Int, Int) Circuit(ε5, Int, Int)
 ```
+
+**A GRADED CARRIER folds its grade into the manifest too.** A hom-object
+may take a **grade** as its first argument, `k(ε, ..., ...)`, and a
+carrier declared with a grade parameter records what its morphism does:
+`Circuit(•, Int, Int)` is a pure circuit and `Circuit(IO, Int, Int)` is
+one that prints. The fold reads both the receipt and the carrier's grade,
+unions them, and prints one manifest:
+
+```text
+quiet : Int =Circuits Recursive> Int        -- • ⇒ Circuit(•, Int, Int), carrying Circuits
+noisy : Int =Circuits IO Recursive> Int     -- • ⇒ Circuit(IO, Int, Int), carrying Circuits
+```
+
+The grade belongs in the carrier because the carrier is where the
+deferred computation lives. Building a circuit performs no IO: the
+closure is inert, and the arrow that builds it says nothing about the
+arrow that runs it. The exit does: `observe : k(ε, Int, Int) =ε> Int`
+takes the grade out of the carrier and puts it on its own arrow, which
+is the arrow that runs the thing.
 
 **The fold folds one carrier.** `pair` above is two words of the
 category side by side outside the scope: well-typed, and visibly not
@@ -297,7 +316,7 @@ Composition is written under the clause (`def f with Circuits = f ; g`).
 Like the resource fold this is display rather than inference, and like
 the resource fold it does not run backwards: a *written*
 `Fn⟨Int =Circuits> Int⟩` means the labelled arrow it looks like, and the
-carrier form is written out (`Fn⟨• =Circuits> Circuit(Int, Int)⟩`).
+carrier form is written out (`Fn⟨• =Circuits> Circuit(•, Int, Int)⟩`).
 
 The built-in labels, then:
 
@@ -307,7 +326,7 @@ The built-in labels, then:
 | `Recursive` | `with Recursive` on a `def` **that names itself** (§8) | none | ties a knot, and may recurse without bound |
 | `F` (any functor) | `with F` on a `functor` (§12) | none | its graph morphism was extended along the wiring |
 | `R` (any resource) | `with R` on a `model R in Doctrine` (§8), **or inferred routing** | a wire of type `R` | threads the `R` wire |
-| `M` (any model with a carrier) | `with M` on a `model` whose theory has a hom-object (§8) | the hom-object `K(a, b)` | was built in the category `M` presents |
+| `M` (any model with a carrier) | `with M` on a `model` whose theory has a hom-object (§8) | the hom-object `K(a, b)`, or `K(ε, a, b)` when the theory grades it | was built in the category `M` presents |
 | `F(M)` (a family applied) | `with F(M)` on a `model F(T(a))` (§8) | the member's own carrier | was read by the model `F(M)` |
 
 One mechanism, six readings. Every one of them unions along
@@ -1392,6 +1411,24 @@ type Bad2 = (• | Int^n)        # rejected: Exponent variable ^n is not a
 Width aliases display-fold like any other: with `Sq` in scope,
 `:t [dupN >> addN]` prints `• ⇒ Sq(n0)`.
 
+**Grades are declared by use too**, and on `data` as well as on `type`. A
+parameter a body writes **on an arrow** is a grade, spelled `ε`, `ε'`,
+`ε2`:
+
+```braid
+data Circuit(ε, a..., b...) = Fn⟨Box(a) =ε Recursive> Box(b) Circuit(ε, a, b)⟩
+    Circuit   : Fn⟨Box(ρ0) =Recursive> Box(ρ1) Circuit(ε0, ρ0, ρ1)⟩ ⇒ Circuit(ε0, ρ0, ρ1)
+```
+
+The grade then rides in the type's argument list as the one wire every
+non-stack argument rides as, and it unifies as a row: `Circuit(•, Int,
+Int)` and `Circuit(IO, Int, Int)` are different types, and a written one
+is exact. `data Bad(a...) = Fn⟨a =ε> a⟩` is refused with *The grade
+variable 'ε' is not a parameter of this declaration*, and a parameter used
+both ways with *parameter 'ε' is used both as a grade (=ε>) and as a wire,
+a stack or a width*. What a grade argument is **for** is a hom-object that
+records what its morphism does, which is §8.
+
 Because `List`'s parameter sits *before* the recursive slot in
 `(• | a List(a))`, it is forced to be a wire. That is why a list cell is
 one wire and why `Box` is how a pair-list is spelled:
@@ -1553,7 +1590,7 @@ Writing a `;` between bindings is refused by name:
 One rule covers models, transformations and theories alike. Theory
 parameters are kinded: a bare name is one wire, `...` a stack, and
 `k(..., ...)` a type **constructor** whose arguments are kinded one by one
-(below).
+(below), each `_` a wire, each `...` a stack, and each `ε` a **grade**.
 
 **THE MODEL HEAD IS ONE GRAMMAR**, and every kind of model is a setting of
 it:
@@ -1638,9 +1675,9 @@ to survive the parser.
 
 **Constructor parameters.** A theory parameter may be a type constructor,
 written with its arity visible as one mark per argument: `_` for a wire,
-`...` for a whole stack, so `theory Arrow(k(..., ...))` and
-`theory Prob(k(..., ...), d(_))`. The kind has to be visible because the
-two bare readings are already taken, a name being a wire and `...` a
+`...` for a whole stack, `ε` for a grade, so `theory Arrow(k(..., ...))`,
+`theory Prob(k(ε, ..., ...), d(_))`. The kind has to be visible because
+the two bare readings are already taken, a name being a wire and `...` a
 stack, and an invisible kind is a guessed kind. Slots then apply it, and a
 lowercase name standing in a `...` position **is a stack variable**: the
 kind is declared once, at the head, and read off here:
@@ -1676,6 +1713,41 @@ ambient: with Funcs   (:clear or a bare `with` to leave)
 braid> :t thenP
 thenP : Arr(ρ0, ρ1) Arr(ρ1, ρ2) ⇒ Arr(ρ0, ρ2)
 ```
+
+**A GRADED HOM-OBJECT.** A hom-object may take a **grade** as an
+argument, `k(ε, ..., ...)`, and then a slot writes a grade where that
+argument goes. A carrier that fills it takes a grade parameter of its own,
+declared **by use**, the way a width is: a parameter the body writes on an
+arrow is a grade.
+
+```braid
+data Circuit(ε, a..., b...) = Fn⟨Box(a) =ε Recursive> Box(b) Circuit(ε, a, b)⟩
+
+theory Arrow(k(ε, ..., ...)) in Doctrine =
+    embed   : Fn⟨a =ε> b⟩ =Recursive> k(ε, a, b)
+    compose : k(ε, a, b) k(ε', b, c) =Recursive> k(ε ε', a, c)
+    observe : k(ε, Int, Int) =ε Recursive> Int
+    sample  : • =Recursive> k(•, Int, Int)
+```
+
+A grade variable is spelled `ε`, `ε'`, `ε2`; `•` is the empty grade and an
+uppercase name is a label. `embed` says the carrier records what the
+embedded program did. `observe` takes that grade back out and puts it on
+its own arrow, which is the arrow that runs the thing. One theory then
+holds both readings, and `examples/circuits.braid` is where that pays:
+`def quiet with Circuits = dup ; *` is `Int =Circuits Recursive> Int` and
+`def noisy with Circuits = dup ; * ; dup ; print ...` is
+`Int =Circuits IO Recursive> Int`.
+
+**Juxtaposition in a grade position means "at least these"**, and it is
+the only new syntax. `k(ε ε', a, c)` is `compose`'s statement that the
+composite's grade is at least each part's. It is **lowered** where it is
+parsed: the checker stores one fresh grade variable for the position and
+records `ε ⊆ ε''` and `ε' ⊆ ε''` beside the signature, which are the
+constraints composition already emits for a `;` (§14). So every grade in
+every type is one variable, no type ever holds a union, and the union is
+only ever the answer the least fixpoint computes. Writing
+`k(IO ε, a, b)` is the same form with a label among the parts.
 
 The slots carry `=Recursive>` because the `Circuit` model builds every
 circuit under `with Recursive`. The function model does not, and a pure
@@ -2344,6 +2416,13 @@ itself extends one, extension being one level deep.
 pure, and `Arrow`'s are `=Recursive>` because circuits are built under
 `with Recursive`. Only the *stacks* are checked against the doctrine. A
 grade says what a model may do, and the doctrine does not bound it.
+
+That reading covers the hom-object's own grade argument. `Doctrine`
+declares `k(..., ...)` and a theory may declare `k(ε, ..., ...)`; the
+grade argument is dropped for the match, so a graded category and an
+ungraded one both join the doctrine. `Doctrine`'s `k(ρ, σ)` is the total
+category of the graded family, and a category with nothing to grade pays
+nothing for the option.
 
 **There is no pairing, and no strength.** The hom-object ranges over
 stacks, so a stage of any width embeds as **itself** and nothing has to be
@@ -4659,8 +4738,19 @@ place rather than dated one by one.
   resource and an unknown name are each refused by kind, with the word to write
   instead. It may only be a def's **own header**, it names one thing, and it
   **mints nothing**: a hand-built morphism prints as the carrier it is,
-  `sum0 : • =Recursive> Circuit(Int, Int)`, unfolded, because `=Circuits>` would
-  say the code went through the functor and it did not.
+  `sum0 : • =Recursive> Circuit(ε0, Int, Int)`, unfolded, because `=Circuits>`
+  would say the code went through the functor and it did not.
+- **A carrier's grade is as written, and a theory with none says so.** A
+  hom-object may be graded (§8), and then the grade is part of the type:
+  `data Silent = Circuit(•, Int, Int)` is the pure circuits only, and rolling
+  an effectful one into it is refused with *Cannot unify effects: IO vs pure
+  (the unlabelled side's manifest is written and fixed)*. A theory whose
+  hom-object declares **no** grade fixes one grade for every program it
+  embeds, so an effectful stage under `with M` cannot be embedded at all;
+  the refusal says so and shows the two lines that grade it (*whose
+  hom-object `Capsule` declares no grade … `theory Vault(k(ε, ..., ...))`
+  with `embed : Fn⟨a =ε> b⟩ ⇒ k(ε, a, b)`*), because the generic *write
+  `=IO>` on that arrow* names an arrow the def does not have.
 - **A hom-object alone is not a carrier; the theory must say `in Doctrine`.** A
   theory may declare a constructor parameter and a `compose` at the Doctrine's
   shape and still have no carrier, because `transportOf` reads the *claim*
