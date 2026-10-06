@@ -819,6 +819,74 @@ Full record and evidence: design-effects.md, "composition JOINS".)*
 intersection half, still open), **not a rewrite trigger** (receipts are
 inference's output), **not a count** (idempotent; cost is another arc).
 
+*(Amended 2026-09-22. **"Filtration" above is half right**, and it
+predates resources becoming models (7b). For a CARRIER-LESS label (a
+functor receipt, `Recursive`, and `IO` as it is actually typed) the
+fibre is a marked copy of the base: hom-shapes identical, subeffecting
+is set inclusion on the label set, and that is a filtration. For a
+CARRIERED label (a resource) the fibre is `C(E⊗Σ, E⊗Θ)`, a DIFFERENT
+hom-set. `note` really has type `Log Str ⇒ Log` and the display folds
+it to `Str =Log> •`, so there is no subset inclusion to appeal to: the
+map from base to fibre is WHISKERING by the carrier, performed by
+routing at elaboration rather than by subsumption at checking. Two
+mechanisms wearing one display. The accurate sentence is that the
+manifest is the INDEX IN A GROTHENDIECK CONSTRUCTION over the
+semilattice, a filtration on the carrier-less part and a family of
+state constructions with whiskering functors on the rest. `IO` is worth
+stating twice: after 7b it is carriered in THEORY, a singleton `World`
+the elaborator never writes, and carrier-less in the TYPE, which is why
+it behaves like a filtration in practice. Also superseded: "only a
+`use` can mint", four paragraphs up. Since 2026-09-18 a scope mints IFF
+IT CHANGED THE CODE, which is image membership, and since 7b a resource
+label is minted by INFERENCE from a callee's scheme, with no header
+written at all.)*
+
+*(Amended 2026-09-29/30, recorded 2026-10-05. **Effects and coeffects
+are one question about one functor, asked at opposite ends**, which
+settles the "not a coeffect" sentence above. Every label names a
+functor `F`. An EFFECT label says which fibre `F` lands in, the
+codomain. A COEFFECT, "in the image of `F`", would say whether the
+arrow lies in `F`'s range within that fibre. The image of the effect
+functor `E ⊗ –` is the PURE part: it is the identity on `E`, and in the
+implementation it is exactly the `_`-padded stages routing writes. The
+elaborated spine says so. `with Log Counter = dup ; * ; bump ;
+"scored " ; note` is
+
+```text
+(with@Log >> unLog >> Log) (with@Counter >> unCounter >> Counter) pass
+  >> _ _ dup pass >> _ _ * pass >> _ bump pass
+  >> _ _ "scored " pass >> swap pass >> _ note pass >> swap pass
+```
+
+so the only atoms outside the padding are the roll and the unroll, and
+the scope writes those in its claim stage alone. The 2026-09-29 wording
+named `unLog`/`Log` and stopped there; `with@R` stands beside them and
+is `pass` that the type can see, so it leaves the image untouched.
+
+An effect is therefore the COMPLEMENT of an image claim, "I cannot
+promise this is in the image of the inclusion", and by De Morgan the
+complement of a property that INTERSECTS (membership in a subcategory:
+both parts in, composite in) is one that UNIONS. That is why effects
+union. It is forced by naming the deviation rather than the property.
+Both polarities are wide-subcategory membership. Pure is "in the
+io-free subcategory", named by its complement, unioning; linear is "in
+the linear subcategory", named directly, intersecting. The polarity is
+pragmatic: name whichever side is finite and exceptional, and most
+programs are io-free while few are linear. It also explains the
+asymmetry. A present effect label is a WEAK claim, being a negation,
+and its absence is a STRONG one, being a membership. Two kinds of
+subcategory carry that: GENERATED, where membership is a scan over
+atoms and so decidable (linearity, io-freedom; GLA's `read` is that
+procedure, used internally), and IMAGES OF NON-IDEMPOTENT FUNCTORS,
+where membership can only be remembered (tracing, metering). A second
+set on the arrow naming generated subcategories directly is an
+extension rather than a gap, and its decision procedure already exists.
+Handlers exist exactly where the effect's fibre is a Kleisli category,
+a monad whose unit and counit are install and discharge; a
+plain-functor fibre has a declared exit instead, and a receipt has no
+way out. The 2026-09-22 correction above is the same fact seen from the
+fibre side.)*
+
 **Modes, restated (Daniel, 2026-09-09).** The rung-2½ amendment above
 gave `Arrow` a nominal mode field and made a K-word outside its scope
 "the reified `K(a,b)` value" — two views of one word, and a rule that
