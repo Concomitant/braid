@@ -5006,6 +5006,15 @@ place rather than dated one by one.
   it; and a clash names both lines. An `as` prefix is one capitalized
   word, because it names a scope: *`lower` is not capitalized: a prefix
   names a SCOPE, like a theory or a model* (§8).
+- **A discharged resource leaves the manifest, and a receipt minted
+  inside it does not.** A handler (`seed ; … ; unwrap`, §15) takes the
+  carrier wire off both stacks, and a resource's label rides with its
+  wire, so `[square] ; collectLog` is `• ⇒ Fn⟨Int ρ0 ⇒ Str Int ρ0⟩`.
+  A functor receipt from inside the discharged scope stays and
+  over-claims: for a `g` written `with Fuel Metered`,
+  `[g] ; collectFuel` is `• ⇒ Fn⟨Int ρ0 =Metered> Int Int ρ0⟩`, and no
+  `Fuel` crosses that arrow for `Metered` to have metered, because a
+  functor receipt has no algebra to discharge it with.
 - A resource is **nominal**: structural shapes never fold into one.
   `model GameState in Doctrine = Int Int` leaves `swap : a0 a1 ⇒ a1 a0` exactly
   as it was, and only a genuine rolled `GameState` wire ever displays
@@ -5126,7 +5135,7 @@ carries the state, the macro installs and discharges it, and the theory
 says what the operations must satisfy. Declaring and *entering* have
 been ordinary since `with`. **Discharging** is the third, and it needs no
 construct either: a wrapping macro seeds the wire, applies the program and
-unrolls it, and the arrow loses the label across it:
+unrolls it, and the arrow loses the resource's label across it:
 
 ```braid
 model Log in Doctrine = Str

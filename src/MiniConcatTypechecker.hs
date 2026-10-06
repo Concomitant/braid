@@ -6239,6 +6239,54 @@ leadingCarriers tbl (SCons (TData n []) r)
   | (l : _) <- [ k | (k, cn) <- tbl, cn == n ] = l : leadingCarriers tbl r
 leadingCarriers _ _                            = []
 
+-- A RESOURCE'S LABEL IS CARRIED (2026-10-05).  A label with a carrier
+-- says the arrow threads that carrier, so it belongs on the arrow
+-- exactly when the carrier wire is in the arrow's stacks.  The display
+-- fold already reads the correspondence one way (a carrier prefix on
+-- both sides earns the name); this is the same correspondence read the
+-- other way, so that a HANDLER's application stops over-claiming.
+--
+-- A handler is `seed ; … ; unwrap` and composition JOINS, so `unR`
+-- removing the wire left `R` on the row: `[square] >> collectLog` read
+-- `Fn⟨Int ρ0 =Log> Str Int ρ0⟩` with no `Log` wire anywhere in it.
+-- Dropping a carriered label whose wire is gone is what discharge does
+-- to the type, and it needs no rule about `unR` and no rule about
+-- handlers: the arrow's own stacks decide.
+--
+-- CARRIER-LESS labels are untouched.  `IO`'s carrier is a singleton
+-- `World` the elaborator never writes, a functor receipt and a model
+-- receipt have no carrier at all, and a hom-object carrier is the whole
+-- arrow rather than a wire beneath one.  Only the names a `model R in
+-- Doctrine = <stack>` declared are pruned, which is why this takes the
+-- resource names rather than the display's whole carrier table.
+pruneCarried :: [String] -> Arrow -> Arrow
+pruneCarried [] arr = arr
+pruneCarried rs (Arrow i o e) =
+    Arrow (goS i) (goS o) e { eLabels = S.filter keep (eLabels e) }
+  where
+    keep l  = l `notElem` rs || l `elem` present
+    present = wireNames i ++ wireNames o
+    goS SEnd            = SEnd
+    goS st@(STail _)    = st
+    goS (SCons t r)     = SCons (goT t) (goS r)
+    goS (SExp b x r)    = SExp (goS b) x (goS r)
+    goT (TFn a)         = TFn (pruneCarried rs a)
+    goT (TSum row)      = TSum (goR row)
+    goT (TData n as)    = TData n (map goS as)
+    goT t               = t
+    goR RNil            = RNil
+    goR r@(RTail _)     = r
+    goR (RCons st r)    = RCons (goS st) (goR r)
+
+-- the nullary data wires of a stack, at any position: a resource rides
+-- deepest under routing, but `lift` puts working wires beneath it and
+-- the wire is still there (`_ bump ... : a0 Counter ρ0 ⇒ a0 Counter ρ0`)
+wireNames :: SType -> [String]
+wireNames (SCons (TData n []) r) = n : wireNames r
+wireNames (SCons _ r)            = wireNames r
+wireNames (SExp b _ r)           = wireNames b ++ wireNames r
+wireNames _                      = []
+
 elabHeadersTop :: Env -> Term -> Either String Term
 elabHeadersTop env = elabHeaders (elabCtx0 env [])
 
@@ -11103,7 +11151,7 @@ checkModuleRaw base src = do
         -- runtime scope is rebuilt from its defs (`buildRunDefs`), and
         -- the entries are on that list.
         (eG, _, dG, entries) <- objGenEntries env' runFinal docs gens
-        arr <- inferTermInAt mainStart eG term1
+        arr <- pruneCarried resNames <$> inferTermInAt mainStart eG term1
         pure (Just (term1, arr), eG, reverse defsRev ++ entries, dG)
   -- own lists are built latest-first, which is exactly the match order
   pure (Module envM defsM ownAliases ownDatas
@@ -11328,8 +11376,11 @@ checkModuleRaw base src = do
           gens <- objGenDefs ectx term
           (envG, runG, docsG, gentries) <- objGenEntries env1 run docs gens
           let accG = reverse gentries ++ acc
-          (arr, dsubs) <- first (closedGradeHint datas transporting)
-                                (inferTermSubAt bodyStart envG term)
+          (arr0, dsubs) <- first (closedGradeHint datas transporting)
+                                 (inferTermSubAt bodyStart envG term)
+          -- a resource's label is CARRIED: a def that discharged the
+          -- wire does not thread it, so the label goes with the wire
+          let arr = pruneCarried resources arr0
           -- `in M` classifies BY SHAPE.  A def that builds one carrier
           -- out of nothing is a morphism of M and joins the K-word
           -- table; one that does not is a base word written in M's

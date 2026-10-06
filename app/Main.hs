@@ -369,7 +369,13 @@ typeOfWith :: (Arrow -> String) -> ReplState -> String -> IO ()
 typeOfWith render st src =
   case first (locFor [] src) (elabIn st src >>= inferTermIn (rsEnv st)) of
     Left err  -> putStrLn $ "error: " ++ err
-    Right arr -> putStrLn $ trim src ++ " : " ++ render (normalizeArrow arr)
+    Right arr -> putStrLn $ trim src ++ " : "
+                         ++ render (normalizeArrow (pruneCarried (resOf st) arr))
+
+-- the session's resource names: a carriered label is on an arrow only
+-- while its wire is, so a discharged resource leaves the manifest
+resOf :: ReplState -> [String]
+resOf st = [ dName d | d <- rsDatas st, dResource d ]
 
 -- `:tc <prog>` — the type of the CODE the line produces (2026-09-16).
 -- A different question from `:t`, not a second spelling of it:

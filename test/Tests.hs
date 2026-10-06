@@ -1538,6 +1538,32 @@ moduleTypeTests =
      "Fn⟨ρ0 =Log> ρ1⟩ =Logs> Fn⟨ρ0 ⇒ Str ρ1⟩")
   , (collectorMod ++ "def r with Counts = collected\nr",
      "Fn⟨ρ0 =Counter> ρ1⟩ =Counts> Fn⟨ρ0 ⇒ Int ρ1⟩")
+    -- ...and the handler APPLIED loses the label too (2026-10-05).  A
+    -- resource's label is CARRIED: it is on an arrow while its wire is,
+    -- so `unLog` taking the wire off both stacks takes `=Log>` with it.
+    -- Until this was pinned the signature said pure and the application
+    -- said `=Log>`, which claimed a wire that crosses no stack.
+  , (handlerMod ++ "def square with Log = dup ; * ; \"squared \" ; note\n\
+     \[square] ; collectLog",
+     "• ⇒ Fn⟨Int ρ0 ⇒ Str Int ρ0⟩")
+    -- a RECEIPT from inside the discharged scope stays, and over-claims:
+    -- no `Fuel` crosses the arrow for `Metered` to have metered, and a
+    -- functor receipt has no algebra to discharge it with (MANUAL §14)
+  , ("model Fuel in Doctrine = Int\n\
+     \def burn = unFuel ; _ 1 ; - ; Fuel\n\
+     \def metered = ([burn ...] ; getCode) ... ; interpose\n\
+     \functor Metered = metered\n\
+     \def collectFuel = (f -> [f (0 ; Fuel) ... ; ev ; unFuel ...])\n\
+     \def g with Fuel Metered = dup ; *\n\
+     \[g] ; collectFuel",
+     "• ⇒ Fn⟨Int ρ0 =Metered> Int Int ρ0⟩")
+    -- and through the GENERIC handler, where the scope's own receipt
+    -- (`Counts`) is carrier-less and stays on the outer arrow
+  , (collectorMod ++ "def collectCount with Counts = collected\n\
+     \def bump = unCounter ; 1 ... ; + ; Counter\n\
+     \def tick with Counter = dup ; * ; bump\n\
+     \[tick] ; collectCount",
+     "• =Counts> Fn⟨Int ρ0 ⇒ Int Int ρ0⟩")
     -- TRANSPORT (5c, 5c½).  THE DISPLAY FOLD: at the base a word of a
     -- category is `• ⇒ Arr(Int, Int)` carrying `Funcs`, and a carrier
     -- the label owns folds onto the glyph exactly as a threaded
