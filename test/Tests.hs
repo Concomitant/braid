@@ -3498,7 +3498,25 @@ moduleFailTests =
      \    embed   = Cap\n\
      \    compose = capThen\n\
      \def bad with Sealed = dup ; * ; print ; 1\n1 ; print",
-     "whose hom-object `Cap` declares no grade")
+     "`print` is =IO> but model Sealed's carrier `Cap` admits only the pure \
+      \arrow: give `Cap` a grade parameter (MANUAL \167\&8), or keep this \
+      \stage pure")
+    -- ...and a carrier written at a grade of its own names that grade,
+    -- because the fix is still to make the carrier graded rather than to
+    -- write a label on an arrow the def does not have
+  , ("data Arr(a..., b...) = Fn\10216a =Recursive> b\10217\n\
+     \theory Arrow(k(..., ...)) in Doctrine =\n\
+     \    embed   : Fn\10216a \8658 b\10217 =Recursive> k(a, b)\n\
+     \    compose : k(a, b) k(b, c) =Recursive> k(a, c)\n\
+     \def runA  = unArr ... ; ev\n\
+     \def thenA = (f g -> [f ... ; runA ; g ... ; runA] ; Arr)\n\
+     \model Funcs in Arrow(Arr) =\n\
+     \    embed   = Arr\n\
+     \    compose = thenA\n\
+     \def loud with Funcs = dup ; * ; print ; 1\n1 ; print",
+     "`print` is =IO> but model Funcs's carrier `Arr` admits only \
+      \=Recursive>: give `Arr` a grade parameter (MANUAL \167\&8), or keep \
+      \this stage pure")
     -- GLA (2026-09-21): `with` a compose-only model is refused, and the
     -- refusal names the clause that works instead.
   , (glaSrc ++ "def bad with Dense = dup ; fadd\nbad ; app ... ; _ 1.0 ; ev ; print",

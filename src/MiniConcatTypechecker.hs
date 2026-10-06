@@ -9940,23 +9940,47 @@ transportOf datas theories inst = do
 -- on.  `with M` is a functor into `M`'s category, `embed` takes a
 -- program at whatever grade the hom-object declares, and when the
 -- hom-object declares no grade parameter that grade is a CONSTANT the
--- theory chose for all its programs.  The fix is the theory's.
-closedGradeHint :: [DataDecl] -> [Transport] -> String -> String
-closedGradeHint datas tps msg
+-- theory chose for all its programs.
+--
+-- So the refusal names the two things the author can change: the word
+-- that exceeds the carrier, and the carrier.  A GRADED carrier admits
+-- whatever its programs do (`examples/circuits.braid`'s `noisy` prints
+-- and is `Int =Circuits IO Recursive> Int`), so this fires only where
+-- the grade is WRITTEN AND CLOSED, and the first fix it offers is the
+-- one that makes the carrier graded.
+closedGradeHint :: [DataDecl] -> [Transport] -> Env -> Term -> String -> String
+closedGradeHint datas tps env term msg
   | "Cannot unify effects" `isInfixOf` msg
   , (tp : _) <- [ t | t <- tps, ungradedCarrier (tpCarrier t) ] =
-      msg ++ "\n  `with " ++ tpName tp ++ "` transports into " ++ tpTheory tp
-          ++ ", whose hom-object `" ++ tpCarrier tp ++ "` declares no grade: "
-          ++ "the carrier's inner arrow is written once, for every program "
-          ++ "the theory embeds.  Grade the hom-object — `theory "
-          ++ tpTheory tp ++ "(k(ε, ..., ...))` with `" ++ doctrineEmbed
-          ++ " : Fn⟨a =ε> b⟩ ⇒ k(ε, a, b)` and `data " ++ tpCarrier tp
-          ++ "(ε, a..., b...)` — or keep the effect outside the scope."
+      let admits  = carrierGradeOf (tpCarrier tp)
+          closing = "model " ++ tpName tp ++ "'s carrier `" ++ tpCarrier tp
+                 ++ "` admits only " ++ written admits
+                 ++ ": give `" ++ tpCarrier tp
+                 ++ "` a grade parameter (MANUAL \167\&8), "
+                 ++ "or keep this stage pure"
+      in msg ++ "\n  " ++ case exceeding admits of
+           ((w, ls) : _) -> "`" ++ w ++ "` is " ++ written ls ++ " but " ++ closing
+           []            -> closing
   | otherwise = msg
   where
     ungradedCarrier c = case [ d | d <- datas, dName d == c ] of
       (d : _) -> not (any isEffParam (dParams d))
       []      -> False
+    -- the grade the carrier's own inner arrow is written at
+    carrierGradeOf c = case [ dBody d | d <- datas, dName d == c ] of
+      (TFn (Arrow _ _ g) : _) -> eLabels g
+      _                       -> S.empty
+    -- ...and the first word of the scope whose scheme already exceeds
+    -- it.  A receipt is not in the environment, so the scope's own
+    -- `with@M` never answers here.
+    exceeding admits =
+      [ (w, extra)
+      | w <- nub (primsIn term)
+      , Just (Forall _ _ _ _ _ _ (Arrow _ _ g)) <- [M.lookup w env]
+      , let extra = eLabels g S.\\ admits
+      , not (S.null extra) ]
+    written ls | S.null ls = "the pure arrow"
+               | otherwise = "=" ++ unwords (S.toList ls) ++ ">"
 
 -- WHEN A MODEL'S FIBRE IS REPRESENTABLE AT A RESOURCE WIRE (stage 7b).
 --
@@ -11376,7 +11400,7 @@ checkModuleRaw base src = do
           gens <- objGenDefs ectx term
           (envG, runG, docsG, gentries) <- objGenEntries env1 run docs gens
           let accG = reverse gentries ++ acc
-          (arr0, dsubs) <- first (closedGradeHint datas transporting)
+          (arr0, dsubs) <- first (closedGradeHint datas transporting envG term)
                                  (inferTermSubAt bodyStart envG term)
           -- a resource's label is CARRIED: a def that discharged the
           -- wire does not thread it, so the label goes with the wire

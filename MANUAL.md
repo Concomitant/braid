@@ -4409,12 +4409,13 @@ because a clash is two places to open:
 test/imports/clash.braid:2: `double` is already defined in test/imports/util.braid:7
 ```
 
-**Eight shapes also carry a one-line hint** naming the rule and the fix.
+**Nine shapes also carry a one-line hint** naming the rule and the fix.
 Seven fire on something the checker can read in the source, and say
 "usually" where it is a guess; the eighth reads the scope instead, and
-names the prefix a qualified import put a name behind. Each is marked ✦ in
+names the prefix a qualified import put a name behind; the ninth reads the
+carrier of the model the scope transports into. Each is marked ✦ in
 the catalogue below, and a ✦ in the list of edges after it points back at
-one of the same eight.
+one of the same nine.
 
 This section is a **catalogue**, kept as reference, so entries are corrected in
 place rather than dated one by one.
@@ -4475,7 +4476,12 @@ place rather than dated one by one.
   wire at the call site (`("" ; Log)`) or wrap the program in a handler that
   seeds and unwraps, rather than writing the label. It fires on the wire shape
   (`Cannot unify types: Int vs Log`) too, which is where a missing
-  install more often lands, because the carrier stays a wire.
+  install more often lands, because the carrier stays a wire. ✦ Inside
+  `with M` for a model whose carrier writes its grade and closes it, the
+  hint names the word and the carrier instead: *`print` is `=IO>` but model
+  `Funcs`'s carrier `Arr` admits only `=Recursive>`: give `Arr` a grade
+  parameter (§8), or keep this stage pure*. There is no arrow in the def to
+  write a label on, so the generic fix does not apply.
 - **`Occurs check failed[ on stack | on exponent | on effect | on sum
   row]: v in T`** — the only solution is an infinite type. ✦ Under
   `with Recursive`, with the variable inside a sum, the hint says what it
@@ -4740,17 +4746,20 @@ place rather than dated one by one.
   **mints nothing**: a hand-built morphism prints as the carrier it is,
   `sum0 : • =Recursive> Circuit(ε0, Int, Int)`, unfolded, because `=Circuits>`
   would say the code went through the functor and it did not.
-- **A carrier's grade is as written, and a theory with none says so.** A
+- **A carrier's grade is as written, and a carrier with none says so.** ✦ A
   hom-object may be graded (§8), and then the grade is part of the type:
   `data Silent = Circuit(•, Int, Int)` is the pure circuits only, and rolling
   an effectful one into it is refused with *Cannot unify effects: IO vs pure
-  (the unlabelled side's manifest is written and fixed)*. A theory whose
-  hom-object declares **no** grade fixes one grade for every program it
-  embeds, so an effectful stage under `with M` cannot be embedded at all;
-  the refusal says so and shows the two lines that grade it (*whose
-  hom-object `Capsule` declares no grade … `theory Vault(k(ε, ..., ...))`
-  with `embed : Fn⟨a =ε> b⟩ ⇒ k(ε, a, b)`*), because the generic *write
-  `=IO>` on that arrow* names an arrow the def does not have.
+  (the unlabelled side's manifest is written and fixed)*. A carrier that
+  writes its grade and closes it fixes one grade for every program its theory
+  embeds, so an effectful stage under `with M` cannot be embedded at all. The
+  refusal names the word and the carrier (*`print` is `=IO>` but model
+  `Sealed`'s carrier `Cap` admits only the pure arrow: give `Cap` a grade
+  parameter (§8), or keep this stage pure*), because the generic *write
+  `=IO>` on that arrow* names an arrow the def does not have. A **graded**
+  carrier admits whatever its programs do, so the refusal does not arise
+  there: `noisy` in `examples/circuits.braid` prints and is
+  `Int =Circuits IO Recursive> Int`.
 - **A hom-object alone is not a carrier; the theory must say `in Doctrine`.** A
   theory may declare a constructor parameter and a `compose` at the Doctrine's
   shape and still have no carrier, because `transportOf` reads the *claim*
