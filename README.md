@@ -82,13 +82,13 @@ Building from source needs GHC 9.4 and cabal; `cabal build all` and
 - `MANUAL.md`: the language reference, with types checked against the
   implementation.
 - `CONSTRUCTS.md`: the declaration layer, construct by construct.
-- `examples/`: 73 programs, each run by the test suite.
+- `examples/`: 74 programs, each run by the test suite.
 - `design-*.md` and `READING.md`: the design decisions and the papers
   behind them.
 
 ## Status
 
-One Haskell module for the checker, interpreter, and REPL, a 1343-case test suite that runs
+One Haskell module for the checker, interpreter, and REPL, a 1344-case test suite that runs
 every example, and design notes recording each
 decision. Not yet present: labelled record fields, totality checking
 (`Recursive` records that a word may not terminate; it does not prove
